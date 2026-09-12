@@ -32,7 +32,8 @@ vi.mock("../../src/services/capture/useCaptureState", () => ({
 // captureService module to verify IPC call structure.
 vi.mock("../../src/services/capture/captureService", () => ({
   cancelCapture: vi.fn().mockResolvedValue(true),
-  isCaptureActive: vi.fn().mockResolvedValue(false),
+  createCaptureRequestId: vi.fn().mockReturnValue("request-id"),
+  getCaptureStatus: vi.fn().mockResolvedValue(null),
   // Returns false in jsdom: Onboarding shows browser-unavailable note.
   // Onboarding.test.tsx overrides with its own vi.mock for permission tests.
   isTauriEnv: vi.fn().mockReturnValue(false),
@@ -40,8 +41,11 @@ vi.mock("../../src/services/capture/captureService", () => ({
   onCaptureEvent: vi.fn().mockResolvedValue(() => {}),
   queryPermission: vi.fn(),
   requestPermission: vi.fn(),
-  startMicTest: vi.fn().mockResolvedValue("1"),
-  stopCapture: vi.fn(),
+  startMicTest: vi.fn().mockResolvedValue({
+    generation: 1,
+    mode: "test",
+    request_id: "request-id",
+  }),
 }));
 
 afterEach(cleanup);

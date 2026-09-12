@@ -1,233 +1,274 @@
-/// Tests for useCaptureState hook.
-///
-/// This file un-mocks useCaptureState (which is globally mocked in setup.ts)
-/// and uses the real implementation, but mocks the Tauri API calls so the
-/// hook can run in jsdom without a real Tauri runtime.
-import {
-  act,
-  cleanup,
-  renderHook,
-} from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Un-mock useCaptureState so we can test the real implementation.
+const mocks = vi.hoisted(() => ({
+  cancelCapture: vi.fn(),
+  createCaptureRequestId: vi.fn(),
+  getCaptureStatus: vi.fn(),
+  isTauriEnv: vi.fn(),
+  listDevices: vi.fn(),
+  onCaptureEvent: vi.fn(),
+  queryPermission: vi.fn(),
+  requestPermission: vi.fn(),
+  startMicTest: vi.fn(),
+}));
+
 vi.unmock("../../src/services/capture/useCaptureState");
+vi.mock("../../src/services/capture/captureService", () => mocks);
 
-// The hook imports from captureService which imports from @tauri-apps/api.
-// The global setup.ts mocks handle those, but we need to ensure the
-// captureService functions behave correctly for our event-driven tests.
-// We override captureService with controlled stubs.
-vi.mock("../../src/services/capture/captureService", () => {
-  type EventHandler = (e: { payload: unknown }) => void;
-  let handler: EventHandler | null = null;
-  const unlisten = vi.fn();
-
-  return {
-    isCaptureActive: vi.fn().mockResolvedValue(false),
-    listDevices: vi.fn().mockResolvedValue([]),
-    onCaptureEvent: vi.fn().mockImplementation(
-      async (cb: (event: unknown) => void) => {
-        handler = (e: { payload: unknown }) => cb(e.payload);
-        return unlisten;
-      },
-    ),
-    cancelCapture: vi.fn().mockResolvedValue(true),
-    isTauriEnv: vi.fn().mockReturnValue(false),
-    queryPermission: vi.fn(),
-    requestPermission: vi.fn(),
-    startMicTest: vi.fn().mockResolvedValue("1"),
-    stopCapture: vi.fn(),
-    // Expose the handler so tests can emit events.
-    __getHandler: () => handler,
-  };
-});
-
+import type { CaptureEvent } from
+  "../../src/services/capture/types";
 import { useCaptureState } from
   "../../src/services/capture/useCaptureState";
 
-// Retrieve the simulated event emitter.
-async function getEmitter() {
-  const mod = await import(
-    "../../src/services/capture/captureService"
-  );
-  return (mod as unknown as {
-    __getHandler: () => ((e: { payload: unknown }) => void) | null;
-  }).__getHandler;
+function deferred<T>() {
+  let reject!: (error: unknown) => void;
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((onResolve, onReject) => {
+    reject = onReject;
+    resolve = onResolve;
+  });
+  return { promise, reject, resolve };
 }
 
-function emit(payload: unknown, handler: ((e: { payload: unknown }) => void) | null) {
-  if (handler) {
-    act(() => handler({ payload }));
-  }
-}
+describe("useCaptureState request ownership", () => {
+  let handler: ((event: CaptureEvent) => void) | null;
+  let nextId: number;
+  let unlisten: ReturnType<typeof vi.fn>;
 
-describe("useCaptureState", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    handler = null;
+    nextId = 1;
+    unlisten = vi.fn();
+    mocks.cancelCapture.mockResolvedValue(true);
+    mocks.createCaptureRequestId.mockImplementation(
+      () => `request-${nextId++}`,
+    );
+    mocks.getCaptureStatus.mockResolvedValue(null);
+    mocks.isTauriEnv.mockReturnValue(true);
+    mocks.listDevices.mockResolvedValue([]);
+    mocks.onCaptureEvent.mockImplementation(async (callback) => {
+      handler = callback;
+      return unlisten;
+    });
+    mocks.queryPermission.mockResolvedValue(undefined);
+    mocks.requestPermission.mockResolvedValue(undefined);
+    mocks.startMicTest.mockImplementation(async (requestId) => ({
+      generation: 7,
+      mode: "test",
+      request_id: requestId,
+    }));
   });
 
-  afterEach(() => {
-    cleanup();
-  });
-
-  it("starts with idle capture state and null permission", async () => {
+  it("waits for listener readiness before starting", async () => {
+    const listener = deferred<() => void>();
+    mocks.onCaptureEvent.mockReturnValue(listener.promise);
     const { result } = renderHook(() => useCaptureState());
-    expect(result.current.captureState.kind).toBe("idle");
-    expect(result.current.permissionStatus).toBeNull();
-  });
 
-  it("updates permission from permission-status event", async () => {
-    const getHandler = await getEmitter();
-    const { result } = renderHook(() => useCaptureState());
-    // Allow useEffect to run.
-    await act(async () => {});
-    const h = getHandler();
-    emit({ kind: "permission-status", status: "authorized" }, h);
-    expect(result.current.permissionStatus).toBe("authorized");
-  });
-
-  it("sets idle state when permission denied", async () => {
-    const getHandler = await getEmitter();
-    const { result } = renderHook(() => useCaptureState());
-    await act(async () => {});
-    const h = getHandler();
-    emit({ kind: "permission-status", status: "denied" }, h);
-    expect(result.current.permissionStatus).toBe("denied");
-    expect(result.current.captureState.kind).toBe("idle");
-  });
-
-  it("sets active state on capture-started", async () => {
-    const getHandler = await getEmitter();
-    const { result } = renderHook(() => useCaptureState());
-    await act(async () => {});
-    const h = getHandler();
-    emit({ device_name: "Built-in Mic", kind: "capture-started" }, h);
-    // generation field is set from generationRef; defaults to "0" when
-    // no startMicTest has been called.
+    let run!: Promise<void>;
+    act(() => { run = result.current.runMicTest(); });
     expect(result.current.captureState).toMatchObject({
-      device: "Built-in Mic",
-      kind: "active",
+      kind: "test-running",
+      request_id: "request-1",
+    });
+    expect(mocks.startMicTest).not.toHaveBeenCalled();
+
+    listener.resolve(unlisten as () => void);
+    await act(async () => { await run; });
+    expect(mocks.startMicTest).toHaveBeenCalledWith(
+      "request-1",
+      undefined,
+    );
+  });
+
+  it("blocks a duplicate start before invoking IPC", async () => {
+    const start = deferred<{
+      generation: number;
+      mode: "test";
+      request_id: string;
+    }>();
+    mocks.startMicTest.mockReturnValue(start.promise);
+    const { result } = renderHook(() => useCaptureState());
+    await act(async () => {});
+
+    act(() => {
+      void result.current.runMicTest();
+      void result.current.runMicTest();
+    });
+    await waitFor(() => expect(mocks.startMicTest).toHaveBeenCalledOnce());
+    start.resolve({
+      generation: 3,
+      mode: "test",
+      request_id: "request-2",
     });
   });
 
-  it("returns to idle on capture-stopped", async () => {
-    const getHandler = await getEmitter();
+  it("does not resurrect state after terminal-before-response", async () => {
+    const start = deferred<{
+      generation: number;
+      mode: "test";
+      request_id: string;
+    }>();
+    mocks.startMicTest.mockReturnValue(start.promise);
     const { result } = renderHook(() => useCaptureState());
     await act(async () => {});
-    const h = getHandler();
-    emit({ device_name: "Mic", kind: "capture-started" }, h);
-    emit({ kind: "capture-stopped" }, h);
-    expect(result.current.captureState.kind).toBe("idle");
+    act(() => { void result.current.runMicTest(); });
+    await waitFor(() => expect(mocks.startMicTest).toHaveBeenCalledOnce());
+
+    const requestId = mocks.startMicTest.mock.calls[0][0];
+    const metadata = {
+      detected_activity: true,
+      duration_secs: 1,
+      frame_count: 16_000,
+      peak_level: 0.5,
+    };
+    act(() => handler?.({
+      generation: 4,
+      kind: "test-complete",
+      metadata,
+      request_id: requestId,
+    }));
+    expect(result.current.captureState.kind).toBe("test-complete");
+
+    start.resolve({
+      generation: 4,
+      mode: "test",
+      request_id: requestId,
+    });
+    await act(async () => {});
+    expect(result.current.captureState.kind).toBe("test-complete");
   });
 
-  it("sets test-complete with metadata on test-complete event",
+  it("ignores a mismatched generation for the owned request", async () => {
+    const { result } = renderHook(() => useCaptureState());
+    await act(async () => {});
+    await act(async () => { await result.current.runMicTest(); });
+    expect(result.current.captureState).toMatchObject({
+      generation: 7,
+      kind: "test-running",
+    });
+
+    const requestId = mocks.startMicTest.mock.calls[0][0];
+    act(() => handler?.({
+      category: "capture-unavailable",
+      generation: 6,
+      kind: "capture-error",
+      message: "stale",
+      request_id: requestId,
+    }));
+    expect(result.current.captureState.kind).toBe("test-running");
+  });
+
+  it("cancels a pending response by request ID without resurrection",
     async () => {
-      const getHandler = await getEmitter();
+      const start = deferred<{
+        generation: number;
+        mode: "test";
+        request_id: string;
+      }>();
+      mocks.startMicTest.mockReturnValue(start.promise);
       const { result } = renderHook(() => useCaptureState());
       await act(async () => {});
-      const h = getHandler();
-      const metadata = {
-        detected_activity: true,
-        duration_secs: 3.2,
-        frame_count: 51_200,
-        peak_level: 0.42,
-      };
-      emit({ kind: "test-complete", metadata }, h);
-      expect(result.current.captureState).toEqual({
-        kind: "test-complete",
-        metadata,
+      act(() => { void result.current.runMicTest(); });
+      await waitFor(() => expect(mocks.startMicTest).toHaveBeenCalledOnce());
+      const requestId = mocks.startMicTest.mock.calls[0][0];
+
+      act(() => result.current.stopMicTest());
+      expect(mocks.cancelCapture).toHaveBeenCalledWith(requestId);
+      start.resolve({
+        generation: 8,
+        mode: "test",
+        request_id: requestId,
       });
+      await act(async () => {});
+      expect(result.current.captureState.kind).toBe("idle");
     });
 
-  it("sets error state on capture-error", async () => {
-    const getHandler = await getEmitter();
+  it("fails closed when listener registration rejects", async () => {
+    mocks.onCaptureEvent.mockRejectedValue(new Error("listener denied"));
     const { result } = renderHook(() => useCaptureState());
-    await act(async () => {});
-    const h = getHandler();
-    emit({
-      category: "permission-denied",
-      kind: "capture-error",
-      message: "Permission denied.",
-    }, h);
+    await waitFor(() => {
+      expect(result.current.captureState.kind).toBe("error");
+    });
+
+    await act(async () => { await result.current.runMicTest(); });
+    expect(mocks.startMicTest).not.toHaveBeenCalled();
     expect(result.current.captureState).toMatchObject({
-      category: "permission-denied",
+      category: "capture-unavailable",
       kind: "error",
     });
   });
 
-  it("capture-cancelled event sets cancelled state", async () => {
-    const getHandler = await getEmitter();
+  it("creates a fresh listener gate after a failed mount", async () => {
+    mocks.onCaptureEvent.mockRejectedValueOnce(
+      new Error("listener denied"),
+    );
+    const first = renderHook(() => useCaptureState());
+    await waitFor(() => {
+      expect(first.result.current.captureState.kind).toBe("error");
+    });
+    first.unmount();
+
+    mocks.onCaptureEvent.mockImplementation(async (callback) => {
+      handler = callback;
+      return unlisten;
+    });
+    const second = renderHook(() => useCaptureState());
+    await act(async () => {});
+    await act(async () => {
+      await second.result.current.runMicTest();
+    });
+    expect(mocks.startMicTest).toHaveBeenCalledOnce();
+    expect(second.result.current.captureState.kind)
+      .toBe("test-running");
+  });
+
+  it("normalizes a rejected busy start", async () => {
+    mocks.startMicTest.mockRejectedValue(new Error("busy"));
     const { result } = renderHook(() => useCaptureState());
     await act(async () => {});
-    const h = getHandler();
-    emit({ kind: "capture-cancelled" }, h);
-    expect(result.current.captureState.kind).toBe("cancelled");
+    await act(async () => { await result.current.runMicTest(); });
+    expect(result.current.captureState).toEqual({
+      category: "busy",
+      kind: "error",
+      message: "A capture session is already active.",
+    });
   });
 
-  it("restricted permission status reflects in hook", async () => {
-    const getHandler = await getEmitter();
-    const { result } = renderHook(() => useCaptureState());
-    await act(async () => {});
-    const h = getHandler();
-    emit({ kind: "permission-status", status: "restricted" }, h);
-    expect(result.current.permissionStatus).toBe("restricted");
-    expect(result.current.captureState.kind).toBe("idle");
-  });
-
-  it("populates devices on device-list event", async () => {
-    const getHandler = await getEmitter();
-    const { result } = renderHook(() => useCaptureState());
-    await act(async () => {});
-    const h = getHandler();
-    emit({ devices: ["Mic A", "Mic B"], kind: "device-list" }, h);
-    expect(result.current.devices).toEqual(["Mic A", "Mic B"]);
-  });
-
-  it("stale events after unmount do not crash or update", async () => {
-    const getHandler = await getEmitter();
-    const { result, unmount } = renderHook(() => useCaptureState());
-    await act(async () => {});
-    const h = getHandler();
-    unmount();
-    // Emitting after unmount must not throw.
-    expect(() => {
-      emit({ kind: "capture-stopped" }, h);
-    }).not.toThrow();
-    // State is unchanged from before unmount.
-    expect(result.current.captureState.kind).toBe("idle");
-  });
-
-  it("stopMicTest resets state to idle", async () => {
-    const getHandler = await getEmitter();
-    const { result } = renderHook(() => useCaptureState());
-    await act(async () => {});
-    const h = getHandler();
-    emit({ device_name: "Mic", kind: "capture-started" }, h);
-    act(() => { result.current.stopMicTest(); });
-    expect(result.current.captureState.kind).toBe("idle");
-  });
-
-  it("runMicTest sets test-running state while IPC is in flight",
+  it("adopts exact native status on remount and cancels its owner",
     async () => {
-      let resolveInvoke!: (v: string) => void;
-      const captureService = await import(
-        "../../src/services/capture/captureService"
-      );
-      vi.mocked(
-        (captureService as unknown as { startMicTest: () => Promise<string> })
-          .startMicTest,
-      ).mockReturnValueOnce(
-        new Promise((res) => { resolveInvoke = res; }),
-      );
+      mocks.getCaptureStatus.mockResolvedValue({
+        generation: 12,
+        mode: "test",
+        request_id: "native-owner",
+      });
+      const { result, unmount } = renderHook(() => useCaptureState());
+      await waitFor(() => {
+        expect(result.current.captureState).toMatchObject({
+          generation: 12,
+          kind: "test-running",
+          request_id: "native-owner",
+        });
+      });
+      unmount();
+      expect(mocks.cancelCapture).toHaveBeenCalledWith("native-owner");
+      await waitFor(() => expect(unlisten).toHaveBeenCalledOnce());
+    });
 
-      const { result } = renderHook(() => useCaptureState());
+  it("unmount before subscription resolves cancels only its request",
+    async () => {
+      const listener = deferred<() => void>();
+      mocks.onCaptureEvent.mockReturnValue(listener.promise);
+      const first = renderHook(() => useCaptureState());
+      act(() => { void first.result.current.runMicTest(); });
+      first.unmount();
+      expect(mocks.cancelCapture).toHaveBeenCalledWith("request-1");
+      expect(mocks.startMicTest).not.toHaveBeenCalled();
+
+      listener.resolve(unlisten as () => void);
       await act(async () => {});
-
-      // Don't await runMicTest so we can check intermediate state.
-      act(() => { void result.current.runMicTest(); });
-      expect(result.current.captureState.kind).toBe("test-running");
-
-      // Resolve the promise.
-      act(() => resolveInvoke("ok"));
+      expect(unlisten).toHaveBeenCalledOnce();
+      expect(mocks.cancelCapture).not.toHaveBeenCalledWith("request-2");
     });
 });

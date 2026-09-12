@@ -22,7 +22,7 @@ vi.mock("../../src/services/capture/useCaptureState", () => ({
 }));
 
 vi.mock("../../src/services/capture/captureService", () => ({
-  listDevices: vi.fn().mockResolvedValue([]),
+  isTauriEnv: vi.fn().mockReturnValue(true),
 }));
 // -----------------------------------------------------------------------
 

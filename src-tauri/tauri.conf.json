@@ -12,7 +12,7 @@
   "app": {
     "macOSPrivateApi": false,
     "security": {
-      "capabilities": []
+      "capabilities": ["main"]
     },
     "windows": [
       {

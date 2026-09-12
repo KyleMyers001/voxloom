@@ -5,8 +5,8 @@
 /// worker thread. This prevents a window where the client has a generation
 /// ID but no flag to cancel yet.
 ///
-/// All `SessionEvent` values carry the session `generation` so the renderer
-/// can suppress stale events from a previous session.
+/// Capture-session events carry client request ID and native generation so
+/// the renderer can suppress stale events from a previous session.
 ///
 /// Cancel is observable at every phase:
 /// - PermissionWait: polled every 100 ms while the OS dialog is open.
@@ -18,6 +18,7 @@
 ///
 /// Injectable seams (`PermissionBackend`, `StreamBackend`) let unit tests
 /// exercise the full lifecycle matrix without a live audio device or TCC.
+use std::collections::VecDeque;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc, Arc, Mutex,
@@ -35,40 +36,46 @@ use crate::capture::{
     stream::{self, DeviceSelection, StreamMeta, RING_CAPACITY},
 };
 
-// ── Constants ─────────────────────────────────────────────────────────────
+// Constants
 
 const FULL_SAFETY_SECS: u64 = 120;
 const TEST_SAFETY_SECS: u64 = 10;
 const WATCHDOG_IDLE_SECS: u64 = 5;
 const ACTIVITY_THRESHOLD: f32 = 0.001; // −60 dBFS
 
-// ── Session events ────────────────────────────────────────────────────────
+// Session events
 
-/// All events emitted to the renderer. No PCM bytes included.
-/// Every event carries `generation` for stale-event suppression.
+/// Events emitted to the renderer. No PCM bytes included. Session and
+/// permission events carry correlation fields; device lists are not sessions.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum SessionEvent {
     PermissionStatus {
         generation: u64,
+        request_id: String,
         status: PermissionStatus,
     },
     CaptureStarted {
         device_name: String,
         generation: u64,
+        request_id: String,
     },
     ActivityDetected {
         generation: u64,
+        request_id: String,
     },
     TestComplete {
         generation: u64,
         metadata: TestCaptureMetadata,
+        request_id: String,
     },
     CaptureStopped {
         generation: u64,
+        request_id: String,
     },
     CaptureCancelled {
         generation: u64,
+        request_id: String,
     },
     DeviceList {
         devices: Vec<String>,
@@ -77,7 +84,22 @@ pub enum SessionEvent {
         category: String,
         generation: u64,
         message: String,
+        request_id: String,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CaptureMode {
+    Full,
+    Test,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct CaptureStatus {
+    pub generation: u64,
+    pub mode: CaptureMode,
+    pub request_id: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -100,7 +122,7 @@ impl From<MicPermission> for PermissionStatus {
     }
 }
 
-// ── Injectable seams ──────────────────────────────────────────────────────
+// Injectable seams
 
 /// Permission backend seam.
 pub trait PermissionBackend: Send + Sync + 'static {
@@ -139,7 +161,7 @@ pub trait StreamBackend: Send + Sync + 'static {
     fn list_devices(&self) -> Vec<String>;
 }
 
-// ── Production backends ───────────────────────────────────────────────────
+// Production backends
 
 pub struct RealPermissionBackend;
 
@@ -186,24 +208,36 @@ impl StreamBackend for CpalStreamBackend {
     }
 }
 
-// ── Coordinator ───────────────────────────────────────────────────────────
+// Coordinator
 
-#[derive(Debug, Clone, PartialEq)]
-enum Phase {
-    Idle,
-    Active,
+struct Reservation {
+    cancel: Arc<AtomicBool>,
+    status: CaptureStatus,
 }
 
-struct CancelRequest {
-    generation: u64,
-    flag: Arc<AtomicBool>,
+struct CoordinatorState {
+    cancelled_requests: VecDeque<String>,
+    reservation: Option<Reservation>,
 }
 
-/// Resets Phase to Idle when dropped on worker-thread exit.
-struct PhaseGuard(Arc<Mutex<Phase>>);
+/// Clears this request's reservation on worker-thread exit.
+struct PhaseGuard {
+    request_id: String,
+    state: Arc<Mutex<CoordinatorState>>,
+}
+
 impl Drop for PhaseGuard {
     fn drop(&mut self) {
-        *self.0.lock().unwrap() = Phase::Idle;
+        let mut state = self.state.lock().unwrap();
+        let owns_reservation = state
+            .reservation
+            .as_ref()
+            .is_some_and(|reservation| {
+                reservation.status.request_id == self.request_id
+            });
+        if owns_reservation {
+            state.reservation = None;
+        }
     }
 }
 
@@ -213,9 +247,8 @@ pub struct Coordinator<
     S: StreamBackend = CpalStreamBackend,
 > {
     generation: AtomicU64,
-    phase: Arc<Mutex<Phase>>,
-    cancel: Mutex<Option<CancelRequest>>,
     permission: Arc<P>,
+    state: Arc<Mutex<CoordinatorState>>,
     stream_backend: Arc<S>,
 }
 
@@ -225,10 +258,12 @@ pub type CaptureCoordinator = Coordinator;
 impl Coordinator {
     pub fn new() -> Self {
         Coordinator {
-            cancel: Mutex::new(None),
             generation: AtomicU64::new(0),
             permission: Arc::new(RealPermissionBackend),
-            phase: Arc::new(Mutex::new(Phase::Idle)),
+            state: Arc::new(Mutex::new(CoordinatorState {
+                cancelled_requests: VecDeque::new(),
+                reservation: None,
+            })),
             stream_backend: Arc::new(CpalStreamBackend),
         }
     }
@@ -244,37 +279,67 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
     #[allow(dead_code)]
     pub fn with_backends(permission: P, stream_backend: S) -> Self {
         Coordinator {
-            cancel: Mutex::new(None),
             generation: AtomicU64::new(0),
             permission: Arc::new(permission),
-            phase: Arc::new(Mutex::new(Phase::Idle)),
+            state: Arc::new(Mutex::new(CoordinatorState {
+                cancelled_requests: VecDeque::new(),
+                reservation: None,
+            })),
             stream_backend: Arc::new(stream_backend),
         }
     }
 
+    #[allow(dead_code)]
     pub fn is_active(&self) -> bool {
-        *self.phase.lock().unwrap() == Phase::Active
+        self.status().is_some()
     }
 
-    /// Cancel the session with the given generation. Returns false when no
-    /// matching active session exists.
-    pub fn cancel(&self, generation: u64) -> bool {
-        if *self.phase.lock().unwrap() == Phase::Idle {
+    pub fn status(&self) -> Option<CaptureStatus> {
+        self.state
+            .lock()
+            .unwrap()
+            .reservation
+            .as_ref()
+            .map(|reservation| reservation.status.clone())
+    }
+
+    /// Cancel one request. If its start command has not reserved the worker
+    /// yet, retain a bounded tombstone so only that future request is
+    /// cancelled. An unrelated active or future request is never touched.
+    pub fn cancel_request(&self, request_id: &str) -> bool {
+        if !valid_request_id(request_id) {
             return false;
         }
-        let guard = self.cancel.lock().unwrap();
-        if let Some(req) = guard.as_ref() {
-            if req.generation == generation {
-                req.flag.store(true, Ordering::Release);
+        let mut state = self.state.lock().unwrap();
+        if let Some(reservation) = state.reservation.as_ref() {
+            if reservation.status.request_id == request_id {
+                reservation.cancel.store(true, Ordering::Release);
                 return true;
             }
         }
-        false
+        if !state
+            .cancelled_requests
+            .iter()
+            .any(|item| item == request_id)
+        {
+            const MAX_CANCEL_TOMBSTONES: usize = 64;
+            if state.cancelled_requests.len() == MAX_CANCEL_TOMBSTONES {
+                state.cancelled_requests.pop_front();
+            }
+            state.cancelled_requests.push_back(request_id.to_owned());
+        }
+        true
     }
 
     pub fn cancel_any(&self) {
-        if let Some(req) = self.cancel.lock().unwrap().as_ref() {
-            req.flag.store(true, Ordering::Release);
+        if let Some(reservation) = self
+            .state
+            .lock()
+            .unwrap()
+            .reservation
+            .as_ref()
+        {
+            reservation.cancel.store(true, Ordering::Release);
         }
     }
 
@@ -285,44 +350,75 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
 
     /// Start a capture session.
     ///
-    /// Generation and cancel flag are reserved atomically inside the phase
-    /// lock BEFORE spawning the worker thread, so the caller always has a
+    /// Status and cancel flag are reserved atomically inside the state lock
+    /// before spawning the worker thread, so the caller always has a
     /// valid cancel handle before any async work begins.
     ///
-    /// Returns `Ok(generation)` or `Err("busy")`.
+    /// Returns the correlated status or `Err("busy")`.
     pub fn start_session<E>(
         &self,
+        request_id: String,
         selection: DeviceSelection,
         test_mode: bool,
         emit: E,
-    ) -> Result<u64, String>
+    ) -> Result<CaptureStatus, String>
     where
         E: Fn(SessionEvent) + Send + 'static,
     {
-        // Reserve generation + cancel flag atomically within the phase lock.
-        let (gen, cancel_flag, phase_arc) = {
-            let mut phase = self.phase.lock().unwrap();
-            if *phase == Phase::Active {
+        if !valid_request_id(&request_id) {
+            return Err(String::from("invalid-request-id"));
+        }
+
+        // Reserve status + cancel flag atomically before spawning the worker.
+        let (cancel_flag, state_arc, status) = {
+            let mut state = self.state.lock().unwrap();
+            if let Some(reservation) = state.reservation.as_ref() {
+                if reservation.status.request_id == request_id {
+                    return Ok(reservation.status.clone());
+                }
                 return Err(String::from("busy"));
             }
-            *phase = Phase::Active;
-            let gen =
+            let generation =
                 self.generation.fetch_add(1, Ordering::AcqRel) + 1;
+            let mode = if test_mode {
+                CaptureMode::Test
+            } else {
+                CaptureMode::Full
+            };
+            let status = CaptureStatus {
+                generation,
+                mode,
+                request_id: request_id.clone(),
+            };
             let flag = Arc::new(AtomicBool::new(false));
-            *self.cancel.lock().unwrap() = Some(CancelRequest {
-                flag: Arc::clone(&flag),
-                generation: gen,
+            let cancelled_index = state
+                .cancelled_requests
+                .iter()
+                .position(|item| item == &request_id);
+            let was_cancelled = cancelled_index
+                .is_some_and(|index| {
+                    state.cancelled_requests.remove(index).is_some()
+                });
+            flag.store(was_cancelled, Ordering::Release);
+            state.reservation = Some(Reservation {
+                cancel: Arc::clone(&flag),
+                status: status.clone(),
             });
-            (gen, flag, Arc::clone(&self.phase))
+            (flag, Arc::clone(&self.state), status)
         };
 
         let permission = Arc::clone(&self.permission);
         let stream_backend = Arc::clone(&self.stream_backend);
+        let worker_status = status.clone();
 
         thread::spawn(move || {
-            let _guard = PhaseGuard(phase_arc);
+            let _guard = PhaseGuard {
+                request_id: request_id.clone(),
+                state: state_arc,
+            };
             run_session(
-                gen,
+                worker_status.generation,
+                request_id,
                 cancel_flag,
                 selection,
                 test_mode,
@@ -332,11 +428,19 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
             );
         });
 
-        Ok(gen)
+        Ok(status)
     }
 }
 
-// ── Session worker ────────────────────────────────────────────────────────
+// Session worker
+
+fn valid_request_id(request_id: &str) -> bool {
+    !request_id.is_empty()
+        && request_id.len() <= 128
+        && request_id.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'
+        })
+}
 
 fn is_cancelled(flag: &AtomicBool) -> bool {
     flag.load(Ordering::Acquire)
@@ -344,6 +448,7 @@ fn is_cancelled(flag: &AtomicBool) -> bool {
 
 fn run_session<P, S, E>(
     gen: u64,
+    request_id: String,
     cancel: Arc<AtomicBool>,
     selection: DeviceSelection,
     test_mode: bool,
@@ -359,11 +464,15 @@ fn run_session<P, S, E>(
     let perm = permission.query();
     emit(SessionEvent::PermissionStatus {
         generation: gen,
+        request_id: request_id.clone(),
         status: perm.into(),
     });
 
     if is_cancelled(&cancel) {
-        emit(SessionEvent::CaptureCancelled { generation: gen });
+        emit(SessionEvent::CaptureCancelled {
+            generation: gen,
+            request_id,
+        });
         return;
     }
 
@@ -382,6 +491,7 @@ fn run_session<P, S, E>(
                         if is_cancelled(&cancel) {
                             emit(SessionEvent::CaptureCancelled {
                                 generation: gen,
+                                request_id,
                             });
                             return;
                         }
@@ -398,6 +508,7 @@ fn run_session<P, S, E>(
             };
             emit(SessionEvent::PermissionStatus {
                 generation: gen,
+                request_id: request_id.clone(),
                 status,
             });
             granted
@@ -413,13 +524,17 @@ fn run_session<P, S, E>(
                 "Microphone access denied. \
                  Enable in System Settings > Privacy & Security.",
             ),
+            request_id,
         });
         return;
     }
 
     // Phase 3: Cancel check before stream open.
     if is_cancelled(&cancel) {
-        emit(SessionEvent::CaptureCancelled { generation: gen });
+        emit(SessionEvent::CaptureCancelled {
+            generation: gen,
+            request_id,
+        });
         return;
     }
 
@@ -448,6 +563,7 @@ fn run_session<P, S, E>(
                 emit(SessionEvent::CaptureStarted {
                     device_name: meta.device_name.clone(),
                     generation: gen,
+                    request_id: request_id.clone(),
                 });
 
                 let mut buffer = CaptureBuffer::new();
@@ -476,6 +592,7 @@ fn run_session<P, S, E>(
                     &mut activity_emitted,
                     start,
                     gen,
+                    &request_id,
                     emit,
                 );
                 (term, buffer)
@@ -488,6 +605,7 @@ fn run_session<P, S, E>(
                 category: String::from("capture-unavailable"),
                 generation: gen,
                 message: e,
+                request_id,
             });
             return;
         }
@@ -500,15 +618,22 @@ fn run_session<P, S, E>(
                 emit(SessionEvent::TestComplete {
                     generation: gen,
                     metadata: inspect(buffer),
+                    request_id,
                 });
             } else {
                 drop(buffer);
-                emit(SessionEvent::CaptureStopped { generation: gen });
+                emit(SessionEvent::CaptureStopped {
+                    generation: gen,
+                    request_id,
+                });
             }
         }
         LoopTerminal::Cancelled => {
             drop(buffer);
-            emit(SessionEvent::CaptureCancelled { generation: gen });
+            emit(SessionEvent::CaptureCancelled {
+                generation: gen,
+                request_id,
+            });
         }
         LoopTerminal::Error(cat, msg) => {
             drop(buffer);
@@ -516,12 +641,13 @@ fn run_session<P, S, E>(
                 category: cat,
                 generation: gen,
                 message: msg,
+                request_id,
             });
         }
     }
 }
 
-// ── Capture loop ──────────────────────────────────────────────────────────
+// Capture loop
 
 enum LoopTerminal {
     Clean,
@@ -547,6 +673,7 @@ fn capture_loop<E: Fn(SessionEvent)>(
     activity_emitted: &mut bool,
     start: Instant,
     gen: u64,
+    request_id: &str,
     emit: &E,
 ) -> LoopTerminal {
     let mut drain_buf = vec![0.0f32; RING_CAPACITY];
@@ -574,7 +701,10 @@ fn capture_loop<E: Fn(SessionEvent)>(
                 && mono.iter().any(|&s| s.abs() >= ACTIVITY_THRESHOLD)
             {
                 *activity_emitted = true;
-                emit(SessionEvent::ActivityDetected { generation: gen });
+                emit(SessionEvent::ActivityDetected {
+                    generation: gen,
+                    request_id: request_id.to_owned(),
+                });
             }
 
             if buffer.push(&mono).is_err() {
@@ -647,14 +777,14 @@ fn capture_loop<E: Fn(SessionEvent)>(
     }
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────
+// Tests
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
 
-    // ── Fake backends ─────────────────────────────────────────────────
+    // Fake backends
 
     #[derive(Clone, Copy)]
     struct FakePermission(MicPermission);
@@ -820,10 +950,13 @@ mod tests {
         FakePermission,
         FakeStreamBackend,
     ) {
-        (FakePermission(MicPermission::Authorized), FakeStreamBackend::new(samples))
+        (
+            FakePermission(MicPermission::Authorized),
+            FakeStreamBackend::new(samples),
+        )
     }
 
-    // ── Invariants ────────────────────────────────────────────────────
+    // Invariants
 
     #[test]
     fn starts_idle() {
@@ -832,19 +965,46 @@ mod tests {
     }
 
     #[test]
+    fn rejects_invalid_request_ids() {
+        let (p, s) = authorized_backend(vec![]);
+        let c = mk(p, s);
+        let (emit, _) = mk_emit();
+        assert_eq!(
+            c.start_session(
+                String::from("invalid request"),
+                DeviceSelection::SystemDefault,
+                true,
+                emit,
+            ),
+            Err(String::from("invalid-request-id")),
+        );
+        assert!(!c.cancel_request(""));
+    }
+
+    #[test]
     fn busy_rejects_second_start() {
         let (p, s) = authorized_backend(vec![]);
         let c = mk(p, s);
         let (e1, _) = mk_emit();
         let (e2, _) = mk_emit();
-        let gen = c
-            .start_session(DeviceSelection::SystemDefault, true, e1)
+        let status = c
+            .start_session(
+                String::from("request-1"),
+                DeviceSelection::SystemDefault,
+                true,
+                e1,
+            )
             .unwrap();
         assert_eq!(
-            c.start_session(DeviceSelection::SystemDefault, true, e2),
+            c.start_session(
+                String::from("request-2"),
+                DeviceSelection::SystemDefault,
+                true,
+                e2,
+            ),
             Err(String::from("busy"))
         );
-        c.cancel(gen);
+        c.cancel_request(&status.request_id);
         idle_wait(&c, Duration::from_secs(3));
     }
 
@@ -855,23 +1015,85 @@ mod tests {
         let (p, s) = authorized_backend(vec![]);
         let c = mk(p, s);
         let (emit, _) = mk_emit();
-        let gen = c
-            .start_session(DeviceSelection::SystemDefault, true, emit)
+        let status = c
+            .start_session(
+                String::from("request"),
+                DeviceSelection::SystemDefault,
+                true,
+                emit,
+            )
             .unwrap();
         // Immediately cancel; the flag must already be registered.
-        assert!(c.cancel(gen), "cancel flag must be registered before thread");
+        assert!(
+            c.cancel_request(&status.request_id),
+            "cancel flag must be registered before thread",
+        );
         idle_wait(&c, Duration::from_secs(3));
     }
 
-    // ── Permission states ─────────────────────────────────────────────
+    #[test]
+    fn cancel_before_start_targets_only_same_request() {
+        let (p, s) = authorized_backend(vec![]);
+        let c = mk(p, s);
+        assert!(c.cancel_request("cancelled-request"));
+
+        let (emit, log) = mk_emit();
+        let status = c
+            .start_session(
+                String::from("cancelled-request"),
+                DeviceSelection::SystemDefault,
+                true,
+                emit,
+            )
+            .unwrap();
+        assert_eq!(status.request_id, "cancelled-request");
+        assert!(wait_for(&log, "cancelled", Duration::from_secs(3)));
+        idle_wait(&c, Duration::from_secs(3));
+
+        let (next_emit, _) = mk_emit();
+        let next = c
+            .start_session(
+                String::from("next-request"),
+                DeviceSelection::SystemDefault,
+                true,
+                next_emit,
+            )
+            .unwrap();
+        assert_eq!(next.request_id, "next-request");
+        c.cancel_request(&next.request_id);
+    }
+
+    #[test]
+    fn status_identifies_active_request_generation_and_mode() {
+        let (p, s) = authorized_backend(vec![]);
+        let c = mk(p, s);
+        let (emit, _) = mk_emit();
+        let started = c
+            .start_session(
+                String::from("owned-request"),
+                DeviceSelection::SystemDefault,
+                true,
+                emit,
+            )
+            .unwrap();
+        assert_eq!(c.status(), Some(started.clone()));
+        assert_eq!(started.mode, CaptureMode::Test);
+        c.cancel_request(&started.request_id);
+    }
+
+    // Permission states
 
     #[test]
     fn authorized_proceeds_to_started() {
         let (p, s) = authorized_backend(vec![0.5]);
         let c = mk(p, s);
         let (emit, log) = mk_emit();
-        c.start_session(DeviceSelection::SystemDefault, true, emit)
-            .unwrap();
+        c.start_session(
+            String::from("request"),
+            DeviceSelection::SystemDefault,
+            true,
+            emit,
+        ).unwrap();
         assert!(wait_for(&log, "started", Duration::from_secs(3)));
     }
 
@@ -882,8 +1104,12 @@ mod tests {
             FakeStreamBackend::new(vec![]),
         );
         let (emit, log) = mk_emit();
-        c.start_session(DeviceSelection::SystemDefault, false, emit)
-            .unwrap();
+        c.start_session(
+            String::from("request"),
+            DeviceSelection::SystemDefault,
+            false,
+            emit,
+        ).unwrap();
         assert!(wait_for(
             &log,
             "error:permission-denied",
@@ -899,8 +1125,12 @@ mod tests {
             FakeStreamBackend::new(vec![]),
         );
         let (emit, log) = mk_emit();
-        c.start_session(DeviceSelection::SystemDefault, false, emit)
-            .unwrap();
+        c.start_session(
+            String::from("request"),
+            DeviceSelection::SystemDefault,
+            false,
+            emit,
+        ).unwrap();
         assert!(wait_for(
             &log,
             "error:permission-denied",
@@ -913,17 +1143,22 @@ mod tests {
         );
     }
 
-    // ── Cancel at every phase ─────────────────────────────────────────
+    // Cancel at every phase
 
     #[test]
     fn cancel_before_open_emits_exactly_one_terminal() {
         let (p, s) = authorized_backend(vec![]);
         let c = mk(p, s);
         let (emit, log) = mk_emit();
-        let gen = c
-            .start_session(DeviceSelection::SystemDefault, true, emit)
+        let status = c
+            .start_session(
+                String::from("request"),
+                DeviceSelection::SystemDefault,
+                true,
+                emit,
+            )
             .unwrap();
-        c.cancel(gen);
+        c.cancel_request(&status.request_id);
         idle_wait(&c, Duration::from_secs(3));
         let events = log.lock().unwrap().clone();
         let terminals: Vec<_> = events.iter().filter(|e| {
@@ -940,27 +1175,33 @@ mod tests {
     }
 
     #[test]
-    fn cancel_after_session_ends_returns_false() {
+    fn session_status_clears_after_terminal() {
         let c = mk(
             FakePermission(MicPermission::Denied),
             FakeStreamBackend::new(vec![]),
         );
         let (emit, log) = mk_emit();
-        let gen = c
-            .start_session(DeviceSelection::SystemDefault, false, emit)
+        c.start_session(
+            String::from("request"),
+            DeviceSelection::SystemDefault,
+            false,
+            emit,
+        )
             .unwrap();
         wait_for(&log, "error:permission-denied", Duration::from_secs(3));
         idle_wait(&c, Duration::from_secs(3));
-        assert!(!c.cancel(gen), "cancel of ended session returns false");
+        assert!(c.status().is_none());
     }
 
     #[test]
-    fn stale_generation_cancel_returns_false() {
+    fn unknown_request_cancel_does_not_activate_session() {
         let (p, s) = authorized_backend(vec![]);
-        assert!(!mk(p, s).cancel(999));
+        let coordinator = mk(p, s);
+        assert!(coordinator.cancel_request("unknown-request"));
+        assert!(coordinator.status().is_none());
     }
 
-    // ── Stream error ──────────────────────────────────────────────────
+    // Stream error
 
     #[test]
     fn open_error_emits_capture_unavailable() {
@@ -974,8 +1215,12 @@ mod tests {
             },
         );
         let (emit, log) = mk_emit();
-        c.start_session(DeviceSelection::SystemDefault, false, emit)
-            .unwrap();
+        c.start_session(
+            String::from("request"),
+            DeviceSelection::SystemDefault,
+            false,
+            emit,
+        ).unwrap();
         assert!(wait_for(
             &log,
             "error:capture-unavailable",
@@ -995,8 +1240,12 @@ mod tests {
             },
         );
         let (emit, log) = mk_emit();
-        c.start_session(DeviceSelection::SystemDefault, false, emit)
-            .unwrap();
+        c.start_session(
+            String::from("request"),
+            DeviceSelection::SystemDefault,
+            false,
+            emit,
+        ).unwrap();
         assert!(
             wait_for(
                 &log,
@@ -1013,7 +1262,7 @@ mod tests {
         );
     }
 
-    // ── Test mode ─────────────────────────────────────────────────────
+    // Test mode
 
     #[test]
     fn test_mode_with_activity_must_emit_test_complete() {
@@ -1028,8 +1277,12 @@ mod tests {
             },
         );
         let (emit, log) = mk_emit();
-        c.start_session(DeviceSelection::SystemDefault, true, emit)
-            .unwrap();
+        c.start_session(
+            String::from("request"),
+            DeviceSelection::SystemDefault,
+            true,
+            emit,
+        ).unwrap();
         // Must see test-complete; errors or stopped are failures.
         assert!(
             wait_for(&log, "test-complete", Duration::from_secs(5)),
@@ -1062,8 +1315,12 @@ mod tests {
             },
         );
         let (emit, log) = mk_emit();
-        c.start_session(DeviceSelection::SystemDefault, true, emit)
-            .unwrap();
+        c.start_session(
+            String::from("request"),
+            DeviceSelection::SystemDefault,
+            true,
+            emit,
+        ).unwrap();
         assert!(wait_for(&log, "test-complete", Duration::from_secs(5)));
         assert!(
             !log.lock().unwrap().contains(&String::from("activity")),
@@ -1071,7 +1328,7 @@ mod tests {
         );
     }
 
-    // ── Overflow flags ────────────────────────────────────────────────
+    // Overflow flags
 
     #[test]
     fn ring_overflow_emits_input_limit_exceeded() {
@@ -1083,8 +1340,12 @@ mod tests {
             },
         );
         let (emit, log) = mk_emit();
-        c.start_session(DeviceSelection::SystemDefault, false, emit)
-            .unwrap();
+        c.start_session(
+            String::from("request"),
+            DeviceSelection::SystemDefault,
+            false,
+            emit,
+        ).unwrap();
         assert!(
             wait_for(
                 &log,
@@ -1095,7 +1356,7 @@ mod tests {
         );
     }
 
-    // ── Generation counter ────────────────────────────────────────────
+    // Generation counter
 
     #[test]
     fn generations_increment_per_session() {
@@ -1105,22 +1366,32 @@ mod tests {
         );
         assert_eq!(c.current_generation(), 0);
         let (e1, l1) = mk_emit();
-        let g1 = c
-            .start_session(DeviceSelection::SystemDefault, false, e1)
+        let first = c
+            .start_session(
+                String::from("request-1"),
+                DeviceSelection::SystemDefault,
+                false,
+                e1,
+            )
             .unwrap();
-        assert_eq!(g1, 1);
+        assert_eq!(first.generation, 1);
         wait_for(&l1, "error:permission-denied", Duration::from_secs(3));
         idle_wait(&c, Duration::from_secs(3));
         let (e2, _) = mk_emit();
-        let g2 = c
-            .start_session(DeviceSelection::SystemDefault, false, e2)
+        let second = c
+            .start_session(
+                String::from("request-2"),
+                DeviceSelection::SystemDefault,
+                false,
+                e2,
+            )
             .unwrap();
-        assert_eq!(g2, 2);
-        c.cancel(g2);
+        assert_eq!(second.generation, 2);
+        c.cancel_request(&second.request_id);
     }
 
     #[test]
-    fn all_events_carry_generation() {
+    fn all_session_events_carry_request_and_generation() {
         // Verify that the PermissionStatus event from a session carries the
         // correct generation by checking the log tag includes generation info.
         // (Full generation field verification requires matching event structs.)
@@ -1135,8 +1406,9 @@ mod tests {
         let events: Arc<Mutex<Vec<SessionEvent>>> =
             Arc::new(Mutex::new(Vec::new()));
         let events2 = Arc::clone(&events);
-        let gen = c
+        let status = c
             .start_session(
+                String::from("request"),
                 DeviceSelection::SystemDefault,
                 true,
                 move |e: SessionEvent| {
@@ -1156,40 +1428,52 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
         let evs = events.lock().unwrap().clone();
-        // Every event must carry the expected generation.
+        // Every session event must carry the expected correlation pair.
         for ev in &evs {
-            let ev_gen = match ev {
-                SessionEvent::PermissionStatus { generation, .. } => {
-                    *generation
+            let (event_generation, event_request_id) = match ev {
+                SessionEvent::PermissionStatus {
+                    generation,
+                    request_id,
+                    ..
                 }
-                SessionEvent::CaptureStarted { generation, .. } => {
-                    *generation
+                | SessionEvent::CaptureStarted {
+                    generation,
+                    request_id,
+                    ..
                 }
-                SessionEvent::ActivityDetected { generation } => {
-                    *generation
+                | SessionEvent::ActivityDetected {
+                    generation,
+                    request_id,
                 }
-                SessionEvent::TestComplete { generation, .. } => {
-                    *generation
+                | SessionEvent::TestComplete {
+                    generation,
+                    request_id,
+                    ..
                 }
-                SessionEvent::CaptureStopped { generation } => {
-                    *generation
+                | SessionEvent::CaptureStopped {
+                    generation,
+                    request_id,
                 }
-                SessionEvent::CaptureCancelled { generation } => {
-                    *generation
+                | SessionEvent::CaptureCancelled {
+                    generation,
+                    request_id,
                 }
-                SessionEvent::CaptureError { generation, .. } => {
-                    *generation
-                }
+                | SessionEvent::CaptureError {
+                    generation,
+                    request_id,
+                    ..
+                } => (*generation, request_id),
                 SessionEvent::DeviceList { .. } => continue, // no gen
             };
             assert_eq!(
-                ev_gen, gen,
+                event_generation, status.generation,
                 "event {ev:?} has wrong generation"
             );
+            assert_eq!(event_request_id, "request");
         }
     }
 
-    // ── capture_loop unit ─────────────────────────────────────────────
+    // capture_loop unit
 
     #[test]
     fn capture_loop_accumulates_then_cancel_terminates() {
@@ -1228,6 +1512,7 @@ mod tests {
             &mut act,
             Instant::now(),
             1,
+            "request",
             &emit_noop,
         );
 
@@ -1258,7 +1543,7 @@ mod tests {
             &mut cons, &overflow, &stream_error, &clean_stop,
             &cancel, &mut dm, &mut buf,
             Duration::from_secs(120), &mut last, &mut act,
-            Instant::now(), 1, &emit_noop,
+            Instant::now(), 1, "request", &emit_noop,
         );
         assert!(
             matches!(term, LoopTerminal::Error(ref c, _)
@@ -1284,7 +1569,7 @@ mod tests {
             &mut cons, &overflow, &stream_error, &clean_stop,
             &cancel, &mut dm, &mut buf,
             Duration::from_secs(120), &mut last, &mut act,
-            Instant::now(), 1, &emit_noop,
+            Instant::now(), 1, "request", &emit_noop,
         );
         assert!(
             matches!(term, LoopTerminal::Error(ref c, _)
@@ -1311,7 +1596,7 @@ mod tests {
             &mut cons, &overflow, &stream_error, &clean_stop,
             &cancel, &mut dm, &mut buf,
             Duration::from_secs(120), &mut last, &mut act,
-            Instant::now(), 1, &emit_noop,
+            Instant::now(), 1, "request", &emit_noop,
         );
         assert!(matches!(term, LoopTerminal::Clean));
     }

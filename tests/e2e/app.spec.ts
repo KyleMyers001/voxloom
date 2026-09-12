@@ -80,6 +80,12 @@ test("screens, settings, themes, and baselines stay synchronized", async (
   await page.getByRole("textbox", { name: "Word" }).fill(" Vite ");
   await page.getByRole("button", { name: "Save" }).click();
   await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByText(
+    "Native microphone capture is unavailable here",
+  )).toBeVisible();
+  await expect(page.getByLabel("Microphone")).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Unavailable" }))
+    .toBeDisabled();
   await page.getByLabel("Current style").selectOption("casual");
 
   for (const screen of screens) {

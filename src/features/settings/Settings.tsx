@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { useApp } from "../../app/AppContext";
 import {
   audioRetentions,
@@ -6,7 +5,7 @@ import {
   transcriptRetentions,
   writingStyles,
 } from "../../domain/settings";
-import { listDevices } from "../../services/capture/captureService";
+import { isTauriEnv } from "../../services/capture/captureService";
 import { useCaptureState } from "../../services/capture/useCaptureState";
 import type { Appearance } from "../../domain/types";
 
@@ -33,11 +32,7 @@ export function Settings({ onSetup }: SettingsProps) {
     stopMicTest,
   } = useCaptureState();
 
-  // Populate device list on mount.
-  useEffect(() => {
-    void listDevices();
-  }, []);
-
+  const isNative = isTauriEnv();
   const micAuthorized = permissionStatus === "authorized";
   const micTesting = captureState.kind === "test-running";
   const micTestDone = captureState.kind === "test-complete";
@@ -92,6 +87,7 @@ export function Settings({ onSetup }: SettingsProps) {
 
           <label className="field">Microphone
             <select
+              disabled={!isNative}
               onChange={(event) => settings.update({
                 key: "microphone",
                 value: event.target.value,
@@ -113,7 +109,9 @@ export function Settings({ onSetup }: SettingsProps) {
             <label>Microphone test</label>
             <div className="onboarding-status">
               <span>
-                {!micAuthorized
+                {!isNative
+                  ? "Native microphone capture is unavailable here"
+                  : !micAuthorized
                   ? permissionStatus === "denied"
                     ? "Permission denied — enable in System Settings"
                     : "Permission required"
@@ -126,7 +124,11 @@ export function Settings({ onSetup }: SettingsProps) {
                       ? "Listening\u2026 (10 s auto-stop)"
                       : "Ready"}
               </span>
-              {!micAuthorized ? (
+              {!isNative ? (
+                <button className="btn" disabled>
+                  Unavailable
+                </button>
+              ) : !micAuthorized ? (
                 <button className="btn" onClick={requestMicPermission}>
                   Enable Microphone
                 </button>

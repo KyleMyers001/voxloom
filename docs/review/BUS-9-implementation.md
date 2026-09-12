@@ -1,124 +1,134 @@
-# BUS-9 — Native capture implementation (round 3)
+# BUS-9 native capture review checkpoint
 
-Branch: `bus-9-native-capture`. Base: `32f3d01` (bus-4-mock-ui HEAD).
+Branch: `bus-9-native-capture`.
 
-## Dependency rationale
+This checkpoint documents Slice A only. It does not claim BUS-9 is complete.
+No microphone was opened and no TCC state was read or changed during this
+slice.
 
-| Crate | Version | Reason |
-|---|---|---|
-| `cpal` | 0.15.3 | API verified from fetched source: `DeviceTrait`, `build_input_stream_raw`, `Data::as_slice<T>`, `SampleFormat` variants. `cpal::Stream` is `!Send` on macOS; handled via `with_stream` callback scoping. |
-| `rubato` | 0.14.1 | `SincFixedIn::new`, `SincInterpolationParameters`, `output_delay()`, `process_into_buffer` verified from source. Used instead of `FastFixedIn` (no anti-aliasing). No public `resample_ratio()` accessor — ratio stored by `Downmixer` at construction. |
-| `ringbuf` | 0.4.8 | `HeapRb<f32>`, `HeapProd`, `HeapCons`, `pop_slice`, `try_push` verified. `HeapRb<T: Send>` is `Send + Sync`. No `is_closed` signal; clean-stop seam provided by test-only `clean_stop: AtomicBool`. |
-| `objc2` | 0.6 | Required ≥ 0.6.2 by `objc2-av-foundation 0.3.2` and `block2 0.6`. |
-| `objc2-av-foundation` | 0.3.2 | `AVCaptureDevice::authorizationStatusForMediaType:` and `requestAccessForMediaType:completionHandler:` verified. All 4 `AVAuthorizationStatus` values mapped. |
-| `objc2-foundation` | 0.3.2 | Transitive. |
-| `block2` | 0.6 | Required by `objc2-av-foundation 0.3.2`. |
-| `serde` | 1 + derive | For `#[derive(Serialize)]` on `SessionEvent`. |
+## Slice A: event access and request ownership
 
-Frontend: no new npm dependencies. `@tauri-apps/api` 2.11.0 (pre-existing).
+### Tauri capability
 
-## Implementation surface audit (round 3 — verified counts)
+`src-tauri/capabilities/main.json` grants only these core permissions to the
+window labelled `main`:
 
-### Rust modules
+- `core:event:allow-listen`
+- `core:event:allow-unlisten`
 
-| Module | Lines (wc -l) | Tests | Key design |
-|---|---|---|---|
-| `buffer.rs` | 133 | 6 | Bounded 120 s accumulator |
-| `consumer.rs` | 103 | 6 | One-shot metadata; no audio returned |
-| `coordinator.rs` | 1318 | 21 | Generation state machine; injectable seams; cancel at all phases; 4-permission-state; `with_stream` backend; distinct overflow/stream-error terminals |
-| `mod.rs` | 13 | — | Re-exports |
-| `permission.rs` | 130 | 2 | 4 macOS states; non-macOS stub |
-| `resample.rs` | 431 | 10 | SincFixedIn; FIR delay drain; passband/stopband/duration/tail/signal assertions |
-| `stream.rs` | 377 | 10 | Ring buffer 4096 frames; `write_mono_f32` no alloc; 5 formats; `with_stream` scoped callback (no `unsafe Send`) |
-| **Total** | **2505** | **55** | |
+`tauri.conf.json` selects that capability by identifier. The capability was
+validated by a non-launching debug host build. Its generated effective form
+was inspected at `src-tauri/target/debug/build/voxloom-*/out/capabilities.json`
+and contained the `main` window plus exactly those two event permissions.
+No emit permission or unrelated core/plugin permission was added.
 
-`coordinator.rs` is 1318 lines — the largest module. Justified: it contains the full lifecycle state machine, two production backends, PhaseGuard, run_session/capture_loop logic, and 21 tests covering every production path (permission states, cancel phases, overflow/stream-error distinction, generation, activity, test-complete). Splitting further would spread the state machine across modules without meaningful responsibility separation.
+### Correlated request lifecycle
 
-### Frontend modules
+The renderer creates a unique client request ID synchronously before its
+first await. Listener registration must resolve successfully before the hook
+can invoke `capture_start`. The same request ID is sent to start and cancel.
 
-| Module | Lines (wc -l) | Tests | Key design |
-|---|---|---|---|
-| `types.ts` | 86 | — | `generation` on all non-device events; 4 permission states |
-| `captureService.ts` | 73 | 17 | `isTauri()` from `@tauri-apps/api/core`; browser fallbacks |
-| `useCaptureState.ts` | 248 | 15 | Listener before start; stale-gen suppression; early-return dup guard; try/catch IPC; unmount cancel |
+Native session reservation stores these values atomically before spawning the
+worker:
 
-## Verification evidence
+- client request ID;
+- native generation;
+- capture mode;
+- cancellation flag.
 
+Every session event carries both request ID and generation. Permission query
+events use their command request ID and generation zero because they are not
+capture sessions. The status command returns the exact active request ID,
+generation, and mode, or `null` while idle; it no longer returns a boolean or
+creates a renderer-side fake generation.
+
+Cancellation accepts a client request ID. If cancellation arrives before the
+start command reserves a worker, native code retains a bounded, exact-ID
+tombstone. A later start with that same ID terminates as cancelled before
+opening the stream. Other current or future request IDs are unaffected.
+
+Renderer cleanup cancels only the request owned by that hook instance. It
+does not call a process-wide cancel command. A terminal event received before
+the start response clears ownership, and the later response cannot restore
+the running state. Events from another request or from a mismatched known
+generation are ignored.
+
+### Browser behavior
+
+Runtime detection uses `isTauri()` from `@tauri-apps/api/core`; it does not
+depend on `window.__TAURI__` or `app.withGlobalTauri`. Browser service methods
+do not invoke native IPC. Settings displays an explicit native-unavailable
+message and disables the microphone selector and action button.
+
+### Generated lint output
+
+The ESLint global ignore list now includes:
+
+- `playwright-report-release`
+- `test-results-release`
+
+The same paths were already present in `.gitignore`. Source files remain in
+lint scope.
+
+## Direct test coverage added or changed
+
+- Service tests verify real-runtime detection, browser fail-closed behavior,
+  correlated start/cancel arguments, active status, listener payloads, and
+  synchronous unique request IDs.
+- Hook tests use deferred listener and start promises to verify listener-ready
+  gating, duplicate-start suppression, terminal-before-response behavior,
+  cancellation before a response, unmount-before-subscribe cleanup, listener
+  rejection, busy normalization, fresh remount gates, and adoption/cancellation
+  of exact native status ownership.
+- Native coordinator tests verify atomic status reservation, exact request-ID
+  cancellation before start, isolation of the next request, active status,
+  and request ID plus generation on emitted session events.
+- Browser component and Playwright coverage verify unavailable copy and
+  disabled microphone controls.
+
+## Verification for this checkpoint
+
+```text
+cargo test
+  58 passed; 0 failed; no warnings
+
+npm run typecheck
+  passed
+
+npm run lint
+  passed, including generated-output ignores
+
+npm run test:unit
+  81 passed in 25 files
+
+npm run test:e2e -- --grep 'screens, settings'
+  1 passed
+
+npm run tauri -- build --debug --no-bundle --ci
+  passed; host binary built without launch
 ```
-cargo check        # clean (0 errors, 0 warnings)
-cargo test         # 55/55 passed
-npm run typecheck  # clean
-npm run lint       # 0 errors in project files
-npm run test:unit  # 95/95 passed (24 files)
-npm run build      # clean 256 kB / 78 kB gzip
-PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers \
-  npx playwright test --reporter=list
-                   # dev suite: 5/5 passed
-PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers \
-  npx playwright test --config=playwright.release.config.ts
-                   # release suite: 1/1 passed
+
+The earlier unsigned app bundle and effective
+`NSMicrophoneUsageDescription` inspection were performed by the main agent;
+they were not repeated in Slice A.
+
+## Audited file sizes after Slice A
+
+```text
+src-tauri/src/capture/coordinator.rs        1603 lines
+src-tauri/src/lib.rs                         152 lines
+src/services/capture/captureService.ts        65 lines
+src/services/capture/types.ts                 87 lines
+src/services/capture/useCaptureState.ts       311 lines
+tests/unit/useCaptureState.test.ts            274 lines
 ```
 
-All commands run on `bus-9-native-capture` in
-`/Users/kylemyers/dev/forge/voxloom`.
-Toolchain: cargo 1.97.0, rustc 1.97.0, Node v24.19.0.
+## Explicitly remaining after Slice A
 
-## Critical safety changes (round 3)
+The following reviewed work is deferred to separately gated slices:
 
-**C1 — `unsafe impl Send` removed**  
-`SendStream` wrapper and `unsafe impl Send for SendStream` are gone.
-`cpal::Stream` is created and dropped inside `with_stream(&self, sel, F)`,
-which calls `F` while the stream lives on the stack. The stream never crosses
-a thread boundary. `StreamBackend::with_stream` takes a `FnOnce` callback;
-no `Send` bound on the stream handle.
-
-**C2 — `isTauri()` from `@tauri-apps/api/core`**  
-`captureService.ts` imports `isTauri` from `@tauri-apps/api/core` (checks
-`(globalThis || window).isTauri` — the real runtime marker, not
-`window.__TAURI__`). Tests mock `isTauri` directly via the mocked module.
-
-## Correctness invariants
-
-- No PCM bytes cross the IPC boundary.
-- `write_mono_f32`: no heap allocation, no lock, no log in the real-time callback.
-- Ring overflow → `input-limit-exceeded`. Stream error callback (device disconnect/revocation) → `stream_error` flag → `capture-unavailable`. The two error categories are distinct and never conflated.
-- Generation reserved + cancel flag installed atomically inside the phase lock before `thread::spawn`. Client holds a valid cancel handle immediately on `start_session` return.
-- All `SessionEvent` variants except `DeviceList` carry `generation: u64`.
-- `with_stream` callback: stream lives and dies in the closure scope; no cross-thread ownership.
-- Exactly one terminal event per session (verified by `cancel_before_open_emits_exactly_one_terminal` test).
-
-## Device identity limitation (documented — not changed)
-
-`DeviceSelection::Named` matches by display name only. CPAL 0.15 does not
-expose a CoreAudio `kAudioDevicePropertyDeviceUID` accessor on the stable
-API surface (the native extensions via `cpal::platform`) — inspected; no
-public UID getter exists in 0.15. Named selection rejects ambiguous matches
-(0 or ≥2 names) with an explicit error; system default is always unambiguous.
-Stable UID selection would require either CPAL 0.18+ or a raw CoreAudio
-binding; this is scoped to a future ticket and documented.
-
-## Bundle plist (verified)
-
-Main confirmed: `npm run tauri -- build --debug --bundles app --no-sign --ci --config '{"bundle":{"active":true}}'` produced a bundled `.app`, and `plutil -p` on the effective `Info.plist` confirmed `NSMicrophoneUsageDescription` present. Forge does not re-run this command; the plist source is `src-tauri/Info.plist` and the reference is `tauri.conf.json bundle.macOS.infoPlist`.
-
-## Manual tests pending
-
-| Test | What to verify |
-|---|---|
-| Default device grant | Cold launch → step 1 NotDetermined → Enable Microphone → OS dialog → Allow → authorized → Test Microphone → TestComplete with `detected_activity: true` when speaking |
-| Default device deny | Dialog → Deny → denied state; no capture attempt |
-| Restricted state | MDM-restricted device → "restricted by system policy" label |
-| Removable device unplug | USB mic → select → start → unplug → `capture-unavailable` error, no hang |
-| Permission revocation mid-capture | Start → revoke in System Settings → `capture-unavailable` error, no crash |
-| Single-session race | Rapid double-click Test Microphone → second blocked |
-| Window teardown | Start test → close window → no lingering mic indicator |
-| UID-based device selection | Out of scope for BUS-9; requires CPAL 0.18+ or raw CoreAudio binding |
-
-## False claims removed
-
-- `unsafe impl Send` entirely removed (C1).
-- `window.__TAURI__` check replaced with `isTauri()` from `@tauri-apps/api/core` (C2).
-- No TCC-reset instructions anywhere.
-- Line counts now match `wc -l` output shown above; previous round's 680/1046 discrepancy resolved.
-- "All CPAL formats supported" replaced with explicit list of 5 handled formats (F32, I16, I32, U16, U32) and explicit rejection message for the rest.
-- `test_mode_with_activity` test now unconditionally asserts `TestComplete` (not error/stopped) via `simulate_clean_stop: true` seam.
+1. Correct FIR delay removal and exact canonical resampler duration/tail.
+2. Stable native device identity, selection refresh, hot-plug, and switching.
+3. Production-clock coverage of the real ten-second auto-stop path and
+   removal of the fake clean-stop success seam.
+4. Foreground microphone and natural permission-state checks by the user.

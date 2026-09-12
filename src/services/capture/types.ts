@@ -1,11 +1,19 @@
 /// Capture service types — BUS-9.
-/// No PCM bytes or audio handles appear anywhere in this file.
+/// No PCM bytes or audio handles cross this boundary.
+
+export type CaptureMode = "full" | "test";
 
 export type PermissionStatus =
   | "not-determined"
   | "authorized"
   | "denied"
   | "restricted";
+
+export interface CaptureStatus {
+  readonly generation: number;
+  readonly mode: CaptureMode;
+  readonly request_id: string;
+}
 
 export interface TestCaptureMetadata {
   readonly detected_activity: boolean;
@@ -14,57 +22,53 @@ export interface TestCaptureMetadata {
   readonly peak_level: number;
 }
 
-/// All events the native coordinator may emit.
-/// Every event except DeviceList carries a `generation` for stale suppression.
+interface SessionCorrelation {
+  readonly generation: number;
+  readonly request_id: string;
+}
+
 export type CaptureEvent =
-  | {
-      generation: number;
+  | (SessionCorrelation & {
       kind: "permission-status";
       status: PermissionStatus;
-    }
-  | {
+    })
+  | (SessionCorrelation & {
       device_name: string;
-      generation: number;
       kind: "capture-started";
-    }
-  | { generation: number; kind: "activity-detected" }
-  | {
-      generation: number;
+    })
+  | (SessionCorrelation & { kind: "activity-detected" })
+  | (SessionCorrelation & {
       kind: "test-complete";
       metadata: TestCaptureMetadata;
-    }
-  | { generation: number; kind: "capture-stopped" }
-  | { generation: number; kind: "capture-cancelled" }
-  | {
-      devices: string[];
-      kind: "device-list";
-    }
-  | {
+    })
+  | (SessionCorrelation & { kind: "capture-stopped" })
+  | (SessionCorrelation & { kind: "capture-cancelled" })
+  | { devices: string[]; kind: "device-list" }
+  | (SessionCorrelation & {
       category: CaptureErrorCategory;
-      generation: number;
       kind: "capture-error";
       message: string;
-    };
+    });
 
-/// Stable error categories matching the Rust coordinator.
 export type CaptureErrorCategory =
   | "busy"
   | "capture-unavailable"
   | "input-limit-exceeded"
   | "permission-denied";
 
-/// Capture session state surfaced to the UI.
 export type CaptureState =
   | { kind: "idle" }
   | { kind: "requesting-permission" }
   | {
       device: string;
-      generation: string;
+      generation: number;
       kind: "active";
+      request_id: string;
     }
   | {
-      generation: string;
+      generation: number | null;
       kind: "test-running";
+      request_id: string;
       started_at: number;
     }
   | {
@@ -78,9 +82,6 @@ export type CaptureState =
       message: string;
     };
 
-/// True when the UI should not permit starting a new session.
-export function isCaptureSessionActive(
-  state: CaptureState,
-): boolean {
+export function isCaptureSessionActive(state: CaptureState): boolean {
   return state.kind === "active" || state.kind === "test-running";
 }

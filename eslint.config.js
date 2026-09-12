@@ -9,8 +9,10 @@ export default tseslint.config(
       ".playwright-browsers",
       "dist",
       "playwright-report",
+      "playwright-report-release",
       "src-tauri/target",
       "test-results",
+      "test-results-release",
     ],
   },
 );

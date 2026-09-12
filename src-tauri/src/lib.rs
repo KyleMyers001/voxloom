@@ -3,25 +3,26 @@ mod capture;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use capture::{
-    coordinator::{CaptureCoordinator, SessionEvent},
+    coordinator::{CaptureCoordinator, CaptureStatus, SessionEvent},
     permission,
     stream::{list_input_device_names, DeviceSelection},
 };
 
-// ── IPC commands ──────────────────────────────────────────────────────────
+// IPC commands
 
 /// Query the current microphone permission without prompting.
 /// Emits a `capture:event` PermissionStatus with generation 0 (not a session).
 #[tauri::command]
 fn capture_query_permission(
     app: AppHandle,
-    _coordinator: State<CaptureCoordinator>,
+    request_id: String,
 ) {
     let status = permission::query();
     let _ = app.emit(
         "capture:event",
         SessionEvent::PermissionStatus {
             generation: 0,
+            request_id,
             status: status.into(),
         },
     );
@@ -29,11 +30,12 @@ fn capture_query_permission(
 
 /// Request microphone permission. Emits updated PermissionStatus.
 #[tauri::command]
-fn capture_request_permission(app: AppHandle) {
+fn capture_request_permission(app: AppHandle, request_id: String) {
     use capture::permission::MicPermission;
     match permission::query() {
         MicPermission::NotDetermined => {
             let app2 = app.clone();
+            let callback_request_id = request_id.clone();
             permission::request(move |granted| {
                 use capture::coordinator::PermissionStatus;
                 let status = if granted {
@@ -45,6 +47,7 @@ fn capture_request_permission(app: AppHandle) {
                     "capture:event",
                     SessionEvent::PermissionStatus {
                         generation: 0,
+                        request_id: callback_request_id.clone(),
                         status,
                     },
                 );
@@ -55,6 +58,7 @@ fn capture_request_permission(app: AppHandle) {
                 "capture:event",
                 SessionEvent::PermissionStatus {
                     generation: 0,
+                    request_id,
                     status: other.into(),
                 },
             );
@@ -69,18 +73,18 @@ fn capture_start(
     app: AppHandle,
     coordinator: State<CaptureCoordinator>,
     preferred_device: Option<String>,
+    request_id: String,
     test_mode: bool,
-) -> Result<String, String> {
+) -> Result<CaptureStatus, String> {
     let selection = match preferred_device {
         Some(name) => DeviceSelection::Named(name),
         None => DeviceSelection::SystemDefault,
     };
     let app2 = app.clone();
     coordinator
-        .start_session(selection, test_mode, move |event| {
+        .start_session(request_id, selection, test_mode, move |event| {
             let _ = app2.emit("capture:event", event);
         })
-        .map(|gen| gen.to_string())
 }
 
 /// Cancel any active capture session.
@@ -89,21 +93,21 @@ fn capture_stop(coordinator: State<CaptureCoordinator>) {
     coordinator.cancel_any();
 }
 
-/// Cancel a specific session by generation.
+/// Cancel one client request, including a start whose response is pending.
 #[tauri::command]
 fn capture_cancel(
     coordinator: State<CaptureCoordinator>,
-    generation: u64,
+    request_id: String,
 ) -> bool {
-    coordinator.cancel(generation)
+    coordinator.cancel_request(&request_id)
 }
 
-/// True when a session is active.
+/// Return the exact active request, or null when idle.
 #[tauri::command]
-fn capture_is_active(
+fn capture_status(
     coordinator: State<CaptureCoordinator>,
-) -> bool {
-    coordinator.is_active()
+) -> Option<CaptureStatus> {
+    coordinator.status()
 }
 
 /// Enumerate input device names.
@@ -119,7 +123,7 @@ fn capture_list_devices(app: AppHandle) -> Vec<String> {
     devices
 }
 
-// ── Application entry ─────────────────────────────────────────────────────
+// Application entry
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -127,11 +131,11 @@ pub fn run() {
         .manage(CaptureCoordinator::new())
         .invoke_handler(tauri::generate_handler![
             capture_cancel,
-            capture_is_active,
             capture_list_devices,
             capture_query_permission,
             capture_request_permission,
             capture_start,
+            capture_status,
             capture_stop,
         ])
         .on_window_event(|window, event| {
