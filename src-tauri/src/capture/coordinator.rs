@@ -222,6 +222,7 @@ struct CoordinatorState {
 
 /// Clears this request's reservation on worker-thread exit.
 struct PhaseGuard {
+    generation: u64,
     request_id: String,
     state: Arc<Mutex<CoordinatorState>>,
 }
@@ -233,7 +234,8 @@ impl Drop for PhaseGuard {
             .reservation
             .as_ref()
             .is_some_and(|reservation| {
-                reservation.status.request_id == self.request_id
+                reservation.status.generation == self.generation
+                    && reservation.status.request_id == self.request_id
             });
         if owns_reservation {
             state.reservation = None;
@@ -413,8 +415,9 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
 
         thread::spawn(move || {
             let _guard = PhaseGuard {
+                generation: worker_status.generation,
                 request_id: request_id.clone(),
-                state: state_arc,
+                state: Arc::clone(&state_arc),
             };
             run_session(
                 worker_status.generation,
@@ -423,6 +426,7 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
                 selection,
                 test_mode,
                 permission,
+                state_arc,
                 stream_backend,
                 &emit,
             );
@@ -446,6 +450,35 @@ fn is_cancelled(flag: &AtomicBool) -> bool {
     flag.load(Ordering::Acquire)
 }
 
+fn release_owned_reservation(
+    state: &Mutex<CoordinatorState>,
+    generation: u64,
+    request_id: &str,
+) {
+    let mut state = state.lock().unwrap();
+    let owns_reservation = state
+        .reservation
+        .as_ref()
+        .is_some_and(|reservation| {
+            reservation.status.generation == generation
+                && reservation.status.request_id == request_id
+        });
+    if owns_reservation {
+        state.reservation = None;
+    }
+}
+
+fn emit_terminal<E: Fn(SessionEvent)>(
+    state: &Mutex<CoordinatorState>,
+    generation: u64,
+    request_id: &str,
+    event: SessionEvent,
+    emit: &E,
+) {
+    release_owned_reservation(state, generation, request_id);
+    emit(event);
+}
+
 fn run_session<P, S, E>(
     gen: u64,
     request_id: String,
@@ -453,6 +486,7 @@ fn run_session<P, S, E>(
     selection: DeviceSelection,
     test_mode: bool,
     permission: Arc<P>,
+    state: Arc<Mutex<CoordinatorState>>,
     stream_backend: Arc<S>,
     emit: &E,
 ) where
@@ -469,10 +503,16 @@ fn run_session<P, S, E>(
     });
 
     if is_cancelled(&cancel) {
-        emit(SessionEvent::CaptureCancelled {
-            generation: gen,
-            request_id,
-        });
+        emit_terminal(
+            &state,
+            gen,
+            &request_id,
+            SessionEvent::CaptureCancelled {
+                generation: gen,
+                request_id: request_id.clone(),
+            },
+            emit,
+        );
         return;
     }
 
@@ -489,10 +529,16 @@ fn run_session<P, S, E>(
                     Ok(g) => break g,
                     Err(mpsc::RecvTimeoutError::Timeout) => {
                         if is_cancelled(&cancel) {
-                            emit(SessionEvent::CaptureCancelled {
-                                generation: gen,
-                                request_id,
-                            });
+                            emit_terminal(
+                                &state,
+                                gen,
+                                &request_id,
+                                SessionEvent::CaptureCancelled {
+                                    generation: gen,
+                                    request_id: request_id.clone(),
+                                },
+                                emit,
+                            );
                             return;
                         }
                     }
@@ -517,24 +563,36 @@ fn run_session<P, S, E>(
     };
 
     if !authorized {
-        emit(SessionEvent::CaptureError {
-            category: String::from("permission-denied"),
-            generation: gen,
-            message: String::from(
-                "Microphone access denied. \
-                 Enable in System Settings > Privacy & Security.",
-            ),
-            request_id,
-        });
+        emit_terminal(
+            &state,
+            gen,
+            &request_id,
+            SessionEvent::CaptureError {
+                category: String::from("permission-denied"),
+                generation: gen,
+                message: String::from(
+                    "Microphone access denied. \
+                     Enable in System Settings > Privacy & Security.",
+                ),
+                request_id: request_id.clone(),
+            },
+            emit,
+        );
         return;
     }
 
     // Phase 3: Cancel check before stream open.
     if is_cancelled(&cancel) {
-        emit(SessionEvent::CaptureCancelled {
-            generation: gen,
-            request_id,
-        });
+        emit_terminal(
+            &state,
+            gen,
+            &request_id,
+            SessionEvent::CaptureCancelled {
+                generation: gen,
+                request_id: request_id.clone(),
+            },
+            emit,
+        );
         return;
     }
 
@@ -601,12 +659,18 @@ fn run_session<P, S, E>(
 
     let (term, buffer) = match open_result {
         Err(e) => {
-            emit(SessionEvent::CaptureError {
-                category: String::from("capture-unavailable"),
-                generation: gen,
-                message: e,
-                request_id,
-            });
+            emit_terminal(
+                &state,
+                gen,
+                &request_id,
+                SessionEvent::CaptureError {
+                    category: String::from("capture-unavailable"),
+                    generation: gen,
+                    message: e,
+                    request_id: request_id.clone(),
+                },
+                emit,
+            );
             return;
         }
         Ok(pair) => pair,
@@ -615,34 +679,59 @@ fn run_session<P, S, E>(
     match term {
         LoopTerminal::Clean => {
             if test_mode {
-                emit(SessionEvent::TestComplete {
-                    generation: gen,
-                    metadata: inspect(buffer),
-                    request_id,
-                });
+                let metadata = inspect(buffer);
+                emit_terminal(
+                    &state,
+                    gen,
+                    &request_id,
+                    SessionEvent::TestComplete {
+                        generation: gen,
+                        metadata,
+                        request_id: request_id.clone(),
+                    },
+                    emit,
+                );
             } else {
                 drop(buffer);
-                emit(SessionEvent::CaptureStopped {
-                    generation: gen,
-                    request_id,
-                });
+                emit_terminal(
+                    &state,
+                    gen,
+                    &request_id,
+                    SessionEvent::CaptureStopped {
+                        generation: gen,
+                        request_id: request_id.clone(),
+                    },
+                    emit,
+                );
             }
         }
         LoopTerminal::Cancelled => {
             drop(buffer);
-            emit(SessionEvent::CaptureCancelled {
-                generation: gen,
-                request_id,
-            });
+            emit_terminal(
+                &state,
+                gen,
+                &request_id,
+                SessionEvent::CaptureCancelled {
+                    generation: gen,
+                    request_id: request_id.clone(),
+                },
+                emit,
+            );
         }
         LoopTerminal::Error(cat, msg) => {
             drop(buffer);
-            emit(SessionEvent::CaptureError {
-                category: cat,
-                generation: gen,
-                message: msg,
-                request_id,
-            });
+            emit_terminal(
+                &state,
+                gen,
+                &request_id,
+                SessionEvent::CaptureError {
+                    category: cat,
+                    generation: gen,
+                    message: msg,
+                    request_id: request_id.clone(),
+                },
+                emit,
+            );
         }
     }
 }
@@ -782,7 +871,7 @@ fn capture_loop<E: Fn(SessionEvent)>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{atomic::AtomicUsize, Arc, Mutex};
 
     // Fake backends
 
@@ -859,6 +948,43 @@ mod tests {
 
         fn list_devices(&self) -> Vec<String> {
             vec![String::from("Fake")]
+        }
+    }
+
+    struct RestartStreamBackend {
+        opens: AtomicUsize,
+        resource_alive: Arc<AtomicBool>,
+    }
+
+    impl StreamBackend for RestartStreamBackend {
+        fn with_stream<F, R>(
+            &self,
+            _selection: &DeviceSelection,
+            f: F,
+        ) -> Result<R, String>
+        where
+            F: FnOnce(CaptureStreamMeta) -> R,
+        {
+            use ringbuf::traits::Split;
+
+            let clean_stop = self.opens.fetch_add(1, Ordering::AcqRel) == 0;
+            let rb = ringbuf::HeapRb::<f32>::new(RING_CAPACITY);
+            let (_producer, consumer) = rb.split();
+            self.resource_alive.store(true, Ordering::Release);
+            let output = f(CaptureStreamMeta {
+                clean_stop: Arc::new(AtomicBool::new(clean_stop)),
+                consumer,
+                device_name: String::from("Restart Fake"),
+                native_rate: 16_000,
+                overflow: Arc::new(AtomicBool::new(false)),
+                stream_error: Arc::new(AtomicBool::new(false)),
+            });
+            self.resource_alive.store(false, Ordering::Release);
+            Ok(output)
+        }
+
+        fn list_devices(&self) -> Vec<String> {
+            vec![String::from("Restart Fake")]
         }
     }
 
@@ -1032,6 +1158,59 @@ mod tests {
     }
 
     #[test]
+    fn terminal_callback_can_start_without_old_guard_clearing_new_run() {
+        let resource_alive = Arc::new(AtomicBool::new(false));
+        let coordinator = Arc::new(Coordinator::with_backends(
+            FakePermission(MicPermission::Authorized),
+            RestartStreamBackend {
+                opens: AtomicUsize::new(0),
+                resource_alive: Arc::clone(&resource_alive),
+            },
+        ));
+        let callback_coordinator = Arc::clone(&coordinator);
+        let callback_resource = Arc::clone(&resource_alive);
+        let (restart_tx, restart_rx) = mpsc::channel();
+        let emit = move |event: SessionEvent| {
+            if matches!(event, SessionEvent::TestComplete { .. }) {
+                assert!(
+                    !callback_resource.load(Ordering::Acquire),
+                    "stream resource must be released before terminal event",
+                );
+                let restarted = callback_coordinator.start_session(
+                    String::from("first-request"),
+                    DeviceSelection::SystemDefault,
+                    true,
+                    |_| {},
+                );
+                restart_tx.send(restarted).unwrap();
+            }
+        };
+
+        let first = coordinator
+            .start_session(
+                String::from("first-request"),
+                DeviceSelection::SystemDefault,
+                true,
+                emit,
+            )
+            .unwrap();
+        let second = restart_rx
+            .recv_timeout(Duration::from_secs(3))
+            .expect("terminal callback should start the next session")
+            .expect("reservation must be released before terminal callback");
+        assert!(second.generation > first.generation);
+
+        thread::sleep(Duration::from_millis(20));
+        assert_eq!(
+            coordinator.status(),
+            Some(second.clone()),
+            "old guard must preserve a new generation with the same ID",
+        );
+        assert!(coordinator.cancel_request(&second.request_id));
+        idle_wait(coordinator.as_ref(), Duration::from_secs(3));
+    }
+
+    #[test]
     fn cancel_before_start_targets_only_same_request() {
         let (p, s) = authorized_backend(vec![]);
         let c = mk(p, s);
@@ -1049,8 +1228,23 @@ mod tests {
         assert_eq!(status.request_id, "cancelled-request");
         assert!(wait_for(&log, "cancelled", Duration::from_secs(3)));
         idle_wait(&c, Duration::from_secs(3));
+        let cancelled_events = log.lock().unwrap().clone();
+        let cancelled_terminals = cancelled_events
+            .iter()
+            .filter(|event| {
+                event.starts_with("error:")
+                    || event.as_str() == "cancelled"
+                    || event.as_str() == "stopped"
+                    || event.as_str() == "test-complete"
+            })
+            .count();
+        assert_eq!(
+            cancelled_terminals,
+            1,
+            "pre-start tombstone must emit exactly one terminal",
+        );
 
-        let (next_emit, _) = mk_emit();
+        let (next_emit, next_log) = mk_emit();
         let next = c
             .start_session(
                 String::from("next-request"),
@@ -1060,7 +1254,34 @@ mod tests {
             )
             .unwrap();
         assert_eq!(next.request_id, "next-request");
-        c.cancel_request(&next.request_id);
+        assert!(wait_for(
+            &next_log,
+            "started",
+            Duration::from_secs(3),
+        ));
+        assert_eq!(
+            c.status(),
+            Some(next.clone()),
+            "tombstone for another ID must not cancel this request",
+        );
+        let unrelated_terminals = next_log
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| {
+                event.starts_with("error:")
+                    || event.as_str() == "cancelled"
+                    || event.as_str() == "stopped"
+                    || event.as_str() == "test-complete"
+            })
+            .count();
+        assert_eq!(
+            unrelated_terminals,
+            0,
+            "cancelled request ID must emit no terminal for unrelated IDs",
+        );
+        assert!(c.cancel_request(&next.request_id));
+        idle_wait(&c, Duration::from_secs(3));
     }
 
     #[test]
