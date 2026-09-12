@@ -31,6 +31,7 @@ use ringbuf::traits::Consumer;
 use crate::capture::{
     buffer::CaptureBuffer,
     consumer::{inspect, TestCaptureMetadata},
+    identity::CaptureGate,
     permission::{self, MicPermission},
     resample::Downmixer,
     stream::{
@@ -183,7 +184,7 @@ pub trait PermissionBackend: Send + Sync + 'static {
 /// their own ring consumer + flags.
 pub struct CaptureStreamMeta {
     /// True while the callback may accept new frames.
-    pub accepting: Arc<AtomicBool>,
+    pub accepting: Arc<CaptureGate>,
     /// Number of callbacks currently writing accepted frames.
     pub callbacks_in_flight: Arc<AtomicUsize>,
     pub device_name: String,
@@ -853,7 +854,7 @@ enum LoopTerminal {
 #[allow(clippy::too_many_arguments)]
 fn capture_loop<E: Fn(SessionEvent)>(
     consumer: &mut ringbuf::HeapCons<f32>,
-    accepting: &AtomicBool,
+    accepting: &CaptureGate,
     callbacks_in_flight: &AtomicUsize,
     overflow: &AtomicBool,
     stream_error: &AtomicBool,
@@ -884,7 +885,7 @@ fn capture_loop<E: Fn(SessionEvent)>(
             // that observed `accepting = true` is globally ordered before
             // this store, so this load sees its lease unless its write and
             // lease release have already completed.
-            accepting.store(false, Ordering::SeqCst);
+            accepting.close();
             if callbacks_in_flight.load(Ordering::SeqCst) > 0 {
                 runtime.wait(limits.poll_interval);
                 continue;
@@ -925,6 +926,13 @@ fn capture_loop<E: Fn(SessionEvent)>(
         }
 
         // Distinct error categories for distinct failure modes.
+        if accepting.is_invalidated() {
+            return LoopTerminal::Error(
+                String::from("capture-unavailable"),
+                String::from("Microphone identity changed."),
+            );
+        }
+
         if overflow.load(Ordering::Acquire) {
             return LoopTerminal::Error(
                 String::from("input-limit-exceeded"),
@@ -987,6 +995,16 @@ mod tests {
     use super::*;
     use crate::capture::buffer::{MAX_FRAMES, TARGET_RATE};
     use std::sync::{Arc, Mutex};
+
+    fn open_gate() -> CaptureGate {
+        let gate = CaptureGate::closed();
+        assert!(gate.try_open());
+        gate
+    }
+
+    fn shared_open_gate() -> Arc<CaptureGate> {
+        Arc::new(open_gate())
+    }
 
     // Fake backends
 
@@ -1171,7 +1189,7 @@ mod tests {
             }
             drop(prod);
             let meta = CaptureStreamMeta {
-                accepting: Arc::new(AtomicBool::new(true)),
+                accepting: shared_open_gate(),
                 callbacks_in_flight: Arc::new(AtomicUsize::new(0)),
                 consumer: cons,
                 device_name: String::from("Fake"),
@@ -1191,6 +1209,49 @@ mod tests {
                 alive.store(false, Ordering::Release);
             }
             Ok(output)
+        }
+
+        fn list_devices(
+            &self,
+        ) -> Result<Vec<InputDeviceDescriptor>, String> {
+            Ok(vec![])
+        }
+    }
+
+    struct PostCaptureIdentityFailureBackend {
+        resource_alive: Arc<AtomicBool>,
+    }
+
+    impl StreamBackend for PostCaptureIdentityFailureBackend {
+        fn with_stream<F, R>(
+            &self,
+            _selection: &DeviceSelection,
+            f: F,
+        ) -> Result<R, String>
+        where
+            F: FnOnce(CaptureStreamMeta) -> R,
+        {
+            use ringbuf::traits::{Producer, Split};
+
+            let ring = ringbuf::HeapRb::<f32>::new(RING_CAPACITY);
+            let (mut producer, consumer) = ring.split();
+            assert_eq!(producer.push_slice(&[0.5; 480]), 480);
+            drop(producer);
+            self.resource_alive.store(true, Ordering::Release);
+            let output = f(CaptureStreamMeta {
+                accepting: shared_open_gate(),
+                callbacks_in_flight: Arc::new(AtomicUsize::new(0)),
+                consumer,
+                device_name: String::from("Identity Fake"),
+                native_rate: TARGET_RATE,
+                overflow: Arc::new(AtomicBool::new(false)),
+                stream_error: Arc::new(AtomicBool::new(false)),
+            });
+            self.resource_alive.store(false, Ordering::Release);
+            drop(output);
+            Err(String::from(
+                "capture-unavailable: microphone identity changed",
+            ))
         }
 
         fn list_devices(
@@ -1222,7 +1283,7 @@ mod tests {
             let (_producer, consumer) = rb.split();
             self.resource_alive.store(true, Ordering::Release);
             let output = f(CaptureStreamMeta {
-                accepting: Arc::new(AtomicBool::new(true)),
+                accepting: shared_open_gate(),
                 callbacks_in_flight: Arc::new(AtomicUsize::new(0)),
                 consumer,
                 device_name: String::from("Restart Fake"),
@@ -1264,7 +1325,7 @@ mod tests {
             });
             self.resource_alive.store(true, Ordering::Release);
             let output = f(CaptureStreamMeta {
-                accepting: Arc::new(AtomicBool::new(true)),
+                accepting: shared_open_gate(),
                 callbacks_in_flight: Arc::new(AtomicUsize::new(0)),
                 consumer,
                 device_name: String::from("Continuous Fake"),
@@ -1304,7 +1365,7 @@ mod tests {
             let ring = ringbuf::HeapRb::<f32>::new(RING_CAPACITY);
             let (_producer, consumer) = ring.split();
             Ok(f(CaptureStreamMeta {
-                accepting: Arc::new(AtomicBool::new(true)),
+                accepting: shared_open_gate(),
                 callbacks_in_flight: Arc::new(AtomicUsize::new(0)),
                 consumer,
                 device_name: format!("Default {index}"),
@@ -1817,6 +1878,63 @@ mod tests {
             "error:capture-unavailable",
             Duration::from_secs(3),
         ));
+    }
+
+    #[test]
+    fn final_identity_failure_discards_pcm_and_emits_one_error() {
+        let resource_alive = Arc::new(AtomicBool::new(false));
+        let coordinator = mk_timed(
+            FakePermission(MicPermission::Authorized),
+            PostCaptureIdentityFailureBackend {
+                resource_alive: Arc::clone(&resource_alive),
+            },
+        );
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let emitted = Arc::clone(&events);
+        let resource_at_terminal = Arc::clone(&resource_alive);
+        let status = coordinator
+            .start_session(
+                String::from("identity-request"),
+                DeviceSelection::SystemDefault,
+                true,
+                move |event| {
+                    if matches!(event, SessionEvent::CaptureError { .. }) {
+                        assert!(!resource_at_terminal.load(Ordering::Acquire));
+                    }
+                    emitted.lock().unwrap().push(event);
+                },
+            )
+            .unwrap();
+        idle_wait(&coordinator, Duration::from_secs(3));
+
+        let events = events.lock().unwrap();
+        let terminals: Vec<_> = events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    SessionEvent::TestComplete { .. }
+                        | SessionEvent::CaptureStopped { .. }
+                        | SessionEvent::CaptureCancelled { .. }
+                        | SessionEvent::CaptureError { .. }
+                )
+            })
+            .collect();
+        assert_eq!(terminals.len(), 1, "events: {events:?}");
+        assert!(matches!(
+            terminals[0],
+            SessionEvent::CaptureError {
+                category,
+                generation,
+                request_id,
+                ..
+            } if category == "capture-unavailable"
+                && *generation == status.generation
+                && request_id == &status.request_id
+        ));
+        assert!(!events
+            .iter()
+            .any(|event| matches!(event, SessionEvent::TestComplete { .. })));
     }
 
     #[test]
@@ -2349,7 +2467,7 @@ mod tests {
             thread::sleep(Duration::from_millis(80));
             cancel_for_thread.store(true, Ordering::Release);
         });
-        let accepting = AtomicBool::new(true);
+        let accepting = open_gate();
         let callbacks_in_flight = AtomicUsize::new(0);
         let overflow = AtomicBool::new(false);
         let stream_error = AtomicBool::new(false);
@@ -2416,12 +2534,30 @@ mod tests {
     }
 
     #[test]
+    fn capture_loop_identity_invalidation_returns_capture_unavailable() {
+        use ringbuf::traits::Split;
+        let mut consumer = ringbuf::HeapRb::<f32>::new(8).split().1;
+        let accepting = open_gate();
+        accepting.invalidate();
+        let overflow = AtomicBool::new(false);
+        let stream_error = AtomicBool::new(false);
+        let terminal = run_immediate_loop_with_gate(
+            &mut consumer,
+            &accepting,
+            &overflow,
+            &stream_error,
+        );
+        assert!(matches!(terminal, LoopTerminal::Error(ref category, _)
+            if category == "capture-unavailable"));
+    }
+
+    #[test]
     fn capture_loop_deadline_drains_queue_and_flushes_once() {
         use ringbuf::traits::{Producer, Split};
         let rb = ringbuf::HeapRb::<f32>::new(512);
         let (mut producer, mut consumer) = rb.split();
         assert_eq!(producer.push_slice(&[0.5; 480]), 480);
-        let accepting = AtomicBool::new(true);
+        let accepting = open_gate();
         let callbacks_in_flight = AtomicUsize::new(0);
         let overflow = AtomicBool::new(false);
         let stream_error = AtomicBool::new(false);
@@ -2462,7 +2598,7 @@ mod tests {
             1,
             "deadline must flush exactly once",
         );
-        assert!(!accepting.load(Ordering::SeqCst));
+        assert!(!accepting.is_open());
     }
 
     #[test]
@@ -2471,7 +2607,7 @@ mod tests {
         let rb = ringbuf::HeapRb::<f32>::new(8);
         let (mut producer, mut consumer) = rb.split();
         assert_eq!(producer.push_slice(&[0.5]), 1);
-        let accepting = AtomicBool::new(true);
+        let accepting = open_gate();
         let callbacks_in_flight = Arc::new(AtomicUsize::new(1));
         let overflow = AtomicBool::new(false);
         let stream_error = AtomicBool::new(false);
@@ -2508,7 +2644,7 @@ mod tests {
         assert!(matches!(terminal, LoopTerminal::Clean));
         assert_eq!(runtime.waits.load(Ordering::Acquire), 1);
         assert_eq!(buffer.len(), 1);
-        assert!(!accepting.load(Ordering::SeqCst));
+        assert!(!accepting.is_open());
     }
 
     #[test]
@@ -2517,7 +2653,7 @@ mod tests {
         let rb = ringbuf::HeapRb::<f32>::new(8);
         let (mut producer, mut consumer) = rb.split();
         assert_eq!(producer.push_slice(&[0.5; 3]), 3);
-        let accepting = AtomicBool::new(true);
+        let accepting = open_gate();
         let callbacks_in_flight = AtomicUsize::new(0);
         let overflow = AtomicBool::new(false);
         let stream_error = AtomicBool::new(false);
@@ -2556,7 +2692,7 @@ mod tests {
             if category == "input-limit-exceeded"));
         assert_eq!(downmixer.flush_calls(), 1);
         assert_eq!(buffer.len(), MAX_FRAMES);
-        assert!(!accepting.load(Ordering::SeqCst));
+        assert!(!accepting.is_open());
     }
 
     fn run_immediate_loop(
@@ -2564,7 +2700,21 @@ mod tests {
         overflow: &AtomicBool,
         stream_error: &AtomicBool,
     ) -> LoopTerminal {
-        let accepting = AtomicBool::new(true);
+        let accepting = open_gate();
+        run_immediate_loop_with_gate(
+            consumer,
+            &accepting,
+            overflow,
+            stream_error,
+        )
+    }
+
+    fn run_immediate_loop_with_gate(
+        consumer: &mut ringbuf::HeapCons<f32>,
+        accepting: &CaptureGate,
+        overflow: &AtomicBool,
+        stream_error: &AtomicBool,
+    ) -> LoopTerminal {
         let callbacks_in_flight = AtomicUsize::new(0);
         let cancel = AtomicBool::new(false);
         let mut downmixer = Downmixer::new(TARGET_RATE).unwrap();
@@ -2575,7 +2725,7 @@ mod tests {
         let mut activity = false;
         capture_loop(
             consumer,
-            &accepting,
+            accepting,
             &callbacks_in_flight,
             overflow,
             stream_error,

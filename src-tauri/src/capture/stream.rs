@@ -9,18 +9,21 @@
 ///   distinct so error category is correct.
 /// - Format conversion (i16/i32/u16/u32/f32) uses `dasp_sample::FromSample`
 ///   inside the callback — no branching allocation.
-/// - `cpal::Stream` is !Send on macOS; it is opened and dropped exclusively
-///   on the worker thread via `with_stream`. No unsafe Send impl is used.
+/// - The stream is opened and dropped on one worker thread via `with_stream`.
+///   CPAL 0.17 makes it Send, but this adapter does not transfer ownership.
+use std::hash::Hash;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{
-    BufferSize, Data, SampleFormat, SampleRate, StreamConfig,
-};
+use cpal::{BufferSize, Data, DeviceId, SampleFormat, StreamConfig};
 use ringbuf::{
     traits::{Producer, Split},
     HeapCons, HeapProd, HeapRb,
+};
+
+use super::identity::{
+    validate_device_id, CaptureGate, NativeIdentityMonitor,
 };
 
 /// Capacity of the ring buffer in f32 mono frames.
@@ -47,7 +50,7 @@ pub enum DeviceSelection {
 
 struct RegistryEntry<T> {
     descriptor: InputDeviceDescriptor,
-    device: Option<T>,
+    identity: T,
 }
 
 struct RegistryState<T> {
@@ -65,7 +68,7 @@ impl<T> Default for RegistryState<T> {
 }
 
 pub struct DeviceRegistry {
-    state: Mutex<RegistryState<cpal::Device>>,
+    state: Mutex<RegistryState<DeviceId>>,
 }
 
 impl DeviceRegistry {
@@ -76,28 +79,30 @@ impl DeviceRegistry {
     }
 
     pub fn list(&self) -> Result<Vec<InputDeviceDescriptor>, String> {
-        refresh_registry(
-            &self.state,
-            enumerate_input_devices,
-            same_native_device,
-            |state| Ok(descriptors(state)),
-        )
+        refresh_registry(&self.state, enumerate_input_devices, |state| {
+            Ok(descriptors(state))
+        })
     }
 
-    pub fn resolve(&self, id: &str) -> Result<cpal::Device, String> {
-        refresh_registry(
+    pub fn resolve(&self, id: &str) -> Result<ResolvedDevice, String> {
+        let identity = refresh_registry(
             &self.state,
             enumerate_input_devices,
-            same_native_device,
             |state| resolve_registered(state, id),
-        )
+        )?;
+        resolve_identity(identity)
     }
+}
+
+pub struct ResolvedDevice {
+    pub device: cpal::Device,
+    pub identity: DeviceId,
 }
 
 /// Metadata returned with the ring consumer when a stream is opened.
 pub struct StreamMeta {
     /// True while the real-time callback may accept new frames.
-    pub accepting: Arc<AtomicBool>,
+    pub accepting: Arc<CaptureGate>,
     /// Number of callbacks currently writing accepted frames.
     pub callbacks_in_flight: Arc<AtomicUsize>,
     /// Display name only — not identity.
@@ -115,36 +120,50 @@ pub struct StreamMeta {
 /// Open an input stream, call `f` with stream metadata while the stream
 /// is alive, then close the stream when `f` returns.
 ///
-/// `cpal::Stream` never crosses thread boundaries. Call this function
-/// from the thread that will own and drop the stream.
+/// `cpal::Stream` never crosses thread boundaries in this adapter. Call this
+/// function from the thread that will own and drop the stream.
 ///
 /// Errors have a `"capture-unavailable: …"` prefix.
-pub fn default_input_device() -> Result<cpal::Device, String> {
-    cpal::default_host().default_input_device().ok_or_else(|| {
-        String::from("capture-unavailable: no default input device")
-    })
+pub fn default_input_device() -> Result<ResolvedDevice, String> {
+    let device = cpal::default_host().default_input_device().ok_or_else(
+        || String::from("capture-unavailable: no default input device"),
+    )?;
+    let identity = device.id().map_err(|error| {
+        format!("capture-unavailable: microphone UID unavailable: {error}")
+    })?;
+    validate_device_id(&identity)?;
+    Ok(ResolvedDevice { device, identity })
 }
 
-pub fn with_stream<F, R>(device: cpal::Device, f: F) -> Result<R, String>
+pub fn with_stream<F, R>(resolved: ResolvedDevice, f: F) -> Result<R, String>
 where
     F: FnOnce(StreamMeta) -> R,
 {
+    let ResolvedDevice { device, identity } = resolved;
+    let accepting = Arc::new(CaptureGate::closed());
+    let monitor = NativeIdentityMonitor::install(
+        &identity,
+        Arc::clone(&accepting),
+    )?;
+    monitor.validate(&device, &identity)?;
+
     let device_name = device
-        .name()
+        .description()
+        .map(|description| description.name().to_owned())
         .unwrap_or_else(|_| String::from("unknown"));
 
     let supported = device
         .default_input_config()
         .map_err(|e| format!("capture-unavailable: {e}"))?;
 
-    let native_rate = supported.sample_rate().0;
+    let native_rate = supported.sample_rate();
     let sample_format = supported.sample_format();
     let channels = supported.channels();
 
     let config = StreamConfig {
         buffer_size: BufferSize::Default,
         channels,
-        sample_rate: SampleRate(native_rate),
+        sample_rate: native_rate,
     };
 
     let rb = HeapRb::<f32>::new(RING_CAPACITY);
@@ -152,7 +171,6 @@ where
 
     let overflow = Arc::new(AtomicBool::new(false));
     let stream_error = Arc::new(AtomicBool::new(false));
-    let accepting = Arc::new(AtomicBool::new(true));
     let callbacks_in_flight = Arc::new(AtomicUsize::new(0));
 
     // Build the stream — stays local to this function's stack frame.
@@ -171,10 +189,17 @@ where
     stream
         .play()
         .map_err(|e| format!("capture-unavailable: {e}"))?;
+    monitor.synchronize();
+    monitor.validate(&device, &identity)?;
+    if !accepting.try_open() {
+        return Err(String::from(
+            "capture-unavailable: microphone identity changed",
+        ));
+    }
 
     let meta = StreamMeta {
-        accepting,
-        callbacks_in_flight,
+        accepting: Arc::clone(&accepting),
+        callbacks_in_flight: Arc::clone(&callbacks_in_flight),
         consumer,
         device_name,
         native_rate,
@@ -184,8 +209,14 @@ where
 
     let result = f(meta);
 
-    // Stream dropped here — explicitly after f returns.
+    accepting.close();
+    while callbacks_in_flight.load(Ordering::SeqCst) != 0 {
+        std::thread::yield_now();
+    }
     drop(stream);
+    monitor.synchronize();
+    monitor.validate(&device, &identity)?;
+    monitor.finish()?;
     Ok(result)
 }
 
@@ -199,74 +230,78 @@ fn descriptors<T>(state: &RegistryState<T>) -> Vec<InputDeviceDescriptor> {
         .collect()
 }
 
-fn enumerate_input_devices() -> Result<Vec<(cpal::Device, String)>, String> {
+fn enumerate_input_devices() -> Result<Vec<(DeviceId, String)>, String> {
     cpal::default_host()
         .input_devices()
         .map_err(|error| format!("capture-unavailable: {error}"))?
         .map(|device| {
             let label = device
-                .name()
+                .description()
+                .map(|description| description.name().to_owned())
                 .unwrap_or_else(|_| String::from("Unknown microphone"));
-            Ok((device, label))
+            let identity = device.id().map_err(|error| {
+                format!(
+                    "capture-unavailable: microphone UID unavailable: \
+                     {error}",
+                )
+            })?;
+            validate_device_id(&identity)?;
+            Ok((identity, label))
         })
         .collect()
 }
 
-fn refresh_registry<T, R>(
+fn refresh_registry<T: Clone + Eq + Hash, R>(
     registry: &Mutex<RegistryState<T>>,
     enumerate: impl FnOnce() -> Result<Vec<(T, String)>, String>,
-    same_device: impl Fn(&T, &T) -> bool,
     inspect: impl FnOnce(&RegistryState<T>) -> Result<R, String>,
 ) -> Result<R, String> {
     // Enumeration occurs while holding the registry lock. A slow older
     // snapshot therefore cannot reconcile after a newer list or resolve.
     let mut state = registry.lock().unwrap();
     let devices = enumerate()?;
-    reconcile_devices(&mut state, devices, same_device);
+    reconcile_devices(&mut state, devices)?;
     inspect(&state)
 }
 
-fn reconcile_devices<T>(
+fn reconcile_devices<T: Clone + Eq + Hash>(
     state: &mut RegistryState<T>,
-    mut devices: Vec<(T, String)>,
-    same_device: impl Fn(&T, &T) -> bool,
-) {
-    for entry in state
-        .entries
-        .iter_mut()
-        .filter(|entry| entry.descriptor.available)
-    {
-        let Some(current) = entry.device.as_ref() else {
-            entry.descriptor.available = false;
-            continue;
-        };
-        if let Some(position) = devices
-            .iter()
-            .position(|(device, _)| same_device(current, device))
+    devices: Vec<(T, String)>,
+) -> Result<(), String> {
+    let unique: std::collections::HashSet<_> =
+        devices.iter().map(|(identity, _)| identity).collect();
+    if unique.len() != devices.len() {
+        return Err(String::from(
+            "capture-unavailable: duplicate microphone UID",
+        ));
+    }
+
+    for entry in &mut state.entries {
+        entry.descriptor.available = false;
+    }
+    for (identity, label) in devices {
+        if let Some(entry) = state
+            .entries
+            .iter_mut()
+            .find(|entry| entry.identity == identity)
         {
-            let (device, label) = devices.remove(position);
+            entry.descriptor.available = true;
             entry.descriptor.label = label;
-            entry.device = Some(device);
         } else {
-            // Once absence is observed, retire this ID permanently. This
-            // prevents a reused CoreAudio AudioDeviceID from rebinding it.
-            entry.descriptor.available = false;
-            entry.device = None;
+            let id = format!("input-{}", state.next_id);
+            state.next_id += 1;
+            state.entries.push(RegistryEntry {
+                descriptor: InputDeviceDescriptor {
+                    available: true,
+                    id,
+                    label,
+                },
+                identity,
+            });
         }
     }
-    for (device, label) in devices {
-        let id = format!("input-{}", state.next_id);
-        state.next_id += 1;
-        state.entries.push(RegistryEntry {
-            descriptor: InputDeviceDescriptor {
-                available: true,
-                id,
-                label,
-            },
-            device: Some(device),
-        });
-    }
     prune_tombstones(state);
+    Ok(())
 }
 
 fn prune_tombstones<T>(state: &mut RegistryState<T>) {
@@ -299,49 +334,73 @@ fn resolve_registered<T: Clone>(
             format!("capture-unavailable: unknown microphone id {id}")
         })
         .and_then(|entry| {
-            entry.device.clone().ok_or_else(|| format!(
-                "capture-unavailable: microphone {} is disconnected",
-                entry.descriptor.label,
-            ))
+            if entry.descriptor.available {
+                Ok(entry.identity.clone())
+            } else {
+                Err(format!(
+                    "capture-unavailable: microphone {} is disconnected",
+                    entry.descriptor.label,
+                ))
+            }
         })
 }
 
-#[cfg(target_os = "macos")]
-fn same_native_device(left: &cpal::Device, right: &cpal::Device) -> bool {
-    use cpal::platform::DeviceInner;
-
-    match (left.as_inner(), right.as_inner()) {
-        (DeviceInner::CoreAudio(left), DeviceInner::CoreAudio(right)) => {
-            left == right
-        }
-    }
+fn resolve_identity(identity: DeviceId) -> Result<ResolvedDevice, String> {
+    let host = cpal::default_host();
+    let device = host.device_by_id(&identity).ok_or_else(|| {
+        String::from("capture-unavailable: microphone is disconnected")
+    })?;
+    let actual = device.id().map_err(|error| {
+        format!("capture-unavailable: microphone UID unavailable: {error}")
+    })?;
+    validate_device_id(&actual)?;
+    validate_resolution(&identity, &actual, device.supports_input())?;
+    Ok(ResolvedDevice { device, identity })
 }
 
-#[cfg(not(target_os = "macos"))]
-fn same_native_device(_left: &cpal::Device, _right: &cpal::Device) -> bool {
-    false
+fn validate_resolution<T: Eq>(
+    expected: &T,
+    actual: &T,
+    supports_input: bool,
+) -> Result<(), String> {
+    if expected != actual {
+        Err(String::from(
+            "capture-unavailable: microphone identity changed",
+        ))
+    } else if !supports_input {
+        Err(String::from(
+            "capture-unavailable: selected device has no input",
+        ))
+    } else {
+        Ok(())
+    }
 }
 
 /// Build a raw input stream, converting all supported CPAL sample formats
 /// to mono f32 inside the callback.
 ///
 /// Supported: F32, I16, I32, U16, U32.
-/// Unsupported (F64, I8, U8, I64, U64, I24, U24, I48, U48): returns Err.
-/// CPAL 0.15 does not expose all possible formats on CoreAudio — the
-/// actually-supported set is constrained by the host; we handle the formats
-/// CPAL 0.15 documents for CoreAudio and fail closed on the rest.
+/// Unsupported formats, including CPAL 0.17's new CoreAudio I8/I24 formats,
+/// return an explicit error. Conversion expansion is outside this slice.
 fn build_stream(
     device: &cpal::Device,
     config: &StreamConfig,
     sample_format: SampleFormat,
     channels: u16,
     mut producer: HeapProd<f32>,
-    accepting: Arc<AtomicBool>,
+    accepting: Arc<CaptureGate>,
     callbacks_in_flight: Arc<AtomicUsize>,
     overflow: Arc<AtomicBool>,
     stream_error: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, String> {
     use cpal::StreamError;
+
+    if !callback_format_supported(sample_format) {
+        return Err(format!(
+            "capture-unavailable: sample format {sample_format:?} is not \
+             supported",
+        ));
+    }
 
     macro_rules! build_typed {
         ($T:ty) => {{
@@ -383,18 +442,22 @@ fn build_stream(
         SampleFormat::I32 => build_typed!(i32),
         SampleFormat::U16 => build_typed!(u16),
         SampleFormat::U32 => build_typed!(u32),
-        other => {
-            return Err(format!(
-                "capture-unavailable: sample format {other:?} not \
-                 supported (F64/I8/U8/I64/U64/I24/U24/I48/U48 are \
-                 not handled; CPAL 0.15 CoreAudio typically reports \
-                 F32 or integer variants listed above)"
-            ));
-        }
+        _ => unreachable!("unsupported formats return before stream build"),
     }
     .map_err(|e| format!("capture-unavailable: {e}"))?;
 
     Ok(stream)
+}
+
+fn callback_format_supported(sample_format: SampleFormat) -> bool {
+    matches!(
+        sample_format,
+        SampleFormat::F32
+            | SampleFormat::I16
+            | SampleFormat::I32
+            | SampleFormat::U16
+            | SampleFormat::U32
+    )
 }
 
 /// Downmix `interleaved` samples of type `T` to mono f32 and push into
@@ -404,7 +467,7 @@ fn write_mono_f32<T>(
     interleaved: &[T],
     channels: usize,
     producer: &mut HeapProd<f32>,
-    accepting: &AtomicBool,
+    accepting: &CaptureGate,
     callbacks_in_flight: &AtomicUsize,
     overflow: &AtomicBool,
 ) where
@@ -417,13 +480,12 @@ fn write_mono_f32<T>(
     // while this callback observes the old accepting state.
     callbacks_in_flight.fetch_add(1, Ordering::SeqCst);
     let _lease = CallbackLease(callbacks_in_flight);
-    if !accepting.load(Ordering::SeqCst) {
+    if !accepting.is_open() {
         return;
     }
     let step = channels.max(1);
     for frame in interleaved.chunks(step) {
-        let sum: f32 =
-            frame.iter().copied().map(|s| f32::from_sample(s)).sum();
+        let sum: f32 = frame.iter().copied().map(|s| f32::from_sample(s)).sum();
         let mono = sum / step as f32;
         if producer.try_push(mono).is_err() {
             overflow.store(true, Ordering::Release);
@@ -458,8 +520,10 @@ mod tests {
         out
     }
 
-    fn open_gate() -> Arc<AtomicBool> {
-        Arc::new(AtomicBool::new(true))
+    fn open_gate() -> Arc<CaptureGate> {
+        let gate = Arc::new(CaptureGate::closed());
+        assert!(gate.try_open());
+        gate
     }
 
     fn no_callbacks() -> AtomicUsize {
@@ -618,7 +682,7 @@ mod tests {
     #[test]
     fn closed_gate_discards_frames_without_overflow() {
         let (mut producer, consumer) = make_ring(2);
-        let accepting = AtomicBool::new(false);
+        let accepting = CaptureGate::closed();
         let callbacks_in_flight = AtomicUsize::new(0);
         let overflow = AtomicBool::new(false);
         write_mono_f32(
@@ -632,6 +696,13 @@ mod tests {
         assert!(drain(consumer).is_empty());
         assert_eq!(callbacks_in_flight.load(Ordering::SeqCst), 0);
         assert!(!overflow.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn new_coreaudio_formats_remain_explicitly_unsupported() {
+        assert!(!callback_format_supported(SampleFormat::I8));
+        assert!(!callback_format_supported(SampleFormat::I24));
+        assert!(callback_format_supported(SampleFormat::F32));
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -665,22 +736,12 @@ mod tests {
         }
         if callback_step < CALLBACK.len() {
             prefix.push(CALLBACK[callback_step]);
-            legal_gate_orders(
-                prefix,
-                callback_step + 1,
-                closer_step,
-                orders,
-            );
+            legal_gate_orders(prefix, callback_step + 1, closer_step, orders);
             prefix.pop();
         }
         if closer_step < CLOSER.len() {
             prefix.push(CLOSER[closer_step]);
-            legal_gate_orders(
-                prefix,
-                callback_step,
-                closer_step + 1,
-                orders,
-            );
+            legal_gate_orders(prefix, callback_step, closer_step + 1, orders);
             prefix.pop();
         }
     }
@@ -717,10 +778,7 @@ mod tests {
                 }
             }
 
-            assert!(
-                closer_safe,
-                "unsafe SeqCst interleaving: {order:?}",
-            );
+            assert!(closer_safe, "unsafe SeqCst interleaving: {order:?}",);
         }
     }
 
@@ -740,8 +798,8 @@ mod tests {
         reconcile_devices(
             &mut state,
             vec![(1, String::from("USB Mic")), (2, String::from("USB Mic"))],
-            |left, right| left == right,
-        );
+        )
+        .unwrap();
         let listed = descriptors(&state);
         assert_eq!(listed.len(), 2);
         assert_eq!(listed[0].label, listed[1].label);
@@ -754,42 +812,40 @@ mod tests {
         reconcile_devices(
             &mut state,
             vec![(7, String::from("Old label"))],
-            |left, right| left == right,
-        );
+        )
+        .unwrap();
         let id = state.entries[0].descriptor.id.clone();
         reconcile_devices(
             &mut state,
             vec![(7, String::from("New label"))],
-            |left, right| left == right,
-        );
+        )
+        .unwrap();
         assert_eq!(state.entries[0].descriptor.id, id);
         assert_eq!(state.entries[0].descriptor.label, "New label");
         assert!(state.entries[0].descriptor.available);
     }
 
     #[test]
-    fn observed_disappearance_permanently_retires_original_id() {
+    fn same_uid_reconnects_to_original_opaque_id() {
         let mut state = RegistryState::default();
         reconcile_devices(
             &mut state,
             vec![(9, String::from("Travel Mic"))],
-            |left, right| left == right,
-        );
+        )
+        .unwrap();
         let id = state.entries[0].descriptor.id.clone();
-        reconcile_devices(&mut state, vec![], |left, right| left == right);
+        reconcile_devices(&mut state, vec![]).unwrap();
         assert!(!state.entries[0].descriptor.available);
 
         reconcile_devices(
             &mut state,
             vec![(9, String::from("Travel Mic"))],
-            |left, right| left == right,
-        );
+        )
+        .unwrap();
         let listed = descriptors(&state);
-        assert_eq!(listed.len(), 2);
+        assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].id, id);
-        assert!(!listed[0].available);
-        assert_ne!(listed[1].id, id);
-        assert!(listed[1].available);
+        assert!(listed[0].available);
     }
 
     #[test]
@@ -798,16 +854,16 @@ mod tests {
         reconcile_devices(
             &mut state,
             vec![(9, String::from("Travel Mic"))],
-            |left, right| left == right,
-        );
+        )
+        .unwrap();
         let original_id = state.entries[0].descriptor.id.clone();
-        reconcile_devices(&mut state, vec![], |left, right| left == right);
+        reconcile_devices(&mut state, vec![]).unwrap();
 
         reconcile_devices(
             &mut state,
             vec![(10, String::from("Travel Mic"))],
-            |left, right| left == right,
-        );
+        )
+        .unwrap();
         let listed = descriptors(&state);
         assert_eq!(listed.len(), 2);
         assert_eq!(listed[0].id, original_id);
@@ -817,15 +873,94 @@ mod tests {
     }
 
     #[test]
+    fn uid_replacement_without_empty_snapshot_never_rebinds_old_id() {
+        let mut state = RegistryState::default();
+        reconcile_devices(
+            &mut state,
+            vec![(9, String::from("Travel Mic"))],
+        )
+        .unwrap();
+        let original_id = state.entries[0].descriptor.id.clone();
+
+        reconcile_devices(
+            &mut state,
+            vec![(10, String::from("Travel Mic"))],
+        )
+        .unwrap();
+
+        assert_eq!(state.entries.len(), 2);
+        assert_eq!(state.entries[0].descriptor.id, original_id);
+        assert!(!state.entries[0].descriptor.available);
+        assert_ne!(state.entries[1].descriptor.id, original_id);
+        assert!(state.entries[1].descriptor.available);
+    }
+
+    #[test]
+    fn duplicate_uid_fails_without_mutating_registry() {
+        let mut state = RegistryState::default();
+        reconcile_devices(
+            &mut state,
+            vec![(7, String::from("Original"))],
+        )
+        .unwrap();
+        let before = descriptors(&state);
+
+        let error = reconcile_devices(
+            &mut state,
+            vec![
+                (8, String::from("Duplicate A")),
+                (8, String::from("Duplicate B")),
+            ],
+        )
+        .unwrap_err();
+
+        assert!(error.contains("duplicate microphone UID"));
+        assert_eq!(descriptors(&state), before);
+    }
+
+    #[test]
+    fn enumeration_failure_preserves_registry_state() {
+        let registry = Mutex::new(RegistryState::default());
+        refresh_registry(
+            &registry,
+            || Ok(vec![(7, String::from("Original"))]),
+            |_| Ok(()),
+        )
+        .unwrap();
+        let before = descriptors(&registry.lock().unwrap());
+
+        let error = refresh_registry(
+            &registry,
+            || Err(String::from("capture-unavailable: unreadable UID")),
+            |_| Ok(()),
+        )
+        .unwrap_err();
+
+        assert!(error.contains("unreadable UID"));
+        assert_eq!(descriptors(&registry.lock().unwrap()), before);
+    }
+
+    #[test]
+    fn resolution_rejects_uid_mismatch_and_output_only_device() {
+        assert!(validate_resolution(&7, &8, true)
+            .unwrap_err()
+            .contains("identity changed"));
+        assert!(validate_resolution(&7, &7, false)
+            .unwrap_err()
+            .contains("no input"));
+        assert!(validate_resolution(&7, &7, true).is_ok());
+    }
+
+    #[test]
     fn missing_and_unknown_ids_fail_without_substitution() {
         let mut state = RegistryState::default();
         reconcile_devices(
             &mut state,
             vec![(11, String::from("Desk Mic"))],
-            |left, right| left == right,
-        );
+        )
+        .unwrap();
         let id = state.entries[0].descriptor.id.clone();
-        reconcile_devices(&mut state, vec![], |left, right| left == right);
+        reconcile_devices(&mut state, vec![]).unwrap();
 
         assert!(resolve_registered(&state, &id)
             .unwrap_err()
@@ -845,17 +980,20 @@ mod tests {
             reconcile_devices(
                 &mut state,
                 vec![(native_id, format!("Mic {native_id}"))],
-                |left, right| left == right,
-            );
+            )
+            .unwrap();
             issued.push(state.entries.last().unwrap().descriptor.id.clone());
-            reconcile_devices(&mut state, vec![], |left, right| left == right);
+            reconcile_devices(&mut state, vec![]).unwrap();
         }
 
         assert_eq!(state.entries.len(), MAX_DEVICE_TOMBSTONES);
         let unique: std::collections::HashSet<_> = issued.iter().collect();
         assert_eq!(unique.len(), cycles);
         assert_eq!(state.next_id, cycles as u64 + 1);
-        assert!(state.entries.iter().all(|entry| entry.device.is_none()));
+        assert!(state
+            .entries
+            .iter()
+            .all(|entry| !entry.descriptor.available));
     }
 
     #[test]
@@ -875,7 +1013,6 @@ mod tests {
                     release_first_rx.recv().unwrap();
                     Ok(vec![(1, String::from("Older snapshot"))])
                 },
-                |left, right| left == right,
                 |_| Ok(()),
             )
             .unwrap();
@@ -893,7 +1030,6 @@ mod tests {
                     second_started_tx.send(()).unwrap();
                     Ok(vec![(2, String::from("Newer snapshot"))])
                 },
-                |left, right| left == right,
                 |_| Ok(()),
             )
             .unwrap();

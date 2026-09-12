@@ -8,6 +8,7 @@
 pub mod buffer;
 pub mod consumer;
 pub mod coordinator;
+pub mod identity;
 pub mod permission;
 pub mod resample;
 pub mod stream;

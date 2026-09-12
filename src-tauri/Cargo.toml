@@ -13,7 +13,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-cpal = "0.15"
+cpal = "=0.17.3"
 ringbuf = "0.4"
 rubato = "0.14"
 serde = { version = "1", features = ["derive"] }
@@ -26,4 +26,11 @@ objc2-av-foundation = { version = "0.3.2", features = [
   "AVCaptureDevice",
   "AVMediaFormat",
 ] }
+objc2-core-audio = { version = "0.3.2", features = [
+  "AudioHardware",
+  "block2",
+  "dispatch2",
+] }
+objc2-core-foundation = { version = "0.3.2", features = ["CFString"] }
 objc2-foundation = "0.3.2"
+dispatch2 = "0.3.1"

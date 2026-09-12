@@ -131,29 +131,68 @@ system-default choice has a shared renderer constant and is resolved from the
 current CPAL host on every start. Explicit choices are never matched by label
 or list index and never fall back to the default device.
 
-CPAL 0.15 does not expose CoreAudio's stable UID or a public constructor from
-an `AudioDeviceID`. Its public device equality is only the current
-`AudioDeviceID` plus a default marker, so it is not a durable hardware
-identity. The registry uses that equality only while a device is continuously
-observed. At the first observed disappearance, the opaque ID is permanently
-retired and its CPAL handle is dropped. A later appearance always receives a
-new monotonically increasing ID, even if CoreAudio reused the same numeric
-identity. Retired IDs are never rebound by label, index, or native equality.
+CPAL is pinned to maintained release 0.17.3. On macOS its public
+`DeviceTrait::id()` reads `kAudioDevicePropertyDeviceUID` and returns a
+`DeviceId(HostId::CoreAudio, uid)`. `HostTrait::device_by_id()` re-enumerates
+and compares those IDs. The native UID is retained only inside the process;
+the renderer receives a monotonically assigned opaque ID. Labels, enumeration
+order, and numeric `AudioDeviceID` values never participate in identity.
+
+The 0.17.3 migration raises CPAL's documented minimum Rust version to 1.78
+(the verified project toolchain is 1.97) and updates `coreaudio-rs` to 0.14.2.
+Direct target-macOS dependencies `objc2-core-audio` 0.3.2,
+`objc2-core-foundation` 0.3.2, and `dispatch2` 0.3.1 expose the maintained
+listener and UID-translation bindings used by the monitor. No crate is
+vendored and no frontend dependency changed. CPAL's changed sample-rate and
+device-description APIs were migrated; newly exposed CoreAudio I8/I24 formats
+fail explicitly rather than entering an untested conversion path.
+
+The registry reconciles by persistent UID. A UID label change preserves its
+opaque ID, and a reconnect with the same UID restores that ID while a different
+UID receives a new ID even if its label is identical. Missing, unreadable,
+empty, or duplicate UIDs fail closed. Exact-device resolution performs a fresh
+UID enumeration and verifies both the resulting UID and input capability.
+At most 32 unavailable descriptor tombstones are retained. Eviction drops UID
+metadata but never reuses an opaque ID.
 
 Native enumeration and reconciliation execute under one registry mutex. A
 slow older snapshot therefore cannot apply after a newer list or resolve.
-Explicit-ID start still performs a fresh serialized enumeration before
-opening. At most 32 unavailable descriptor tombstones are retained; their
-native handles are already gone. Eviction never reuses an ID. Settings keeps
-its selected missing ID and label as a renderer-side unavailable option even
-if that old descriptor has been evicted from the native catalog. IDs and
-handles remain process-local and are not persisted or sent with audio.
+An enumeration error leaves the prior registry snapshot unchanged. Settings
+keeps a selected missing opaque ID and label as an unavailable option even if
+its native tombstone has been evicted. No UID or CPAL handle is persisted,
+logged, or sent with audio.
 
-This conservative minimum cannot detect an unplug and `AudioDeviceID` reuse
-that both occur between two enumerations. Closing that gap requires a stable
-CoreAudio UID mapped to the exact CPAL device. The existing CPAL 0.15 public
-API does not expose the needed mapping; implementing a separate CoreAudio
-adapter is a larger future design boundary, not claimed by this slice.
+### macOS identity monitor
+
+Capture acceptance starts closed. Before the first identity validation, the
+adapter registers a system `kAudioHardwarePropertyDevices` listener, translates
+the expected UID to the current `AudioDeviceID`, then registers selected-device
+`DeviceIsAlive` and `DeviceUID` listeners. All listeners use one private serial
+dispatch queue. Their callback performs only a `SeqCst` atomic invalidation;
+it does not query CoreAudio, allocate, lock, block, log, or emit IPC.
+
+The adapter validates the CPAL device UID, UID-to-`AudioDeviceID` translation,
+and alive state before stream construction and after play. It synchronizes the
+listener queue before the post-play validation. One atomic gate contains both
+OPEN and INVALIDATED state: opening is a compare-and-exchange from CLOSED,
+while invalidation stores sticky INVALIDATED. Therefore an invalidation that
+wins first cannot be reopened; one that wins later closes acceptance.
+
+On completion the adapter closes acceptance, waits for all accepted callback
+leases, drops the stream, synchronizes queued listener callbacks, validates
+again, removes listeners in reverse order, and synchronizes before releasing
+their blocks. Any identity mismatch, topology/alive notification, listener
+setup/cleanup failure, or final invalidation returns `capture-unavailable` and
+discards the entire in-memory PCM result. Overflow remains a distinct error.
+Resources and listeners are cleaned before coordinator reservation release and
+the single correlated terminal event.
+
+This is not an atomic hardware transaction. It rejects UID mismatch and
+topology uncertainty visible through CoreAudio queries or delivered listener
+callbacks, but cannot claim to detect an OS notification that CoreAudio has not
+yet delivered or enqueued. Queue synchronization drains already-enqueued work;
+it is not represented as proof that every pending hardware notification has
+arrived. Real unplug/reconnect timing remains a foreground verification gap.
 
 Device listing is a command response rather than an uncorrelated event. It
 enumerates input metadata without querying/requesting microphone permission
@@ -202,12 +241,19 @@ IPC-free; Slice B's `SeqCst` gate and lease protocol is unchanged.
   cancellation before start, isolation of the next request, active status,
   and request ID plus generation on emitted session events.
 - Native device tests verify duplicate labels receive distinct IDs, label
-  changes preserve continuously observed identity, observed disappearance
-  permanently retires an ID and drops its handle, same-value reappearance gets
-  a new ID, tombstones remain bounded under churn, IDs are never reused, and
-  stale/unknown IDs fail without fallback. A deliberately delayed older
-  enumeration proves list/resolve reconciliation is serialized. Existing tests
-  retain fresh-default, list-error, and permission-free listing coverage.
+  changes and same-UID reconnects preserve identity, direct UID replacement
+  without an empty snapshot never rebinds the old ID, tombstones remain bounded,
+  IDs are never reused, and stale/unknown IDs fail without fallback. Duplicate
+  or unreadable UID snapshots preserve prior state. Resolution rejects UID
+  mismatch and output-only devices. A deliberately delayed older enumeration
+  proves list/resolve reconciliation is serialized.
+- Identity tests verify sticky atomic invalidation before opening and during
+  every stream phase, reverse listener cleanup, partial-registration cleanup,
+  continued cleanup after a removal error, and listener-block lifetime through
+  the dispatch-queue barrier. A coordinator integration test verifies a final
+  identity failure discards PCM and emits one correlated error after resource
+  teardown. A direct capture-loop test verifies invalidation remains distinct
+  from overflow.
 - Resampler tests cover exact frame counts at 44.1 and 48 kHz for tiny,
   partial, exact-block, and multiblock inputs; 16 kHz passthrough; fragmented
   versus single-call equality; exact-block tail drain; and a trailing impulse
@@ -229,7 +275,7 @@ IPC-free; Slice B's `SeqCst` gate and lease protocol is unchanged.
 
 ```text
 cargo test
-  76 passed; 0 failed; no warnings
+  92 passed; 0 failed; no warnings
 
 npm run typecheck
   passed
@@ -271,9 +317,12 @@ they were not repeated in Slices B or C.
 ## Audited file sizes after Slice C
 
 ```text
-src-tauri/src/capture/coordinator.rs        2596 lines
+src-tauri/src/capture/coordinator.rs        2746 lines
 src-tauri/src/capture/resample.rs            445 lines
-src-tauri/src/capture/stream.rs               930 lines
+src-tauri/src/capture/stream.rs              1066 lines
+src-tauri/src/capture/identity.rs             394 lines
+src-tauri/src/capture/identity/macos.rs       174 lines
+src-tauri/src/capture/identity/macos_api.rs   113 lines
 src-tauri/src/lib.rs                         149 lines
 src/services/capture/captureService.ts        66 lines
 src/services/capture/types.ts                 96 lines
@@ -283,12 +332,13 @@ tests/unit/useCaptureState.test.ts            534 lines
 tests/unit/Settings.test.tsx                  174 lines
 ```
 
-These existing files exceed the preferred module-size target, with much of
-the Rust growth in inline direct tests. Slice C kept the registry in the
-stream adapter and switching in the capture owner hook because splitting
-either during this gated correction would duplicate ownership or native
-handle state. Further decomposition is warranted but was not mixed into the
-device-correctness slice.
+The new identity runtime surfaces remain below 200 logical lines: common gate
+and listener ownership ends before the test module at line 181, the macOS
+monitor is 174 physical lines, and low-level CoreAudio queries end before the
+test module at line 95. Existing stream/coordinator files remain oversized,
+with most additional lines in direct tests. This narrow correction retained
+their established backend and lifecycle seams rather than mixing a broad file
+split into the native-identity change. Further decomposition remains warranted.
 
 ## Explicitly remaining after Slice C
 
@@ -298,8 +348,9 @@ scope decision:
 1. Real CoreAudio enumeration, duplicate-label selection, default-device
    changes, unplug/reconnect, and stream-error timing.
 2. Natural microphone permission-state checks by the user.
-3. A CoreAudio UID adapter to close the unobserved unplug/reuse gap and provide
-   identity across app restarts.
+3. Notification-delivery timing that is not exposed by CoreAudio queries or an
+   already-enqueued listener callback; no atomic hardware transaction is
+   claimed.
 
 Foreground checklist, not performed by Forge:
 
@@ -311,7 +362,7 @@ Foreground checklist, not performed by Forge:
   selection stays visible as unavailable with no default fallback.
 - Unplug during a test and confirm one `capture-unavailable` terminal appears
   only after the system microphone indicator clears.
-- Reconnect and refresh. Confirm a new option appears while the retired
-  selection remains unavailable; the old opaque ID must never return.
+- Reconnect and refresh. The same persistent UID should restore the same opaque
+  selection; replacement hardware must appear under a different opaque ID.
 - Exercise permission states only through normal foreground prompts and System
   Settings; do not reset or manipulate TCC data.
