@@ -99,6 +99,67 @@ pub struct ResolvedDevice {
     pub identity: DeviceId,
 }
 
+trait IdentityLifecycle {
+    fn check(&self) -> Result<(), String>;
+    fn close(&self);
+    fn enable(&self) -> Result<(), String>;
+    fn finish(self) -> Result<(), String>;
+}
+
+struct NativeIdentityLifecycle<'a> {
+    device: &'a cpal::Device,
+    expected: &'a DeviceId,
+    gate: Arc<CaptureGate>,
+    monitor: NativeIdentityMonitor,
+}
+
+struct NativeIdentityInstall<'a> {
+    device: &'a cpal::Device,
+    expected: &'a DeviceId,
+    gate: Arc<CaptureGate>,
+}
+
+impl<'a> NativeIdentityLifecycle<'a> {
+    fn install(install: NativeIdentityInstall<'a>) -> Result<Self, String> {
+        let monitor = NativeIdentityMonitor::install(
+            install.expected,
+            Arc::clone(&install.gate),
+        )?;
+        Ok(Self {
+            device: install.device,
+            expected: install.expected,
+            gate: install.gate,
+            monitor,
+        })
+    }
+}
+
+impl IdentityLifecycle for NativeIdentityLifecycle<'_> {
+    fn check(&self) -> Result<(), String> {
+        self.monitor.synchronize();
+        validate_unique_input_identity(self.expected)?;
+        self.monitor.validate(self.device, self.expected)
+    }
+
+    fn close(&self) {
+        self.gate.close();
+    }
+
+    fn enable(&self) -> Result<(), String> {
+        if self.gate.try_open() {
+            Ok(())
+        } else {
+            Err(String::from(
+                "capture-unavailable: microphone identity changed",
+            ))
+        }
+    }
+
+    fn finish(self) -> Result<(), String> {
+        self.monitor.finish()
+    }
+}
+
 /// Metadata returned with the ring consumer when a stream is opened.
 pub struct StreamMeta {
     /// True while the real-time callback may accept new frames.
@@ -141,11 +202,11 @@ where
 {
     let ResolvedDevice { device, identity } = resolved;
     let accepting = Arc::new(CaptureGate::closed());
-    let monitor = NativeIdentityMonitor::install(
-        &identity,
-        Arc::clone(&accepting),
-    )?;
-    monitor.validate(&device, &identity)?;
+    let install = NativeIdentityInstall {
+        device: &device,
+        expected: &identity,
+        gate: Arc::clone(&accepting),
+    };
 
     let device_name = device
         .description()
@@ -173,50 +234,79 @@ where
     let stream_error = Arc::new(AtomicBool::new(false));
     let callbacks_in_flight = Arc::new(AtomicUsize::new(0));
 
-    // Build the stream — stays local to this function's stack frame.
-    let stream = build_stream(
-        &device,
-        &config,
-        sample_format,
-        channels,
-        producer,
-        Arc::clone(&accepting),
-        Arc::clone(&callbacks_in_flight),
-        Arc::clone(&overflow),
-        Arc::clone(&stream_error),
-    )?;
+    guarded_stream_lifecycle(
+        || NativeIdentityLifecycle::install(install),
+        || {
+            let stream = build_stream(
+                &device,
+                &config,
+                sample_format,
+                channels,
+                producer,
+                Arc::clone(&accepting),
+                Arc::clone(&callbacks_in_flight),
+                Arc::clone(&overflow),
+                Arc::clone(&stream_error),
+            )?;
+            stream
+                .play()
+                .map_err(|e| format!("capture-unavailable: {e}"))?;
+            let meta = StreamMeta {
+                accepting: Arc::clone(&accepting),
+                callbacks_in_flight: Arc::clone(&callbacks_in_flight),
+                consumer,
+                device_name,
+                native_rate,
+                overflow,
+                stream_error,
+            };
+            Ok((stream, meta))
+        },
+        f,
+        |stream| {
+            while callbacks_in_flight.load(Ordering::SeqCst) != 0 {
+                std::thread::yield_now();
+            }
+            drop(stream);
+        },
+    )
+}
 
-    stream
-        .play()
-        .map_err(|e| format!("capture-unavailable: {e}"))?;
-    monitor.synchronize();
-    monitor.validate(&device, &identity)?;
-    if !accepting.try_open() {
-        return Err(String::from(
-            "capture-unavailable: microphone identity changed",
-        ));
+fn guarded_stream_lifecycle<G, S, M, R>(
+    install: impl FnOnce() -> Result<G, String>,
+    build_play: impl FnOnce() -> Result<(S, M), String>,
+    capture: impl FnOnce(M) -> R,
+    stop: impl FnOnce(S),
+) -> Result<R, String>
+where
+    G: IdentityLifecycle,
+{
+    let lifecycle = install()?;
+    if let Err(error) = lifecycle.check() {
+        lifecycle.close();
+        let _ = lifecycle.finish();
+        return Err(error);
     }
-
-    let meta = StreamMeta {
-        accepting: Arc::clone(&accepting),
-        callbacks_in_flight: Arc::clone(&callbacks_in_flight),
-        consumer,
-        device_name,
-        native_rate,
-        overflow,
-        stream_error,
+    let (stream, metadata) = match build_play() {
+        Ok(built) => built,
+        Err(error) => {
+            lifecycle.close();
+            let _ = lifecycle.finish();
+            return Err(error);
+        }
     };
-
-    let result = f(meta);
-
-    accepting.close();
-    while callbacks_in_flight.load(Ordering::SeqCst) != 0 {
-        std::thread::yield_now();
+    if let Err(error) = lifecycle.check().and_then(|_| lifecycle.enable()) {
+        lifecycle.close();
+        stop(stream);
+        let _ = lifecycle.finish();
+        return Err(error);
     }
-    drop(stream);
-    monitor.synchronize();
-    monitor.validate(&device, &identity)?;
-    monitor.finish()?;
+    let result = capture(metadata);
+    lifecycle.close();
+    stop(stream);
+    let final_check = lifecycle.check();
+    let cleanup = lifecycle.finish();
+    final_check.and(cleanup)?;
     Ok(result)
 }
 
@@ -249,6 +339,35 @@ fn enumerate_input_devices() -> Result<Vec<(DeviceId, String)>, String> {
             Ok((identity, label))
         })
         .collect()
+}
+
+fn validate_unique_input_identity(expected: &DeviceId) -> Result<(), String> {
+    let mut matches = 0usize;
+    for device in cpal::default_host()
+        .input_devices()
+        .map_err(|error| format!("capture-unavailable: {error}"))?
+    {
+        let identity = device.id().map_err(|error| {
+            format!(
+                "capture-unavailable: microphone UID unavailable: {error}",
+            )
+        })?;
+        validate_device_id(&identity)?;
+        if &identity == expected {
+            matches += 1;
+        }
+    }
+    require_unique_identity(matches)
+}
+
+fn require_unique_identity(matches: usize) -> Result<(), String> {
+    if matches != 1 {
+        return Err(format!(
+            "capture-unavailable: expected one matching microphone UID, \
+             found {matches}",
+        ));
+    }
+    Ok(())
 }
 
 fn refresh_registry<T: Clone + Eq + Hash, R>(
@@ -1050,6 +1169,292 @@ mod tests {
             .collect();
         assert_eq!(available.len(), 1);
         assert_eq!(available[0].label, "Newer snapshot");
+    }
+
+    struct FakeIdentityLifecycle {
+        checks: Arc<AtomicUsize>,
+        events: Arc<Mutex<Vec<&'static str>>>,
+        fail_check: Option<usize>,
+        fail_enable: bool,
+        gate: Arc<CaptureGate>,
+    }
+
+    impl IdentityLifecycle for FakeIdentityLifecycle {
+        fn check(&self) -> Result<(), String> {
+            self.events.lock().unwrap().extend([
+                "synchronize",
+                "unique-uid",
+                "validate-uid-alive",
+            ]);
+            let check = self.checks.fetch_add(1, Ordering::SeqCst) + 1;
+            if self.fail_check == Some(check)
+                || self.gate.is_invalidated()
+            {
+                Err(String::from("identity check failed"))
+            } else {
+                Ok(())
+            }
+        }
+
+        fn close(&self) {
+            self.events.lock().unwrap().push("close");
+            self.gate.close();
+        }
+
+        fn enable(&self) -> Result<(), String> {
+            self.events.lock().unwrap().push("enable");
+            if self.fail_enable {
+                self.gate.invalidate();
+            }
+            self.gate
+                .try_open()
+                .then_some(())
+                .ok_or_else(|| String::from("enable failed"))
+        }
+
+        fn finish(self) -> Result<(), String> {
+            self.events.lock().unwrap().push("remove-and-barrier");
+            Ok(())
+        }
+    }
+
+    fn install_fake(
+        install: FakeIdentityLifecycle,
+    ) -> Result<FakeIdentityLifecycle, String> {
+        install.events.lock().unwrap().extend([
+            "install-topology",
+            "translate-uid",
+            "install-alive",
+            "install-uid",
+        ]);
+        Ok(install)
+    }
+
+    fn fake_identity_lifecycle(
+        events: Arc<Mutex<Vec<&'static str>>>,
+        fail_check: Option<usize>,
+        fail_enable: bool,
+    ) -> (FakeIdentityLifecycle, Arc<CaptureGate>) {
+        let gate = Arc::new(CaptureGate::closed());
+        (
+            FakeIdentityLifecycle {
+                checks: Arc::new(AtomicUsize::new(0)),
+                events,
+                fail_check,
+                fail_enable,
+                gate: Arc::clone(&gate),
+            },
+            gate,
+        )
+    }
+
+    #[test]
+    fn guarded_orchestration_orders_every_production_boundary() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let (lifecycle, gate) = fake_identity_lifecycle(
+            Arc::clone(&events),
+            None,
+            false,
+        );
+        let build_events = Arc::clone(&events);
+        let capture_events = Arc::clone(&events);
+        let stop_events = Arc::clone(&events);
+        let result = guarded_stream_lifecycle(
+            || install_fake(lifecycle),
+            || {
+                assert!(!gate.is_open());
+                build_events.lock().unwrap().extend(["build", "play"]);
+                Ok(((), ()))
+            },
+            |_| {
+                assert!(gate.is_open());
+                capture_events.lock().unwrap().push("capture");
+                7
+            },
+            |_| {
+                assert!(!gate.is_open());
+                stop_events.lock().unwrap().push("drop-stream");
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result, 7);
+        assert_eq!(
+            *events.lock().unwrap(),
+            [
+                "install-topology",
+                "translate-uid",
+                "install-alive",
+                "install-uid",
+                "synchronize",
+                "unique-uid",
+                "validate-uid-alive",
+                "build",
+                "play",
+                "synchronize",
+                "unique-uid",
+                "validate-uid-alive",
+                "enable",
+                "capture",
+                "close",
+                "drop-stream",
+                "synchronize",
+                "unique-uid",
+                "validate-uid-alive",
+                "remove-and-barrier",
+            ],
+        );
+    }
+
+    #[test]
+    fn guarded_orchestration_fails_closed_at_each_identity_check() {
+        for failed_check in 1..=3 {
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let (lifecycle, gate) = fake_identity_lifecycle(
+                Arc::clone(&events),
+                Some(failed_check),
+                false,
+            );
+            let result = guarded_stream_lifecycle(
+                || install_fake(lifecycle),
+                || Ok(((), ())),
+                |_| {
+                    assert!(gate.is_open());
+                },
+                |_| {},
+            );
+            assert!(result.is_err(), "check {failed_check}");
+            assert!(!gate.is_open());
+            assert_eq!(
+                events
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|event| **event == "remove-and-barrier")
+                    .count(),
+                1,
+            );
+        }
+    }
+
+    #[test]
+    fn guarded_orchestration_cleans_monitor_after_build_failure() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let (lifecycle, gate) = fake_identity_lifecycle(
+            Arc::clone(&events),
+            None,
+            false,
+        );
+        let result: Result<(), String> = guarded_stream_lifecycle(
+            || install_fake(lifecycle),
+            || Err::<((), ()), _>(String::from("build failed")),
+            |_| panic!("capture must not run after build failure"),
+            |_| {},
+        );
+        assert_eq!(result.unwrap_err(), "build failed");
+        assert!(!gate.is_open());
+        assert_eq!(
+            events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|event| **event == "remove-and-barrier")
+                .count(),
+            1,
+        );
+    }
+
+    #[test]
+    fn guarded_orchestration_cleans_stream_after_play_failure() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let (lifecycle, gate) = fake_identity_lifecycle(
+            Arc::clone(&events),
+            None,
+            false,
+        );
+        let play_events = Arc::clone(&events);
+        let result: Result<(), String> = guarded_stream_lifecycle(
+            || install_fake(lifecycle),
+            || {
+                play_events.lock().unwrap().extend(["build", "play"]);
+                Err::<((), ()), _>(String::from("play failed"))
+            },
+            |_| panic!("capture must not run after play failure"),
+            |_| {},
+        );
+        assert_eq!(result.unwrap_err(), "play failed");
+        assert!(!gate.is_open());
+        assert!(events
+            .lock()
+            .unwrap()
+            .contains(&"remove-and-barrier"));
+    }
+
+    #[test]
+    fn guarded_orchestration_stops_when_listener_install_fails() {
+        let result: Result<(), String> = guarded_stream_lifecycle(
+            || {
+                Err::<FakeIdentityLifecycle, _>(String::from(
+                    "listener install failed",
+                ))
+            },
+            || -> Result<((), ()), String> {
+                panic!("build must not run after install failure")
+            },
+            |_| {},
+            |_: ()| {},
+        );
+        assert_eq!(result.unwrap_err(), "listener install failed");
+    }
+
+    #[test]
+    fn guarded_orchestration_cannot_enable_after_invalidation() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let (lifecycle, gate) = fake_identity_lifecycle(
+            Arc::clone(&events),
+            None,
+            true,
+        );
+        let result: Result<(), String> = guarded_stream_lifecycle(
+            || install_fake(lifecycle),
+            || Ok(((), ())),
+            |_| panic!("capture must not run after invalidation"),
+            |_| {},
+        );
+        assert!(result.is_err());
+        assert!(gate.is_invalidated());
+        assert!(!gate.is_open());
+    }
+
+    #[test]
+    fn guarded_orchestration_discards_result_after_capture_invalidation() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let (lifecycle, gate) = fake_identity_lifecycle(
+            Arc::clone(&events),
+            None,
+            false,
+        );
+        let invalidating_gate = Arc::clone(&gate);
+        let result = guarded_stream_lifecycle(
+            || install_fake(lifecycle),
+            || Ok(((), ())),
+            |_| {
+                invalidating_gate.invalidate();
+                vec![0.5f32]
+            },
+            |_| {},
+        );
+        assert!(result.is_err());
+        assert!(gate.is_invalidated());
+    }
+
+    #[test]
+    fn default_and_explicit_require_exactly_one_uid_match() {
+        for selection in ["default", "explicit"] {
+            assert!(require_unique_identity(1).is_ok(), "{selection}");
+            assert!(require_unique_identity(0).is_err(), "{selection}");
+            assert!(require_unique_identity(2).is_err(), "{selection}");
+        }
     }
 
     // DeviceSelection debug

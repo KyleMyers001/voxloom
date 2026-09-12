@@ -49,73 +49,11 @@ pub(super) fn require_valid(gate: &CaptureGate) -> Result<(), String> {
     }
 }
 
-pub(super) trait ListenerOperations {
-    type Registration;
-    type Target;
+mod listeners;
+use listeners::{ListenerOperations, ListenerOwner};
 
-    fn register(
-        &mut self,
-        target: Self::Target,
-    ) -> Result<Self::Registration, String>;
-
-    fn remove(
-        &mut self,
-        registration: &Self::Registration,
-    ) -> Result<(), String>;
-
-    fn synchronize(&self);
-}
-
-pub(super) struct ListenerOwner<O: ListenerOperations> {
-    operations: O,
-    registrations: Vec<O::Registration>,
-}
-
-impl<O: ListenerOperations> ListenerOwner<O> {
-    pub fn new(operations: O) -> Self {
-        Self {
-            operations,
-            registrations: Vec::new(),
-        }
-    }
-
-    pub fn register(&mut self, target: O::Target) -> Result<(), String> {
-        let registration = self.operations.register(target)?;
-        self.registrations.push(registration);
-        Ok(())
-    }
-
-    pub fn synchronize(&self) {
-        self.operations.synchronize();
-    }
-
-    pub fn finish(mut self) -> Result<(), String> {
-        self.remove_all()
-    }
-
-    fn remove_all(&mut self) -> Result<(), String> {
-        let registrations = std::mem::take(&mut self.registrations);
-        if registrations.is_empty() {
-            return Ok(());
-        }
-        let mut first_error = None;
-        for registration in registrations.iter().rev() {
-            if let Err(error) = self.operations.remove(registration) {
-                first_error.get_or_insert(error);
-            }
-        }
-        self.operations.synchronize();
-        drop(registrations);
-        first_error.map_or(Ok(()), Err)
-    }
-}
-
-impl<O: ListenerOperations> Drop for ListenerOwner<O> {
-    fn drop(&mut self) {
-        let _ = self.remove_all();
-    }
-}
-
+#[cfg(target_os = "macos")]
+mod admission;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "macos")]
@@ -181,6 +119,7 @@ impl NativeIdentityMonitor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, Mutex};
 
     #[test]
@@ -222,6 +161,8 @@ mod tests {
         events: Arc<Mutex<Vec<String>>>,
         fail_registration: Option<u8>,
         fail_removal: Option<u8>,
+        quarantined: Arc<AtomicBool>,
+        removal_failures: usize,
     }
 
     impl ListenerOperations for FakeListeners {
@@ -245,7 +186,10 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(format!("remove:{registration}"));
-            if self.fail_removal == Some(*registration) {
+            if self.fail_removal == Some(*registration)
+                && self.removal_failures > 0
+            {
+                self.removal_failures -= 1;
                 Err(String::from("removal failed"))
             } else {
                 Ok(())
@@ -258,16 +202,28 @@ mod tests {
                 .unwrap()
                 .push(String::from("synchronize"));
         }
+
+        fn quarantine(&mut self) {
+            self.quarantined.store(true, Ordering::SeqCst);
+        }
+    }
+
+    fn fake_listeners(events: Arc<Mutex<Vec<String>>>) -> FakeListeners {
+        FakeListeners {
+            events,
+            fail_registration: None,
+            fail_removal: None,
+            quarantined: Arc::new(AtomicBool::new(false)),
+            removal_failures: 0,
+        }
     }
 
     #[test]
     fn partial_registration_cleans_up_registered_callbacks() {
         let events = Arc::new(Mutex::new(Vec::new()));
-        let mut owner = ListenerOwner::new(FakeListeners {
-            events: Arc::clone(&events),
-            fail_registration: Some(2),
-            fail_removal: None,
-        });
+        let mut listeners = fake_listeners(Arc::clone(&events));
+        listeners.fail_registration = Some(2);
+        let mut owner = ListenerOwner::new(listeners);
         owner.register(1).unwrap();
         assert!(owner.register(2).is_err());
         drop(owner);
@@ -281,11 +237,9 @@ mod tests {
     #[test]
     fn listener_cleanup_is_reverse_order_and_synchronized() {
         let events = Arc::new(Mutex::new(Vec::new()));
-        let mut owner = ListenerOwner::new(FakeListeners {
-            events: Arc::clone(&events),
-            fail_registration: None,
-            fail_removal: None,
-        });
+        let mut owner = ListenerOwner::new(fake_listeners(
+            Arc::clone(&events),
+        ));
         owner.register(1).unwrap();
         owner.register(2).unwrap();
         owner.finish().unwrap();
@@ -303,23 +257,49 @@ mod tests {
     }
 
     #[test]
-    fn removal_failure_still_removes_others_and_synchronizes() {
+    fn removal_failure_retries_exact_registration() {
         let events = Arc::new(Mutex::new(Vec::new()));
-        let mut owner = ListenerOwner::new(FakeListeners {
-            events: Arc::clone(&events),
-            fail_registration: None,
-            fail_removal: Some(2),
-        });
+        let mut listeners = fake_listeners(Arc::clone(&events));
+        listeners.fail_removal = Some(2);
+        listeners.removal_failures = 1;
+        let mut owner = ListenerOwner::new(listeners);
         owner.register(1).unwrap();
         owner.register(2).unwrap();
 
-        assert_eq!(owner.finish().unwrap_err(), "removal failed");
+        owner.finish().unwrap();
         assert_eq!(
             *events.lock().unwrap(),
             [
                 "register:1",
                 "register:2",
                 "remove:2",
+                "remove:1",
+                "synchronize",
+                "remove:2",
+                "synchronize",
+            ],
+        );
+    }
+
+    #[test]
+    fn permanent_removal_failure_quarantines_after_retry() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let quarantined = Arc::new(AtomicBool::new(false));
+        let mut listeners = fake_listeners(Arc::clone(&events));
+        listeners.fail_removal = Some(1);
+        listeners.quarantined = Arc::clone(&quarantined);
+        listeners.removal_failures = 2;
+        let mut owner = ListenerOwner::new(listeners);
+        owner.register(1).unwrap();
+
+        assert_eq!(owner.finish().unwrap_err(), "removal failed");
+        assert!(quarantined.load(Ordering::SeqCst));
+        assert_eq!(
+            *events.lock().unwrap(),
+            [
+                "register:1",
+                "remove:1",
+                "synchronize",
                 "remove:1",
                 "synchronize",
             ],
@@ -342,6 +322,7 @@ mod tests {
 
     struct LifetimeListeners {
         events: Arc<Mutex<Vec<String>>>,
+        fail_removal: bool,
     }
 
     impl ListenerOperations for LifetimeListeners {
@@ -366,7 +347,11 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(format!("remove:{}", registration.id));
-            Ok(())
+            if self.fail_removal {
+                Err(String::from("removal failed"))
+            } else {
+                Ok(())
+            }
         }
 
         fn synchronize(&self) {
@@ -382,6 +367,7 @@ mod tests {
         let events = Arc::new(Mutex::new(Vec::new()));
         let mut owner = ListenerOwner::new(LifetimeListeners {
             events: Arc::clone(&events),
+            fail_removal: false,
         });
         owner.register(1).unwrap();
         owner.finish().unwrap();
@@ -390,5 +376,23 @@ mod tests {
             *events.lock().unwrap(),
             ["remove:1", "synchronize", "drop:1"],
         );
+    }
+
+    #[test]
+    fn permanently_registered_block_is_retained_after_cleanup_failure() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut owner = ListenerOwner::new(LifetimeListeners {
+            events: Arc::clone(&events),
+            fail_removal: true,
+        });
+        owner.register(1).unwrap();
+        assert!(owner.finish().is_err());
+
+        let events = events.lock().unwrap();
+        assert_eq!(
+            events.as_slice(),
+            ["remove:1", "synchronize", "remove:1", "synchronize"],
+        );
+        assert!(!events.iter().any(|event| event == "drop:1"));
     }
 }

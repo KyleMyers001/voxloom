@@ -171,9 +171,13 @@ the expected UID to the current `AudioDeviceID`, then registers selected-device
 dispatch queue. Their callback performs only a `SeqCst` atomic invalidation;
 it does not query CoreAudio, allocate, lock, block, log, or emit IPC.
 
-The adapter validates the CPAL device UID, UID-to-`AudioDeviceID` translation,
-and alive state before stream construction and after play. It synchronizes the
-listener queue before the post-play validation. One atomic gate contains both
+At every pre-build, post-play, and final validation, the adapter synchronizes
+the listener queue, freshly enumerates input-device UIDs, requires the expected
+UID to occur exactly once, and validates the selected CPAL device UID,
+UID-to-`AudioDeviceID` translation, and alive state. This applies equally to
+freshly resolved system-default and explicit selections. A duplicate appearing
+after registry refresh therefore fails before audio acceptance or invalidates
+the entire captured result. One atomic gate contains both
 OPEN and INVALIDATED state: opening is a compare-and-exchange from CLOSED,
 while invalidation stores sticky INVALIDATED. Therefore an invalidation that
 wins first cannot be reopened; one that wins later closes acceptance.
@@ -181,9 +185,14 @@ wins first cannot be reopened; one that wins later closes acceptance.
 On completion the adapter closes acceptance, waits for all accepted callback
 leases, drops the stream, synchronizes queued listener callbacks, validates
 again, removes listeners in reverse order, and synchronizes before releasing
-their blocks. Any identity mismatch, topology/alive notification, listener
-setup/cleanup failure, or final invalidation returns `capture-unavailable` and
-discards the entire in-memory PCM result. Overflow remains a distinct error.
+their blocks. Listener removal failures retain the exact registration and retry
+once after queue synchronization. A second failure quarantines one retained
+listener owner for the process lifetime and rejects every future monitor before
+new listener registration, bounding the retained owner and preventing callback
+use-after-free. Any identity mismatch, duplicate UID, topology/alive
+notification, listener setup/cleanup failure, or final invalidation returns
+`capture-unavailable` and discards the entire in-memory PCM result. Overflow
+remains a distinct error.
 Resources and listeners are cleaned before coordinator reservation release and
 the single correlated terminal event.
 
@@ -249,8 +258,14 @@ IPC-free; Slice B's `SeqCst` gate and lease protocol is unchanged.
   proves list/resolve reconciliation is serialized.
 - Identity tests verify sticky atomic invalidation before opening and during
   every stream phase, reverse listener cleanup, partial-registration cleanup,
-  continued cleanup after a removal error, and listener-block lifetime through
-  the dispatch-queue barrier. A coordinator integration test verifies a final
+  exact-registration retry after a removal error, permanent-failure quarantine,
+  bounded repeated admission failure, and listener-block lifetime through the
+  dispatch-queue barrier. The production orchestration seam is directly tested
+  for topology/UID/alive install order, pre-build/post-play/final uniqueness and
+  identity checks, closed-gate build, atomic enable, stream teardown, and final
+  listener cleanup. Boundary failures, build failure, enable invalidation, and
+  capture-time invalidation all fail closed. A coordinator integration test
+  verifies a final
   identity failure discards PCM and emits one correlated error after resource
   teardown. A direct capture-loop test verifies invalidation remains distinct
   from overflow.
@@ -275,7 +290,9 @@ IPC-free; Slice B's `SeqCst` gate and lease protocol is unchanged.
 
 ```text
 cargo test
-  92 passed; 0 failed; no warnings
+  Base commit 10d5b03: 92 passed; 0 failed; no warnings.
+  Current correction: not rerun. The permitted offline cache lacks
+  objc2-audio-toolbox, and host policy rejects CARGO_HOME overrides.
 
 npm run typecheck
   passed
@@ -293,12 +310,28 @@ npm run test:e2e:release
   1 passed
 
 cargo check
-  passed; no warnings
+  Base commit 10d5b03: passed; no warnings.
+  Current correction: blocked by the same offline-cache limitation.
 
 cargo fmt -- --check
   reports the repository's existing rustfmt differences, beginning in
   unchanged buffer.rs and consumer.rs; no broad formatting rewrite applied
 ```
+
+Current-correction Rust reproduction attempted with the permitted command:
+
+```text
+cd src-tauri
+cargo check --offline --locked
+```
+
+It fails before compilation because the ordinary cache lacks
+`objc2-audio-toolbox`. Host policy rejects a `CARGO_HOME` override, so no
+wrapper, source replacement, or global-cache write was used. Ignored review
+paths are retained at `.cargo-local` and `.target-cpal17`; the target directory
+is empty. `.cargo-local/source/cpal-0.17.3` contains the published crate source
+used to verify that macOS `DeviceTrait::id()` reads
+`kAudioDevicePropertyDeviceUID` and `device_by_id()` compares `DeviceId`.
 
 Slice A also verified:
 
@@ -319,9 +352,11 @@ they were not repeated in Slices B or C.
 ```text
 src-tauri/src/capture/coordinator.rs        2746 lines
 src-tauri/src/capture/resample.rs            445 lines
-src-tauri/src/capture/stream.rs              1066 lines
-src-tauri/src/capture/identity.rs             394 lines
-src-tauri/src/capture/identity/macos.rs       174 lines
+src-tauri/src/capture/stream.rs              1471 lines
+src-tauri/src/capture/identity.rs             398 lines
+src-tauri/src/capture/identity/admission.rs    60 lines
+src-tauri/src/capture/identity/listeners.rs   106 lines
+src-tauri/src/capture/identity/macos.rs       193 lines
 src-tauri/src/capture/identity/macos_api.rs   113 lines
 src-tauri/src/lib.rs                         149 lines
 src/services/capture/captureService.ts        66 lines
@@ -332,10 +367,10 @@ tests/unit/useCaptureState.test.ts            534 lines
 tests/unit/Settings.test.tsx                  174 lines
 ```
 
-The new identity runtime surfaces remain below 200 logical lines: common gate
-and listener ownership ends before the test module at line 181, the macOS
-monitor is 174 physical lines, and low-level CoreAudio queries end before the
-test module at line 95. Existing stream/coordinator files remain oversized,
+The new identity runtime responsibilities remain below 200 lines each: common
+gate/validation, monitor admission, retryable listener ownership, the macOS
+monitor, and low-level CoreAudio queries are separate modules. Existing
+stream/coordinator files remain oversized,
 with most additional lines in direct tests. This narrow correction retained
 their established backend and lifecycle seams rather than mixing a broad file
 split into the native-identity change. Further decomposition remains warranted.

@@ -13,6 +13,7 @@ use objc2_core_audio::{
     AudioObjectRemovePropertyListenerBlock,
 };
 
+use super::admission;
 use super::{require_valid, CaptureGate, ListenerOperations, ListenerOwner};
 use super::macos_api::{
     check_status, core_audio_uid, device_is_alive, translate_uid,
@@ -86,6 +87,10 @@ impl ListenerOperations for NativeListenerOperations {
         // Called only by the capture worker, never from this queue.
         self.queue.exec_sync(|| {});
     }
+
+    fn quarantine(&mut self) {
+        admission::quarantine();
+    }
 }
 
 pub struct NativeIdentityMonitor {
@@ -100,6 +105,7 @@ impl NativeIdentityMonitor {
         gate: Arc<CaptureGate>,
     ) -> Result<Self, String> {
         let expected_uid = core_audio_uid(expected)?;
+        admission::reserve()?;
         let queue = DispatchQueue::new("com.voxloom.capture.identity", None);
         let operations = NativeListenerOperations {
             gate: Arc::clone(&gate),
@@ -134,11 +140,8 @@ impl NativeIdentityMonitor {
     }
 
     pub fn finish(mut self) -> Result<(), String> {
-        let cleanup = if let Some(listeners) = self.listeners.take() {
-            listeners.finish()
-        } else {
-            Ok(())
-        };
+        let cleanup = self.cleanup();
+        self.release_admission();
         cleanup?;
         require_valid(&self.gate)
     }
@@ -169,5 +172,22 @@ impl NativeIdentityMonitor {
             .as_mut()
             .expect("listeners exist until finish")
             .register(target)
+    }
+
+    fn cleanup(&mut self) -> Result<(), String> {
+        self.listeners
+            .take()
+            .map_or(Ok(()), ListenerOwner::finish)
+    }
+
+    fn release_admission(&self) {
+        admission::release();
+    }
+}
+
+impl Drop for NativeIdentityMonitor {
+    fn drop(&mut self) {
+        let _ = self.cleanup();
+        self.release_admission();
     }
 }
