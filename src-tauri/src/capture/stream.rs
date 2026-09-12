@@ -231,9 +231,12 @@ fn write_mono_f32<T>(
     f32: cpal::FromSample<T>,
 {
     use cpal::Sample;
-    callbacks_in_flight.fetch_add(1, Ordering::AcqRel);
+    // These two atomics form one close/lease protocol. SeqCst is required
+    // for every operation so the closer cannot observe an old lease count
+    // while this callback observes the old accepting state.
+    callbacks_in_flight.fetch_add(1, Ordering::SeqCst);
     let _lease = CallbackLease(callbacks_in_flight);
-    if !accepting.load(Ordering::Acquire) {
+    if !accepting.load(Ordering::SeqCst) {
         return;
     }
     let step = channels.max(1);
@@ -252,7 +255,7 @@ struct CallbackLease<'a>(&'a AtomicUsize);
 
 impl Drop for CallbackLease<'_> {
     fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::AcqRel);
+        self.0.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -486,8 +489,98 @@ mod tests {
             &overflow,
         );
         assert!(drain(consumer).is_empty());
-        assert_eq!(callbacks_in_flight.load(Ordering::Acquire), 0);
+        assert_eq!(callbacks_in_flight.load(Ordering::SeqCst), 0);
         assert!(!overflow.load(Ordering::Acquire));
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum GateOperation {
+        CallbackAcquire,
+        CallbackCheck,
+        CallbackRelease,
+        CloserClose,
+        CloserCheck,
+    }
+
+    fn legal_gate_orders(
+        prefix: &mut Vec<GateOperation>,
+        callback_step: usize,
+        closer_step: usize,
+        orders: &mut Vec<Vec<GateOperation>>,
+    ) {
+        const CALLBACK: [GateOperation; 3] = [
+            GateOperation::CallbackAcquire,
+            GateOperation::CallbackCheck,
+            GateOperation::CallbackRelease,
+        ];
+        const CLOSER: [GateOperation; 2] = [
+            GateOperation::CloserClose,
+            GateOperation::CloserCheck,
+        ];
+
+        if callback_step == CALLBACK.len() && closer_step == CLOSER.len() {
+            orders.push(prefix.clone());
+            return;
+        }
+        if callback_step < CALLBACK.len() {
+            prefix.push(CALLBACK[callback_step]);
+            legal_gate_orders(
+                prefix,
+                callback_step + 1,
+                closer_step,
+                orders,
+            );
+            prefix.pop();
+        }
+        if closer_step < CLOSER.len() {
+            prefix.push(CLOSER[closer_step]);
+            legal_gate_orders(
+                prefix,
+                callback_step,
+                closer_step + 1,
+                orders,
+            );
+            prefix.pop();
+        }
+    }
+
+    #[test]
+    fn seqcst_gate_model_covers_all_legal_interleavings() {
+        let mut orders = Vec::new();
+        legal_gate_orders(&mut Vec::new(), 0, 0, &mut orders);
+        assert_eq!(orders.len(), 10);
+
+        for order in orders {
+            let mut accepting = true;
+            let mut callback_accepted = false;
+            let mut callback_completed = false;
+            let mut leases = 0usize;
+            let mut closer_safe = false;
+
+            for operation in &order {
+                match operation {
+                    GateOperation::CallbackAcquire => leases += 1,
+                    GateOperation::CallbackCheck => {
+                        callback_accepted = accepting;
+                    }
+                    GateOperation::CallbackRelease => {
+                        callback_completed = true;
+                        leases -= 1;
+                    }
+                    GateOperation::CloserClose => accepting = false,
+                    GateOperation::CloserCheck => {
+                        closer_safe = !callback_accepted
+                            || leases > 0
+                            || callback_completed;
+                    }
+                }
+            }
+
+            assert!(
+                closer_safe,
+                "unsafe SeqCst interleaving: {order:?}",
+            );
+        }
     }
 
     // DeviceSelection debug

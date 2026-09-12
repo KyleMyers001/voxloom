@@ -860,8 +860,12 @@ fn capture_loop<E: Fn(SessionEvent)>(
         let now = runtime.now();
         let deadline_reached = now.saturating_sub(start) >= bound;
         if deadline_reached {
-            accepting.store(false, Ordering::Release);
-            if callbacks_in_flight.load(Ordering::Acquire) > 0 {
+            // Paired with the callback's SeqCst lease protocol. A callback
+            // that observed `accepting = true` is globally ordered before
+            // this store, so this load sees its lease unless its write and
+            // lease release have already completed.
+            accepting.store(false, Ordering::SeqCst);
+            if callbacks_in_flight.load(Ordering::SeqCst) > 0 {
                 runtime.wait(limits.poll_interval);
                 continue;
             }
@@ -996,6 +1000,70 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Default)]
+    struct ProductionVirtualRuntime {
+        state: Arc<ProductionVirtualState>,
+    }
+
+    #[derive(Default)]
+    struct ProductionVirtualState {
+        elapsed_millis: AtomicU64,
+        feed: Mutex<Option<Box<dyn FnMut() + Send>>>,
+        ten_second_observer: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    }
+
+    impl ProductionVirtualRuntime {
+        fn clear_feed(&self) {
+            self.state.feed.lock().unwrap().take();
+        }
+
+        fn elapsed(&self) -> Duration {
+            Duration::from_millis(
+                self.state.elapsed_millis.load(Ordering::Acquire),
+            )
+        }
+
+        fn install_feed(&self, feed: impl FnMut() + Send + 'static) {
+            *self.state.feed.lock().unwrap() = Some(Box::new(feed));
+        }
+
+        fn observe_ten_seconds(
+            &self,
+            observer: impl FnOnce() + Send + 'static,
+        ) {
+            *self.state.ten_second_observer.lock().unwrap() =
+                Some(Box::new(observer));
+        }
+    }
+
+    impl LoopRuntime for ProductionVirtualRuntime {
+        fn now(&self) -> Duration {
+            self.elapsed()
+        }
+
+        fn wait(&self, duration: Duration) {
+            let millis = duration.as_millis().max(1) as u64;
+            let previous = self
+                .state
+                .elapsed_millis
+                .fetch_add(millis, Ordering::AcqRel);
+            if let Some(feed) = self.state.feed.lock().unwrap().as_mut() {
+                feed();
+            }
+            if previous < 10_000 && previous + millis >= 10_000 {
+                let observer = self
+                    .state
+                    .ten_second_observer
+                    .lock()
+                    .unwrap()
+                    .take();
+                if let Some(observer) = observer {
+                    observer();
+                }
+            }
+        }
+    }
+
     struct DrainingRuntime {
         callbacks_in_flight: Arc<AtomicUsize>,
         waits: AtomicUsize,
@@ -1008,7 +1076,7 @@ mod tests {
 
         fn wait(&self, _duration: Duration) {
             self.waits.fetch_add(1, Ordering::AcqRel);
-            self.callbacks_in_flight.store(0, Ordering::Release);
+            self.callbacks_in_flight.store(0, Ordering::SeqCst);
         }
     }
 
@@ -1129,6 +1197,47 @@ mod tests {
 
         fn list_devices(&self) -> Vec<String> {
             vec![String::from("Restart Fake")]
+        }
+    }
+
+    struct ContinuousStreamBackend {
+        resource_alive: Arc<AtomicBool>,
+        runtime: ProductionVirtualRuntime,
+    }
+
+    impl StreamBackend for ContinuousStreamBackend {
+        fn with_stream<F, R>(
+            &self,
+            _selection: &DeviceSelection,
+            f: F,
+        ) -> Result<R, String>
+        where
+            F: FnOnce(CaptureStreamMeta) -> R,
+        {
+            use ringbuf::traits::{Producer, Split};
+
+            let ring = ringbuf::HeapRb::<f32>::new(RING_CAPACITY);
+            let (mut producer, consumer) = ring.split();
+            self.runtime.install_feed(move || {
+                let _ = producer.try_push(0.25);
+            });
+            self.resource_alive.store(true, Ordering::Release);
+            let output = f(CaptureStreamMeta {
+                accepting: Arc::new(AtomicBool::new(true)),
+                callbacks_in_flight: Arc::new(AtomicUsize::new(0)),
+                consumer,
+                device_name: String::from("Continuous Fake"),
+                native_rate: TARGET_RATE,
+                overflow: Arc::new(AtomicBool::new(false)),
+                stream_error: Arc::new(AtomicBool::new(false)),
+            });
+            self.runtime.clear_feed();
+            self.resource_alive.store(false, Ordering::Release);
+            Ok(output)
+        }
+
+        fn list_devices(&self) -> Vec<String> {
+            vec![String::from("Continuous Fake")]
         }
     }
 
@@ -1642,10 +1751,131 @@ mod tests {
     // Test mode
 
     #[test]
-    fn production_limits_are_ten_and_one_hundred_twenty_seconds() {
-        let limits = CaptureLimits::production();
-        assert_eq!(limits.test_bound, Duration::from_secs(10));
-        assert_eq!(limits.full_bound, Duration::from_secs(120));
+    fn production_test_mode_completes_at_ten_seconds() {
+        let resource_alive = Arc::new(AtomicBool::new(false));
+        let runtime = ProductionVirtualRuntime::default();
+        let coordinator = Coordinator::with_loop_runtime(
+            FakePermission(MicPermission::Authorized),
+            ContinuousStreamBackend {
+                resource_alive: Arc::clone(&resource_alive),
+                runtime: runtime.clone(),
+            },
+            runtime.clone(),
+            CaptureLimits::production(),
+        );
+        let terminals = Arc::new(Mutex::new(Vec::new()));
+        let terminal_log = Arc::clone(&terminals);
+        let event_runtime = runtime.clone();
+        let emit = move |event: SessionEvent| {
+            if let SessionEvent::TestComplete {
+                generation,
+                request_id,
+                ..
+            } = event
+            {
+                terminal_log.lock().unwrap().push((
+                    generation,
+                    request_id,
+                    event_runtime.elapsed(),
+                ));
+            }
+        };
+
+        let status = coordinator
+            .start_session(
+                String::from("production-test"),
+                DeviceSelection::SystemDefault,
+                true,
+                emit,
+            )
+            .unwrap();
+        idle_wait(&coordinator, Duration::from_secs(3));
+
+        assert_eq!(
+            terminals.lock().unwrap().as_slice(),
+            &[(
+                status.generation,
+                String::from("production-test"),
+                Duration::from_secs(10),
+            )],
+        );
+        assert_eq!(runtime.elapsed(), Duration::from_secs(10));
+        assert!(!resource_alive.load(Ordering::Acquire));
+        assert!(coordinator.status().is_none());
+    }
+
+    #[test]
+    fn production_full_mode_is_active_at_ten_and_stops_at_one_twenty() {
+        let resource_alive = Arc::new(AtomicBool::new(false));
+        let runtime = ProductionVirtualRuntime::default();
+        let coordinator = Arc::new(Coordinator::with_loop_runtime(
+            FakePermission(MicPermission::Authorized),
+            ContinuousStreamBackend {
+                resource_alive: Arc::clone(&resource_alive),
+                runtime: runtime.clone(),
+            },
+            runtime.clone(),
+            CaptureLimits::production(),
+        ));
+        let status_at_ten = Arc::new(Mutex::new(None));
+        let observed_status = Arc::clone(&status_at_ten);
+        let ten_second_coordinator = Arc::clone(&coordinator);
+        let terminal_count = Arc::new(AtomicUsize::new(0));
+        let count_at_ten = Arc::new(AtomicUsize::new(usize::MAX));
+        let observed_count = Arc::clone(&count_at_ten);
+        let event_count = Arc::clone(&terminal_count);
+        runtime.observe_ten_seconds(move || {
+            *observed_status.lock().unwrap() =
+                ten_second_coordinator.status();
+            observed_count.store(
+                event_count.load(Ordering::Acquire),
+                Ordering::Release,
+            );
+        });
+
+        let terminals = Arc::new(Mutex::new(Vec::new()));
+        let terminal_log = Arc::clone(&terminals);
+        let event_runtime = runtime.clone();
+        let event_count = Arc::clone(&terminal_count);
+        let emit = move |event: SessionEvent| {
+            if let SessionEvent::CaptureStopped {
+                generation,
+                request_id,
+            } = event
+            {
+                event_count.fetch_add(1, Ordering::AcqRel);
+                terminal_log.lock().unwrap().push((
+                    generation,
+                    request_id,
+                    event_runtime.elapsed(),
+                ));
+            }
+        };
+
+        let status = coordinator
+            .start_session(
+                String::from("production-full"),
+                DeviceSelection::SystemDefault,
+                false,
+                emit,
+            )
+            .unwrap();
+        idle_wait(coordinator.as_ref(), Duration::from_secs(3));
+
+        assert_eq!(status_at_ten.lock().unwrap().as_ref(), Some(&status));
+        assert_eq!(count_at_ten.load(Ordering::Acquire), 0);
+        assert_eq!(
+            terminals.lock().unwrap().as_slice(),
+            &[(
+                status.generation,
+                String::from("production-full"),
+                Duration::from_secs(120),
+            )],
+        );
+        assert_eq!(terminal_count.load(Ordering::Acquire), 1);
+        assert_eq!(runtime.elapsed(), Duration::from_secs(120));
+        assert!(!resource_alive.load(Ordering::Acquire));
+        assert!(coordinator.status().is_none());
     }
 
     #[test]
@@ -2048,7 +2278,7 @@ mod tests {
             1,
             "deadline must flush exactly once",
         );
-        assert!(!accepting.load(Ordering::Acquire));
+        assert!(!accepting.load(Ordering::SeqCst));
     }
 
     #[test]
@@ -2094,7 +2324,7 @@ mod tests {
         assert!(matches!(terminal, LoopTerminal::Clean));
         assert_eq!(runtime.waits.load(Ordering::Acquire), 1);
         assert_eq!(buffer.len(), 1);
-        assert!(!accepting.load(Ordering::Acquire));
+        assert!(!accepting.load(Ordering::SeqCst));
     }
 
     #[test]
@@ -2142,7 +2372,7 @@ mod tests {
             if category == "input-limit-exceeded"));
         assert_eq!(downmixer.flush_calls(), 1);
         assert_eq!(buffer.len(), MAX_FRAMES);
-        assert!(!accepting.load(Ordering::Acquire));
+        assert!(!accepting.load(Ordering::SeqCst));
     }
 
     fn run_immediate_loop(

@@ -96,14 +96,23 @@ IPC or logging boundaries.
 
 The capture loop now receives a monotonic runtime and duration limits. The
 production limits remain ten seconds for microphone tests and 120 seconds for
-full capture. Tests use the same deadline branch with a virtual monotonic
-clock and shorter bounds. At the deadline, the loop atomically closes the
-real-time callback's acceptance gate, drains the now-finite bounded ring,
-waits for a callback that already passed the gate to finish, flushes the
-resampler exactly once, and emits one terminal event after scoped stream
-teardown and reservation release. The gate and in-flight lease use only
-atomics in the callback; they add no allocation, blocking, logging, or IPC.
-The old fake clean-stop signal has been removed.
+full capture. Coordinator tests run those production limits through the same
+deadline branch with a virtual monotonic runtime. At the deadline, the loop
+atomically closes the real-time callback's acceptance gate, drains the
+now-finite bounded ring, waits for a callback that already passed the gate to
+finish, flushes the resampler exactly once, and emits one terminal event after
+scoped stream teardown and reservation release.
+
+The acceptance flag and callback lease count form one `SeqCst` protocol. A
+callback increments its lease before reading the flag; the closer stores
+`false` before reading the lease count. In the resulting single global order,
+a callback that read `true` either remains visible to the closer or has already
+completed its write and released its lease. A model test enumerates all ten
+legal interleavings of callback acquire/check/release and closer close/check.
+This is an explicit model of the protocol rather than a scheduler stress test;
+production-path tests separately cover closed callbacks and waiting for an
+accepted callback. These callback operations remain allocation-, lock-, log-,
+and IPC-free. The old fake clean-stop signal has been removed.
 
 ## Direct test coverage added or changed
 
@@ -123,11 +132,12 @@ The old fake clean-stop signal has been removed.
   versus single-call equality; exact-block tail drain; and a trailing impulse
   at the delay-compensated canonical index. Existing passband, stopband, and
   silence assertions remain active.
-- Coordinator timing tests assert the production ten/120-second defaults,
-  drive the real deadline and flush branch with a virtual clock, drain queued
-  input, count one flush, and verify a 44.1 kHz test produces exact 16 kHz
-  metadata, one terminal, a released stream resource and reservation, and an
-  `input-limit-exceeded` error if the flushed tail exceeds the bounded buffer.
+- Coordinator timing tests run `CaptureLimits::production()` through actual
+  coordinator sessions. Test mode emits one correlated `TestComplete` at ten
+  simulated seconds. Full mode is still active with no terminal at ten seconds
+  and emits one correlated `CaptureStopped` at 120 seconds. Both verify stream
+  teardown and reservation cleanup. Short-limit tests separately verify exact
+  44.1 kHz metadata, one flush, queue draining, and bounded-buffer errors.
 - Stream adapter tests verify that a closed deadline gate discards subsequent
   callback frames without overflowing the ring. A capture-loop test verifies
   that an already accepted callback finishes before queue draining begins.
@@ -138,7 +148,7 @@ The old fake clean-stop signal has been removed.
 
 ```text
 cargo test
-  64 passed; 0 failed; no warnings
+  66 passed; 0 failed; no warnings
 
 npm run typecheck
   passed
