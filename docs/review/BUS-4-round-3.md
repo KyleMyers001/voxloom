@@ -3,9 +3,10 @@
 ## Scope and fix
 
 This bounded round changes only app-local shortcut gating. The controller now
-accepts an enabled state before key events mutate hold, tap, latch, or timer
-state. Disabling clears pending timers, timestamps, latch state, active key
-state, and key-up suppression.
+accepts a `practice`, `product`, or blocked interaction identity before key
+events mutate hold, tap, latch, or timer state. Any identity transition clears
+pending timers, timestamps, latch state, active key state, and key-up
+suppression, including enabled practice-to-product transitions.
 
 Dialogs publish a small centralized modal count. The app shortcut hook disables
 and resets its controller when a modal opens and cleanly enables it after the
@@ -22,6 +23,9 @@ exception so its real gesture practice still works.
   navigation suppression, dismisses it, proves the first fresh tap does not
   record, and proves a subsequent hold waits the complete threshold.
 - `modalState.test.ts` covers nested modal tracking and notifications.
+- `PracticeTransition.integration.test.tsx` proves partial and latched practice
+  gestures cannot cross Skip into product interaction. It also proves a fresh
+  tap does not record and a fresh hold waits the complete threshold.
 - Existing onboarding integration and release-preview journeys verify that the
   intentional step-three exception remains functional.
 
@@ -37,7 +41,7 @@ npm run test:e2e:release
 git diff --check
 ```
 
-Final counts are 21 Vitest files / 47 tests, five development-browser
+Final counts are 22 Vitest files / 50 tests, five development-browser
 journeys, and one production-preview journey. Native implementation and its
 previously disclosed macOS privacy and Windows test limitations are unchanged.
 

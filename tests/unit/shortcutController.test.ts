@@ -79,12 +79,13 @@ describe("createShortcutController", () => {
       target: document,
     });
 
+    controller.setContext("practice");
     document.dispatchEvent(shortcutEvent("keydown"));
     now = 100;
-    controller.setEnabled(false);
+    controller.setContext(null);
     vi.advanceTimersByTime(320);
     document.dispatchEvent(shortcutEvent("keyup"));
-    controller.setEnabled(true);
+    controller.setContext("product");
     expect(gestures).toEqual([]);
 
     now = 500;
@@ -98,10 +99,10 @@ describe("createShortcutController", () => {
     now = 850;
     document.dispatchEvent(shortcutEvent("keydown"));
     document.dispatchEvent(shortcutEvent("keyup"));
-    controller.setEnabled(false);
+    controller.setContext(null);
     document.dispatchEvent(shortcutEvent("keydown"));
     document.dispatchEvent(shortcutEvent("keyup"));
-    controller.setEnabled(true);
+    controller.setContext("product");
     gestures.length = 0;
     now = 1_000;
     document.dispatchEvent(shortcutEvent("keydown"));
@@ -115,5 +116,51 @@ describe("createShortcutController", () => {
     expect(gestures).toEqual(["latch-start", "latch-finish"]);
     controller.dispose();
     vi.useRealTimers();
+  });
+
+  it("resets partial and latched state between enabled contexts", () => {
+    let now = 0;
+    const gestures: ShortcutGesture[] = [];
+    const controller = createShortcutController({
+      clock: () => now,
+      onGesture: (gesture) => gestures.push(gesture),
+      shortcut: "Ctrl + Shift + Space",
+      target: document,
+    });
+    const tap = () => {
+      document.dispatchEvent(shortcutEvent("keydown"));
+      document.dispatchEvent(shortcutEvent("keyup"));
+    };
+
+    controller.setContext("practice");
+    tap();
+    controller.setContext("product");
+    now = 100;
+    tap();
+    expect(gestures).toEqual([]);
+    now = 180;
+    tap();
+    now = 240;
+    tap();
+    expect(gestures).toEqual(["latch-start", "latch-finish"]);
+
+    gestures.length = 0;
+    controller.setContext("practice");
+    now = 500;
+    tap();
+    now = 600;
+    tap();
+    expect(gestures).toEqual(["latch-start"]);
+    gestures.length = 0;
+    controller.setContext("product");
+    now = 650;
+    tap();
+    expect(gestures).toEqual([]);
+    now = 700;
+    tap();
+    now = 750;
+    tap();
+    expect(gestures).toEqual(["latch-start", "latch-finish"]);
+    controller.dispose();
   });
 });

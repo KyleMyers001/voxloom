@@ -6,6 +6,8 @@ export type ShortcutGesture =
   | "latch-finish"
   | "latch-start";
 
+export type ShortcutContext = "practice" | "product" | null;
+
 export interface DictationLifecycle {
   cancel(runId: number): void;
   complete(runId: number): void;
@@ -38,7 +40,7 @@ export interface SetupLifecycle {
 
 export interface ShortcutController {
   dispose(): void;
-  setEnabled(enabled: boolean): void;
+  setContext(context: ShortcutContext): void;
 }
 
 export interface Scheduler {

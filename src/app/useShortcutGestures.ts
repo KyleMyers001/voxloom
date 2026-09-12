@@ -5,6 +5,7 @@ import type { OnboardingState } from "../domain/types";
 import type {
   DictationLifecycle,
   SetupLifecycle,
+  ShortcutContext,
   ShortcutGesture,
 } from "../services/contracts";
 import { createShortcutController } from
@@ -34,8 +35,8 @@ export function useShortcutGestures(options: GestureOptions) {
       target: document,
     });
     controllerRef.current = controller;
-    const update = () => controller.setEnabled(
-      canReceiveGestures(optionsRef.current),
+    const update = () => controller.setContext(
+      interactionContext(optionsRef.current),
     );
     const unsubscribe = subscribeModal(update);
     update();
@@ -47,7 +48,7 @@ export function useShortcutGestures(options: GestureOptions) {
   }, [options.now, options.state.settings.shortcut]);
 
   useEffect(() => {
-    controllerRef.current?.setEnabled(canReceiveGestures(options));
+    controllerRef.current?.setContext(interactionContext(options));
   }, [options.onboardingOpen, options.shortcutOpen,
     options.state.onboarding.step]);
 
@@ -81,9 +82,11 @@ function handleGesture(options: GestureOptions, gesture: ShortcutGesture) {
   }
 }
 
-function canReceiveGestures(options: GestureOptions): boolean {
-  if (options.onboardingOpen) return options.state.onboarding.step === 3;
-  return !options.shortcutOpen && !hasOpenModal();
+function interactionContext(options: GestureOptions): ShortcutContext {
+  if (options.onboardingOpen) {
+    return options.state.onboarding.step === 3 ? "practice" : null;
+  }
+  return options.shortcutOpen || hasOpenModal() ? null : "product";
 }
 
 function handlePractice(options: GestureOptions, gesture: ShortcutGesture) {

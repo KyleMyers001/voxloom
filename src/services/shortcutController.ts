@@ -1,6 +1,7 @@
 import type {
   Scheduler,
   ShortcutController,
+  ShortcutContext,
   ShortcutGesture,
 } from "./contracts";
 
@@ -46,7 +47,7 @@ export function createShortcutController({
   let latched = false;
   let lastTap: number | null = null;
   let tapTimer: number | null = null;
-  let enabled = true;
+  let context: ShortcutContext = "product";
 
   function clear(timer: number | null) {
     if (timer !== null) scheduler.clear(timer);
@@ -66,7 +67,7 @@ export function createShortcutController({
 
   function keyDown(event: Event) {
     const key = event as KeyboardEvent;
-    if (!enabled) return;
+    if (context === null) return;
     if (key.repeat || downAt !== null || !matches(key, shortcut)) return;
     key.preventDefault();
     if (latched) {
@@ -94,7 +95,7 @@ export function createShortcutController({
 
   function keyUp(event: Event) {
     const key = event as KeyboardEvent;
-    if (!enabled) return;
+    if (context === null) return;
     if (!matches(key, shortcut)) return;
     key.preventDefault();
     if (ignoreUp) {
@@ -122,9 +123,10 @@ export function createShortcutController({
       target.removeEventListener("keydown", keyDown);
       target.removeEventListener("keyup", keyUp);
     },
-    setEnabled(value) {
-      enabled = value;
-      if (!enabled) reset();
+    setContext(value) {
+      if (context === value) return;
+      context = value;
+      reset();
     },
   };
 }
