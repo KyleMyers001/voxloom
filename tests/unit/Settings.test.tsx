@@ -148,7 +148,7 @@ describe("Settings", () => {
 
     expect(screen.getByLabelText(/Microphone/)).toHaveValue("input-2");
     expect(screen.getByRole("option", {
-      name: "Previously selected microphone (unavailable)",
+      name: "USB Audio (unavailable)",
     })).toBeDisabled();
     expect(screen.getByRole("button", {
       name: "Test Microphone",

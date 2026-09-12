@@ -27,6 +27,7 @@ use ringbuf::{
 /// 4096 frames ≈ 256 ms at 16 kHz.
 pub const RING_CAPACITY: usize = 4096;
 pub const SYSTEM_DEFAULT_ID: &str = "system-default";
+const MAX_DEVICE_TOMBSTONES: usize = 32;
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct InputDeviceDescriptor {
@@ -46,7 +47,7 @@ pub enum DeviceSelection {
 
 struct RegistryEntry<T> {
     descriptor: InputDeviceDescriptor,
-    device: T,
+    device: Option<T>,
 }
 
 struct RegistryState<T> {
@@ -75,39 +76,21 @@ impl DeviceRegistry {
     }
 
     pub fn list(&self) -> Result<Vec<InputDeviceDescriptor>, String> {
-        self.refresh()?;
-        let state = self.state.lock().unwrap();
-        Ok(state
-            .entries
-            .iter()
-            .map(|entry| entry.descriptor.clone())
-            .collect())
+        refresh_registry(
+            &self.state,
+            enumerate_input_devices,
+            same_native_device,
+            |state| Ok(descriptors(state)),
+        )
     }
 
     pub fn resolve(&self, id: &str) -> Result<cpal::Device, String> {
-        self.refresh()?;
-        let state = self.state.lock().unwrap();
-        resolve_registered(&state, id)
-    }
-
-    fn refresh(&self) -> Result<(), String> {
-        let host = cpal::default_host();
-        let devices = host
-            .input_devices()
-            .map_err(|error| format!("capture-unavailable: {error}"))?
-            .map(|device| {
-                let label = device
-                    .name()
-                    .unwrap_or_else(|_| String::from("Unknown microphone"));
-                (device, label)
-            })
-            .collect();
-        reconcile_devices(
-            &mut self.state.lock().unwrap(),
-            devices,
+        refresh_registry(
+            &self.state,
+            enumerate_input_devices,
             same_native_device,
-        );
-        Ok(())
+            |state| resolve_registered(state, id),
+        )
     }
 }
 
@@ -208,25 +191,70 @@ where
 
 // Internals
 
+fn descriptors<T>(state: &RegistryState<T>) -> Vec<InputDeviceDescriptor> {
+    state
+        .entries
+        .iter()
+        .map(|entry| entry.descriptor.clone())
+        .collect()
+}
+
+fn enumerate_input_devices() -> Result<Vec<(cpal::Device, String)>, String> {
+    cpal::default_host()
+        .input_devices()
+        .map_err(|error| format!("capture-unavailable: {error}"))?
+        .map(|device| {
+            let label = device
+                .name()
+                .unwrap_or_else(|_| String::from("Unknown microphone"));
+            Ok((device, label))
+        })
+        .collect()
+}
+
+fn refresh_registry<T, R>(
+    registry: &Mutex<RegistryState<T>>,
+    enumerate: impl FnOnce() -> Result<Vec<(T, String)>, String>,
+    same_device: impl Fn(&T, &T) -> bool,
+    inspect: impl FnOnce(&RegistryState<T>) -> Result<R, String>,
+) -> Result<R, String> {
+    // Enumeration occurs while holding the registry lock. A slow older
+    // snapshot therefore cannot reconcile after a newer list or resolve.
+    let mut state = registry.lock().unwrap();
+    let devices = enumerate()?;
+    reconcile_devices(&mut state, devices, same_device);
+    inspect(&state)
+}
+
 fn reconcile_devices<T>(
     state: &mut RegistryState<T>,
-    devices: Vec<(T, String)>,
+    mut devices: Vec<(T, String)>,
     same_device: impl Fn(&T, &T) -> bool,
 ) {
-    for entry in &mut state.entries {
-        entry.descriptor.available = false;
+    for entry in state
+        .entries
+        .iter_mut()
+        .filter(|entry| entry.descriptor.available)
+    {
+        let Some(current) = entry.device.as_ref() else {
+            entry.descriptor.available = false;
+            continue;
+        };
+        if let Some(position) = devices
+            .iter()
+            .position(|(device, _)| same_device(current, device))
+        {
+            let (device, label) = devices.remove(position);
+            entry.descriptor.label = label;
+            entry.device = Some(device);
+        } else {
+            // Once absence is observed, retire this ID permanently. This
+            // prevents a reused CoreAudio AudioDeviceID from rebinding it.
+            entry.descriptor.available = false;
+            entry.device = None;
+        }
     }
     for (device, label) in devices {
-        if let Some(entry) = state
-            .entries
-            .iter_mut()
-            .find(|entry| same_device(&entry.device, &device))
-        {
-            entry.descriptor.available = true;
-            entry.descriptor.label = label;
-            entry.device = device;
-            continue;
-        }
         let id = format!("input-{}", state.next_id);
         state.next_id += 1;
         state.entries.push(RegistryEntry {
@@ -235,8 +263,27 @@ fn reconcile_devices<T>(
                 id,
                 label,
             },
-            device,
+            device: Some(device),
         });
+    }
+    prune_tombstones(state);
+}
+
+fn prune_tombstones<T>(state: &mut RegistryState<T>) {
+    while state
+        .entries
+        .iter()
+        .filter(|entry| !entry.descriptor.available)
+        .count()
+        > MAX_DEVICE_TOMBSTONES
+    {
+        if let Some(position) = state
+            .entries
+            .iter()
+            .position(|entry| !entry.descriptor.available)
+        {
+            state.entries.remove(position);
+        }
     }
 }
 
@@ -252,14 +299,10 @@ fn resolve_registered<T: Clone>(
             format!("capture-unavailable: unknown microphone id {id}")
         })
         .and_then(|entry| {
-            if entry.descriptor.available {
-                Ok(entry.device.clone())
-            } else {
-                Err(format!(
-                    "capture-unavailable: microphone {} is disconnected",
-                    entry.descriptor.label,
-                ))
-            }
+            entry.device.clone().ok_or_else(|| format!(
+                "capture-unavailable: microphone {} is disconnected",
+                entry.descriptor.label,
+            ))
         })
 }
 
@@ -725,7 +768,7 @@ mod tests {
     }
 
     #[test]
-    fn same_native_identity_reappears_with_original_id() {
+    fn observed_disappearance_permanently_retires_original_id() {
         let mut state = RegistryState::default();
         reconcile_devices(
             &mut state,
@@ -741,8 +784,12 @@ mod tests {
             vec![(9, String::from("Travel Mic"))],
             |left, right| left == right,
         );
-        assert_eq!(state.entries[0].descriptor.id, id);
-        assert!(state.entries[0].descriptor.available);
+        let listed = descriptors(&state);
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].id, id);
+        assert!(!listed[0].available);
+        assert_ne!(listed[1].id, id);
+        assert!(listed[1].available);
     }
 
     #[test]
@@ -786,6 +833,87 @@ mod tests {
         assert!(resolve_registered(&state, "input-404")
             .unwrap_err()
             .contains("unknown microphone id"));
+    }
+
+    #[test]
+    fn tombstones_are_bounded_and_ids_are_never_reused() {
+        let mut state = RegistryState::default();
+        let cycles = MAX_DEVICE_TOMBSTONES + 10;
+        let mut issued = Vec::new();
+
+        for native_id in 0..cycles {
+            reconcile_devices(
+                &mut state,
+                vec![(native_id, format!("Mic {native_id}"))],
+                |left, right| left == right,
+            );
+            issued.push(state.entries.last().unwrap().descriptor.id.clone());
+            reconcile_devices(&mut state, vec![], |left, right| left == right);
+        }
+
+        assert_eq!(state.entries.len(), MAX_DEVICE_TOMBSTONES);
+        let unique: std::collections::HashSet<_> = issued.iter().collect();
+        assert_eq!(unique.len(), cycles);
+        assert_eq!(state.next_id, cycles as u64 + 1);
+        assert!(state.entries.iter().all(|entry| entry.device.is_none()));
+    }
+
+    #[test]
+    fn enumeration_and_reconciliation_are_serialized() {
+        use std::sync::mpsc;
+        use std::thread;
+
+        let registry = Arc::new(Mutex::new(RegistryState::default()));
+        let (first_started_tx, first_started_rx) = mpsc::channel();
+        let (release_first_tx, release_first_rx) = mpsc::channel();
+        let first_registry = Arc::clone(&registry);
+        let first = thread::spawn(move || {
+            refresh_registry(
+                &first_registry,
+                || {
+                    first_started_tx.send(()).unwrap();
+                    release_first_rx.recv().unwrap();
+                    Ok(vec![(1, String::from("Older snapshot"))])
+                },
+                |left, right| left == right,
+                |_| Ok(()),
+            )
+            .unwrap();
+        });
+
+        first_started_rx.recv().unwrap();
+        let (second_attempt_tx, second_attempt_rx) = mpsc::channel();
+        let (second_started_tx, second_started_rx) = mpsc::channel();
+        let second_registry = Arc::clone(&registry);
+        let second = thread::spawn(move || {
+            second_attempt_tx.send(()).unwrap();
+            refresh_registry(
+                &second_registry,
+                || {
+                    second_started_tx.send(()).unwrap();
+                    Ok(vec![(2, String::from("Newer snapshot"))])
+                },
+                |left, right| left == right,
+                |_| Ok(()),
+            )
+            .unwrap();
+        });
+
+        second_attempt_rx.recv().unwrap();
+        assert!(second_started_rx
+            .recv_timeout(std::time::Duration::from_millis(50))
+            .is_err());
+        release_first_tx.send(()).unwrap();
+        first.join().unwrap();
+        second.join().unwrap();
+
+        let state = registry.lock().unwrap();
+        let available: Vec<_> = descriptors(&state)
+            .into_iter()
+            .filter(|device| device.available)
+            .collect();
+        assert_eq!(available.len(), 1);
+        assert_eq!(available[0].label, "Newer snapshot");
     }
 
     // DeviceSelection debug

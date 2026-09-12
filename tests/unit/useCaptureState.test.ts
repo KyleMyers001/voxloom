@@ -108,6 +108,94 @@ describe("useCaptureState request ownership", () => {
     await expect(result.current.prepareDeviceChange()).resolves.toBe(false);
   });
 
+  it("rejects status for a session that terminated before status resolves",
+    async () => {
+      const status = deferred<{
+        generation: number;
+        mode: "test";
+        request_id: string;
+      }>();
+      mocks.getCaptureStatus.mockReturnValue(status.promise);
+      const { result } = renderHook(() => useCaptureState());
+      await waitFor(() => expect(handler).not.toBeNull());
+
+      act(() => handler?.({
+        generation: 12,
+        kind: "capture-stopped",
+        request_id: "native-owner",
+      }));
+      status.resolve({
+        generation: 12,
+        mode: "test",
+        request_id: "native-owner",
+      });
+
+      await waitFor(() => expect(result.current.captureReady).toBe(true));
+      expect(result.current.captureState).toEqual({ kind: "idle" });
+      expect(mocks.cancelCapture).not.toHaveBeenCalled();
+    });
+
+  it("does not let an unrelated terminal suppress valid native status",
+    async () => {
+      const status = deferred<{
+        generation: number;
+        mode: "test";
+        request_id: string;
+      }>();
+      mocks.getCaptureStatus.mockReturnValue(status.promise);
+      const { result } = renderHook(() => useCaptureState());
+      await waitFor(() => expect(handler).not.toBeNull());
+
+      act(() => handler?.({
+        generation: 4,
+        kind: "capture-cancelled",
+        request_id: "unrelated",
+      }));
+      status.resolve({
+        generation: 5,
+        mode: "test",
+        request_id: "native-owner",
+      });
+
+      await waitFor(() => expect(result.current.captureState).toMatchObject({
+        generation: 5,
+        kind: "test-running",
+        request_id: "native-owner",
+      }));
+    });
+
+  it("fails status adoption closed when terminal cache reaches its bound",
+    async () => {
+      const status = deferred<{
+        generation: number;
+        mode: "test";
+        request_id: string;
+      }>();
+      mocks.getCaptureStatus.mockReturnValue(status.promise);
+      const { result } = renderHook(() => useCaptureState());
+      await waitFor(() => expect(handler).not.toBeNull());
+
+      for (let generation = 1; generation <= 33; generation += 1) {
+        act(() => handler?.({
+          generation,
+          kind: "capture-stopped",
+          request_id: `ended-${generation}`,
+        }));
+      }
+      status.resolve({
+        generation: 33,
+        mode: "test",
+        request_id: "ended-33",
+      });
+
+      await waitFor(() => {
+        expect(result.current.captureState.kind).toBe("error");
+      });
+      expect(result.current.captureReady).toBe(false);
+      await expect(result.current.prepareDeviceChange())
+        .resolves.toBe(false);
+    });
+
   it("blocks a duplicate start before invoking IPC", async () => {
     const start = deferred<{
       generation: number;

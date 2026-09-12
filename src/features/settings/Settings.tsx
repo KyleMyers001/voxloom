@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useApp } from "../../app/AppContext";
 import {
   audioRetentions,
@@ -24,6 +25,10 @@ const appearances: { label: string; value: Appearance }[] = [
 
 export function Settings({ onSetup }: SettingsProps) {
   const { settings, state } = useApp();
+  const selectedLabelRef = useRef<{
+    id: string;
+    label: string;
+  } | null>(null);
 
   const {
     captureReady,
@@ -51,6 +56,17 @@ export function Settings({ onSetup }: SettingsProps) {
   const selectedDescriptor = devices.find(
     (device) => device.id === selectedDevice,
   );
+  useEffect(() => {
+    if (selectedDescriptor) {
+      selectedLabelRef.current = {
+        id: selectedDescriptor.id,
+        label: selectedDescriptor.label,
+      };
+    }
+  }, [selectedDescriptor]);
+  const missingDeviceLabel = selectedLabelRef.current?.id === selectedDevice
+    ? selectedLabelRef.current.label
+    : "Previously selected microphone";
   const selectionUnavailable = selectedDevice !== SYSTEM_DEFAULT_DEVICE_ID
     && (!selectedDescriptor || !selectedDescriptor.available);
 
@@ -115,7 +131,7 @@ export function Settings({ onSetup }: SettingsProps) {
               <option value={SYSTEM_DEFAULT_DEVICE_ID}>System default</option>
               {selectionUnavailable && !selectedDescriptor && (
                 <option disabled value={selectedDevice}>
-                  Previously selected microphone (unavailable)
+                  {missingDeviceLabel} (unavailable)
                 </option>
               )}
               {devices.map((device) => (

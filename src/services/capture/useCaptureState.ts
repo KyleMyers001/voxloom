@@ -57,6 +57,13 @@ interface TerminalWaiter {
   resolve: (completed: boolean) => void;
 }
 
+interface TerminalCorrelation {
+  generation: number;
+  requestId: string;
+}
+
+const MAX_TERMINAL_CORRELATIONS = 32;
+
 const errorMessages: Record<CaptureErrorCategory, string> = {
   busy: "A capture session is already active.",
   "capture-unavailable": "Microphone capture is not available.",
@@ -95,6 +102,41 @@ function stateFromStatus(status: CaptureStatus): CaptureState {
   };
 }
 
+function isTerminalEvent(event: CaptureEvent): boolean {
+  return event.kind === "capture-cancelled"
+    || event.kind === "capture-error"
+    || event.kind === "capture-stopped"
+    || event.kind === "test-complete";
+}
+
+function rememberTerminal(
+  terminals: TerminalCorrelation[],
+  event: CaptureEvent,
+): boolean {
+  if (!isTerminalEvent(event)) return false;
+  terminals.push({
+    generation: event.generation,
+    requestId: event.request_id,
+  });
+  if (terminals.length > MAX_TERMINAL_CORRELATIONS) {
+    terminals.shift();
+    return true;
+  }
+  return false;
+}
+
+function consumeTerminal(
+  terminals: TerminalCorrelation[],
+  status: CaptureStatus,
+): boolean {
+  const index = terminals.findIndex((terminal) =>
+    terminal.generation === status.generation
+      && terminal.requestId === status.request_id);
+  if (index < 0) return false;
+  terminals.splice(index, 1);
+  return true;
+}
+
 export function useCaptureState(): UseCaptureStateResult {
   const [captureReady, setCaptureReady] = useState(false);
   const [captureState, setCaptureState] =
@@ -110,7 +152,10 @@ export function useCaptureState(): UseCaptureStateResult {
   const ownerRef = useRef<CaptureOwner | null>(null);
   const refreshSequenceRef = useRef(0);
   const switchSequenceRef = useRef(0);
+  const terminalCacheOverflowRef = useRef(false);
   const terminalWaiterRef = useRef<TerminalWaiter | null>(null);
+  const terminalsRef = useRef<TerminalCorrelation[]>([]);
+  const statusPendingRef = useRef(false);
 
   const refreshDevices = useCallback(async () => {
     const sequence = ++refreshSequenceRef.current;
@@ -142,6 +187,11 @@ export function useCaptureState(): UseCaptureStateResult {
       if (event.kind === "permission-status") {
         setPermissionStatus(event.status);
         return;
+      }
+
+      if (statusPendingRef.current
+          && rememberTerminal(terminalsRef.current, event)) {
+        terminalCacheOverflowRef.current = true;
       }
 
       const owner = ownerRef.current;
@@ -205,6 +255,7 @@ export function useCaptureState(): UseCaptureStateResult {
     void listener.then(async (result) => {
       if (!result.ok || disposed || !mountedRef.current) return;
       const permissionRequestId = createCaptureRequestId();
+      statusPendingRef.current = true;
       void refreshDevices();
       const operations = await Promise.allSettled([
         getCaptureStatus(),
@@ -214,16 +265,24 @@ export function useCaptureState(): UseCaptureStateResult {
 
       const [statusResult] = operations;
       if (statusResult.status === "fulfilled") {
-        if (statusResult.value && ownerRef.current === null) {
+        if (terminalCacheOverflowRef.current) {
+          setCaptureState({
+            category: "capture-unavailable",
+            kind: "error",
+            message: errorMessages["capture-unavailable"],
+          });
+        } else if (statusResult.value && ownerRef.current === null) {
           const status = statusResult.value;
-          ownerRef.current = {
-            generation: status.generation,
-            mode: status.mode,
-            requestId: status.request_id,
-          };
-          setCaptureState(stateFromStatus(status));
+          if (!consumeTerminal(terminalsRef.current, status)) {
+            ownerRef.current = {
+              generation: status.generation,
+              mode: status.mode,
+              requestId: status.request_id,
+            };
+            setCaptureState(stateFromStatus(status));
+          }
         }
-        setCaptureReady(true);
+        setCaptureReady(!terminalCacheOverflowRef.current);
       } else if (statusResult.status === "rejected"
           && ownerRef.current === null) {
         setCaptureState({
@@ -231,12 +290,18 @@ export function useCaptureState(): UseCaptureStateResult {
           ...normalizeError(statusResult.reason),
         });
       }
+      statusPendingRef.current = false;
+      terminalCacheOverflowRef.current = false;
+      terminalsRef.current = [];
     });
 
     return () => {
       disposed = true;
       mountedRef.current = false;
       listenerRef.current = null;
+      statusPendingRef.current = false;
+      terminalCacheOverflowRef.current = false;
+      terminalsRef.current = [];
       refreshSequenceRef.current += 1;
       switchSequenceRef.current += 1;
       const terminalWaiter = terminalWaiterRef.current;
