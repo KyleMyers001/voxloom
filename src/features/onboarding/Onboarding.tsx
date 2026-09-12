@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useApp } from "../../app/AppContext";
 import { Dialog } from "../../components/Dialog";
-import { useCaptureState } from "../../services/capture/useCaptureState";
+import { isTauriEnv } from "../../services/capture/captureService";
+import { useCaptureState } from
+  "../../services/capture/useCaptureState";
 
 interface OnboardingProps {
   onClose: () => void;
@@ -22,7 +24,11 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
     stopMicTest,
   } = useCaptureState();
 
-  const micAuthorized = permissionStatus === "authorized";
+  const isNative = isTauriEnv();
+  // In a browser context native capture is unavailable;
+  // allow Next without blocking on permission.
+  const micAuthorized =
+    !isNative || permissionStatus === "authorized";
   const micTesting = captureState.kind === "test-running";
   const micTestDone = captureState.kind === "test-complete";
   const micError =
@@ -70,6 +76,24 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
     }
   }
 
+  function permissionLabel(): string {
+    if (!isNative) {
+      return "Native capture unavailable in this environment";
+    }
+    switch (permissionStatus) {
+      case "authorized":
+        return "Microphone access granted";
+      case "denied":
+        return "Microphone access denied \u2014 enable in System Settings";
+      case "restricted":
+        return "Microphone access restricted by system policy";
+      case "not-determined":
+        return "Microphone access not yet granted";
+      default:
+        return "Checking microphone permission\u2026";
+    }
+  }
+
   return (
     <Dialog label="Set up Voxloom" onClose={onClose} opener={opener}>
       <h2>Set up Voxloom</h2>
@@ -82,43 +106,30 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
         <section className="onboarding-step">
           <h3>Microphone access</h3>
           <p>
-            Voxloom captures audio locally. No audio leaves your device.
+            Voxloom captures audio locally.
+            No audio leaves your device.
           </p>
           <div className="onboarding-status">
-            <span>
-              {permissionStatus === "authorized"
-                ? "Microphone access granted"
-                : permissionStatus === "denied"
-                  ? "Microphone access denied — enable in System Settings"
-                  : permissionStatus === "not-determined"
-                    ? "Microphone access not yet granted"
-                    : "Checking microphone permission\u2026"}
-            </span>
-            {permissionStatus !== "authorized" && (
-              <button
-                className="btn"
-                onClick={requestMicPermission}
-              >
+            <span>{permissionLabel()}</span>
+            {isNative && permissionStatus !== "authorized" && (
+              <button className="btn" onClick={requestMicPermission}>
                 Enable Microphone
               </button>
             )}
           </div>
-          {permissionStatus === "authorized" && (
+          {isNative && permissionStatus === "authorized" && (
             <div className="onboarding-test">
               <span>
                 {micTestDone
-                  ? captureState.kind === "test-complete"
-                    && captureState.metadata.detected_activity
+                  && captureState.kind === "test-complete"
+                  ? captureState.metadata.detected_activity
                     ? "Audio activity detected \u2014 mic is working"
                     : "No audio activity detected \u2014 check your mic"
                   : micTesting
-                    ? "Listening\u2026 (10 s auto-stop)"
+                    ? "Listening\u2026 (10\u202fs auto-stop)"
                     : "Test your microphone"}
               </span>
-              <button
-                className="btn"
-                onClick={handleTestMic}
-              >
+              <button className="btn" onClick={handleTestMic}>
                 {micTesting ? "Stop test" : "Test Microphone"}
               </button>
             </div>
@@ -126,10 +137,10 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
           {micError && (
             <p className="form-error" role="alert">{micError}</p>
           )}
-          {permissionStatus === "denied" && (
+          {isNative && permissionStatus === "denied" && (
             <p className="empty-note">
-              Open System Settings &rsaquo; Privacy &amp; Security &rsaquo;{" "}
-              Microphone and enable Voxloom.
+              Open System Settings &rsaquo;{" "}
+              Privacy &amp; Security &rsaquo; Microphone and enable Voxloom.
             </p>
           )}
         </section>
@@ -167,7 +178,7 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
           </label>
           <div className="onboarding-test">
             <span>
-              Press-and-hold ·{" "}
+              Press-and-hold &middot;{" "}
               {onboarding.holdTested ? "recognized" : "not tested"}
             </span>
             {import.meta.env.DEV && (
@@ -185,14 +196,15 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
           </div>
           <div className="onboarding-test">
             <span>
-              Rapid double-tap ·{" "}
+              Rapid double-tap &middot;{" "}
               {onboarding.tapTested ? "recognized" : "not tested"}
             </span>
             {import.meta.env.DEV && (
               <button
                 className="btn"
                 onClick={() => update({
-                  recognizedText: "Double-tap: keep --dry-run enabled.",
+                  recognizedText:
+                    "Double-tap: keep --dry-run enabled.",
                   tapTested: true,
                 })}
               >

@@ -10,9 +10,9 @@ import { describe, expect, it, vi } from "vitest";
 import { Onboarding } from "../../src/features/onboarding/Onboarding";
 import { renderWithApp } from "./testUtils";
 
-// --- Capture hook mock -------------------------------------------------
-// Controlled permission state for all Onboarding tests.
+// Controlled permission state and Tauri env flag for Onboarding tests.
 let mockPermissionStatus = "authorized";
+let mockIsTauri = true; // Tests run in native mode by default.
 
 vi.mock("../../src/services/capture/useCaptureState", () => ({
   useCaptureState: () => ({
@@ -24,6 +24,18 @@ vi.mock("../../src/services/capture/useCaptureState", () => ({
     stopMicTest: vi.fn(),
   }),
 }));
+
+// Override the global isTauriEnv mock so the Onboarding shows the real
+// permission UI path (not the browser-unavailable path).
+vi.mock("../../src/services/capture/captureService", async (importOriginal) => {
+  const original = await importOriginal<
+    typeof import("../../src/services/capture/captureService")
+  >();
+  return {
+    ...original,
+    isTauriEnv: () => mockIsTauri,
+  };
+});
 
 // -----------------------------------------------------------------------
 

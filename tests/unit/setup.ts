@@ -28,10 +28,23 @@ vi.mock("../../src/services/capture/useCaptureState", () => ({
   }),
 }));
 
-// Note: captureService is NOT globally mocked here.
-// Component tests that use captureService (Settings.test.tsx) mock it
-// per-file. captureService.test.ts mocks @tauri-apps/api/* directly and
-// imports the real captureService module to verify IPC call details.
+// Global mock: captureService — prevents live IPC in component tests.
+// Settings.test.tsx and similar override per-file as needed.
+// captureService.test.ts re-mocks @tauri-apps/api/* and uses the real
+// captureService module to verify IPC call structure.
+vi.mock("../../src/services/capture/captureService", () => ({
+  cancelCapture: vi.fn().mockResolvedValue(true),
+  isCaptureActive: vi.fn().mockResolvedValue(false),
+  // isTauriEnv: returns false in jsdom so Onboarding shows browser path.
+  // Onboarding.test.tsx overrides this for permission-specific scenarios.
+  isTauriEnv: vi.fn().mockReturnValue(false),
+  listDevices: vi.fn().mockResolvedValue([]),
+  onCaptureEvent: vi.fn().mockResolvedValue(() => {}),
+  queryPermission: vi.fn(),
+  requestPermission: vi.fn(),
+  startMicTest: vi.fn().mockResolvedValue("1"),
+  stopCapture: vi.fn(),
+}));
 
 afterEach(cleanup);
 

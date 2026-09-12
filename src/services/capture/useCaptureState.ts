@@ -1,18 +1,29 @@
 /// React hook: exposes real-time capture state to components.
 ///
-/// Subscribes to native capture events on mount and unsubscribes on unmount.
-/// No audio bytes or handles ever enter this hook; only safe metadata.
+/// - Preserves `test-running` mode when `capture-started` arrives so the
+///   UI never shows a confusing mode transition.
+/// - Prevents duplicate starts via a `sessionActive` check.
+/// - Handles `busy`, `capture-unavailable`, and other IPC errors as stable
+///   error categories.
+/// - Stale events after unmount are discarded via `mountedRef`.
+/// - Unmount calls `stopCapture()` for window-teardown safety.
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
+  cancelCapture,
   isCaptureActive,
+  listDevices,
   onCaptureEvent,
   queryPermission,
   requestPermission,
   startMicTest,
   stopCapture,
 } from "./captureService";
-import type { CaptureState, PermissionStatus } from "./types";
+import {
+  isCaptureSessionActive,
+  type CaptureState,
+  type PermissionStatus,
+} from "./types";
 
 export interface UseCaptureStateResult {
   captureState: CaptureState;
@@ -30,8 +41,9 @@ export function useCaptureState(): UseCaptureStateResult {
   const [permissionStatus, setPermissionStatus] =
     useState<PermissionStatus | null>(null);
 
-  // Guard: stale events from a previous mount should not update state.
   const mountedRef = useRef(true);
+  // Tracks the active session generation to correlate cancel.
+  const generationRef = useRef<string | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -42,55 +54,89 @@ export function useCaptureState(): UseCaptureStateResult {
       switch (event.kind) {
         case "permission-status":
           setPermissionStatus(event.status);
-          if (event.status !== "authorized") {
-            setCaptureState({ kind: "idle" });
+          if (
+            event.status !== "authorized"
+          ) {
+            setCaptureState((prev) =>
+              prev.kind === "idle" ? prev : { kind: "idle" },
+            );
           }
           break;
+
         case "capture-started":
-          setCaptureState({
-            device: event.device_name,
-            kind: "active",
+          // Preserve test-running mode: only update device name.
+          setCaptureState((prev) => {
+            if (prev.kind === "test-running") {
+              // Keep mode, update device name would require a new field;
+              // the mode is preserved as-is.
+              return prev;
+            }
+            return {
+              device: event.device_name,
+              generation: generationRef.current ?? "0",
+              kind: "active",
+            };
           });
           break;
+
         case "activity-detected":
-          // Surfaced via captureState.kind; no separate state needed.
+          // No separate state; consumers observe TestComplete.metadata.
           break;
+
         case "test-complete":
           setCaptureState({
             kind: "test-complete",
             metadata: event.metadata,
           });
+          generationRef.current = null;
           break;
+
         case "capture-stopped":
           setCaptureState({ kind: "idle" });
+          generationRef.current = null;
           break;
+
+        case "capture-cancelled":
+          setCaptureState({ kind: "cancelled" });
+          generationRef.current = null;
+          break;
+
         case "device-list":
           setDevices(event.devices);
           break;
+
         case "capture-error":
           setCaptureState({
             category: event.category,
             kind: "error",
             message: event.message,
           });
+          generationRef.current = null;
           break;
       }
     });
 
-    // Query permission and active state on mount.
     queryPermission();
     isCaptureActive().then((active) => {
       if (!mountedRef.current) return;
       if (active) {
-        setCaptureState({ device: "unknown", kind: "active" });
+        setCaptureState({
+          device: "unknown",
+          generation: "0",
+          kind: "active",
+        });
+      }
+    });
+    // Populate device list.
+    void listDevices().then((devs) => {
+      if (mountedRef.current && devs.length > 0) {
+        setDevices(devs);
       }
     });
 
     return () => {
       mountedRef.current = false;
-      // Cancel subscription asynchronously; ignore errors on unmount.
       subscription.then((unlisten) => unlisten()).catch(() => {});
-      // Stop any active session on unmount (window teardown safety).
       stopCapture();
     };
   }, []);
@@ -101,25 +147,67 @@ export function useCaptureState(): UseCaptureStateResult {
   }, []);
 
   const runMicTest = useCallback(async (device?: string) => {
-    setCaptureState({
-      kind: "test-running",
-      started_at: Date.now(),
+    // Prevent duplicate starts.
+    setCaptureState((prev) => {
+      if (isCaptureSessionActive(prev)) return prev;
+      return {
+        generation: "pending",
+        kind: "test-running",
+        started_at: Date.now(),
+      };
     });
+
     const result = await startMicTest(device);
     if (!mountedRef.current) return;
-    if (result !== "ok") {
+
+    if (result === "capture-unavailable") {
+      // Browser/non-Tauri environment: capture unavailable.
       setCaptureState({
         category: "capture-unavailable",
         kind: "error",
-        message: result,
+        message: "Native capture is not available in this environment.",
+      });
+      return;
+    }
+
+    // result is the generation string; store for cancel correlation.
+    if (!isNaN(parseInt(result, 10))) {
+      generationRef.current = result;
+      setCaptureState((prev) => {
+        if (prev.kind === "test-running") {
+          return { ...prev, generation: result };
+        }
+        return prev;
+      });
+    } else {
+      // Error category returned from IPC (e.g., "busy").
+      const category = result as import("./types").CaptureErrorCategory;
+      const messages: Record<string, string> = {
+        busy: "A capture session is already active.",
+        "capture-unavailable":
+          "Microphone capture is not available.",
+        "input-limit-exceeded":
+          "Capture limit reached.",
+        "permission-denied":
+          "Microphone permission denied.",
+      };
+      setCaptureState({
+        category,
+        kind: "error",
+        message: messages[result] ?? result,
       });
     }
-    // Terminal state arrives via event; no state update here.
   }, []);
 
   const stopMicTest = useCallback(() => {
-    stopCapture();
+    const gen = generationRef.current;
+    if (gen) {
+      void cancelCapture(gen);
+    } else {
+      stopCapture();
+    }
     setCaptureState({ kind: "idle" });
+    generationRef.current = null;
   }, []);
 
   return {

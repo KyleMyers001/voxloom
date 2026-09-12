@@ -1,10 +1,11 @@
 /// macOS AVFoundation microphone permission bridge.
 ///
-/// Wraps AVCaptureDevice class methods to query and request microphone
-/// access. Never resets TCC or modifies system permission state.
+/// Wraps `AVCaptureDevice` class methods to query and request microphone
+/// access. Exposes all four AVAuthorizationStatus values:
+/// NotDetermined, Authorized, Denied, Restricted.
 ///
-/// The non-macOS stub returns `Denied` so the coordinator fails closed on
-/// unsupported platforms.
+/// Never resets TCC or modifies system permission state.
+/// The non-macOS stub returns `Denied` so the coordinator fails closed.
 #[cfg(target_os = "macos")]
 mod macos {
     use block2::RcBlock;
@@ -18,15 +19,12 @@ mod macos {
         NotDetermined,
         Authorized,
         Denied,
+        Restricted,
     }
 
     /// Query the current microphone authorization status without prompting.
-    ///
-    /// Safe to call from any thread after the Objective-C runtime is
-    /// initialized (which Tauri does on application start).
     pub fn query() -> MicPermission {
-        // SAFETY: `authorizationStatusForMediaType:` is safe to call from
-        // any thread and does not trigger a permission prompt.
+        // SAFETY: class method call, no run loop required.
         let status = unsafe {
             AVCaptureDevice::authorizationStatusForMediaType(
                 audio_media_type(),
@@ -35,11 +33,8 @@ mod macos {
         map_status(status)
     }
 
-    /// Request microphone access, invoking `callback` on an arbitrary
-    /// GCD queue with the granted result.
-    ///
-    /// Only prompts the user when status is `NotDetermined`. When Denied
-    /// or Restricted the callback fires immediately with `false`.
+    /// Request microphone access, invoking `callback` on a GCD queue.
+    /// Prompts only when status is `NotDetermined`.
     pub fn request<F>(callback: F)
     where
         F: Fn(bool) + Send + 'static,
@@ -47,8 +42,7 @@ mod macos {
         let block = RcBlock::new(move |granted: Bool| {
             callback(granted.as_bool());
         });
-        // SAFETY: `requestAccessForMediaType:completionHandler:` may be
-        // called from any thread. RcBlock derefs to DynBlock (Block<F>).
+        // SAFETY: RcBlock derefs to Block/DynBlock.
         unsafe {
             AVCaptureDevice::requestAccessForMediaType_completionHandler(
                 audio_media_type(),
@@ -57,19 +51,19 @@ mod macos {
         }
     }
 
-    fn map_status(status: AVAuthorizationStatus) -> MicPermission {
-        match status {
+    fn map_status(s: AVAuthorizationStatus) -> MicPermission {
+        match s {
             AVAuthorizationStatus::NotDetermined => {
                 MicPermission::NotDetermined
             }
             AVAuthorizationStatus::Authorized => MicPermission::Authorized,
+            AVAuthorizationStatus::Restricted => MicPermission::Restricted,
             _ => MicPermission::Denied,
         }
     }
 
     /// Reference to the AVMediaTypeAudio constant.
-    ///
-    /// SAFETY: constant is always present on macOS 10.7+ and is never null.
+    /// SAFETY: always present on macOS 10.7+.
     unsafe fn audio_media_type() -> &'static AVMediaType {
         objc2_av_foundation::AVMediaTypeAudio
             .expect("AVMediaTypeAudio missing")
@@ -83,14 +77,14 @@ mod stub {
         NotDetermined,
         Authorized,
         Denied,
+        Restricted,
     }
 
-    /// Non-macOS: native capture is unavailable; fail closed.
     pub fn query() -> MicPermission {
+        // Non-macOS: native capture unavailable, fail closed.
         MicPermission::Denied
     }
 
-    /// Non-macOS: no-op; coordinator surfaces `capture-unavailable`.
     pub fn request<F>(_callback: F)
     where
         F: Fn(bool) + Send + 'static,
@@ -109,18 +103,28 @@ mod tests {
     use super::MicPermission;
 
     #[test]
-    fn permission_variants_are_distinct() {
-        assert_ne!(MicPermission::NotDetermined, MicPermission::Authorized);
-        assert_ne!(MicPermission::Authorized, MicPermission::Denied);
-        assert_ne!(MicPermission::NotDetermined, MicPermission::Denied);
+    fn all_four_variants_are_distinct() {
+        let variants = [
+            MicPermission::NotDetermined,
+            MicPermission::Authorized,
+            MicPermission::Denied,
+            MicPermission::Restricted,
+        ];
+        for (i, a) in variants.iter().enumerate() {
+            for (j, b) in variants.iter().enumerate() {
+                if i != j {
+                    assert_ne!(a, b);
+                }
+            }
+        }
     }
 
     #[test]
-    fn permission_is_copy() {
+    fn mic_permission_is_copy() {
         let p = MicPermission::Authorized;
         let q = p;
         assert_eq!(p, q);
     }
     // query() and request() require a foreground TCC context.
-    // Manual test coverage documented in docs/review/BUS-9-implementation.md.
+    // Manual tests documented in docs/review/BUS-9-implementation.md.
 }

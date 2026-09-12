@@ -41,7 +41,8 @@ test("first run practices gestures and dictates", async ({ page }) => {
   await expect(onboarding).toBeVisible();
   await expectAccessible(page);
   await page.screenshot({ path: "artifacts/screenshots/onboarding.png" });
-  await page.getByRole("button", { name: "Enable mock microphone" }).click();
+  // In browser (non-Tauri) context, step 1 shows native capture unavailable
+  // and Next is not blocked by permission.
   await page.getByRole("button", { name: "Next" }).click();
   await page.getByRole("button", { name: "Next" }).click();
   await holdShortcut(page);

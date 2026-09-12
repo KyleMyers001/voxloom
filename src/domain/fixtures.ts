@@ -48,7 +48,9 @@ export const initialSettings: Settings = {
   clipboardFallback: true,
   language: "English (US)",
   languageModel: "Alder Text Small · local",
-  microphone: "System default · simulated",
+  // Sentinel value that the Settings mic select treats as
+  // "use system default". Must match the <option> value in Settings.tsx.
+  microphone: "System default",
   shortcut: "Ctrl + Shift + Space",
   startAtLogin: false,
   style: "formal",

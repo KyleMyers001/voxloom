@@ -1,12 +1,11 @@
 /// Capture service types — BUS-9.
-///
-/// All values crossing this boundary carry only safe state metadata.
-/// No PCM bytes, audio handles, or file paths are present.
+/// No PCM bytes or audio handles appear anywhere in this file.
 
 export type PermissionStatus =
   | "not-determined"
   | "authorized"
-  | "denied";
+  | "denied"
+  | "restricted";
 
 export interface TestCaptureMetadata {
   readonly detected_activity: boolean;
@@ -15,7 +14,7 @@ export interface TestCaptureMetadata {
   readonly peak_level: number;
 }
 
-/// Discriminated union of all events emitted from the native capture layer.
+/// All events the native coordinator may emit.
 export type CaptureEvent =
   | {
       kind: "permission-status";
@@ -31,6 +30,7 @@ export type CaptureEvent =
       metadata: TestCaptureMetadata;
     }
   | { kind: "capture-stopped" }
+  | { kind: "capture-cancelled" }
   | {
       devices: string[];
       kind: "device-list";
@@ -52,8 +52,13 @@ export type CaptureErrorCategory =
 export type CaptureState =
   | { kind: "idle" }
   | { kind: "requesting-permission" }
-  | { device: string; kind: "active" }
   | {
+      device: string;
+      generation: string;
+      kind: "active";
+    }
+  | {
+      generation: string;
       kind: "test-running";
       started_at: number;
     }
@@ -61,8 +66,16 @@ export type CaptureState =
       kind: "test-complete";
       metadata: TestCaptureMetadata;
     }
+  | { kind: "cancelled" }
   | {
       category: CaptureErrorCategory;
       kind: "error";
       message: string;
     };
+
+/// True when the UI should not permit starting a new session.
+export function isCaptureSessionActive(
+  state: CaptureState,
+): boolean {
+  return state.kind === "active" || state.kind === "test-running";
+}

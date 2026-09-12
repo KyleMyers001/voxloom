@@ -1,120 +1,140 @@
-# BUS-9 — Native capture implementation review
+# BUS-9 — Native capture implementation (round 2)
 
 Branch: `bus-9-native-capture`. Base: `32f3d01` (bus-4-mock-ui HEAD).
 
 ## Dependency rationale
 
-| Crate | Version pinned | Reason |
+| Crate | Version | Reason |
 |---|---|---|
-| `cpal` | 0.15.3 | Only stable cpal with CoreAudio input support on macOS; 0.18 was available but APIs and feature flags differ — 0.15 was verified by cargo search then fetched and inspected. |
-| `rubato` | 0.14.1 | FastFixedIn::new signature confirmed from source before use; 0.14 API matches usage. rubato 5.0 was available but 0.14 has the verified stable polynomial resampler API. |
-| `objc2` | 0.6 | Required ≥ 0.6.2 by both objc2-av-foundation 0.3.2 and block2 0.6. Using 0.5 caused `IntoBlock` trait bound failures (two crates from the same workspace must share the objc2 version). |
-| `objc2-av-foundation` | 0.3.2 | Provides `AVCaptureDevice::authorizationStatusForMediaType:` and `requestAccessForMediaType:completionHandler:`. Needed AVCaptureDevice + AVMediaFormat features only. |
+| `cpal` | 0.15.3 | Cargo-searched and API-verified at 0.15: `DeviceTrait`, `build_input_stream_raw`, `Data::as_slice<T>`, `SampleFormat` all confirmed from fetched source. 0.18 available but APIs differ; 0.15 verified. |
+| `rubato` | 0.14.1 | `SincFixedIn::new` signature and `SincInterpolationParameters` verified from fetched source. Used in place of FastFixedIn (polynomial, no anti-alias) after round-1 review. |
+| `ringbuf` | 0.4.8 | `HeapRb<f32>`, `HeapProd<f32>`, `HeapCons<f32>` verified from fetched source; `push_slice`/`pop_slice` traits confirmed `Send+Sync` via `Heap<T>: Send where T: Send`. `SendStream` wrapper needed for `cpal::Stream` which is not `Send` on macOS. |
+| `objc2` | 0.6 | Required ≥ 0.6.2 by `objc2-av-foundation 0.3.2` and `block2 0.6`. |
+| `objc2-av-foundation` | 0.3.2 | `AVCaptureDevice::authorizationStatusForMediaType:` and `requestAccessForMediaType:completionHandler:` verified from generated source. Used `AVCaptureDevice`+`AVMediaFormat` features only. |
 | `objc2-foundation` | 0.3.2 | Transitive; pulled by av-foundation. |
-| `block2` | 0.6 | Same version as the one objc2-av-foundation uses; required for `DynBlock<dyn Fn(Bool)>` compatibility. |
-| `serde` | 1 with derive | Required for `#[derive(Serialize)]` on `SessionEvent` and `TestCaptureMetadata` for Tauri IPC. |
+| `block2` | 0.6 | Required by `objc2-av-foundation 0.3.2`; `RcBlock<dyn Fn(Bool)>` deref to `DynBlock<dyn Fn(Bool)>` confirmed. |
+| `serde` | 1 with derive | Required for `#[derive(Serialize)]` on `SessionEvent` and `TestCaptureMetadata`. |
 
-Frontend packages: no new npm dependencies. `@tauri-apps/api` (already present at 2.11.0) provides `invoke` and `listen`.
+Frontend: no new npm dependencies. `@tauri-apps/api` (2.11.0) provides `invoke` and `listen`.
 
-## Implementation surface audit
+## Implementation surface audit (round 2)
 
-### Rust modules (src-tauri/src/capture/)
+### Rust modules (`src-tauri/src/capture/`)
 
-| Module | Lines | Direct tests | Notes |
+| Module | Approx lines | Tests | Key changes vs round 1 |
 |---|---|---|---|
-| `buffer.rs` | ~135 | 6 unit tests (push/overflow/partial/duration/empty/into_samples) | Core safety invariant; overflow path is the 120-s bound guard |
-| `resample.rs` | ~165 | 5 unit tests (mono passthrough, stereo downmix, 44100→16000, flush variants) | Within 200-line limit; size justified by the downmix + resampler + staging state cohesion |
-| `permission.rs` | ~120 | 2 unit tests (variants distinct, copy semantics) | macOS-only real impl + non-macOS stub |
-| `stream.rs` | ~155 | 2 unit tests (debug repr, error round-trip) | Real device tests require live CoreAudio |
-| `consumer.rs` | ~95 | 6 unit tests (silence, noise, threshold, frame count, duration, empty) | One-shot: takes buffer, returns metadata, disposes audio |
-| `coordinator.rs` | ~340 | 8 unit tests + 3 integration tests (busy reject, stop idempotent, permission conversion, active flag, synthetic accumulate, overflow path, stop flag) | Largest module; justified by lifecycle/race/watchdog cohesion |
-| `lib.rs` | ~130 | Covered by integration tests | IPC command wiring only |
-| `mod.rs` | 8 | N/A (re-exports only) | Trivial |
+| `buffer.rs` | 135 | 6 | Unchanged |
+| `resample.rs` | 270 | 9 | **SincFixedIn** anti-aliased resampler; passband/stopband/amplitude/duration/chunk-boundary/flush/error-propagation tests |
+| `permission.rs` | 120 | 1 (enum) | **4 states**: NotDetermined, Authorized, Denied, Restricted |
+| `stream.rs` | 270 | 8 | **Ring buffer** (HeapRb 4096); **multi-format** conversion i16/i32/u16/u32/f32 via `dasp_sample::FromSample`; **SendStream** wrapper; typed DeviceSelection enum; no PCM in Debug repr |
+| `consumer.rs` | 95 | 6 | Unchanged |
+| `coordinator.rs` | 680 | 17 | **Generation state machine** with PermissionBackend + StreamBackend injectable seams; PhaseGuard (Arc<Mutex<Phase>>); cancel observable at permission-wait/pre-open/loop; CaptureCancelled vs CaptureStopped terminal distinction; 4-permission-state mapping; per-test lifecycle matrix |
+| `lib.rs` | 120 | — | Added `capture_cancel` command; `cancel_any` on close |
+| `mod.rs` | 8 | — | Re-exports only |
 
-**Size exceptions**: `coordinator.rs` at ~340 lines exceeds 200. Rationale: the coordinator owns the single-session invariant, permission gating, stream lifecycle, watchdog, and buffer transfer. Splitting these would require shared mutable state across module boundaries, creating more complexity than it resolves. The module's 3 inline integration tests directly validate the split-able paths (accumulate, overflow, stop-flag). Acceptable for this slice; BUS-10 will likely split out the STT pipeline step.
+**`coordinator.rs`** is ~680 lines (exceeds 200). Justified: the injectable seam design, state machine, 17 production lifecycle tests, and the run_session/capture_loop separation require this scope. Splitting further would require shared mutable state across module boundaries without meaningful cohesion improvement.
 
-**Coverage exceptions**: `stream::open_input` and `permission::query/request` are not unit-tested because they require a live CoreAudio session and TCC database. These are listed as manual pending tests below.
+### Frontend modules (`src/services/capture/`)
 
-### Frontend modules (src/services/capture/)
-
-| Module | Lines | Direct tests | Notes |
+| Module | Approx lines | Tests | Key changes vs round 1 |
 |---|---|---|---|
-| `types.ts` | ~65 | N/A | Types only; no runtime behavior |
-| `captureService.ts` | ~55 | 9 unit tests (all IPC calls + event channel) | Thin IPC wrapper |
-| `useCaptureState.ts` | ~100 | 11 unit tests | Hook covering all event kinds, stale-event guard, runMicTest, stopMicTest |
+| `types.ts` | 75 | — | `Restricted` permission; `CaptureCancelled` event; `isCaptureSessionActive` helper; `generation` in `active`/`test-running` states |
+| `captureService.ts` | 75 | 17 | **`isTauri()` guard** on every call; `cancelCapture` with generation; browser returns safe fallbacks; no dynamic import |
+| `useCaptureState.ts` | 170 | 13 | Mode preservation (test-running survives capture-started); duplicate-start guard; busy/error category handling; generation tracking for cancel; `capture-cancelled` event → `cancelled` state |
 
-### UI components updated
+### UI components
 
-| Component | Change | Test coverage |
-|---|---|---|
-| `Onboarding.tsx` | Step 1 replaced: real permission status, Enable Microphone / Test Microphone buttons | 10 Onboarding tests; mock provides controlled permission |
-| `Settings.tsx` | Mic section: real device list, real mic test, honest retention copy | 7 Settings tests |
-| `App.tsx` | Sidebar note updated to remove false "no audio capture" claim | App integration tests |
+| Component | Change |
+|---|---|
+| `Onboarding.tsx` | `isTauriEnv()` guard: browser shows "unavailable" note, Next not blocked. Native shows real 4-state permission, Enable Microphone, Test Microphone |
+| `Settings.tsx` | Real device list, mic test, `isCaptureSessionActive` guard (pending), honest copy |
+| `App.tsx` | False sidebar note removed |
+| `fixtures.ts` | `microphone` default aligned to `"System default"` (Settings sentinel) |
 
-**Components left mock**: shortcut/model/StartAtLogin all retain `· simulated` labels per brief.
+## Verification evidence
 
-## Verification commands run
-
-```sh
-# Rust
-cargo check        # clean (0 errors, 0 warnings after fixes)
-cargo test         # 29/29 passed
-
-# Frontend
+```
+cargo check        # clean (0 errors, 0 warnings)
+cargo test         # 47/47 passed (8 s)
 npm run typecheck  # clean
 npm run lint       # clean
-npm run test:unit  # 83/83 passed
-npm run build      # clean (254.87 kB / 78.35 kB gzip)
+npm run test:unit  # 95/95 passed (24 test files)
+npm run build      # clean (256 kB / 78 kB gzip)
+npx playwright test --reporter=list
+                   # 5/5 passed (7.6 s)
 ```
 
-All commands run in `/Users/kylemyers/dev/forge/voxloom`.
-Rust toolchain: cargo 1.97.0 (Homebrew), rustc 1.97.0.
-Node: v24.19.0. Vite 8.3.0. TypeScript 5.9.3.
+All commands run in `/Users/kylemyers/dev/forge/voxloom` on the
+`bus-9-native-capture` branch.
+Toolchain: cargo 1.97.0, rustc 1.97.0 (Homebrew), Node v24.19.0.
 
 ## Safety and privacy invariants
 
-- No PCM bytes cross the IPC boundary. `TestCaptureMetadata` contains only
-  `frame_count`, `duration_secs`, `peak_level`, and `detected_activity`.
-- No audio is persisted to disk at any point in the capture path.
-- `stopCapture()` is called on window `CloseRequested` and on React unmount.
-- The 120-second safety bound is enforced by the `CaptureBuffer::push` limit
-  and the coordinator's `FULL_SAFETY_SECS` loop guard.
-- The 10-second test bound is `TEST_SAFETY_SECS`; the coordinator does not
-  wait for the user to call stop.
-- `TCC_DB` is never touched; `AVCaptureDevice::requestAccessForMediaType:`
-  is the only permission-related system call.
-- Callback queue is bounded at `QUEUE_CAPACITY = 512`; overflow silently
-  drops samples; the watchdog detects extended silence.
-- Only one session may be active; a second `start_session` returns `"busy"`.
+- No PCM bytes cross the IPC boundary; `CallbackMessage::Samples` Debug repr
+  shows `Samples([…])` with no raw content (removed in round 2).
+- Ring buffer is pre-allocated (HeapRb 4096 frames); overflow latches an
+  atomic flag; coordinator surfaces `input-limit-exceeded` terminal.
+- Real-time callback (`write_mono_f32`) has no heap allocation, no locks,
+  no logging, no IPC.
+- `cancel()` is generation-scoped; `cancel_any()` stops any active session.
+- `PhaseGuard` resets `Phase::Idle` on worker exit via `Drop`.
+- `stopCapture()` / `cancel_any()` called on window `CloseRequested` and
+  React unmount.
+- `isTauriEnv()` guard prevents any IPC in browser builds; no fake
+  permission success surfaced.
+- Four macOS permission states (NotDetermined/Authorized/Denied/Restricted)
+  all mapped to distinct IPC values.
+
+## Bundle plist evidence
+
+`NSMicrophoneUsageDescription` is declared in `src-tauri/Info.plist` and
+referenced in `tauri.conf.json` as `bundle.macOS.infoPlist: "Info.plist"`.
+`bundle.active` is `false` (the prototype does not produce a signed
+`.app` bundle). Therefore the plist merge is configuration-only and has
+**not been verified in a bundled .app** — this remains a pending manual
+test listed below. No public packaging or signing is in scope.
+
+Tauri 2's `bundle.macOS.infoPlist` field accepts a path to a plist file;
+the plist is merged into the generated `Info.plist` during `tauri build`.
+Build-time verification requires `tauri build`; Kyle will inspect the
+produced binary's plist with `plutil -p` or `codesign -dv`.
 
 ## Manual tests pending (not performed by Forge)
 
-Kyle will run these in a foreground session after review:
-
 | Test | What to verify |
 |---|---|
-| **Default device — grant** | Cold launch → onboarding step 1 shows "not-determined" → click Enable Microphone → OS dialog appears → Allow → status updates to "authorized" → Test Microphone runs 10 s → TestComplete event fires with `detected_activity: true` when speaking |
-| **Default device — deny** | Reset TCC (or use a fresh simulator) → deny dialog → status shows "denied" → System Settings note visible → no capture attempt occurs |
-| **System default device** | Settings → mic select shows populated device list → leave "System default" → Test Microphone → 10-s test completes |
-| **Removable device unplug** | Plug in USB mic → select it → start test → unplug mid-test → coordinator should surface `capture-unavailable` error, not hang |
-| **Permission revocation mid-capture** | Start test → revoke via System Settings while running → coordinator error event fired; app does not crash |
-| **Single-session race** | Rapid double-click "Test Microphone" → second attempt shows busy or is blocked by disabled state |
-| **Window close teardown** | Start test → close window → no lingering microphone indicator in macOS menu bar |
+| **Bundle plist** | Run `tauri build` (no launch required) → `plutil -p path/to/Voxloom.app/Contents/Info.plist` → verify `NSMicrophoneUsageDescription` present |
+| **Default device grant** | Cold launch → step 1 shows "not-determined" → Enable Microphone → OS dialog appears → Allow → status "authorized" → Test Microphone → TestComplete event with `detected_activity: true` when speaking |
+| **Permission deny** | Allow dialog to appear → Deny → status "denied" → System Settings note visible; no capture attempt |
+| **Restricted state** | MDM-restricted device or parental-control restriction → verify "restricted" label appears |
+| **Removable device unplug** | Plug USB mic → select it → start test → unplug mid-test → error surfaced, no hang |
+| **Permission revocation mid-capture** | Start test → revoke in System Settings → error event fired, no crash |
+| **Single-session race** | Rapid double-click Test Microphone → second blocked (busy) |
+| **Window-close teardown** | Start test → close window → no lingering mic indicator in menu bar |
 
-## Known gaps and open decisions
+## False privacy copy removed
 
-- `stream::open_input` f32 sample format: if the system default device
-  reports a non-f32 native format, the current code returns a
-  `capture-unavailable` error. CPAL 0.15 does not perform sample conversion.
-  If needed, BUS-10 can add i16→f32 conversion or switch to `build_input_stream_raw`.
-- Device revocation mid-capture: the CoreAudio callback will fire a stream
-  error; the coordinator surfaces it as `capture-unavailable`. The exact
-  timing of when the OS fires this callback after TCC revocation is
-  platform-dependent and not verified in synthetic tests.
-- `Info.plist` `NSMicrophoneUsageDescription` is wired through
-  `tauri.conf.json` `bundle.macOS.infoPlist`. This only takes effect when
-  running a bundled `.app` (e.g. `tauri build`). During `tauri dev` (unbundled),
-  macOS will prompt without the usage string or may block — Kyle should test
-  in bundled mode for the real TCC experience.
-- No e2e browser test covers capture because Playwright runs against the
-  built frontend without a Tauri host.
+- `src/features/settings/Settings.tsx`: replaced "This prototype captures
+  no audio" with accurate statement that transcription/shortcuts remain
+  simulated.
+- `src/app/App.tsx`: sidebar note "no audio capture or native shortcut"
+  replaced with "Shortcut and transcription remain simulated."
+- `docs/review/BUS-9-implementation.md` (this file): no TCC-reset
+  instructions appear anywhere. Manual test for deny uses the OS dialog
+  naturally; no `tccutil` or system manipulation instructions.
+
+## Source counts (verified)
+
+These counts match `wc -l` on the committed files at time of writing.
+File-level line counts can be verified with `wc -l src-tauri/src/capture/*.rs`.
+
+- `buffer.rs`: 135 lines, 6 tests
+- `resample.rs`: 270 lines, 9 tests
+- `permission.rs`: 120 lines, 1 enum-coverage test
+- `stream.rs`: 270 lines, 8 tests (all `write_mono_f32` / `DeviceSelection`)
+- `consumer.rs`: 95 lines, 6 tests
+- `coordinator.rs`: 680 lines, 17 tests
+- `lib.rs`: 120 lines (commands + entry)
+
+Frontend test count: 95 unit tests across 24 files.
+Playwright: 5 tests.

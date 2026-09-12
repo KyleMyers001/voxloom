@@ -31,9 +31,10 @@ vi.mock("../../src/services/capture/captureService", () => {
         return unlisten;
       },
     ),
+    cancelCapture: vi.fn().mockResolvedValue(true),
     queryPermission: vi.fn(),
     requestPermission: vi.fn(),
-    startMicTest: vi.fn().mockResolvedValue("ok"),
+    startMicTest: vi.fn().mockResolvedValue("1"),
     stopCapture: vi.fn(),
     // Expose the handler so tests can emit events.
     __getHandler: () => handler,
@@ -100,7 +101,9 @@ describe("useCaptureState", () => {
     await act(async () => {});
     const h = getHandler();
     emit({ device_name: "Built-in Mic", kind: "capture-started" }, h);
-    expect(result.current.captureState).toEqual({
+    // generation field is set from generationRef; defaults to "0" when
+    // no startMicTest has been called.
+    expect(result.current.captureState).toMatchObject({
       device: "Built-in Mic",
       kind: "active",
     });
@@ -149,6 +152,25 @@ describe("useCaptureState", () => {
       category: "permission-denied",
       kind: "error",
     });
+  });
+
+  it("capture-cancelled event sets cancelled state", async () => {
+    const getHandler = await getEmitter();
+    const { result } = renderHook(() => useCaptureState());
+    await act(async () => {});
+    const h = getHandler();
+    emit({ kind: "capture-cancelled" }, h);
+    expect(result.current.captureState.kind).toBe("cancelled");
+  });
+
+  it("restricted permission status reflects in hook", async () => {
+    const getHandler = await getEmitter();
+    const { result } = renderHook(() => useCaptureState());
+    await act(async () => {});
+    const h = getHandler();
+    emit({ kind: "permission-status", status: "restricted" }, h);
+    expect(result.current.permissionStatus).toBe("restricted");
+    expect(result.current.captureState.kind).toBe("idle");
   });
 
   it("populates devices on device-list event", async () => {
