@@ -6,7 +6,9 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
   {
     ignores: [
+      ".cargo-local/**",
       ".playwright-browsers",
+      ".target-cpal17/**",
       "dist",
       "playwright-report",
       "playwright-report-release",
