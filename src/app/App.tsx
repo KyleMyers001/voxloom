@@ -118,7 +118,7 @@ export function App() {
           onReset={resetSession}
         />}
         <p className="review-note">
-          Mock session · no audio capture or native shortcut.
+          Shortcut and transcription remain simulated.
         </p>
       </aside>
       <main className="main">
