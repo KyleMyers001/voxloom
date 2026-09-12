@@ -43,7 +43,7 @@ or Tauri capabilities. All gestures remain focused-window simulations.
 `settings.types.ts` during typecheck. Playwright configuration and package
 scripts are test wiring. Existing unchanged modules retain the round-one audit.
 
-No behavior-bearing handwritten module exceeds 200 lines. `state.ts` is 188
+No behavior-bearing handwritten module exceeds 200 lines. `state.ts` is 189
 lines after moving action declarations to a type-only module. The 100-200-line
 screen and reducer modules remain cohesive single-responsibility units.
 
