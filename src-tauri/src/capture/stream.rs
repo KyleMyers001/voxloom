@@ -12,7 +12,7 @@
 /// - `cpal::Stream` is !Send on macOS; it is opened and dropped exclusively
 ///   on the worker thread via `with_stream`. No unsafe Send impl is used.
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{
@@ -26,14 +26,89 @@ use ringbuf::{
 /// Capacity of the ring buffer in f32 mono frames.
 /// 4096 frames ≈ 256 ms at 16 kHz.
 pub const RING_CAPACITY: usize = 4096;
+pub const SYSTEM_DEFAULT_ID: &str = "system-default";
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct InputDeviceDescriptor {
+    pub available: bool,
+    pub id: String,
+    pub label: String,
+}
 
 /// Typed device selection.
 #[derive(Debug, Clone)]
 pub enum DeviceSelection {
     /// System default input device resolved at open time.
     SystemDefault,
-    /// First device whose name matches exactly; errors if zero or multiple.
-    Named(String),
+    /// Opaque process-local ID issued by `DeviceRegistry`.
+    Id(String),
+}
+
+struct RegistryEntry<T> {
+    descriptor: InputDeviceDescriptor,
+    device: T,
+}
+
+struct RegistryState<T> {
+    entries: Vec<RegistryEntry<T>>,
+    next_id: u64,
+}
+
+impl<T> Default for RegistryState<T> {
+    fn default() -> Self {
+        Self {
+            entries: Vec::new(),
+            next_id: 1,
+        }
+    }
+}
+
+pub struct DeviceRegistry {
+    state: Mutex<RegistryState<cpal::Device>>,
+}
+
+impl DeviceRegistry {
+    pub fn new() -> Self {
+        Self {
+            state: Mutex::new(RegistryState::default()),
+        }
+    }
+
+    pub fn list(&self) -> Result<Vec<InputDeviceDescriptor>, String> {
+        self.refresh()?;
+        let state = self.state.lock().unwrap();
+        Ok(state
+            .entries
+            .iter()
+            .map(|entry| entry.descriptor.clone())
+            .collect())
+    }
+
+    pub fn resolve(&self, id: &str) -> Result<cpal::Device, String> {
+        self.refresh()?;
+        let state = self.state.lock().unwrap();
+        resolve_registered(&state, id)
+    }
+
+    fn refresh(&self) -> Result<(), String> {
+        let host = cpal::default_host();
+        let devices = host
+            .input_devices()
+            .map_err(|error| format!("capture-unavailable: {error}"))?
+            .map(|device| {
+                let label = device
+                    .name()
+                    .unwrap_or_else(|_| String::from("Unknown microphone"));
+                (device, label)
+            })
+            .collect();
+        reconcile_devices(
+            &mut self.state.lock().unwrap(),
+            devices,
+            same_native_device,
+        );
+        Ok(())
+    }
 }
 
 /// Metadata returned with the ring consumer when a stream is opened.
@@ -61,16 +136,16 @@ pub struct StreamMeta {
 /// from the thread that will own and drop the stream.
 ///
 /// Errors have a `"capture-unavailable: …"` prefix.
-pub fn with_stream<F, R>(
-    selection: &DeviceSelection,
-    f: F,
-) -> Result<R, String>
+pub fn default_input_device() -> Result<cpal::Device, String> {
+    cpal::default_host().default_input_device().ok_or_else(|| {
+        String::from("capture-unavailable: no default input device")
+    })
+}
+
+pub fn with_stream<F, R>(device: cpal::Device, f: F) -> Result<R, String>
 where
     F: FnOnce(StreamMeta) -> R,
 {
-    let host = cpal::default_host();
-    let device = resolve_device(&host, selection)?;
-
     let device_name = device
         .name()
         .unwrap_or_else(|_| String::from("unknown"));
@@ -131,15 +206,78 @@ where
     Ok(result)
 }
 
-/// Enumerate input device names using the default host.
-pub fn list_input_device_names() -> Vec<String> {
-    let host = cpal::default_host();
-    host.input_devices()
-        .map(|devs| devs.filter_map(|d| d.name().ok()).collect())
-        .unwrap_or_default()
+// Internals
+
+fn reconcile_devices<T>(
+    state: &mut RegistryState<T>,
+    devices: Vec<(T, String)>,
+    same_device: impl Fn(&T, &T) -> bool,
+) {
+    for entry in &mut state.entries {
+        entry.descriptor.available = false;
+    }
+    for (device, label) in devices {
+        if let Some(entry) = state
+            .entries
+            .iter_mut()
+            .find(|entry| same_device(&entry.device, &device))
+        {
+            entry.descriptor.available = true;
+            entry.descriptor.label = label;
+            entry.device = device;
+            continue;
+        }
+        let id = format!("input-{}", state.next_id);
+        state.next_id += 1;
+        state.entries.push(RegistryEntry {
+            descriptor: InputDeviceDescriptor {
+                available: true,
+                id,
+                label,
+            },
+            device,
+        });
+    }
 }
 
-// Internals
+fn resolve_registered<T: Clone>(
+    state: &RegistryState<T>,
+    id: &str,
+) -> Result<T, String> {
+    state
+        .entries
+        .iter()
+        .find(|entry| entry.descriptor.id == id)
+        .ok_or_else(|| {
+            format!("capture-unavailable: unknown microphone id {id}")
+        })
+        .and_then(|entry| {
+            if entry.descriptor.available {
+                Ok(entry.device.clone())
+            } else {
+                Err(format!(
+                    "capture-unavailable: microphone {} is disconnected",
+                    entry.descriptor.label,
+                ))
+            }
+        })
+}
+
+#[cfg(target_os = "macos")]
+fn same_native_device(left: &cpal::Device, right: &cpal::Device) -> bool {
+    use cpal::platform::DeviceInner;
+
+    match (left.as_inner(), right.as_inner()) {
+        (DeviceInner::CoreAudio(left), DeviceInner::CoreAudio(right)) => {
+            left == right
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn same_native_device(_left: &cpal::Device, _right: &cpal::Device) -> bool {
+    false
+}
 
 /// Build a raw input stream, converting all supported CPAL sample formats
 /// to mono f32 inside the callback.
@@ -256,46 +394,6 @@ struct CallbackLease<'a>(&'a AtomicUsize);
 impl Drop for CallbackLease<'_> {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::SeqCst);
-    }
-}
-
-/// Resolve a device from the default CPAL host.
-fn resolve_device(
-    host: &cpal::Host,
-    selection: &DeviceSelection,
-) -> Result<cpal::Device, String> {
-    match selection {
-        DeviceSelection::SystemDefault => {
-            host.default_input_device().ok_or_else(|| {
-                String::from(
-                    "capture-unavailable: no default input device",
-                )
-            })
-        }
-        DeviceSelection::Named(name) => {
-            let devices = host
-                .input_devices()
-                .map_err(|e| format!("capture-unavailable: {e}"))?;
-            let mut matches: Vec<cpal::Device> = devices
-                .filter(|d| {
-                    d.name().map(|n| n == *name).unwrap_or(false)
-                })
-                .collect();
-            match matches.len() {
-                0 => Err(format!(
-                    "capture-unavailable: device '{name}' not found; \
-                     note: device names are display labels only, not \
-                     stable identifiers — connect the device and \
-                     verify the name"
-                )),
-                1 => Ok(matches.remove(0)),
-                n => Err(format!(
-                    "capture-unavailable: device name '{name}' is \
-                     ambiguous ({n} devices match); name-based \
-                     selection cannot disambiguate duplicate names"
-                )),
-            }
-        }
     }
 }
 
@@ -583,12 +681,119 @@ mod tests {
         }
     }
 
+    // Device registry
+
+    fn descriptors<T>(state: &RegistryState<T>) -> Vec<InputDeviceDescriptor> {
+        state
+            .entries
+            .iter()
+            .map(|entry| entry.descriptor.clone())
+            .collect()
+    }
+
+    #[test]
+    fn duplicate_labels_receive_distinct_opaque_ids() {
+        let mut state = RegistryState::default();
+        reconcile_devices(
+            &mut state,
+            vec![(1, String::from("USB Mic")), (2, String::from("USB Mic"))],
+            |left, right| left == right,
+        );
+        let listed = descriptors(&state);
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].label, listed[1].label);
+        assert_ne!(listed[0].id, listed[1].id);
+    }
+
+    #[test]
+    fn label_change_preserves_identity() {
+        let mut state = RegistryState::default();
+        reconcile_devices(
+            &mut state,
+            vec![(7, String::from("Old label"))],
+            |left, right| left == right,
+        );
+        let id = state.entries[0].descriptor.id.clone();
+        reconcile_devices(
+            &mut state,
+            vec![(7, String::from("New label"))],
+            |left, right| left == right,
+        );
+        assert_eq!(state.entries[0].descriptor.id, id);
+        assert_eq!(state.entries[0].descriptor.label, "New label");
+        assert!(state.entries[0].descriptor.available);
+    }
+
+    #[test]
+    fn same_native_identity_reappears_with_original_id() {
+        let mut state = RegistryState::default();
+        reconcile_devices(
+            &mut state,
+            vec![(9, String::from("Travel Mic"))],
+            |left, right| left == right,
+        );
+        let id = state.entries[0].descriptor.id.clone();
+        reconcile_devices(&mut state, vec![], |left, right| left == right);
+        assert!(!state.entries[0].descriptor.available);
+
+        reconcile_devices(
+            &mut state,
+            vec![(9, String::from("Travel Mic"))],
+            |left, right| left == right,
+        );
+        assert_eq!(state.entries[0].descriptor.id, id);
+        assert!(state.entries[0].descriptor.available);
+    }
+
+    #[test]
+    fn changed_native_identity_gets_new_id_without_replacing_stale_one() {
+        let mut state = RegistryState::default();
+        reconcile_devices(
+            &mut state,
+            vec![(9, String::from("Travel Mic"))],
+            |left, right| left == right,
+        );
+        let original_id = state.entries[0].descriptor.id.clone();
+        reconcile_devices(&mut state, vec![], |left, right| left == right);
+
+        reconcile_devices(
+            &mut state,
+            vec![(10, String::from("Travel Mic"))],
+            |left, right| left == right,
+        );
+        let listed = descriptors(&state);
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].id, original_id);
+        assert!(!listed[0].available);
+        assert!(listed[1].available);
+        assert_ne!(listed[1].id, original_id);
+    }
+
+    #[test]
+    fn missing_and_unknown_ids_fail_without_substitution() {
+        let mut state = RegistryState::default();
+        reconcile_devices(
+            &mut state,
+            vec![(11, String::from("Desk Mic"))],
+            |left, right| left == right,
+        );
+        let id = state.entries[0].descriptor.id.clone();
+        reconcile_devices(&mut state, vec![], |left, right| left == right);
+
+        assert!(resolve_registered(&state, &id)
+            .unwrap_err()
+            .contains("disconnected"));
+        assert!(resolve_registered(&state, "input-404")
+            .unwrap_err()
+            .contains("unknown microphone id"));
+    }
+
     // DeviceSelection debug
 
     #[test]
     fn device_selection_debug_shows_name() {
-        let d = DeviceSelection::Named(String::from("Mic A"));
-        assert!(format!("{d:?}").contains("Mic A"));
+        let d = DeviceSelection::Id(String::from("input-3"));
+        assert!(format!("{d:?}").contains("input-3"));
         let d2 = DeviceSelection::SystemDefault;
         assert!(format!("{d2:?}").contains("SystemDefault"));
     }

@@ -22,6 +22,7 @@ import type {
   CaptureMode,
   CaptureState,
   CaptureStatus,
+  InputDeviceDescriptor,
   PermissionStatus,
 } from "./types";
 
@@ -36,12 +37,24 @@ type ListenerResult =
   | { error: string; ok: false };
 
 export interface UseCaptureStateResult {
+  captureReady: boolean;
   captureState: CaptureState;
-  devices: string[];
+  deviceListError: string | null;
+  devices: InputDeviceDescriptor[];
+  devicesLoading: boolean;
   permissionStatus: PermissionStatus | null;
+  prepareDeviceChange: () => Promise<boolean>;
+  refreshDevices: () => Promise<void>;
   requestMicPermission: () => void;
-  runMicTest: (device?: string) => Promise<void>;
+  runMicTest: (deviceId?: string) => Promise<void>;
   stopMicTest: () => void;
+}
+
+interface TerminalWaiter {
+  cancelSent: boolean;
+  promise: Promise<boolean>;
+  requestId: string;
+  resolve: (completed: boolean) => void;
 }
 
 const errorMessages: Record<CaptureErrorCategory, string> = {
@@ -83,14 +96,42 @@ function stateFromStatus(status: CaptureStatus): CaptureState {
 }
 
 export function useCaptureState(): UseCaptureStateResult {
+  const [captureReady, setCaptureReady] = useState(false);
   const [captureState, setCaptureState] =
     useState<CaptureState>({ kind: "idle" });
-  const [devices, setDevices] = useState<string[]>([]);
+  const [deviceListError, setDeviceListError] =
+    useState<string | null>(null);
+  const [devices, setDevices] = useState<InputDeviceDescriptor[]>([]);
+  const [devicesLoading, setDevicesLoading] = useState(false);
   const [permissionStatus, setPermissionStatus] =
     useState<PermissionStatus | null>(null);
   const listenerRef = useRef<Promise<ListenerResult> | null>(null);
   const mountedRef = useRef(false);
   const ownerRef = useRef<CaptureOwner | null>(null);
+  const refreshSequenceRef = useRef(0);
+  const switchSequenceRef = useRef(0);
+  const terminalWaiterRef = useRef<TerminalWaiter | null>(null);
+
+  const refreshDevices = useCallback(async () => {
+    const sequence = ++refreshSequenceRef.current;
+    setDevicesLoading(true);
+    try {
+      const listed = await listDevices();
+      if (!mountedRef.current
+          || sequence !== refreshSequenceRef.current) return;
+      setDevices(listed);
+      setDeviceListError(null);
+    } catch (error: unknown) {
+      if (!mountedRef.current
+          || sequence !== refreshSequenceRef.current) return;
+      setDeviceListError(normalizeError(error).message);
+    } finally {
+      if (mountedRef.current
+          && sequence === refreshSequenceRef.current) {
+        setDevicesLoading(false);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -98,10 +139,6 @@ export function useCaptureState(): UseCaptureStateResult {
 
     const handleEvent = (event: CaptureEvent) => {
       if (disposed || !mountedRef.current) return;
-      if (event.kind === "device-list") {
-        setDevices(event.devices);
-        return;
-      }
       if (event.kind === "permission-status") {
         setPermissionStatus(event.status);
         return;
@@ -131,6 +168,11 @@ export function useCaptureState(): UseCaptureStateResult {
       if (event.kind === "activity-detected") return;
 
       ownerRef.current = null;
+      const waiter = terminalWaiterRef.current;
+      if (waiter?.requestId === event.request_id) {
+        terminalWaiterRef.current = null;
+        waiter.resolve(true);
+      }
       if (event.kind === "test-complete") {
         setCaptureState({
           kind: "test-complete",
@@ -163,24 +205,25 @@ export function useCaptureState(): UseCaptureStateResult {
     void listener.then(async (result) => {
       if (!result.ok || disposed || !mountedRef.current) return;
       const permissionRequestId = createCaptureRequestId();
+      void refreshDevices();
       const operations = await Promise.allSettled([
         getCaptureStatus(),
-        listDevices(),
         queryPermission(permissionRequestId),
       ]);
       if (disposed || !mountedRef.current) return;
 
-      const [statusResult, devicesResult] = operations;
-      if (statusResult.status === "fulfilled"
-          && statusResult.value
-          && ownerRef.current === null) {
-        const status = statusResult.value;
-        ownerRef.current = {
-          generation: status.generation,
-          mode: status.mode,
-          requestId: status.request_id,
-        };
-        setCaptureState(stateFromStatus(status));
+      const [statusResult] = operations;
+      if (statusResult.status === "fulfilled") {
+        if (statusResult.value && ownerRef.current === null) {
+          const status = statusResult.value;
+          ownerRef.current = {
+            generation: status.generation,
+            mode: status.mode,
+            requestId: status.request_id,
+          };
+          setCaptureState(stateFromStatus(status));
+        }
+        setCaptureReady(true);
       } else if (statusResult.status === "rejected"
           && ownerRef.current === null) {
         setCaptureState({
@@ -188,25 +231,30 @@ export function useCaptureState(): UseCaptureStateResult {
           ...normalizeError(statusResult.reason),
         });
       }
-      if (devicesResult.status === "fulfilled") {
-        setDevices(devicesResult.value);
-      }
     });
 
     return () => {
       disposed = true;
       mountedRef.current = false;
       listenerRef.current = null;
+      refreshSequenceRef.current += 1;
+      switchSequenceRef.current += 1;
+      const terminalWaiter = terminalWaiterRef.current;
+      terminalWaiter?.resolve(false);
+      terminalWaiterRef.current = null;
       const owner = ownerRef.current;
       ownerRef.current = null;
-      if (owner) {
+      const cancellationAlreadySent = owner
+        && terminalWaiter?.requestId === owner.requestId
+        && terminalWaiter.cancelSent;
+      if (owner && !cancellationAlreadySent) {
         void cancelCapture(owner.requestId).catch(() => {});
       }
       void listener.then((result) => {
         if (result.ok) result.unlisten();
       });
     };
-  }, []);
+  }, [refreshDevices]);
 
   const requestMicPermission = useCallback(() => {
     if (!isTauriEnv()) {
@@ -232,7 +280,7 @@ export function useCaptureState(): UseCaptureStateResult {
     })();
   }, []);
 
-  const runMicTest = useCallback(async (device?: string) => {
+  const runMicTest = useCallback(async (deviceId?: string) => {
     if (ownerRef.current !== null) return;
 
     const requestId = createCaptureRequestId();
@@ -266,7 +314,7 @@ export function useCaptureState(): UseCaptureStateResult {
     }
 
     try {
-      const status = await startMicTest(requestId, device);
+      const status = await startMicTest(requestId, deviceId);
       if (!mountedRef.current
           || ownerRef.current?.requestId !== requestId) return;
       if (status.request_id !== requestId) {
@@ -291,9 +339,65 @@ export function useCaptureState(): UseCaptureStateResult {
     }
   }, []);
 
+  const prepareDeviceChange = useCallback(async () => {
+    if (!captureReady) return false;
+    const sequence = ++switchSequenceRef.current;
+    const owner = ownerRef.current;
+    if (!owner) return true;
+
+    setCaptureState({ kind: "switching-device" });
+    let waiter = terminalWaiterRef.current;
+    if (!waiter || waiter.requestId !== owner.requestId) {
+      let resolve: (completed: boolean) => void = () => {
+        throw new Error("terminal waiter was not initialized");
+      };
+      const promise = new Promise<boolean>((complete) => {
+        resolve = complete;
+      });
+      waiter = {
+        cancelSent: false,
+        promise,
+        requestId: owner.requestId,
+        resolve,
+      };
+      terminalWaiterRef.current = waiter;
+    }
+
+    if (!waiter.cancelSent) {
+      waiter.cancelSent = true;
+      try {
+        await cancelCapture(owner.requestId);
+      } catch (error: unknown) {
+        if (mountedRef.current
+            && sequence === switchSequenceRef.current) {
+          setCaptureState({ kind: "error", ...normalizeError(error) });
+        }
+        return false;
+      }
+    }
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<boolean>((resolveTimeout) => {
+      timeoutId = setTimeout(() => resolveTimeout(false), 5_000);
+    });
+    const completed = await Promise.race([waiter.promise, timedOut]);
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+    if (!mountedRef.current
+        || sequence !== switchSequenceRef.current) return false;
+    if (!completed) {
+      setCaptureState({
+        category: "capture-unavailable",
+        kind: "error",
+        message: "Microphone did not stop; selection was not changed.",
+      });
+      return false;
+    }
+    setCaptureState({ kind: "idle" });
+    return true;
+  }, [captureReady]);
+
   const stopMicTest = useCallback(() => {
     const owner = ownerRef.current;
-    ownerRef.current = null;
     if (owner) {
       void cancelCapture(owner.requestId).catch(() => {});
     }
@@ -301,9 +405,14 @@ export function useCaptureState(): UseCaptureStateResult {
   }, []);
 
   return {
+    captureReady,
     captureState,
+    deviceListError,
     devices,
+    devicesLoading,
     permissionStatus,
+    prepareDeviceChange,
+    refreshDevices,
     requestMicPermission,
     runMicTest,
     stopMicTest,

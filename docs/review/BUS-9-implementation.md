@@ -2,8 +2,8 @@
 
 Branch: `bus-9-native-capture`.
 
-This checkpoint documents approved Slice A and proposed Slice B. It does not
-claim BUS-9 is complete.
+This checkpoint documents approved Slices A and B plus proposed Slice C. It
+does not claim BUS-9 is complete.
 No microphone was opened and no TCC state was read or changed during this
 slice.
 
@@ -114,6 +114,50 @@ production-path tests separately cover closed callbacks and waiting for an
 accepted callback. These callback operations remain allocation-, lock-, log-,
 and IPC-free. The old fake clean-stop signal has been removed.
 
+## Slice C: device identity, refresh, and safe switching
+
+The renderer and native command boundary now use device descriptors with an
+opaque `id`, display-only `label`, and current `available` state. The special
+system-default choice has a shared renderer constant and is resolved from the
+current CPAL host on every start. Explicit choices are never matched by label
+or list index and never fall back to the default device.
+
+CPAL 0.15 does not expose CoreAudio's stable UID or a public constructor from
+an `AudioDeviceID`. The native registry therefore issues process-local IDs and
+reconciles macOS devices using CPAL's native `CoreAudioDevice` equality, whose
+implementation contains the current `AudioDeviceID` and default marker.
+Within one process, a device that keeps that native identity retains its
+opaque ID even if its label changes or it temporarily disappears. If macOS
+assigns a new native identity after reconnection, the registry keeps the old
+entry visibly unavailable and issues a new opaque ID; it does not guess by
+label. Explicit-ID start performs a fresh enumeration and resolves the current
+device object before opening. IDs and native handles remain in memory only and
+are not persisted or sent with captured audio.
+
+Device listing is a command response rather than an uncorrelated event. It
+enumerates input metadata without querying/requesting microphone permission
+or opening a stream. List errors preserve the renderer's last successful
+catalog. Sequence numbers prevent an older refresh response from replacing a
+newer one. Settings includes an explicit refresh action and retains a selected
+missing ID as an unavailable option instead of silently changing selection.
+
+Before committing a selection change, the capture hook cancels its exact
+owned request and waits for the matching terminal event. The terminal is
+emitted only after stream teardown and reservation release under Slice A.
+Unrelated or stale terminal events cannot unlock the change. Concurrent
+switch attempts share one cancellation; only the newest attempt may commit.
+A five-second missing-terminal timeout fails closed, leaves the selection
+unchanged, and starts no replacement capture. Unmount resolves pending switch
+waiters as unsuccessful and does not cancel another request. Settings also
+stays locked until the native active-status query has established ownership.
+Switching never automatically restarts capture.
+
+The existing stream-error path remains the during-capture disappearance seam:
+CoreAudio callback errors produce `capture-unavailable`, close acceptance,
+drain the bounded queue safely, and emit one terminal event after teardown.
+The real-time callback remains allocation-, lock-, log-, blocking-, and
+IPC-free; Slice B's `SeqCst` gate and lease protocol is unchanged.
+
 ## Direct test coverage added or changed
 
 - Service tests verify real-runtime detection, browser fail-closed behavior,
@@ -124,9 +168,23 @@ and IPC-free. The old fake clean-stop signal has been removed.
   cancellation before a response, unmount-before-subscribe cleanup, listener
   rejection, busy normalization, fresh remount gates, and adoption/cancellation
   of exact native status ownership.
+- Slice C hook tests use deferred status, refresh, cancellation, and terminal
+  events to verify ownership-ready locking, newest-refresh wins, list-error
+  retention, exact terminal matching, rapid switch coalescing, timeout failure,
+  and unmount cleanup without unrelated cancellation.
+- Settings tests verify teardown precedes selection commit, failed teardown
+  preserves the old selection, a missing selected ID remains visibly
+  unavailable, testing is disabled for that selection, and browser controls
+  remain truthfully unavailable.
 - Native coordinator tests verify atomic status reservation, exact request-ID
   cancellation before start, isolation of the next request, active status,
   and request ID plus generation on emitted session events.
+- Native device tests verify duplicate labels receive distinct IDs, label
+  changes preserve identity, same-native-identity reappearance restores the
+  original ID, changed native identity receives a new ID while the old entry
+  remains unavailable, stale/unknown IDs fail without fallback, the default is
+  resolved independently for each start, list errors propagate, and listing
+  neither queries permission nor opens a stream.
 - Resampler tests cover exact frame counts at 44.1 and 48 kHz for tiny,
   partial, exact-block, and multiblock inputs; 16 kHz passthrough; fragmented
   versus single-call equality; exact-block tail drain; and a trailing impulse
@@ -148,7 +206,7 @@ and IPC-free. The old fake clean-stop signal has been removed.
 
 ```text
 cargo test
-  66 passed; 0 failed; no warnings
+  74 passed; 0 failed; no warnings
 
 npm run typecheck
   passed
@@ -157,7 +215,7 @@ npm run lint
   passed, including generated-output ignores
 
 npm run test:unit
-  81 passed in 25 files
+  92 passed in 25 files
 
 npm run build
   passed
@@ -185,24 +243,53 @@ npm run tauri -- build --debug --no-bundle --ci
 
 The earlier unsigned app bundle and effective
 `NSMicrophoneUsageDescription` inspection were performed by the main agent;
-they were not repeated in Slice B.
+they were not repeated in Slices B or C.
 
-## Audited file sizes after Slice B
+## Audited file sizes after Slice C
 
 ```text
-src-tauri/src/capture/coordinator.rs        2182 lines
+src-tauri/src/capture/coordinator.rs        2596 lines
 src-tauri/src/capture/resample.rs            445 lines
-src-tauri/src/capture/stream.rs               504 lines
-src-tauri/src/lib.rs                         152 lines
-src/services/capture/captureService.ts        65 lines
-src/services/capture/types.ts                 87 lines
-src/services/capture/useCaptureState.ts       311 lines
-tests/unit/useCaptureState.test.ts            274 lines
+src-tauri/src/capture/stream.rs               802 lines
+src-tauri/src/lib.rs                         149 lines
+src/services/capture/captureService.ts        66 lines
+src/services/capture/types.ts                 96 lines
+src/services/capture/useCaptureState.ts       420 lines
+src/features/settings/Settings.tsx            382 lines
+tests/unit/useCaptureState.test.ts            446 lines
+tests/unit/Settings.test.tsx                  174 lines
 ```
 
-## Explicitly remaining after Slice B
+These existing files exceed the preferred module-size target, with much of
+the Rust growth in inline direct tests. Slice C kept the registry in the
+stream adapter and switching in the capture owner hook because splitting
+either during this gated correction would duplicate ownership or native
+handle state. Further decomposition is warranted but was not mixed into the
+device-correctness slice.
 
-The following reviewed work is deferred to separately gated slices:
+## Explicitly remaining after Slice C
 
-1. Stable native device identity, selection refresh, hot-plug, and switching.
-2. Foreground microphone and natural permission-state checks by the user.
+The following work requires user-driven foreground verification or a future
+scope decision:
+
+1. Real CoreAudio enumeration, duplicate-label selection, default-device
+   changes, unplug/reconnect, and stream-error timing.
+2. Natural microphone permission-state checks by the user.
+3. A CoreAudio UID adapter if IDs must survive an app restart or a reconnect
+   where macOS assigns a new `AudioDeviceID`.
+
+Foreground checklist, not performed by Forge:
+
+- Refresh with two same-label microphones and confirm each remains selectable
+  independently.
+- Change the system default between two tests and confirm the new default is
+  used without changing the saved sentinel.
+- Select an explicit USB microphone, unplug it before testing, and confirm the
+  selection stays visible as unavailable with no default fallback.
+- Unplug during a test and confirm one `capture-unavailable` terminal appears
+  only after the system microphone indicator clears.
+- Reconnect and refresh. Confirm either the original opaque ID returns when
+  CoreAudio preserved native identity or a new option appears while the stale
+  selection remains unavailable.
+- Exercise permission states only through normal foreground prompts and System
+  Settings; do not reset or manipulate TCC data.

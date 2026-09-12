@@ -16,9 +16,14 @@ const mockIsTauri = true; // Tests run in native mode by default.
 
 vi.mock("../../src/services/capture/useCaptureState", () => ({
   useCaptureState: () => ({
+    captureReady: true,
     captureState: { kind: "idle" },
+    deviceListError: null,
     devices: [],
+    devicesLoading: false,
     permissionStatus: mockPermissionStatus,
+    prepareDeviceChange: vi.fn().mockResolvedValue(true),
+    refreshDevices: vi.fn().mockResolvedValue(undefined),
     requestMicPermission: vi.fn(),
     runMicTest: vi.fn().mockResolvedValue(undefined),
     stopMicTest: vi.fn(),

@@ -3,7 +3,7 @@
 /// Public surface exposed to `lib.rs`:
 /// - `coordinator::CaptureCoordinator` — managed state, start/stop.
 /// - `coordinator::SessionEvent` — IPC-safe event type.
-/// - `stream::list_input_device_names` — device enumeration for UI.
+/// - `stream::DeviceRegistry` — opaque input-device selection metadata.
 /// - `permission::query` — query without prompting.
 pub mod buffer;
 pub mod consumer;

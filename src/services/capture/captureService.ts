@@ -4,6 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   CaptureEvent,
   CaptureStatus,
+  InputDeviceDescriptor,
 } from "./types";
 
 const CAPTURE_EVENT = "capture:event";
@@ -37,13 +38,13 @@ export async function requestPermission(requestId: string): Promise<void> {
 
 export async function startMicTest(
   requestId: string,
-  preferredDevice?: string,
+  preferredDeviceId?: string,
 ): Promise<CaptureStatus> {
   if (!isTauri()) {
     throw new Error("capture-unavailable");
   }
   return invoke<CaptureStatus>("capture_start", {
-    preferredDevice: preferredDevice ?? null,
+    preferredDeviceId: preferredDeviceId ?? null,
     requestId,
     testMode: true,
   });
@@ -59,7 +60,7 @@ export async function getCaptureStatus(): Promise<CaptureStatus | null> {
   return invoke<CaptureStatus | null>("capture_status");
 }
 
-export async function listDevices(): Promise<string[]> {
+export async function listDevices(): Promise<InputDeviceDescriptor[]> {
   if (!isTauri()) return [];
-  return invoke<string[]>("capture_list_devices");
+  return invoke<InputDeviceDescriptor[]>("capture_list_devices");
 }

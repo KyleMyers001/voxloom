@@ -17,9 +17,14 @@ vi.mock("@tauri-apps/api/event", () => ({
 // Tests that need different permission states declare their own vi.mock.
 vi.mock("../../src/services/capture/useCaptureState", () => ({
   useCaptureState: () => ({
+    captureReady: true,
     captureState: { kind: "idle" },
+    deviceListError: null,
     devices: [],
+    devicesLoading: false,
     permissionStatus: "authorized",
+    prepareDeviceChange: vi.fn().mockResolvedValue(true),
+    refreshDevices: vi.fn().mockResolvedValue(undefined),
     requestMicPermission: vi.fn(),
     runMicTest: vi.fn().mockResolvedValue(undefined),
     stopMicTest: vi.fn(),

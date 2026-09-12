@@ -33,7 +33,10 @@ use crate::capture::{
     consumer::{inspect, TestCaptureMetadata},
     permission::{self, MicPermission},
     resample::Downmixer,
-    stream::{self, DeviceSelection, StreamMeta, RING_CAPACITY},
+    stream::{
+        self, DeviceRegistry, DeviceSelection, InputDeviceDescriptor,
+        StreamMeta, RING_CAPACITY,
+    },
 };
 
 // Constants
@@ -94,7 +97,7 @@ impl LoopRuntime for SystemLoopRuntime {
 // Session events
 
 /// Events emitted to the renderer. No PCM bytes included. Session and
-/// permission events carry correlation fields; device lists are not sessions.
+/// permission events carry correlation fields.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum SessionEvent {
@@ -124,9 +127,6 @@ pub enum SessionEvent {
     CaptureCancelled {
         generation: u64,
         request_id: String,
-    },
-    DeviceList {
-        devices: Vec<String>,
     },
     CaptureError {
         category: String,
@@ -208,7 +208,7 @@ pub trait StreamBackend: Send + Sync + 'static {
         F: FnOnce(CaptureStreamMeta) -> R;
 
     #[allow(dead_code)]
-    fn list_devices(&self) -> Vec<String>;
+    fn list_devices(&self) -> Result<Vec<InputDeviceDescriptor>, String>;
 }
 
 // Production backends
@@ -229,7 +229,17 @@ impl PermissionBackend for RealPermissionBackend {
     }
 }
 
-pub struct CpalStreamBackend;
+pub struct CpalStreamBackend {
+    registry: DeviceRegistry,
+}
+
+impl CpalStreamBackend {
+    fn new() -> Self {
+        Self {
+            registry: DeviceRegistry::new(),
+        }
+    }
+}
 
 impl StreamBackend for CpalStreamBackend {
     fn with_stream<F, R>(
@@ -240,7 +250,11 @@ impl StreamBackend for CpalStreamBackend {
     where
         F: FnOnce(CaptureStreamMeta) -> R,
     {
-        stream::with_stream(selection, |meta: StreamMeta| {
+        let device = match selection {
+            DeviceSelection::SystemDefault => stream::default_input_device()?,
+            DeviceSelection::Id(id) => self.registry.resolve(id)?,
+        };
+        stream::with_stream(device, |meta: StreamMeta| {
             f(CaptureStreamMeta {
                 accepting: meta.accepting,
                 callbacks_in_flight: meta.callbacks_in_flight,
@@ -253,8 +267,8 @@ impl StreamBackend for CpalStreamBackend {
         })
     }
 
-    fn list_devices(&self) -> Vec<String> {
-        stream::list_input_device_names()
+    fn list_devices(&self) -> Result<Vec<InputDeviceDescriptor>, String> {
+        self.registry.list()
     }
 }
 
@@ -320,7 +334,7 @@ impl Coordinator {
                 cancelled_requests: VecDeque::new(),
                 reservation: None,
             })),
-            stream_backend: Arc::new(CpalStreamBackend),
+            stream_backend: Arc::new(CpalStreamBackend::new()),
         }
     }
 }
@@ -379,6 +393,12 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
             .reservation
             .as_ref()
             .map(|reservation| reservation.status.clone())
+    }
+
+    pub fn list_devices(
+        &self,
+    ) -> Result<Vec<InputDeviceDescriptor>, String> {
+        self.stream_backend.list_devices()
     }
 
     /// Cancel one request. If its start command has not reserved the worker
@@ -982,6 +1002,23 @@ mod tests {
         }
     }
 
+    struct CountingPermission {
+        queries: Arc<AtomicUsize>,
+        requests: Arc<AtomicUsize>,
+    }
+
+    impl PermissionBackend for CountingPermission {
+        fn query(&self) -> MicPermission {
+            self.queries.fetch_add(1, Ordering::AcqRel);
+            MicPermission::Authorized
+        }
+
+        fn request(&self, callback: Box<dyn FnOnce(bool) + Send>) {
+            self.requests.fetch_add(1, Ordering::AcqRel);
+            callback(true);
+        }
+    }
+
     #[derive(Default)]
     struct VirtualRuntime {
         elapsed_millis: AtomicU64,
@@ -1156,8 +1193,10 @@ mod tests {
             Ok(output)
         }
 
-        fn list_devices(&self) -> Vec<String> {
-            vec![String::from("Fake")]
+        fn list_devices(
+            &self,
+        ) -> Result<Vec<InputDeviceDescriptor>, String> {
+            Ok(vec![])
         }
     }
 
@@ -1195,8 +1234,10 @@ mod tests {
             Ok(output)
         }
 
-        fn list_devices(&self) -> Vec<String> {
-            vec![String::from("Restart Fake")]
+        fn list_devices(
+            &self,
+        ) -> Result<Vec<InputDeviceDescriptor>, String> {
+            Ok(vec![])
         }
     }
 
@@ -1236,8 +1277,75 @@ mod tests {
             Ok(output)
         }
 
-        fn list_devices(&self) -> Vec<String> {
-            vec![String::from("Continuous Fake")]
+        fn list_devices(
+            &self,
+        ) -> Result<Vec<InputDeviceDescriptor>, String> {
+            Ok(vec![])
+        }
+    }
+
+    struct ChangingDefaultBackend {
+        opens: AtomicUsize,
+    }
+
+    impl StreamBackend for ChangingDefaultBackend {
+        fn with_stream<F, R>(
+            &self,
+            selection: &DeviceSelection,
+            f: F,
+        ) -> Result<R, String>
+        where
+            F: FnOnce(CaptureStreamMeta) -> R,
+        {
+            use ringbuf::traits::Split;
+
+            assert!(matches!(selection, DeviceSelection::SystemDefault));
+            let index = self.opens.fetch_add(1, Ordering::AcqRel);
+            let ring = ringbuf::HeapRb::<f32>::new(RING_CAPACITY);
+            let (_producer, consumer) = ring.split();
+            Ok(f(CaptureStreamMeta {
+                accepting: Arc::new(AtomicBool::new(true)),
+                callbacks_in_flight: Arc::new(AtomicUsize::new(0)),
+                consumer,
+                device_name: format!("Default {index}"),
+                native_rate: TARGET_RATE,
+                overflow: Arc::new(AtomicBool::new(false)),
+                stream_error: Arc::new(AtomicBool::new(true)),
+            }))
+        }
+
+        fn list_devices(
+            &self,
+        ) -> Result<Vec<InputDeviceDescriptor>, String> {
+            Ok(vec![])
+        }
+    }
+
+    struct ListingBackend {
+        error: Option<String>,
+        listed: Vec<InputDeviceDescriptor>,
+    }
+
+    impl StreamBackend for ListingBackend {
+        fn with_stream<F, R>(
+            &self,
+            _selection: &DeviceSelection,
+            _f: F,
+        ) -> Result<R, String>
+        where
+            F: FnOnce(CaptureStreamMeta) -> R,
+        {
+            panic!("device listing must not open an input stream")
+        }
+
+        fn list_devices(
+            &self,
+        ) -> Result<Vec<InputDeviceDescriptor>, String> {
+            if let Some(error) = &self.error {
+                Err(error.clone())
+            } else {
+                Ok(self.listed.clone())
+            }
         }
     }
 
@@ -1292,9 +1400,6 @@ mod tests {
             }
             SessionEvent::CaptureCancelled { .. } => {
                 String::from("cancelled")
-            }
-            SessionEvent::DeviceList { .. } => {
-                String::from("device-list")
             }
             SessionEvent::CaptureError { category, .. } => {
                 format!("error:{category}")
@@ -1712,6 +1817,86 @@ mod tests {
             "error:capture-unavailable",
             Duration::from_secs(3),
         ));
+    }
+
+    #[test]
+    fn system_default_is_resolved_again_for_each_start() {
+        let coordinator = mk(
+            FakePermission(MicPermission::Authorized),
+            ChangingDefaultBackend {
+                opens: AtomicUsize::new(0),
+            },
+        );
+        let labels = Arc::new(Mutex::new(Vec::new()));
+
+        for request_id in ["default-first", "default-second"] {
+            let event_labels = Arc::clone(&labels);
+            coordinator
+                .start_session(
+                    String::from(request_id),
+                    DeviceSelection::SystemDefault,
+                    false,
+                    move |event| {
+                        if let SessionEvent::CaptureStarted {
+                            device_name,
+                            ..
+                        } = event
+                        {
+                            event_labels.lock().unwrap().push(device_name);
+                        }
+                    },
+                )
+                .unwrap();
+            idle_wait(&coordinator, Duration::from_secs(3));
+        }
+
+        assert_eq!(
+            labels.lock().unwrap().as_slice(),
+            &[String::from("Default 0"), String::from("Default 1")],
+        );
+    }
+
+    #[test]
+    fn listing_devices_never_queries_or_requests_permission() {
+        let queries = Arc::new(AtomicUsize::new(0));
+        let requests = Arc::new(AtomicUsize::new(0));
+        let coordinator = mk(
+            CountingPermission {
+                queries: Arc::clone(&queries),
+                requests: Arc::clone(&requests),
+            },
+            ListingBackend {
+                error: None,
+                listed: vec![InputDeviceDescriptor {
+                    available: true,
+                    id: String::from("input-1"),
+                    label: String::from("Desk microphone"),
+                }],
+            },
+        );
+
+        let listed = coordinator.list_devices().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(queries.load(Ordering::Acquire), 0);
+        assert_eq!(requests.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn device_list_error_is_returned_without_opening_capture() {
+        let coordinator = mk(
+            FakePermission(MicPermission::Authorized),
+            ListingBackend {
+                error: Some(String::from(
+                    "capture-unavailable: enumeration failed",
+                )),
+                listed: vec![],
+            },
+        );
+
+        assert_eq!(
+            coordinator.list_devices().unwrap_err(),
+            "capture-unavailable: enumeration failed",
+        );
     }
 
     #[test]
@@ -2141,7 +2326,6 @@ mod tests {
                     request_id,
                     ..
                 } => (*generation, request_id),
-                SessionEvent::DeviceList { .. } => continue, // no gen
             };
             assert_eq!(
                 event_generation, status.generation,

@@ -60,11 +60,11 @@ describe("captureService in Tauri", () => {
       request_id: "request-id",
     };
     mockInvoke.mockResolvedValueOnce(status).mockResolvedValueOnce(true);
-    await expect(startMicTest("request-id", "Mic A"))
+    await expect(startMicTest("request-id", "input-1"))
       .resolves.toEqual(status);
     await expect(cancelCapture("request-id")).resolves.toBe(true);
     expect(mockInvoke).toHaveBeenNthCalledWith(1, "capture_start", {
-      preferredDevice: "Mic A",
+      preferredDeviceId: "input-1",
       requestId: "request-id",
       testMode: true,
     });
@@ -87,18 +87,30 @@ describe("captureService in Tauri", () => {
   it("lists devices and forwards event payloads", async () => {
     const unlisten = vi.fn();
     let callback: ((event: { payload: unknown }) => void) | undefined;
-    mockInvoke.mockResolvedValue(["Mic A"]);
+    const devices = [
+      { available: true, id: "input-1", label: "Mic A" },
+    ];
+    mockInvoke.mockResolvedValue(devices);
     mockListen.mockImplementation(async (_event, handler) => {
       callback = handler as typeof callback;
       return unlisten;
     });
-    await expect(listDevices()).resolves.toEqual(["Mic A"]);
+    await expect(listDevices()).resolves.toEqual(devices);
     const handler = vi.fn();
     await expect(onCaptureEvent(handler)).resolves.toBe(unlisten);
-    callback?.({ payload: { devices: ["Mic A"], kind: "device-list" } });
+    callback?.({
+      payload: {
+        generation: 0,
+        kind: "permission-status",
+        request_id: "permission-1",
+        status: "authorized",
+      },
+    });
     expect(handler).toHaveBeenCalledWith({
-      devices: ["Mic A"],
-      kind: "device-list",
+      generation: 0,
+      kind: "permission-status",
+      request_id: "permission-1",
+      status: "authorized",
     });
   });
 });

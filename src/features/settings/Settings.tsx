@@ -6,6 +6,8 @@ import {
   writingStyles,
 } from "../../domain/settings";
 import { isTauriEnv } from "../../services/capture/captureService";
+import { SYSTEM_DEFAULT_DEVICE_ID } from
+  "../../services/capture/types";
 import { useCaptureState } from "../../services/capture/useCaptureState";
 import type { Appearance } from "../../domain/types";
 
@@ -24,9 +26,14 @@ export function Settings({ onSetup }: SettingsProps) {
   const { settings, state } = useApp();
 
   const {
+    captureReady,
     captureState,
+    deviceListError,
     devices,
+    devicesLoading,
     permissionStatus,
+    prepareDeviceChange,
+    refreshDevices,
     requestMicPermission,
     runMicTest,
     stopMicTest,
@@ -35,20 +42,31 @@ export function Settings({ onSetup }: SettingsProps) {
   const isNative = isTauriEnv();
   const micAuthorized = permissionStatus === "authorized";
   const micTesting = captureState.kind === "test-running";
+  const micSwitching = captureState.kind === "switching-device";
   const micTestDone = captureState.kind === "test-complete";
   const micError =
     captureState.kind === "error" ? captureState.message : null;
 
   const selectedDevice = state.settings.microphone;
-  const availableDevices =
-    devices.length > 0 ? devices : [selectedDevice];
+  const selectedDescriptor = devices.find(
+    (device) => device.id === selectedDevice,
+  );
+  const selectionUnavailable = selectedDevice !== SYSTEM_DEFAULT_DEVICE_ID
+    && (!selectedDescriptor || !selectedDescriptor.available);
+
+  async function handleDeviceChange(deviceId: string) {
+    if (deviceId === selectedDevice) return;
+    if (await prepareDeviceChange()) {
+      settings.update({ key: "microphone", value: deviceId });
+    }
+  }
 
   function handleTestMic() {
     if (micTesting) {
       stopMicTest();
     } else {
       const device =
-        selectedDevice && selectedDevice !== "System default"
+        selectedDevice !== SYSTEM_DEFAULT_DEVICE_ID
           ? selectedDevice
           : undefined;
       void runMicTest(device);
@@ -87,22 +105,48 @@ export function Settings({ onSetup }: SettingsProps) {
 
           <label className="field">Microphone
             <select
-              disabled={!isNative}
-              onChange={(event) => settings.update({
-                key: "microphone",
-                value: event.target.value,
-              })}
+              disabled={!isNative || !captureReady || micSwitching}
+              onChange={(event) => {
+                void handleDeviceChange(event.target.value);
+              }}
+              onFocus={() => { void refreshDevices(); }}
               value={state.settings.microphone}
             >
-              <option value="System default">System default</option>
-              {availableDevices
-                .filter((d) => d !== "System default")
-                .map((name) => (
-                  <option key={name} value={name}>
-                    {name}
+              <option value={SYSTEM_DEFAULT_DEVICE_ID}>System default</option>
+              {selectionUnavailable && !selectedDescriptor && (
+                <option disabled value={selectedDevice}>
+                  Previously selected microphone (unavailable)
+                </option>
+              )}
+              {devices.map((device) => (
+                  <option
+                    disabled={!device.available}
+                    key={device.id}
+                    value={device.id}
+                  >
+                    {device.label}
+                    {device.available ? "" : " (unavailable)"}
                   </option>
                 ))}
             </select>
+            <button
+              className="btn"
+              disabled={
+                !isNative
+                || !captureReady
+                || devicesLoading
+                || micSwitching
+              }
+              onClick={() => { void refreshDevices(); }}
+              type="button"
+            >
+              {devicesLoading ? "Refreshing…" : "Refresh microphones"}
+            </button>
+            {deviceListError && (
+              <span className="form-error" role="alert">
+                {deviceListError}
+              </span>
+            )}
           </label>
 
           <div className="field">
@@ -115,6 +159,10 @@ export function Settings({ onSetup }: SettingsProps) {
                   ? permissionStatus === "denied"
                     ? "Permission denied — enable in System Settings"
                     : "Permission required"
+                  : micSwitching
+                    ? "Waiting for microphone to stop…"
+                  : selectionUnavailable
+                    ? "Selected microphone is unavailable"
                   : micTestDone
                     ? captureState.kind === "test-complete"
                       && captureState.metadata.detected_activity
@@ -133,7 +181,15 @@ export function Settings({ onSetup }: SettingsProps) {
                   Enable Microphone
                 </button>
               ) : (
-                <button className="btn" onClick={handleTestMic}>
+                <button
+                  className="btn"
+                  disabled={
+                    !captureReady
+                    || micSwitching
+                    || selectionUnavailable
+                  }
+                  onClick={handleTestMic}
+                >
                   {micTesting ? "Stop test" : "Test Microphone"}
                 </button>
               )}

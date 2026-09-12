@@ -6,9 +6,14 @@ vi.mock("../../src/services/capture/captureService", () => ({
 }));
 vi.mock("../../src/services/capture/useCaptureState", () => ({
   useCaptureState: () => ({
+    captureReady: true,
     captureState: { kind: "idle" },
+    deviceListError: null,
     devices: [],
+    devicesLoading: false,
     permissionStatus: null,
+    prepareDeviceChange: vi.fn().mockResolvedValue(true),
+    refreshDevices: vi.fn().mockResolvedValue(undefined),
     requestMicPermission: vi.fn(),
     runMicTest: vi.fn(),
     stopMicTest: vi.fn(),
@@ -25,6 +30,8 @@ describe("Settings without a native host", () => {
       .toBeInTheDocument();
     expect(screen.getByLabelText("Microphone")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Unavailable" }))
+      .toBeDisabled();
+    expect(screen.getByRole("button", { name: "Refresh microphones" }))
       .toBeDisabled();
     expect(screen.queryByRole("button", { name: "Enable Microphone" }))
       .not.toBeInTheDocument();

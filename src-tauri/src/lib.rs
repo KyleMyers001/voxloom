@@ -5,7 +5,9 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use capture::{
     coordinator::{CaptureCoordinator, CaptureStatus, SessionEvent},
     permission,
-    stream::{list_input_device_names, DeviceSelection},
+    stream::{
+        DeviceSelection, InputDeviceDescriptor, SYSTEM_DEFAULT_ID,
+    },
 };
 
 // IPC commands
@@ -72,13 +74,13 @@ fn capture_request_permission(app: AppHandle, request_id: String) {
 fn capture_start(
     app: AppHandle,
     coordinator: State<CaptureCoordinator>,
-    preferred_device: Option<String>,
+    preferred_device_id: Option<String>,
     request_id: String,
     test_mode: bool,
 ) -> Result<CaptureStatus, String> {
-    let selection = match preferred_device {
-        Some(name) => DeviceSelection::Named(name),
-        None => DeviceSelection::SystemDefault,
+    let selection = match preferred_device_id {
+        Some(id) if id != SYSTEM_DEFAULT_ID => DeviceSelection::Id(id),
+        _ => DeviceSelection::SystemDefault,
     };
     let app2 = app.clone();
     coordinator
@@ -110,17 +112,12 @@ fn capture_status(
     coordinator.status()
 }
 
-/// Enumerate input device names.
+/// Refresh and enumerate process-local input device descriptors.
 #[tauri::command]
-fn capture_list_devices(app: AppHandle) -> Vec<String> {
-    let devices = list_input_device_names();
-    let _ = app.emit(
-        "capture:event",
-        SessionEvent::DeviceList {
-            devices: devices.clone(),
-        },
-    );
-    devices
+fn capture_list_devices(
+    coordinator: State<CaptureCoordinator>,
+) -> Result<Vec<InputDeviceDescriptor>, String> {
+    coordinator.list_devices()
 }
 
 // Application entry

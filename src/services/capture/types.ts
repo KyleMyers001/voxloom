@@ -2,6 +2,9 @@
 /// No PCM bytes or audio handles cross this boundary.
 
 export type CaptureMode = "full" | "test";
+export type InputDeviceId = string;
+
+export const SYSTEM_DEFAULT_DEVICE_ID: InputDeviceId = "system-default";
 
 export type PermissionStatus =
   | "not-determined"
@@ -13,6 +16,12 @@ export interface CaptureStatus {
   readonly generation: number;
   readonly mode: CaptureMode;
   readonly request_id: string;
+}
+
+export interface InputDeviceDescriptor {
+  readonly available: boolean;
+  readonly id: InputDeviceId;
+  readonly label: string;
 }
 
 export interface TestCaptureMetadata {
@@ -43,7 +52,6 @@ export type CaptureEvent =
     })
   | (SessionCorrelation & { kind: "capture-stopped" })
   | (SessionCorrelation & { kind: "capture-cancelled" })
-  | { devices: string[]; kind: "device-list" }
   | (SessionCorrelation & {
       category: CaptureErrorCategory;
       kind: "capture-error";
@@ -59,6 +67,7 @@ export type CaptureErrorCategory =
 export type CaptureState =
   | { kind: "idle" }
   | { kind: "requesting-permission" }
+  | { kind: "switching-device" }
   | {
       device: string;
       generation: number;

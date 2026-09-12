@@ -82,6 +82,32 @@ describe("useCaptureState request ownership", () => {
     );
   });
 
+  it("blocks device switches until native ownership is known",
+    async () => {
+      const status = deferred<null>();
+      mocks.getCaptureStatus.mockReturnValue(status.promise);
+      const { result } = renderHook(() => useCaptureState());
+      await act(async () => {});
+
+      expect(result.current.captureReady).toBe(false);
+      await expect(result.current.prepareDeviceChange()).resolves.toBe(false);
+
+      status.resolve(null);
+      await waitFor(() => expect(result.current.captureReady).toBe(true));
+      await expect(result.current.prepareDeviceChange()).resolves.toBe(true);
+    });
+
+  it("keeps device changes locked when native status fails", async () => {
+    mocks.getCaptureStatus.mockRejectedValue(new Error("status failed"));
+    const { result } = renderHook(() => useCaptureState());
+
+    await waitFor(() => {
+      expect(result.current.captureState.kind).toBe("error");
+    });
+    expect(result.current.captureReady).toBe(false);
+    await expect(result.current.prepareDeviceChange()).resolves.toBe(false);
+  });
+
   it("blocks a duplicate start before invoking IPC", async () => {
     const start = deferred<{
       generation: number;
@@ -270,5 +296,151 @@ describe("useCaptureState request ownership", () => {
       await act(async () => {});
       expect(unlisten).toHaveBeenCalledOnce();
       expect(mocks.cancelCapture).not.toHaveBeenCalledWith("request-2");
+    });
+
+  it("waits for the matching terminal before allowing a device switch",
+    async () => {
+      const { result } = renderHook(() => useCaptureState());
+      await act(async () => {});
+      await act(async () => { await result.current.runMicTest("input-1"); });
+      const requestId = mocks.startMicTest.mock.calls[0][0];
+
+      let switchResult: boolean | undefined;
+      act(() => {
+        void result.current.prepareDeviceChange().then((ready) => {
+          switchResult = ready;
+        });
+      });
+      await waitFor(() => {
+        expect(mocks.cancelCapture).toHaveBeenCalledWith(requestId);
+      });
+      act(() => handler?.({
+        generation: 99,
+        kind: "capture-cancelled",
+        request_id: "unrelated-request",
+      }));
+      await act(async () => {});
+      expect(switchResult).toBeUndefined();
+
+      act(() => handler?.({
+        generation: 7,
+        kind: "capture-cancelled",
+        request_id: requestId,
+      }));
+      await waitFor(() => expect(switchResult).toBe(true));
+      expect(result.current.captureState.kind).toBe("idle");
+    });
+
+  it("coalesces rapid switches and only the latest may commit", async () => {
+    const { result } = renderHook(() => useCaptureState());
+    await act(async () => {});
+    await act(async () => { await result.current.runMicTest("input-1"); });
+    const requestId = mocks.startMicTest.mock.calls[0][0];
+
+    let first: boolean | undefined;
+    let second: boolean | undefined;
+    act(() => {
+      void result.current.prepareDeviceChange().then((ready) => {
+        first = ready;
+      });
+      void result.current.prepareDeviceChange().then((ready) => {
+        second = ready;
+      });
+    });
+    await waitFor(() => expect(mocks.cancelCapture).toHaveBeenCalledOnce());
+    act(() => handler?.({
+      generation: 7,
+      kind: "capture-cancelled",
+      request_id: requestId,
+    }));
+    await waitFor(() => expect(second).toBe(true));
+    expect(first).toBe(false);
+  });
+
+  it("unmount resolves a pending switch without changing ownership",
+    async () => {
+      const { result, unmount } = renderHook(() => useCaptureState());
+      await act(async () => {});
+      await act(async () => { await result.current.runMicTest("input-1"); });
+      const requestId = mocks.startMicTest.mock.calls[0][0];
+      let switchResult: boolean | undefined;
+      act(() => {
+        void result.current.prepareDeviceChange().then((ready) => {
+          switchResult = ready;
+        });
+      });
+      await waitFor(() => {
+        expect(mocks.cancelCapture).toHaveBeenCalledWith(requestId);
+      });
+
+      unmount();
+      await waitFor(() => expect(switchResult).toBe(false));
+      expect(mocks.cancelCapture).toHaveBeenCalledOnce();
+      expect(mocks.cancelCapture).toHaveBeenCalledWith(requestId);
+    });
+
+  it("fails a switch closed when no terminal arrives", async () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() => useCaptureState());
+      await act(async () => {});
+      await act(async () => { await result.current.runMicTest("input-1"); });
+      let switchResult: boolean | undefined;
+      act(() => {
+        void result.current.prepareDeviceChange().then((ready) => {
+          switchResult = ready;
+        });
+      });
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+      expect(switchResult).toBe(false);
+      expect(result.current.captureState).toMatchObject({
+        category: "capture-unavailable",
+        kind: "error",
+      });
+      expect(mocks.startMicTest).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores stale refresh results and retains devices on list error",
+    async () => {
+      const { result } = renderHook(() => useCaptureState());
+      await act(async () => {});
+      const first = deferred<Array<{
+        available: boolean;
+        id: string;
+        label: string;
+      }>>();
+      const second = deferred<Array<{
+        available: boolean;
+        id: string;
+        label: string;
+      }>>();
+      mocks.listDevices
+        .mockReturnValueOnce(first.promise)
+        .mockReturnValueOnce(second.promise);
+
+      act(() => {
+        void result.current.refreshDevices();
+        void result.current.refreshDevices();
+      });
+      second.resolve([
+        { available: true, id: "input-2", label: "Newest" },
+      ]);
+      await waitFor(() => expect(result.current.devices[0]?.id)
+        .toBe("input-2"));
+      first.resolve([
+        { available: true, id: "input-1", label: "Stale" },
+      ]);
+      await act(async () => {});
+      expect(result.current.devices[0]?.id).toBe("input-2");
+
+      mocks.listDevices.mockRejectedValueOnce(new Error("device list failed"));
+      await act(async () => { await result.current.refreshDevices(); });
+      expect(result.current.devices[0]?.id).toBe("input-2");
+      expect(result.current.deviceListError).toBe(
+        "Microphone capture is not available.",
+      );
     });
 });
