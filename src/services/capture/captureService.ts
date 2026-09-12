@@ -1,46 +1,44 @@
 /// Capture service — BUS-9.
 ///
-/// Wraps Tauri IPC commands for the native capture coordinator.
-/// Guards all calls: when running in a browser (no Tauri runtime), returns
-/// safe fallbacks. No unhandled errors; no live mic in non-Tauri context.
-import { invoke } from "@tauri-apps/api/core";
+/// Uses `isTauri()` from @tauri-apps/api/core (checks the real runtime
+/// marker set by Tauri, not `window.__TAURI__`). Every IPC call is guarded;
+/// non-Tauri environments receive safe fallbacks with no unhandled errors.
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import type { CaptureEvent } from "./types";
 
 const CAPTURE_EVENT = "capture:event";
 
-/// True when running inside a real Tauri app window.
-export function isTauriEnv(): boolean {
-  return typeof window !== "undefined" && "__TAURI__" in window;
-}
+/// Re-export so components can guard Tauri-only UI.
+export { isTauri as isTauriEnv };
 
 /// Subscribe to capture events. Returns no-op unlisten outside Tauri.
 export async function onCaptureEvent(
   handler: (event: CaptureEvent) => void,
 ): Promise<UnlistenFn> {
-  if (!isTauriEnv()) return () => {};
+  if (!isTauri()) return () => {};
   return listen<CaptureEvent>(CAPTURE_EVENT, (e) => handler(e.payload));
 }
 
 /// Query current microphone permission without prompting.
 export function queryPermission(): void {
-  if (!isTauriEnv()) return;
+  if (!isTauri()) return;
   void invoke("capture_query_permission");
 }
 
 /// Request microphone permission (prompts when not-determined).
 export function requestPermission(): void {
-  if (!isTauriEnv()) return;
+  if (!isTauri()) return;
   void invoke("capture_request_permission");
 }
 
 /// Start a 10-second mic test.
-/// Returns the session generation string on success, or an error category.
+/// Returns the session generation string, or an error category string.
 export async function startMicTest(
   preferredDevice?: string,
 ): Promise<string> {
-  if (!isTauriEnv()) return "capture-unavailable";
+  if (!isTauri()) return "capture-unavailable";
   return invoke<string>("capture_start", {
     preferredDevice: preferredDevice ?? null,
     testMode: true,
@@ -52,24 +50,24 @@ export async function cancelCapture(
   generation: string,
 ): Promise<boolean> {
   const gen = parseInt(generation, 10);
-  if (!isTauriEnv() || isNaN(gen)) return false;
+  if (!isTauri() || isNaN(gen)) return false;
   return invoke<boolean>("capture_cancel", { generation: gen });
 }
 
 /// Stop any active capture session. Idempotent.
 export function stopCapture(): void {
-  if (!isTauriEnv()) return;
+  if (!isTauri()) return;
   void invoke("capture_stop");
 }
 
 /// True when a capture session is currently active.
 export async function isCaptureActive(): Promise<boolean> {
-  if (!isTauriEnv()) return false;
+  if (!isTauri()) return false;
   return invoke<boolean>("capture_is_active");
 }
 
 /// Enumerate input device names. Returns [] outside Tauri.
 export async function listDevices(): Promise<string[]> {
-  if (!isTauriEnv()) return [];
+  if (!isTauri()) return [];
   return invoke<string[]>("capture_list_devices");
 }

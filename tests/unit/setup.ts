@@ -3,12 +3,10 @@ import { cleanup } from "@testing-library/react";
 import { afterEach, beforeEach, vi } from "vitest";
 
 // Global mock: Tauri API is unavailable in jsdom.
-// captureService.test.ts and useCaptureState.test.ts declare their own
-// vi.mock for @tauri-apps/api/core and @tauri-apps/api/event, which take
-// precedence within those files. This global ensures other test files that
-// import components using the capture hook do not crash on missing Tauri.
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn().mockResolvedValue(undefined),
+  // isTauri() returns false in jsdom (no real Tauri runtime).
+  isTauri: vi.fn().mockReturnValue(false),
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
@@ -35,8 +33,8 @@ vi.mock("../../src/services/capture/useCaptureState", () => ({
 vi.mock("../../src/services/capture/captureService", () => ({
   cancelCapture: vi.fn().mockResolvedValue(true),
   isCaptureActive: vi.fn().mockResolvedValue(false),
-  // isTauriEnv: returns false in jsdom so Onboarding shows browser path.
-  // Onboarding.test.tsx overrides this for permission-specific scenarios.
+  // Returns false in jsdom: Onboarding shows browser-unavailable note.
+  // Onboarding.test.tsx overrides with its own vi.mock for permission tests.
   isTauriEnv: vi.fn().mockReturnValue(false),
   listDevices: vi.fn().mockResolvedValue([]),
   onCaptureEvent: vi.fn().mockResolvedValue(() => {}),

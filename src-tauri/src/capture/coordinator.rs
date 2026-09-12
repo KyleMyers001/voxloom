@@ -1,14 +1,20 @@
 /// Capture session coordinator — BUS-9.
 ///
-/// Generation-based state machine. Every session gets a monotonically
-/// increasing `generation: u64`. Cancellation is phase-aware:
+/// Generation-based state machine. Every `start_session` call atomically
+/// reserves a `generation` and installs the cancel flag BEFORE spawning the
+/// worker thread. This prevents a window where the client has a generation
+/// ID but no flag to cancel yet.
 ///
-/// - PermissionWait: checked every 100 ms while the OS dialog is open.
-/// - Pre-stream: checked before `StreamBackend::open`.
-/// - CaptureLoop: checked every iteration.
+/// All `SessionEvent` values carry the session `generation` so the renderer
+/// can suppress stale events from a previous session.
 ///
-/// Exactly one terminal `SessionEvent` is emitted per session:
-/// `TestComplete`, `CaptureStopped`, `CaptureCancelled`, or `CaptureError`.
+/// Cancel is observable at every phase:
+/// - PermissionWait: polled every 100 ms while the OS dialog is open.
+/// - Pre-stream: checked before calling `StreamBackend::with_stream`.
+/// - CaptureLoop: checked each iteration.
+///
+/// Exactly one terminal event per session: `TestComplete`, `CaptureStopped`,
+/// `CaptureCancelled`, or `CaptureError`.
 ///
 /// Injectable seams (`PermissionBackend`, `StreamBackend`) let unit tests
 /// exercise the full lifecycle matrix without a live audio device or TCC.
@@ -26,7 +32,7 @@ use crate::capture::{
     consumer::{inspect, TestCaptureMetadata},
     permission::{self, MicPermission},
     resample::Downmixer,
-    stream::{self, DeviceSelection, RING_CAPACITY},
+    stream::{self, DeviceSelection, StreamMeta, RING_CAPACITY},
 };
 
 // ── Constants ─────────────────────────────────────────────────────────────
@@ -36,22 +42,42 @@ const TEST_SAFETY_SECS: u64 = 10;
 const WATCHDOG_IDLE_SECS: u64 = 5;
 const ACTIVITY_THRESHOLD: f32 = 0.001; // −60 dBFS
 
-// ── Public event type ─────────────────────────────────────────────────────
+// ── Session events ────────────────────────────────────────────────────────
 
-/// Events emitted to the renderer. No PCM bytes are ever included.
+/// All events emitted to the renderer. No PCM bytes included.
+/// Every event carries `generation` for stale-event suppression.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum SessionEvent {
-    PermissionStatus { status: PermissionStatus },
-    CaptureStarted { device_name: String },
-    ActivityDetected,
-    TestComplete { metadata: TestCaptureMetadata },
-    /// Clean stop: safety bound reached or explicit stop on a full session.
-    CaptureStopped,
-    /// Session was explicitly cancelled by the user/coordinator.
-    CaptureCancelled,
-    DeviceList { devices: Vec<String> },
-    CaptureError { category: String, message: String },
+    PermissionStatus {
+        generation: u64,
+        status: PermissionStatus,
+    },
+    CaptureStarted {
+        device_name: String,
+        generation: u64,
+    },
+    ActivityDetected {
+        generation: u64,
+    },
+    TestComplete {
+        generation: u64,
+        metadata: TestCaptureMetadata,
+    },
+    CaptureStopped {
+        generation: u64,
+    },
+    CaptureCancelled {
+        generation: u64,
+    },
+    DeviceList {
+        devices: Vec<String>,
+    },
+    CaptureError {
+        category: String,
+        generation: u64,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -79,30 +105,38 @@ impl From<MicPermission> for PermissionStatus {
 /// Permission backend seam.
 pub trait PermissionBackend: Send + Sync + 'static {
     fn query(&self) -> MicPermission;
-    /// Call `callback` with `true` (granted) or `false` (denied).
-    /// The callback may be invoked on any thread.
     fn request(&self, callback: Box<dyn FnOnce(bool) + Send>);
 }
 
-/// Data returned by a successful stream open.
-pub struct StreamHandleData<H> {
-    pub handle: H,
-    #[allow(dead_code)] // Available for multi-channel future use
-    pub channels: u16,
+/// Stream metadata provided to the capture loop by `StreamBackend`.
+/// Mirrors `stream::StreamMeta` for the real backend; tests supply
+/// their own ring consumer + flags.
+pub struct CaptureStreamMeta {
     pub device_name: String,
     pub native_rate: u32,
     pub consumer: ringbuf::HeapCons<f32>,
+    /// Latched true on ring-buffer overflow → `input-limit-exceeded`.
     pub overflow: Arc<AtomicBool>,
+    /// Latched true on device error → `capture-unavailable`.
+    pub stream_error: Arc<AtomicBool>,
+    /// Latched true by fake backend to signal clean end-of-stream in tests.
+    pub clean_stop: Arc<AtomicBool>,
 }
 
 /// Stream backend seam.
+/// `with_stream` calls `f` while the stream is alive, then drops the stream.
+/// The stream need not be `Send`; it lives and dies in the scope of `f`.
 pub trait StreamBackend: Send + Sync + 'static {
-    type StreamHandle: Send + 'static;
-    fn open(
+    fn with_stream<F, R>(
         &self,
         selection: &DeviceSelection,
-    ) -> Result<StreamHandleData<Self::StreamHandle>, String>;
-    #[allow(dead_code)] fn list_devices(&self) -> Vec<String>;
+        f: F,
+    ) -> Result<R, String>
+    where
+        F: FnOnce(CaptureStreamMeta) -> R;
+
+    #[allow(dead_code)]
+    fn list_devices(&self) -> Vec<String>;
 }
 
 // ── Production backends ───────────────────────────────────────────────────
@@ -114,8 +148,6 @@ impl PermissionBackend for RealPermissionBackend {
         permission::query()
     }
     fn request(&self, callback: Box<dyn FnOnce(bool) + Send>) {
-        // Wrap FnOnce in Mutex<Option> so the Fn closure can call it once.
-        use std::sync::Mutex;
         let cb = Mutex::new(Some(callback));
         permission::request(move |granted| {
             if let Some(f) = cb.lock().unwrap().take() {
@@ -128,20 +160,24 @@ impl PermissionBackend for RealPermissionBackend {
 pub struct CpalStreamBackend;
 
 impl StreamBackend for CpalStreamBackend {
-    type StreamHandle = stream::SendStream;
-
-    fn open(
+    fn with_stream<F, R>(
         &self,
         selection: &DeviceSelection,
-    ) -> Result<StreamHandleData<stream::SendStream>, String> {
-        let opened = stream::open_input(selection)?;
-        Ok(StreamHandleData {
-            channels: opened.channels,
-            consumer: opened.consumer,
-            device_name: opened.device_name,
-            handle: opened.stream,
-            native_rate: opened.native_rate,
-            overflow: opened.overflow,
+        f: F,
+    ) -> Result<R, String>
+    where
+        F: FnOnce(CaptureStreamMeta) -> R,
+    {
+        stream::with_stream(selection, |meta: StreamMeta| {
+            let clean_stop = Arc::new(AtomicBool::new(false));
+            f(CaptureStreamMeta {
+                clean_stop,
+                consumer: meta.consumer,
+                device_name: meta.device_name,
+                native_rate: meta.native_rate,
+                overflow: meta.overflow,
+                stream_error: meta.stream_error,
+            })
         })
     }
 
@@ -163,7 +199,7 @@ struct CancelRequest {
     flag: Arc<AtomicBool>,
 }
 
-/// Resets the phase to Idle when dropped (on worker-thread exit).
+/// Resets Phase to Idle when dropped on worker-thread exit.
 struct PhaseGuard(Arc<Mutex<Phase>>);
 impl Drop for PhaseGuard {
     fn drop(&mut self) {
@@ -172,9 +208,6 @@ impl Drop for PhaseGuard {
 }
 
 /// Thread-safe capture coordinator.
-///
-/// The type parameters allow test substitution of permission and stream
-/// backends. Production code uses the default type aliases below.
 pub struct Coordinator<
     P: PermissionBackend = RealPermissionBackend,
     S: StreamBackend = CpalStreamBackend,
@@ -186,7 +219,7 @@ pub struct Coordinator<
     stream_backend: Arc<S>,
 }
 
-/// Production coordinator type alias.
+/// Production type alias.
 pub type CaptureCoordinator = Coordinator;
 
 impl Coordinator {
@@ -208,8 +241,8 @@ impl Default for Coordinator {
 }
 
 impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
-    /// Create with injectable backends (tests only).
-    #[allow(dead_code)] pub fn with_backends(permission: P, stream_backend: S) -> Self {
+    #[allow(dead_code)]
+    pub fn with_backends(permission: P, stream_backend: S) -> Self {
         Coordinator {
             cancel: Mutex::new(None),
             generation: AtomicU64::new(0),
@@ -219,15 +252,13 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
         }
     }
 
-    /// True while a session worker is running.
     pub fn is_active(&self) -> bool {
         *self.phase.lock().unwrap() == Phase::Active
     }
 
-    /// Cancel the session with the given generation. Idempotent.
-    /// Returns false if no matching *active* session exists.
+    /// Cancel the session with the given generation. Returns false when no
+    /// matching active session exists.
     pub fn cancel(&self, generation: u64) -> bool {
-        // Check phase first: if Idle, no active session to cancel.
         if *self.phase.lock().unwrap() == Phase::Idle {
             return false;
         }
@@ -241,23 +272,24 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
         false
     }
 
-    /// Cancel any active session regardless of generation.
     pub fn cancel_any(&self) {
         if let Some(req) = self.cancel.lock().unwrap().as_ref() {
             req.flag.store(true, Ordering::Release);
         }
     }
 
-    /// The generation counter of the most recently started session (0 = none).
-    #[allow(dead_code)] // used in tests via with_backends
+    #[allow(dead_code)]
     pub fn current_generation(&self) -> u64 {
         self.generation.load(Ordering::Acquire)
     }
 
-    /// Start a new capture session. Returns `Ok(generation)` or `Err("busy")`.
+    /// Start a capture session.
     ///
-    /// `emit` is called from the worker thread for each `SessionEvent`.
-    /// It must be `Send + 'static` and must not block the worker.
+    /// Generation and cancel flag are reserved atomically inside the phase
+    /// lock BEFORE spawning the worker thread, so the caller always has a
+    /// valid cancel handle before any async work begins.
+    ///
+    /// Returns `Ok(generation)` or `Err("busy")`.
     pub fn start_session<E>(
         &self,
         selection: DeviceSelection,
@@ -267,28 +299,30 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
     where
         E: Fn(SessionEvent) + Send + 'static,
     {
-        let mut phase = self.phase.lock().unwrap();
-        if *phase == Phase::Active {
-            return Err(String::from("busy"));
-        }
-        *phase = Phase::Active;
-        drop(phase);
+        // Reserve generation + cancel flag atomically within the phase lock.
+        let (gen, cancel_flag, phase_arc) = {
+            let mut phase = self.phase.lock().unwrap();
+            if *phase == Phase::Active {
+                return Err(String::from("busy"));
+            }
+            *phase = Phase::Active;
+            let gen =
+                self.generation.fetch_add(1, Ordering::AcqRel) + 1;
+            let flag = Arc::new(AtomicBool::new(false));
+            *self.cancel.lock().unwrap() = Some(CancelRequest {
+                flag: Arc::clone(&flag),
+                generation: gen,
+            });
+            (gen, flag, Arc::clone(&self.phase))
+        };
 
-        let gen = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
-        let cancel_flag = Arc::new(AtomicBool::new(false));
-
-        *self.cancel.lock().unwrap() = Some(CancelRequest {
-            flag: Arc::clone(&cancel_flag),
-            generation: gen,
-        });
-
-        let phase_arc = Arc::clone(&self.phase);
         let permission = Arc::clone(&self.permission);
         let stream_backend = Arc::clone(&self.stream_backend);
 
         thread::spawn(move || {
             let _guard = PhaseGuard(phase_arc);
             run_session(
+                gen,
                 cancel_flag,
                 selection,
                 test_mode,
@@ -309,6 +343,7 @@ fn is_cancelled(flag: &AtomicBool) -> bool {
 }
 
 fn run_session<P, S, E>(
+    gen: u64,
     cancel: Arc<AtomicBool>,
     selection: DeviceSelection,
     test_mode: bool,
@@ -323,15 +358,16 @@ fn run_session<P, S, E>(
     // Phase 1: Permission query (no prompt).
     let perm = permission.query();
     emit(SessionEvent::PermissionStatus {
+        generation: gen,
         status: perm.into(),
     });
 
     if is_cancelled(&cancel) {
-        emit(SessionEvent::CaptureCancelled);
+        emit(SessionEvent::CaptureCancelled { generation: gen });
         return;
     }
 
-    // Phase 2: Request permission if not-determined.
+    // Phase 2: Request if not-determined, polling cancel every 100 ms.
     let authorized = match permission.query() {
         MicPermission::Authorized => true,
         MicPermission::NotDetermined => {
@@ -339,13 +375,14 @@ fn run_session<P, S, E>(
             permission.request(Box::new(move |granted| {
                 let _ = tx.send(granted);
             }));
-            // Poll for cancellation while waiting for OS dialog.
             let granted = loop {
                 match rx.recv_timeout(Duration::from_millis(100)) {
                     Ok(g) => break g,
                     Err(mpsc::RecvTimeoutError::Timeout) => {
                         if is_cancelled(&cancel) {
-                            emit(SessionEvent::CaptureCancelled);
+                            emit(SessionEvent::CaptureCancelled {
+                                generation: gen,
+                            });
                             return;
                         }
                     }
@@ -359,7 +396,10 @@ fn run_session<P, S, E>(
             } else {
                 PermissionStatus::Denied
             };
-            emit(SessionEvent::PermissionStatus { status });
+            emit(SessionEvent::PermissionStatus {
+                generation: gen,
+                status,
+            });
             granted
         }
         MicPermission::Denied | MicPermission::Restricted => false,
@@ -368,6 +408,7 @@ fn run_session<P, S, E>(
     if !authorized {
         emit(SessionEvent::CaptureError {
             category: String::from("permission-denied"),
+            generation: gen,
             message: String::from(
                 "Microphone access denied. \
                  Enable in System Settings > Privacy & Security.",
@@ -378,82 +419,102 @@ fn run_session<P, S, E>(
 
     // Phase 3: Cancel check before stream open.
     if is_cancelled(&cancel) {
-        emit(SessionEvent::CaptureCancelled);
+        emit(SessionEvent::CaptureCancelled { generation: gen });
         return;
     }
 
-    // Phase 4: Open stream.
-    let mut stream_data = match stream_backend.open(&selection) {
-        Ok(d) => d,
+    // Phase 4: Open stream — stays local to this thread via `with_stream`.
+    // The stream is created, used, and dropped inside this closure.
+    let open_result: Result<(LoopTerminal, CaptureBuffer), String> =
+        stream_backend.with_stream(
+            &selection,
+            |meta: CaptureStreamMeta| {
+                if is_cancelled(&cancel) {
+                    return (LoopTerminal::Cancelled, CaptureBuffer::new());
+                }
+
+                let mut downmixer =
+                    match Downmixer::new(meta.native_rate) {
+                        Ok(d) => d,
+                        Err(e) => return (
+                            LoopTerminal::Error(
+                                String::from("capture-unavailable"),
+                                e,
+                            ),
+                            CaptureBuffer::new(),
+                        ),
+                    };
+
+                emit(SessionEvent::CaptureStarted {
+                    device_name: meta.device_name.clone(),
+                    generation: gen,
+                });
+
+                let mut buffer = CaptureBuffer::new();
+                let bound = Duration::from_secs(
+                    if test_mode {
+                        TEST_SAFETY_SECS
+                    } else {
+                        FULL_SAFETY_SECS
+                    },
+                );
+                let start = Instant::now();
+                let mut last_sample = Instant::now();
+                let mut activity_emitted = false;
+                let mut consumer = meta.consumer;
+
+                let term = capture_loop(
+                    &mut consumer,
+                    &meta.overflow,
+                    &meta.stream_error,
+                    &meta.clean_stop,
+                    &cancel,
+                    &mut downmixer,
+                    &mut buffer,
+                    bound,
+                    &mut last_sample,
+                    &mut activity_emitted,
+                    start,
+                    gen,
+                    emit,
+                );
+                (term, buffer)
+            },
+        );
+
+    let (term, buffer) = match open_result {
         Err(e) => {
             emit(SessionEvent::CaptureError {
                 category: String::from("capture-unavailable"),
+                generation: gen,
                 message: e,
             });
             return;
         }
+        Ok(pair) => pair,
     };
 
-    // Phase 5: Downmixer (mono; stream already downmixes channels).
-    let mut downmixer = match Downmixer::new(stream_data.native_rate) {
-        Ok(d) => d,
-        Err(e) => {
-            emit(SessionEvent::CaptureError {
-                category: String::from("capture-unavailable"),
-                message: e,
-            });
-            return;
-        }
-    };
-
-    emit(SessionEvent::CaptureStarted {
-        device_name: stream_data.device_name.clone(),
-    });
-
-    // Phase 6: Capture loop.
-    let mut buffer = CaptureBuffer::new();
-    let bound = Duration::from_secs(
-        if test_mode { TEST_SAFETY_SECS } else { FULL_SAFETY_SECS },
-    );
-    let start = Instant::now();
-    let mut last_sample = Instant::now();
-    let mut activity_emitted = false;
-
-    let terminal = capture_loop(
-        &mut stream_data.consumer,
-        &stream_data.overflow,
-        &cancel,
-        &mut downmixer,
-        &mut buffer,
-        bound,
-        &mut last_sample,
-        &mut activity_emitted,
-        start,
-        emit,
-    );
-
-    // Drop stream before consuming buffer.
-    drop(stream_data.handle);
-
-    match terminal {
+    match term {
         LoopTerminal::Clean => {
             if test_mode {
                 emit(SessionEvent::TestComplete {
+                    generation: gen,
                     metadata: inspect(buffer),
                 });
             } else {
                 drop(buffer);
-                emit(SessionEvent::CaptureStopped);
+                emit(SessionEvent::CaptureStopped { generation: gen });
             }
         }
         LoopTerminal::Cancelled => {
             drop(buffer);
-            emit(SessionEvent::CaptureCancelled);
+            emit(SessionEvent::CaptureCancelled { generation: gen });
         }
         LoopTerminal::Error(cat, msg) => {
             drop(buffer);
             emit(SessionEvent::CaptureError {
                 category: cat,
+                generation: gen,
                 message: msg,
             });
         }
@@ -468,12 +529,16 @@ enum LoopTerminal {
     Error(String, String),
 }
 
-/// Drains the ring buffer, resamples, accumulates into `buffer`.
-/// Emits `ActivityDetected` exactly once when audio is detected.
-/// Returns exactly one terminal.
+/// Drain ring buffer, resample, accumulate, detect activity.
+/// Both `overflow` and `stream_error` are checked each iteration with
+/// distinct error categories.
+/// `clean_stop` is a test-only seam; real backends always leave it false.
+#[allow(clippy::too_many_arguments)]
 fn capture_loop<E: Fn(SessionEvent)>(
     consumer: &mut ringbuf::HeapCons<f32>,
     overflow: &AtomicBool,
+    stream_error: &AtomicBool,
+    clean_stop: &AtomicBool,
     cancel: &AtomicBool,
     downmixer: &mut Downmixer,
     buffer: &mut CaptureBuffer,
@@ -481,9 +546,9 @@ fn capture_loop<E: Fn(SessionEvent)>(
     last_sample: &mut Instant,
     activity_emitted: &mut bool,
     start: Instant,
+    gen: u64,
     emit: &E,
 ) -> LoopTerminal {
-    // Preallocated drain buffer; no per-iteration heap allocation.
     let mut drain_buf = vec![0.0f32; RING_CAPACITY];
 
     loop {
@@ -509,7 +574,7 @@ fn capture_loop<E: Fn(SessionEvent)>(
                 && mono.iter().any(|&s| s.abs() >= ACTIVITY_THRESHOLD)
             {
                 *activity_emitted = true;
-                emit(SessionEvent::ActivityDetected);
+                emit(SessionEvent::ActivityDetected { generation: gen });
             }
 
             if buffer.push(&mono).is_err() {
@@ -522,6 +587,7 @@ fn capture_loop<E: Fn(SessionEvent)>(
             }
         }
 
+        // Distinct error categories for distinct failure modes.
         if overflow.load(Ordering::Acquire) {
             return LoopTerminal::Error(
                 String::from("input-limit-exceeded"),
@@ -529,21 +595,38 @@ fn capture_loop<E: Fn(SessionEvent)>(
             );
         }
 
+        if stream_error.load(Ordering::Acquire) {
+            return LoopTerminal::Error(
+                String::from("capture-unavailable"),
+                String::from(
+                    "Audio device error (disconnect or revocation).",
+                ),
+            );
+        }
+
+        // Test-only: clean end-of-stream signal from fake backend.
+        if clean_stop.load(Ordering::Acquire) {
+            if let Ok(tail) = downmixer.flush() {
+                let _ = buffer.push(&tail);
+            }
+            return LoopTerminal::Clean;
+        }
+
         if start.elapsed() >= bound {
-            let tail = match downmixer.flush() {
-                Ok(t) => t,
+            match downmixer.flush() {
+                Ok(tail) if !tail.is_empty() => {
+                    if buffer.push(&tail).is_err() {
+                        return LoopTerminal::Error(
+                            String::from("input-limit-exceeded"),
+                            String::from("Flush overflow."),
+                        );
+                    }
+                }
+                Ok(_) => {}
                 Err(e) => {
                     return LoopTerminal::Error(
                         String::from("capture-unavailable"),
                         e,
-                    );
-                }
-            };
-            if !tail.is_empty() {
-                if buffer.push(&tail).is_err() {
-                    return LoopTerminal::Error(
-                        String::from("input-limit-exceeded"),
-                        String::from("Flush overflow."),
                     );
                 }
             }
@@ -571,7 +654,7 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
 
-    // ── Test backends ─────────────────────────────────────────────────
+    // ── Fake backends ─────────────────────────────────────────────────
 
     #[derive(Clone, Copy)]
     struct FakePermission(MicPermission);
@@ -588,17 +671,35 @@ mod tests {
     struct FakeStreamBackend {
         samples: Vec<f32>,
         open_error: Option<String>,
-        /// Pre-latch the overflow flag to simulate ring buffer overflow.
+        /// Pre-latch ring overflow flag (→ input-limit-exceeded).
         simulate_overflow: bool,
+        /// Pre-latch stream_error flag (→ capture-unavailable).
+        simulate_stream_error: bool,
+        /// Signal clean end-of-stream after samples are consumed.
+        simulate_clean_stop: bool,
+    }
+
+    impl FakeStreamBackend {
+        fn new(samples: Vec<f32>) -> Self {
+            FakeStreamBackend {
+                open_error: None,
+                samples,
+                simulate_clean_stop: false,
+                simulate_overflow: false,
+                simulate_stream_error: false,
+            }
+        }
     }
 
     impl StreamBackend for FakeStreamBackend {
-        type StreamHandle = ();
-
-        fn open(
+        fn with_stream<F, R>(
             &self,
             _selection: &DeviceSelection,
-        ) -> Result<StreamHandleData<()>, String> {
+            f: F,
+        ) -> Result<R, String>
+        where
+            F: FnOnce(CaptureStreamMeta) -> R,
+        {
             if let Some(ref e) = self.open_error {
                 return Err(e.clone());
             }
@@ -609,17 +710,21 @@ mod tests {
                 let _ = prod.try_push(s);
             }
             drop(prod);
-            let overflow = Arc::new(AtomicBool::new(
-                self.simulate_overflow,
-            ));
-            Ok(StreamHandleData {
-                channels: 1,
+            let meta = CaptureStreamMeta {
+                clean_stop: Arc::new(AtomicBool::new(
+                    self.simulate_clean_stop,
+                )),
                 consumer: cons,
                 device_name: String::from("Fake"),
-                handle: (),
                 native_rate: 16_000,
-                overflow,
-            })
+                overflow: Arc::new(AtomicBool::new(
+                    self.simulate_overflow,
+                )),
+                stream_error: Arc::new(AtomicBool::new(
+                    self.simulate_stream_error,
+                )),
+            };
+            Ok(f(meta))
         }
 
         fn list_devices(&self) -> Vec<String> {
@@ -638,7 +743,8 @@ mod tests {
         impl Fn(SessionEvent) + Send + 'static + Clone,
         Arc<Mutex<Vec<String>>>,
     ) {
-        let log: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let log: Arc<Mutex<Vec<String>>> =
+            Arc::new(Mutex::new(Vec::new()));
         let log2 = Arc::clone(&log);
         let emit = move |e: SessionEvent| {
             log2.lock().unwrap().push(event_tag(&e));
@@ -648,19 +754,27 @@ mod tests {
 
     fn event_tag(e: &SessionEvent) -> String {
         match e {
-            SessionEvent::PermissionStatus { status } => {
+            SessionEvent::PermissionStatus { status, .. } => {
                 format!("perm:{status:?}")
             }
             SessionEvent::CaptureStarted { .. } => {
                 String::from("started")
             }
-            SessionEvent::ActivityDetected => String::from("activity"),
+            SessionEvent::ActivityDetected { .. } => {
+                String::from("activity")
+            }
             SessionEvent::TestComplete { .. } => {
                 String::from("test-complete")
             }
-            SessionEvent::CaptureStopped => String::from("stopped"),
-            SessionEvent::CaptureCancelled => String::from("cancelled"),
-            SessionEvent::DeviceList { .. } => String::from("device-list"),
+            SessionEvent::CaptureStopped { .. } => {
+                String::from("stopped")
+            }
+            SessionEvent::CaptureCancelled { .. } => {
+                String::from("cancelled")
+            }
+            SessionEvent::DeviceList { .. } => {
+                String::from("device-list")
+            }
             SessionEvent::CaptureError { category, .. } => {
                 format!("error:{category}")
             }
@@ -702,33 +816,50 @@ mod tests {
         }
     }
 
+    fn authorized_backend(samples: Vec<f32>) -> (
+        FakePermission,
+        FakeStreamBackend,
+    ) {
+        (FakePermission(MicPermission::Authorized), FakeStreamBackend::new(samples))
+    }
+
     // ── Invariants ────────────────────────────────────────────────────
 
     #[test]
     fn starts_idle() {
-        let c = mk(
-            FakePermission(MicPermission::Authorized),
-            FakeStreamBackend { open_error: None, samples: vec![], simulate_overflow: false },
-        );
-        assert!(!c.is_active());
+        let (p, s) = authorized_backend(vec![]);
+        assert!(!mk(p, s).is_active());
     }
 
     #[test]
     fn busy_rejects_second_start() {
-        let c = mk(
-            FakePermission(MicPermission::Authorized),
-            FakeStreamBackend { open_error: None, samples: vec![], simulate_overflow: false },
-        );
-        let (emit1, _) = mk_emit();
-        let (emit2, _) = mk_emit();
+        let (p, s) = authorized_backend(vec![]);
+        let c = mk(p, s);
+        let (e1, _) = mk_emit();
+        let (e2, _) = mk_emit();
         let gen = c
-            .start_session(DeviceSelection::SystemDefault, true, emit1)
+            .start_session(DeviceSelection::SystemDefault, true, e1)
             .unwrap();
         assert_eq!(
-            c.start_session(DeviceSelection::SystemDefault, true, emit2),
+            c.start_session(DeviceSelection::SystemDefault, true, e2),
             Err(String::from("busy"))
         );
         c.cancel(gen);
+        idle_wait(&c, Duration::from_secs(3));
+    }
+
+    #[test]
+    fn generation_and_cancel_reserved_before_spawn() {
+        // After start_session returns Ok(gen), cancel(gen) must return
+        // true — the flag is installed before the worker thread runs.
+        let (p, s) = authorized_backend(vec![]);
+        let c = mk(p, s);
+        let (emit, _) = mk_emit();
+        let gen = c
+            .start_session(DeviceSelection::SystemDefault, true, emit)
+            .unwrap();
+        // Immediately cancel; the flag must already be registered.
+        assert!(c.cancel(gen), "cancel flag must be registered before thread");
         idle_wait(&c, Duration::from_secs(3));
     }
 
@@ -736,10 +867,8 @@ mod tests {
 
     #[test]
     fn authorized_proceeds_to_started() {
-        let c = mk(
-            FakePermission(MicPermission::Authorized),
-            FakeStreamBackend { open_error: None, samples: vec![0.5], simulate_overflow: false },
-        );
+        let (p, s) = authorized_backend(vec![0.5]);
+        let c = mk(p, s);
         let (emit, log) = mk_emit();
         c.start_session(DeviceSelection::SystemDefault, true, emit)
             .unwrap();
@@ -750,7 +879,7 @@ mod tests {
     fn denied_emits_permission_error_not_started() {
         let c = mk(
             FakePermission(MicPermission::Denied),
-            FakeStreamBackend { open_error: None, samples: vec![], simulate_overflow: false },
+            FakeStreamBackend::new(vec![]),
         );
         let (emit, log) = mk_emit();
         c.start_session(DeviceSelection::SystemDefault, false, emit)
@@ -764,10 +893,10 @@ mod tests {
     }
 
     #[test]
-    fn restricted_emits_permission_error() {
+    fn restricted_emits_permission_error_with_status() {
         let c = mk(
             FakePermission(MicPermission::Restricted),
-            FakeStreamBackend { open_error: None, samples: vec![], simulate_overflow: false },
+            FakeStreamBackend::new(vec![]),
         );
         let (emit, log) = mk_emit();
         c.start_session(DeviceSelection::SystemDefault, false, emit)
@@ -777,19 +906,19 @@ mod tests {
             "error:permission-denied",
             Duration::from_secs(3),
         ));
-        let events = log.lock().unwrap().clone();
-        assert!(events.iter().any(|e| e.contains("Restricted")));
+        // PermissionStatus::Restricted must appear in the event log.
+        assert!(
+            log.lock().unwrap().iter().any(|e| e.contains("Restricted")),
+            "Restricted permission status must be emitted"
+        );
     }
 
     // ── Cancel at every phase ─────────────────────────────────────────
 
     #[test]
-    fn cancel_before_open_emits_cancelled_not_started() {
-        // Pre-authorised so no dialog wait; cancel immediately.
-        let c = mk(
-            FakePermission(MicPermission::Authorized),
-            FakeStreamBackend { open_error: None, samples: vec![], simulate_overflow: false },
-        );
+    fn cancel_before_open_emits_exactly_one_terminal() {
+        let (p, s) = authorized_backend(vec![]);
+        let c = mk(p, s);
         let (emit, log) = mk_emit();
         let gen = c
             .start_session(DeviceSelection::SystemDefault, true, emit)
@@ -797,24 +926,24 @@ mod tests {
         c.cancel(gen);
         idle_wait(&c, Duration::from_secs(3));
         let events = log.lock().unwrap().clone();
-        // Terminal must be exactly one of: cancelled, test-complete, stopped.
-        let terminal: Vec<_> = events
-            .iter()
-            .filter(|e| {
-                e.starts_with("error:")
-                    || *e == "cancelled"
-                    || *e == "stopped"
-                    || *e == "test-complete"
-            })
-            .collect();
-        assert_eq!(terminal.len(), 1, "expected exactly one terminal; got {events:?}");
+        let terminals: Vec<_> = events.iter().filter(|e| {
+            e.starts_with("error:")
+                || *e == "cancelled"
+                || *e == "stopped"
+                || *e == "test-complete"
+        }).collect();
+        assert_eq!(
+            terminals.len(),
+            1,
+            "exactly one terminal; got: {events:?}"
+        );
     }
 
     #[test]
-    fn cancel_after_session_ends_is_noop() {
+    fn cancel_after_session_ends_returns_false() {
         let c = mk(
             FakePermission(MicPermission::Denied),
-            FakeStreamBackend { open_error: None, samples: vec![], simulate_overflow: false },
+            FakeStreamBackend::new(vec![]),
         );
         let (emit, log) = mk_emit();
         let gen = c
@@ -827,11 +956,8 @@ mod tests {
 
     #[test]
     fn stale_generation_cancel_returns_false() {
-        let c = mk(
-            FakePermission(MicPermission::Authorized),
-            FakeStreamBackend { open_error: None, samples: vec![], simulate_overflow: false },
-        );
-        assert!(!c.cancel(999));
+        let (p, s) = authorized_backend(vec![]);
+        assert!(!mk(p, s).cancel(999));
     }
 
     // ── Stream error ──────────────────────────────────────────────────
@@ -844,8 +970,7 @@ mod tests {
                 open_error: Some(String::from(
                     "capture-unavailable: no device",
                 )),
-                samples: vec![],
-                simulate_overflow: false,
+                ..FakeStreamBackend::new(vec![])
             },
         );
         let (emit, log) = mk_emit();
@@ -858,74 +983,103 @@ mod tests {
         ));
     }
 
-    // ── Test mode ─────────────────────────────────────────────────────
-
     #[test]
-    fn test_mode_with_activity_emits_test_complete() {
-        // Feed audible samples + simulate ring overflow so the loop
-        // terminates with input-limit-exceeded rather than waiting 5 s
-        // for the watchdog.
-        // The activity event must fire before termination.
+    fn device_stream_error_flag_emits_capture_unavailable() {
+        // Stream error (device disconnect) must map to capture-unavailable,
+        // NOT input-limit-exceeded.
         let c = mk(
             FakePermission(MicPermission::Authorized),
             FakeStreamBackend {
-                open_error: None,
+                simulate_stream_error: true,
+                ..FakeStreamBackend::new(vec![])
+            },
+        );
+        let (emit, log) = mk_emit();
+        c.start_session(DeviceSelection::SystemDefault, false, emit)
+            .unwrap();
+        assert!(
+            wait_for(
+                &log,
+                "error:capture-unavailable",
+                Duration::from_secs(3),
+            ),
+            "stream error must be capture-unavailable"
+        );
+        assert!(
+            !log.lock()
+                .unwrap()
+                .contains(&String::from("error:input-limit-exceeded")),
+            "stream error must NOT be input-limit-exceeded"
+        );
+    }
+
+    // ── Test mode ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_mode_with_activity_must_emit_test_complete() {
+        // Use simulate_clean_stop: true so the loop terminates cleanly
+        // (not via watchdog) and the coordinator emits TestComplete.
+        let c = mk(
+            FakePermission(MicPermission::Authorized),
+            FakeStreamBackend {
                 samples: vec![0.5f32; 160],
-                simulate_overflow: false,
+                simulate_clean_stop: true,
+                ..FakeStreamBackend::new(vec![])
             },
         );
         let (emit, log) = mk_emit();
         c.start_session(DeviceSelection::SystemDefault, true, emit)
             .unwrap();
-        // Wait up to 8 s; the watchdog fires after 6 s total
-        // (1 s grace + 5 s idle).
-        let has_terminal = wait_for(&log, "test-complete", Duration::from_secs(8))
-            || wait_for(&log, "error:capture-unavailable", Duration::from_millis(100))
-            || wait_for(&log, "stopped", Duration::from_millis(100));
-        assert!(has_terminal, "expected a terminal event");
+        // Must see test-complete; errors or stopped are failures.
+        assert!(
+            wait_for(&log, "test-complete", Duration::from_secs(5)),
+            "expected test-complete; got: {:?}",
+            log.lock().unwrap()
+        );
         assert!(
             log.lock().unwrap().contains(&String::from("activity")),
-            "0.5 samples should trigger activity"
+            "0.5 samples must trigger activity"
         );
+        // Exactly one terminal.
+        let events = log.lock().unwrap().clone();
+        let terminals: Vec<_> = events.iter().filter(|e| {
+            e.starts_with("error:")
+                || *e == "cancelled"
+                || *e == "stopped"
+                || *e == "test-complete"
+        }).collect();
+        assert_eq!(terminals.len(), 1, "exactly one terminal: {events:?}");
     }
 
     #[test]
     fn test_mode_silence_no_activity_event() {
-        // Feed silence + wait for watchdog to terminate.
         let c = mk(
             FakePermission(MicPermission::Authorized),
             FakeStreamBackend {
-                open_error: None,
                 samples: vec![0.0f32; 160],
-                simulate_overflow: false,
+                simulate_clean_stop: true,
+                ..FakeStreamBackend::new(vec![])
             },
         );
         let (emit, log) = mk_emit();
         c.start_session(DeviceSelection::SystemDefault, true, emit)
             .unwrap();
-        // Wait for any terminal event.
-        wait_for(&log, "test-complete", Duration::from_secs(8));
-        wait_for(&log, "error:capture-unavailable", Duration::from_millis(100));
-        wait_for(&log, "stopped", Duration::from_millis(100));
+        assert!(wait_for(&log, "test-complete", Duration::from_secs(5)));
         assert!(
             !log.lock().unwrap().contains(&String::from("activity")),
-            "silence should not emit activity"
+            "silence must not emit activity"
         );
     }
 
-    // ── Buffer overflow ───────────────────────────────────────────────
+    // ── Overflow flags ────────────────────────────────────────────────
 
     #[test]
-    fn ring_overflow_flag_emits_input_limit_exceeded() {
-        // Pre-latch the ring overflow flag so the coordinator terminates
-        // immediately with input-limit-exceeded without needing to fill
-        // the 120s CaptureBuffer (which would be impractical in tests).
+    fn ring_overflow_emits_input_limit_exceeded() {
         let c = mk(
             FakePermission(MicPermission::Authorized),
             FakeStreamBackend {
-                open_error: None,
-                samples: vec![],
                 simulate_overflow: true,
+                ..FakeStreamBackend::new(vec![])
             },
         );
         let (emit, log) = mk_emit();
@@ -937,8 +1091,7 @@ mod tests {
                 "error:input-limit-exceeded",
                 Duration::from_secs(5),
             ),
-            "expected input-limit-exceeded from ring overflow; got: {:?}",
-            log.lock().unwrap()
+            "ring overflow must be input-limit-exceeded"
         );
     }
 
@@ -948,7 +1101,7 @@ mod tests {
     fn generations_increment_per_session() {
         let c = mk(
             FakePermission(MicPermission::Denied),
-            FakeStreamBackend { open_error: None, samples: vec![], simulate_overflow: false },
+            FakeStreamBackend::new(vec![]),
         );
         assert_eq!(c.current_generation(), 0);
         let (e1, l1) = mk_emit();
@@ -966,17 +1119,86 @@ mod tests {
         c.cancel(g2);
     }
 
+    #[test]
+    fn all_events_carry_generation() {
+        // Verify that the PermissionStatus event from a session carries the
+        // correct generation by checking the log tag includes generation info.
+        // (Full generation field verification requires matching event structs.)
+        let c = mk(
+            FakePermission(MicPermission::Authorized),
+            FakeStreamBackend {
+                samples: vec![0.5f32; 80],
+                simulate_clean_stop: true,
+                ..FakeStreamBackend::new(vec![])
+            },
+        );
+        let events: Arc<Mutex<Vec<SessionEvent>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let events2 = Arc::clone(&events);
+        let gen = c
+            .start_session(
+                DeviceSelection::SystemDefault,
+                true,
+                move |e: SessionEvent| {
+                    events2.lock().unwrap().push(e.clone());
+                },
+            )
+            .unwrap();
+        // Wait for TestComplete.
+        let start = Instant::now();
+        loop {
+            let has_tc = events.lock().unwrap().iter().any(|e| {
+                matches!(e, SessionEvent::TestComplete { .. })
+            });
+            if has_tc || start.elapsed() > Duration::from_secs(5) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        let evs = events.lock().unwrap().clone();
+        // Every event must carry the expected generation.
+        for ev in &evs {
+            let ev_gen = match ev {
+                SessionEvent::PermissionStatus { generation, .. } => {
+                    *generation
+                }
+                SessionEvent::CaptureStarted { generation, .. } => {
+                    *generation
+                }
+                SessionEvent::ActivityDetected { generation } => {
+                    *generation
+                }
+                SessionEvent::TestComplete { generation, .. } => {
+                    *generation
+                }
+                SessionEvent::CaptureStopped { generation } => {
+                    *generation
+                }
+                SessionEvent::CaptureCancelled { generation } => {
+                    *generation
+                }
+                SessionEvent::CaptureError { generation, .. } => {
+                    *generation
+                }
+                SessionEvent::DeviceList { .. } => continue, // no gen
+            };
+            assert_eq!(
+                ev_gen, gen,
+                "event {ev:?} has wrong generation"
+            );
+        }
+    }
+
     // ── capture_loop unit ─────────────────────────────────────────────
 
     #[test]
-    fn capture_loop_accumulates_and_cancel_terminates() {
+    fn capture_loop_accumulates_then_cancel_terminates() {
         use ringbuf::traits::{Producer, Split};
         let rb = ringbuf::HeapRb::<f32>::new(RING_CAPACITY);
         let (mut prod, mut cons) = rb.split();
         for _ in 0..480 {
             let _ = prod.try_push(0.5f32);
         }
-        // Leave producer alive so Disconnected is not the exit.
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel2 = Arc::clone(&cancel);
         thread::spawn(move || {
@@ -985,15 +1207,19 @@ mod tests {
         });
 
         let overflow = AtomicBool::new(false);
+        let stream_error = AtomicBool::new(false);
+        let clean_stop = AtomicBool::new(false);
         let mut dm = Downmixer::new(16_000).unwrap();
         let mut buf = CaptureBuffer::new();
         let mut last = Instant::now();
         let mut act = false;
-        let emit = |_: SessionEvent| {};
+        let emit_noop = |_: SessionEvent| {};
 
         let term = capture_loop(
             &mut cons,
             &overflow,
+            &stream_error,
+            &clean_stop,
             &cancel,
             &mut dm,
             &mut buf,
@@ -1001,7 +1227,8 @@ mod tests {
             &mut last,
             &mut act,
             Instant::now(),
-            &emit,
+            1,
+            &emit_noop,
         );
 
         assert!(
@@ -1014,33 +1241,78 @@ mod tests {
     }
 
     #[test]
-    fn capture_loop_ring_overflow_returns_error() {
-        use ringbuf::traits::{Split};
-        let rb = ringbuf::HeapRb::<f32>::new(8);
-        let (mut cons) = rb.split().1;
-        let overflow = AtomicBool::new(true); // Pre-latched.
+    fn capture_loop_overflow_returns_input_limit_exceeded() {
+        use ringbuf::traits::Split;
+        let mut cons = ringbuf::HeapRb::<f32>::new(8).split().1;
+        let overflow = AtomicBool::new(true);
+        let stream_error = AtomicBool::new(false);
+        let clean_stop = AtomicBool::new(false);
         let cancel = AtomicBool::new(false);
         let mut dm = Downmixer::new(16_000).unwrap();
         let mut buf = CaptureBuffer::new();
         let mut last = Instant::now();
         let mut act = false;
-        let emit = |_: SessionEvent| {};
+        let emit_noop = |_: SessionEvent| {};
 
         let term = capture_loop(
-            &mut cons,
-            &overflow,
-            &cancel,
-            &mut dm,
-            &mut buf,
-            Duration::from_secs(120),
-            &mut last,
-            &mut act,
-            Instant::now(),
-            &emit,
+            &mut cons, &overflow, &stream_error, &clean_stop,
+            &cancel, &mut dm, &mut buf,
+            Duration::from_secs(120), &mut last, &mut act,
+            Instant::now(), 1, &emit_noop,
         );
         assert!(
-            matches!(term, LoopTerminal::Error(ref cat, _)
-                if cat == "input-limit-exceeded"),
+            matches!(term, LoopTerminal::Error(ref c, _)
+                if c == "input-limit-exceeded"),
         );
+    }
+
+    #[test]
+    fn capture_loop_stream_error_returns_capture_unavailable() {
+        use ringbuf::traits::Split;
+        let mut cons = ringbuf::HeapRb::<f32>::new(8).split().1;
+        let overflow = AtomicBool::new(false);
+        let stream_error = AtomicBool::new(true);
+        let clean_stop = AtomicBool::new(false);
+        let cancel = AtomicBool::new(false);
+        let mut dm = Downmixer::new(16_000).unwrap();
+        let mut buf = CaptureBuffer::new();
+        let mut last = Instant::now();
+        let mut act = false;
+        let emit_noop = |_: SessionEvent| {};
+
+        let term = capture_loop(
+            &mut cons, &overflow, &stream_error, &clean_stop,
+            &cancel, &mut dm, &mut buf,
+            Duration::from_secs(120), &mut last, &mut act,
+            Instant::now(), 1, &emit_noop,
+        );
+        assert!(
+            matches!(term, LoopTerminal::Error(ref c, _)
+                if c == "capture-unavailable"),
+            "stream error must be capture-unavailable"
+        );
+    }
+
+    #[test]
+    fn capture_loop_clean_stop_returns_clean() {
+        use ringbuf::traits::Split;
+        let mut cons = ringbuf::HeapRb::<f32>::new(8).split().1;
+        let overflow = AtomicBool::new(false);
+        let stream_error = AtomicBool::new(false);
+        let clean_stop = AtomicBool::new(true); // Pre-set.
+        let cancel = AtomicBool::new(false);
+        let mut dm = Downmixer::new(16_000).unwrap();
+        let mut buf = CaptureBuffer::new();
+        let mut last = Instant::now();
+        let mut act = false;
+        let emit_noop = |_: SessionEvent| {};
+
+        let term = capture_loop(
+            &mut cons, &overflow, &stream_error, &clean_stop,
+            &cancel, &mut dm, &mut buf,
+            Duration::from_secs(120), &mut last, &mut act,
+            Instant::now(), 1, &emit_noop,
+        );
+        assert!(matches!(term, LoopTerminal::Clean));
     }
 }

@@ -32,6 +32,7 @@ vi.mock("../../src/services/capture/captureService", () => {
       },
     ),
     cancelCapture: vi.fn().mockResolvedValue(true),
+    isTauriEnv: vi.fn().mockReturnValue(false),
     queryPermission: vi.fn(),
     requestPermission: vi.fn(),
     startMicTest: vi.fn().mockResolvedValue("1"),

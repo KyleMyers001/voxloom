@@ -11,21 +11,23 @@ use capture::{
 // ── IPC commands ──────────────────────────────────────────────────────────
 
 /// Query the current microphone permission without prompting.
-/// Emits a `capture:event` PermissionStatus event.
+/// Emits a `capture:event` PermissionStatus with generation 0 (not a session).
 #[tauri::command]
 fn capture_query_permission(
     app: AppHandle,
     _coordinator: State<CaptureCoordinator>,
 ) {
     let status = permission::query();
-    let event = SessionEvent::PermissionStatus {
-        status: status.into(),
-    };
-    let _ = app.emit("capture:event", event);
+    let _ = app.emit(
+        "capture:event",
+        SessionEvent::PermissionStatus {
+            generation: 0,
+            status: status.into(),
+        },
+    );
 }
 
-/// Request microphone permission (prompts when NotDetermined).
-/// Emits `capture:event` PermissionStatus on completion.
+/// Request microphone permission. Emits updated PermissionStatus.
 #[tauri::command]
 fn capture_request_permission(app: AppHandle) {
     use capture::permission::MicPermission;
@@ -41,7 +43,10 @@ fn capture_request_permission(app: AppHandle) {
                 };
                 let _ = app2.emit(
                     "capture:event",
-                    SessionEvent::PermissionStatus { status },
+                    SessionEvent::PermissionStatus {
+                        generation: 0,
+                        status,
+                    },
                 );
             });
         }
@@ -49,6 +54,7 @@ fn capture_request_permission(app: AppHandle) {
             let _ = app.emit(
                 "capture:event",
                 SessionEvent::PermissionStatus {
+                    generation: 0,
                     status: other.into(),
                 },
             );
@@ -57,11 +63,7 @@ fn capture_request_permission(app: AppHandle) {
 }
 
 /// Start a capture session.
-///
-/// `preferred_device`: exact device name, or null for system default.
-/// `test_mode`: auto-stops after 10 s and emits TestComplete.
-///
-/// Returns `"ok"` or a stable error string.
+/// Returns the session generation as a string (e.g., `"1"`), or an error.
 #[tauri::command]
 fn capture_start(
     app: AppHandle,
@@ -79,16 +81,15 @@ fn capture_start(
             let _ = app2.emit("capture:event", event);
         })
         .map(|gen| gen.to_string())
-        .map_err(|e| e)
 }
 
-/// Stop (cancel) the active capture session. Idempotent.
+/// Cancel any active capture session.
 #[tauri::command]
 fn capture_stop(coordinator: State<CaptureCoordinator>) {
     coordinator.cancel_any();
 }
 
-/// Cancel a specific session generation.
+/// Cancel a specific session by generation.
 #[tauri::command]
 fn capture_cancel(
     coordinator: State<CaptureCoordinator>,
@@ -97,7 +98,7 @@ fn capture_cancel(
     coordinator.cancel(generation)
 }
 
-/// True when a capture session is currently active.
+/// True when a session is active.
 #[tauri::command]
 fn capture_is_active(
     coordinator: State<CaptureCoordinator>,
@@ -106,7 +107,6 @@ fn capture_is_active(
 }
 
 /// Enumerate input device names.
-/// Also emits `capture:event` DeviceList for the frontend to observe.
 #[tauri::command]
 fn capture_list_devices(app: AppHandle) -> Vec<String> {
     let devices = list_input_device_names();

@@ -3,13 +3,14 @@
 /// Design constraints:
 /// - The real-time callback must never allocate on the heap, block, log,
 ///   or emit IPC. It writes mono f32 into a preallocated HeapRb ring buffer.
-/// - On overflow, an atomic overflow flag is latched; the coordinator reads
-///   it on each worker iteration and terminates with `input-limit-exceeded`.
-/// - Format conversion (i16/i32/u16/u32/f32) is performed inside the
-///   callback using dasp_sample::FromSample — no branching alloc.
-/// - Device identity uses the CoreAudio UID string where CPAL exposes it,
-///   falling back to name-match with explicit `None` for the system default.
-///   Ambiguous names are not silently disambiguated.
+/// - On ring overflow, `overflow_flag` latches true; coordinator terminates
+///   with `input-limit-exceeded`. On device error, `error_flag` latches true;
+///   coordinator terminates with `capture-unavailable`. The two flags are
+///   distinct so error category is correct.
+/// - Format conversion (i16/i32/u16/u32/f32) uses `dasp_sample::FromSample`
+///   inside the callback — no branching allocation.
+/// - `cpal::Stream` is !Send on macOS; it is opened and dropped exclusively
+///   on the worker thread via `with_stream`. No unsafe Send impl is used.
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -22,9 +23,8 @@ use ringbuf::{
     HeapCons, HeapProd, HeapRb,
 };
 
-/// Capacity of the ring buffer in f32 frames (mono, 16 kHz equivalent).
-/// 4096 frames ≈ 256 ms at 16 kHz — large enough to absorb OS scheduling
-/// jitter without losing samples during normal operation.
+/// Capacity of the ring buffer in f32 mono frames.
+/// 4096 frames ≈ 256 ms at 16 kHz.
 pub const RING_CAPACITY: usize = 4096;
 
 /// Typed device selection.
@@ -32,53 +32,38 @@ pub const RING_CAPACITY: usize = 4096;
 pub enum DeviceSelection {
     /// System default input device resolved at open time.
     SystemDefault,
-    /// Device matched by exact name. Returns `capture-unavailable` if the
-    /// name is absent or matches more than one device.
+    /// First device whose name matches exactly; errors if zero or multiple.
     Named(String),
 }
 
-/// SAFETY wrapper: CPAL's CoreAudio stream uses non-Send raw pointers
-/// internally, but the stream is only created/dropped on the worker thread
-/// (never sent to a thread while active). We send it to the worker at
-/// construction time only, and drop it there.
-///
-/// This is the same pattern used by cpal's own examples.
-#[allow(clippy::non_send_fields_in_send_ty)]
-pub struct SendStream(#[allow(dead_code)] cpal::Stream);
-
-// SAFETY: cpal::Stream is tied to CoreAudio which is safe to send
-// between threads as long as it is not used concurrently from multiple
-// threads. We guarantee single-threaded ownership by construction.
-unsafe impl Send for SendStream {}
-
-impl Drop for SendStream {
-    fn drop(&mut self) {
-        // Stream is stopped on drop by cpal.
-    }
-}
-
-/// Opened stream returned to the coordinator.
-pub struct OpenedStream {
-    /// Keep alive to hold the stream active; drop to stop.
-    pub stream: SendStream,
-    /// Number of interleaved channels in the native feed.
-    pub channels: u16,
-    /// Native device sample rate (Hz).
-    pub native_rate: u32,
-    /// Device display name (not used for identity decisions).
+/// Metadata returned with the ring consumer when a stream is opened.
+pub struct StreamMeta {
+    /// Display name only — not identity.
     pub device_name: String,
-    /// Consumer half of the ring buffer; worker drains this.
+    /// Native device sample rate in Hz.
+    pub native_rate: u32,
+    /// Consumer half of the ring; worker drains this.
     pub consumer: HeapCons<f32>,
-    /// Latched true on ring-buffer overflow.
+    /// Latched true on ring-buffer overflow (input-limit-exceeded).
     pub overflow: Arc<AtomicBool>,
+    /// Latched true on device/stream error (capture-unavailable).
+    pub stream_error: Arc<AtomicBool>,
 }
 
-/// Open an input stream.
+/// Open an input stream, call `f` with stream metadata while the stream
+/// is alive, then close the stream when `f` returns.
+///
+/// `cpal::Stream` never crosses thread boundaries. Call this function
+/// from the thread that will own and drop the stream.
 ///
 /// Errors have a `"capture-unavailable: …"` prefix.
-pub fn open_input(
+pub fn with_stream<F, R>(
     selection: &DeviceSelection,
-) -> Result<OpenedStream, String> {
+    f: F,
+) -> Result<R, String>
+where
+    F: FnOnce(StreamMeta) -> R,
+{
     let host = cpal::default_host();
     let device = resolve_device(&host, selection)?;
 
@@ -90,9 +75,9 @@ pub fn open_input(
         .default_input_config()
         .map_err(|e| format!("capture-unavailable: {e}"))?;
 
-    let channels = supported.channels();
     let native_rate = supported.sample_rate().0;
     let sample_format = supported.sample_format();
+    let channels = supported.channels();
 
     let config = StreamConfig {
         buffer_size: BufferSize::Default,
@@ -104,6 +89,9 @@ pub fn open_input(
     let (producer, consumer) = rb.split();
 
     let overflow = Arc::new(AtomicBool::new(false));
+    let stream_error = Arc::new(AtomicBool::new(false));
+
+    // Build the stream — stays local to this function's stack frame.
     let stream = build_stream(
         &device,
         &config,
@@ -111,36 +99,46 @@ pub fn open_input(
         channels,
         producer,
         Arc::clone(&overflow),
+        Arc::clone(&stream_error),
     )?;
 
     stream
         .play()
         .map_err(|e| format!("capture-unavailable: {e}"))?;
 
-    Ok(OpenedStream {
-        channels,
+    let meta = StreamMeta {
         consumer,
         device_name,
         native_rate,
         overflow,
-        stream: SendStream(stream),
-    })
+        stream_error,
+    };
+
+    let result = f(meta);
+
+    // Stream dropped here — explicitly after f returns.
+    drop(stream);
+    Ok(result)
 }
 
 /// Enumerate input device names using the default host.
 pub fn list_input_device_names() -> Vec<String> {
     let host = cpal::default_host();
     host.input_devices()
-        .map(|devs| {
-            devs.filter_map(|d| d.name().ok()).collect()
-        })
+        .map(|devs| devs.filter_map(|d| d.name().ok()).collect())
         .unwrap_or_default()
 }
 
 // ── Internals ─────────────────────────────────────────────────────────────
 
-/// Build a raw input stream that converts all supported CPAL formats to
-/// mono f32 inline in the callback. No heap allocation in the hot path.
+/// Build a raw input stream, converting all supported CPAL sample formats
+/// to mono f32 inside the callback.
+///
+/// Supported: F32, I16, I32, U16, U32.
+/// Unsupported (F64, I8, U8, I64, U64, I24, U24, I48, U48): returns Err.
+/// CPAL 0.15 does not expose all possible formats on CoreAudio — the
+/// actually-supported set is constrained by the host; we handle the formats
+/// CPAL 0.15 documents for CoreAudio and fail closed on the rest.
 fn build_stream(
     device: &cpal::Device,
     config: &StreamConfig,
@@ -148,38 +146,28 @@ fn build_stream(
     channels: u16,
     mut producer: HeapProd<f32>,
     overflow: Arc<AtomicBool>,
+    stream_error: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, String> {
-    use cpal::traits::DeviceTrait;
     use cpal::StreamError;
-
-    let overflow_err = Arc::clone(&overflow);
 
     macro_rules! build_typed {
         ($T:ty) => {{
             let ch = channels as usize;
-            let overflow2 = Arc::clone(&overflow);
+            let of2 = Arc::clone(&overflow);
+            let se2 = Arc::clone(&stream_error);
             device.build_input_stream_raw(
                 config,
                 sample_format,
                 move |data: &Data, _: &cpal::InputCallbackInfo| {
-                    // SAFETY: SampleFormat matches T because we match
-                    // on sample_format before calling this macro.
                     let samples: &[$T] = match data.as_slice() {
                         Some(s) => s,
                         None => return,
                     };
-                    write_mono_f32(
-                        samples,
-                        ch,
-                        &mut producer,
-                        &overflow2,
-                    );
+                    write_mono_f32(samples, ch, &mut producer, &of2);
                 },
                 move |_err: StreamError| {
-                    // Error surfaced via ring-buffer drain timing out;
-                    // the coordinator watchdog handles it. We do not
-                    // log or allocate here.
-                    overflow_err.store(true, Ordering::Release);
+                    // Device disconnect / revocation — distinct from overflow.
+                    se2.store(true, Ordering::Release);
                 },
                 None,
             )
@@ -194,8 +182,10 @@ fn build_stream(
         SampleFormat::U32 => build_typed!(u32),
         other => {
             return Err(format!(
-                "capture-unavailable: sample format {other:?} \
-                 not supported"
+                "capture-unavailable: sample format {other:?} not \
+                 supported (F64/I8/U8/I64/U64/I24/U24/I48/U48 are \
+                 not handled; CPAL 0.15 CoreAudio typically reports \
+                 F32 or integer variants listed above)"
             ));
         }
     }
@@ -205,9 +195,8 @@ fn build_stream(
 }
 
 /// Downmix `interleaved` samples of type `T` to mono f32 and push into
-/// `producer`. Sets `overflow` if the ring buffer is full.
-///
-/// No heap allocation. Called from the real-time callback.
+/// `producer`. Sets `overflow` when the ring buffer is full.
+/// Must not allocate, block, or log — called from the real-time callback.
 fn write_mono_f32<T>(
     interleaved: &[T],
     channels: usize,
@@ -220,16 +209,10 @@ fn write_mono_f32<T>(
     use cpal::Sample;
     let step = channels.max(1);
     for frame in interleaved.chunks(step) {
-        // Average channels to mono.
-        let sum: f32 = frame
-            .iter()
-            .copied()
-            .map(|s| f32::from_sample(s))
-            .sum();
+        let sum: f32 =
+            frame.iter().copied().map(|s| f32::from_sample(s)).sum();
         let mono = sum / step as f32;
-
         if producer.try_push(mono).is_err() {
-            // Ring full: latch overflow flag; coordinator terminates.
             overflow.store(true, Ordering::Release);
             return;
         }
@@ -237,8 +220,6 @@ fn write_mono_f32<T>(
 }
 
 /// Resolve a device from the default CPAL host.
-/// `SystemDefault` returns the OS default input device.
-/// `Named` returns an error if zero or multiple matches exist.
 fn resolve_device(
     host: &cpal::Host,
     selection: &DeviceSelection,
@@ -262,12 +243,16 @@ fn resolve_device(
                 .collect();
             match matches.len() {
                 0 => Err(format!(
-                    "capture-unavailable: device '{name}' not found"
+                    "capture-unavailable: device '{name}' not found; \
+                     note: device names are display labels only, not \
+                     stable identifiers — connect the device and \
+                     verify the name"
                 )),
                 1 => Ok(matches.remove(0)),
                 n => Err(format!(
                     "capture-unavailable: device name '{name}' is \
-                     ambiguous ({n} matches)"
+                     ambiguous ({n} devices match); name-based \
+                     selection cannot disambiguate duplicate names"
                 )),
             }
         }
@@ -277,10 +262,7 @@ fn resolve_device(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
-
-    // ── write_mono_f32 ────────────────────────────────────────────────
 
     fn make_ring(cap: usize) -> (HeapProd<f32>, HeapCons<f32>) {
         HeapRb::<f32>::new(cap).split()
@@ -295,100 +277,101 @@ mod tests {
         out
     }
 
+    // ── write_mono_f32 ────────────────────────────────────────────────
+
     #[test]
     fn f32_mono_passthrough() {
         let (mut prod, cons) = make_ring(16);
-        let overflow = Arc::new(AtomicBool::new(false));
-        write_mono_f32(&[0.25f32, 0.5, -0.5], 1, &mut prod, &overflow);
-        assert!(!overflow.load(Ordering::Acquire));
-        let out = drain(cons);
-        assert_eq!(out, vec![0.25f32, 0.5, -0.5]);
+        let ov = Arc::new(AtomicBool::new(false));
+        write_mono_f32(&[0.25f32, 0.5, -0.5], 1, &mut prod, &ov);
+        assert!(!ov.load(Ordering::Acquire));
+        assert_eq!(drain(cons), vec![0.25f32, 0.5, -0.5]);
     }
 
     #[test]
-    fn stereo_f32_downmix_averages_channels() {
+    fn stereo_f32_downmix_averages_to_zero() {
         let (mut prod, cons) = make_ring(16);
-        let overflow = Arc::new(AtomicBool::new(false));
-        // Two stereo frames: [1.0, -1.0] and [0.5, 0.5]
-        write_mono_f32(&[1.0f32, -1.0, 0.5, 0.5], 2, &mut prod, &overflow);
+        let ov = Arc::new(AtomicBool::new(false));
+        // [1.0, -1.0] → avg 0.0; [0.5, 0.5] → avg 0.5
+        write_mono_f32(&[1.0f32, -1.0, 0.5, 0.5], 2, &mut prod, &ov);
         let out = drain(cons);
         assert_eq!(out.len(), 2);
-        assert!((out[0]).abs() < 1e-6, "average of 1.0 and -1.0 = 0");
+        assert!(out[0].abs() < 1e-6);
         assert!((out[1] - 0.5).abs() < 1e-6);
     }
 
     #[test]
-    fn i16_converted_to_f32() {
-        let (mut prod, cons) = make_ring(16);
-        let overflow = Arc::new(AtomicBool::new(false));
-        // i16::MAX converts to approximately 1.0 in dasp.
-        write_mono_f32(&[i16::MAX], 1, &mut prod, &overflow);
+    fn i16_max_converts_near_plus_one() {
+        let (mut prod, cons) = make_ring(4);
+        let ov = Arc::new(AtomicBool::new(false));
+        write_mono_f32(&[i16::MAX], 1, &mut prod, &ov);
         let out = drain(cons);
-        assert_eq!(out.len(), 1);
         assert!((out[0] - 1.0).abs() < 0.001);
     }
 
     #[test]
-    fn i16_min_converts_to_neg_one() {
-        let (mut prod, cons) = make_ring(16);
-        let overflow = Arc::new(AtomicBool::new(false));
-        write_mono_f32(&[i16::MIN], 1, &mut prod, &overflow);
+    fn i16_min_converts_near_minus_one() {
+        let (mut prod, cons) = make_ring(4);
+        let ov = Arc::new(AtomicBool::new(false));
+        write_mono_f32(&[i16::MIN], 1, &mut prod, &ov);
         let out = drain(cons);
         assert!((out[0] - (-1.0)).abs() < 0.001);
     }
 
     #[test]
-    fn u16_mid_converts_to_silence() {
-        // u16 silence is 32768 (midpoint); dasp maps to 0.0.
-        let (mut prod, cons) = make_ring(16);
-        let overflow = Arc::new(AtomicBool::new(false));
-        write_mono_f32(&[32768u16], 1, &mut prod, &overflow);
+    fn u16_midpoint_converts_near_zero() {
+        let (mut prod, cons) = make_ring(4);
+        let ov = Arc::new(AtomicBool::new(false));
+        write_mono_f32(&[32768u16], 1, &mut prod, &ov);
         let out = drain(cons);
-        assert!(out[0].abs() < 0.001, "u16 midpoint should be ~0.0");
+        assert!(out[0].abs() < 0.001, "u16 midpoint maps to ~0.0");
     }
 
     #[test]
     fn i32_extrema_convert_to_pm1() {
-        let (mut prod, cons) = make_ring(16);
-        let overflow = Arc::new(AtomicBool::new(false));
-        write_mono_f32(&[i32::MAX, i32::MIN], 1, &mut prod, &overflow);
+        let (mut prod, cons) = make_ring(4);
+        let ov = Arc::new(AtomicBool::new(false));
+        write_mono_f32(&[i32::MAX, i32::MIN], 1, &mut prod, &ov);
         let out = drain(cons);
         assert!((out[0] - 1.0).abs() < 0.001);
         assert!((out[1] - (-1.0)).abs() < 0.001);
     }
 
     #[test]
-    fn overflow_latches_when_ring_full() {
-        // Ring capacity 2; send 4 frames.
-        let (mut prod, _cons) = make_ring(2);
-        let overflow = Arc::new(AtomicBool::new(false));
-        write_mono_f32(&[0.1f32, 0.2, 0.3, 0.4], 1, &mut prod, &overflow);
-        assert!(
-            overflow.load(Ordering::Acquire),
-            "overflow should be latched"
-        );
+    fn u32_midpoint_converts_near_zero() {
+        let (mut prod, cons) = make_ring(4);
+        let ov = Arc::new(AtomicBool::new(false));
+        write_mono_f32(&[u32::MAX / 2], 1, &mut prod, &ov);
+        let out = drain(cons);
+        assert!(out[0].abs() < 0.001, "u32 midpoint maps to ~0.0");
     }
 
     #[test]
-    fn silence_stays_zero_after_conversion() {
+    fn overflow_flag_latches_when_ring_full() {
+        let (mut prod, _cons) = make_ring(2);
+        let ov = Arc::new(AtomicBool::new(false));
+        write_mono_f32(&[0.1f32, 0.2, 0.3, 0.4], 1, &mut prod, &ov);
+        assert!(ov.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn silence_produces_zero_frames() {
         let (mut prod, cons) = make_ring(16);
-        let overflow = Arc::new(AtomicBool::new(false));
-        write_mono_f32(&[0.0f32; 8], 1, &mut prod, &overflow);
+        let ov = Arc::new(AtomicBool::new(false));
+        write_mono_f32(&[0.0f32; 8], 1, &mut prod, &ov);
         let out = drain(cons);
         assert!(out.iter().all(|&s| s == 0.0));
     }
 
-    // ── DeviceSelection ───────────────────────────────────────────────
+    // ── DeviceSelection debug ─────────────────────────────────────────
 
     #[test]
-    fn device_selection_debug() {
-        // Verify DeviceSelection derives Debug without exposing live devices.
+    fn device_selection_debug_shows_name() {
         let d = DeviceSelection::Named(String::from("Mic A"));
         assert!(format!("{d:?}").contains("Mic A"));
         let d2 = DeviceSelection::SystemDefault;
         assert!(format!("{d2:?}").contains("SystemDefault"));
     }
 
-    // open_input() requires a live CoreAudio session; tested manually.
-    // See docs/review/BUS-9-implementation.md for manual test matrix.
+    // with_stream() requires live CoreAudio — manual test only.
 }

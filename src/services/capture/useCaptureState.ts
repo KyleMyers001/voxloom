@@ -1,13 +1,19 @@
-/// React hook: exposes real-time capture state to components.
+/// React hook: native capture state — BUS-9.
 ///
-/// - Preserves `test-running` mode when `capture-started` arrives so the
-///   UI never shows a confusing mode transition.
-/// - Prevents duplicate starts via a `sessionActive` check.
-/// - Handles `busy`, `capture-unavailable`, and other IPC errors as stable
-///   error categories.
-/// - Stale events after unmount are discarded via `mountedRef`.
-/// - Unmount calls `stopCapture()` for window-teardown safety.
-import { useCallback, useEffect, useRef, useState } from "react";
+/// Design:
+/// - Listener is installed BEFORE any start command is issued so no events
+///   are lost between subscribe and start.
+/// - Active generation is stored in a ref; stale events (different gen) are
+///   discarded on the renderer side.
+/// - Duplicate start is blocked via early return before any IPC.
+/// - IPC errors (including "busy") are caught and mapped to stable categories.
+/// - Unmount cancels any active session and unsubscribes the listener.
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import {
   cancelCapture,
@@ -21,6 +27,7 @@ import {
 } from "./captureService";
 import {
   isCaptureSessionActive,
+  type CaptureErrorCategory,
   type CaptureState,
   type PermissionStatus,
 } from "./types";
@@ -42,46 +49,53 @@ export function useCaptureState(): UseCaptureStateResult {
     useState<PermissionStatus | null>(null);
 
   const mountedRef = useRef(true);
-  // Tracks the active session generation to correlate cancel.
   const generationRef = useRef<string | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
 
-    const subscription = onCaptureEvent((event) => {
+    // Install listener BEFORE querying permission or starting any session
+    // to avoid dropping events emitted between start and subscribe.
+    const subscriptionPromise = onCaptureEvent((event) => {
       if (!mountedRef.current) return;
+
+      // Suppress stale events from a previous session.
+      const eventGen =
+        "generation" in event ? event.generation : null;
+      if (
+        eventGen !== null
+        && generationRef.current !== null
+        && String(eventGen) !== generationRef.current
+        && event.kind !== "permission-status"
+      ) {
+        return; // Stale generation — discard.
+      }
 
       switch (event.kind) {
         case "permission-status":
           setPermissionStatus(event.status);
-          if (
-            event.status !== "authorized"
-          ) {
+          if (event.status !== "authorized") {
             setCaptureState((prev) =>
-              prev.kind === "idle" ? prev : { kind: "idle" },
+              isCaptureSessionActive(prev) ? { kind: "idle" } : prev,
             );
           }
           break;
 
         case "capture-started":
-          // Preserve test-running mode: only update device name.
-          setCaptureState((prev) => {
-            if (prev.kind === "test-running") {
-              // Keep mode, update device name would require a new field;
-              // the mode is preserved as-is.
-              return prev;
-            }
-            return {
-              device: event.device_name,
-              generation: generationRef.current ?? "0",
-              kind: "active",
-            };
-          });
+          // Preserve test-running mode; update device name side-effect only.
+          setCaptureState((prev) =>
+            prev.kind === "test-running"
+              ? prev
+              : {
+                  device: event.device_name,
+                  generation: generationRef.current ?? "0",
+                  kind: "active",
+                },
+          );
           break;
 
         case "activity-detected":
-          // No separate state; consumers observe TestComplete.metadata.
-          break;
+          break; // Surfaced via test-complete metadata.
 
         case "test-complete":
           setCaptureState({
@@ -116,6 +130,7 @@ export function useCaptureState(): UseCaptureStateResult {
       }
     });
 
+    // Query permission and existing active state after subscribing.
     queryPermission();
     isCaptureActive().then((active) => {
       if (!mountedRef.current) return;
@@ -127,17 +142,20 @@ export function useCaptureState(): UseCaptureStateResult {
         });
       }
     });
-    // Populate device list.
-    void listDevices().then((devs) => {
-      if (mountedRef.current && devs.length > 0) {
-        setDevices(devs);
-      }
+    listDevices().then((devs) => {
+      if (mountedRef.current && devs.length > 0) setDevices(devs);
     });
 
     return () => {
       mountedRef.current = false;
-      subscription.then((unlisten) => unlisten()).catch(() => {});
-      stopCapture();
+      // Cancel any active session on unmount (window teardown).
+      const gen = generationRef.current;
+      if (gen) {
+        void cancelCapture(gen);
+      } else {
+        stopCapture();
+      }
+      subscriptionPromise.then((unlisten) => unlisten()).catch(() => {});
     };
   }, []);
 
@@ -147,54 +165,63 @@ export function useCaptureState(): UseCaptureStateResult {
   }, []);
 
   const runMicTest = useCallback(async (device?: string) => {
-    // Prevent duplicate starts.
-    setCaptureState((prev) => {
-      if (isCaptureSessionActive(prev)) return prev;
-      return {
-        generation: "pending",
-        kind: "test-running",
-        started_at: Date.now(),
-      };
+    // Authoritative duplicate-start guard using ref (not state).
+    if (generationRef.current !== null) return;
+
+    // Set test-running immediately before IPC resolves.
+    setCaptureState({
+      generation: "pending",
+      kind: "test-running",
+      started_at: Date.now(),
     });
 
-    const result = await startMicTest(device);
-    if (!mountedRef.current) return;
-
-    if (result === "capture-unavailable") {
-      // Browser/non-Tauri environment: capture unavailable.
+    let result: string;
+    try {
+      result = await startMicTest(device);
+    } catch (err: unknown) {
+      if (!mountedRef.current) return;
+      const msg = err instanceof Error ? err.message : String(err);
       setCaptureState({
         category: "capture-unavailable",
         kind: "error",
-        message: "Native capture is not available in this environment.",
+        message: msg,
       });
       return;
     }
 
-    // result is the generation string; store for cancel correlation.
-    if (!isNaN(parseInt(result, 10))) {
-      generationRef.current = result;
-      setCaptureState((prev) => {
-        if (prev.kind === "test-running") {
-          return { ...prev, generation: result };
-        }
-        return prev;
+    if (!mountedRef.current) return;
+
+    if (result === "capture-unavailable") {
+      setCaptureState({
+        category: "capture-unavailable",
+        kind: "error",
+        message:
+          "Native capture is not available in this environment.",
       });
+      return;
+    }
+
+    const gen = parseInt(result, 10);
+    if (!isNaN(gen)) {
+      generationRef.current = result;
+      setCaptureState((prev) =>
+        prev.kind === "test-running"
+          ? { ...prev, generation: result }
+          : prev,
+      );
     } else {
-      // Error category returned from IPC (e.g., "busy").
-      const category = result as import("./types").CaptureErrorCategory;
-      const messages: Record<string, string> = {
+      // IPC returned an error category string (e.g., "busy").
+      const category = result as CaptureErrorCategory;
+      const messages: Record<CaptureErrorCategory, string> = {
         busy: "A capture session is already active.",
-        "capture-unavailable":
-          "Microphone capture is not available.",
-        "input-limit-exceeded":
-          "Capture limit reached.",
-        "permission-denied":
-          "Microphone permission denied.",
+        "capture-unavailable": "Microphone capture is not available.",
+        "input-limit-exceeded": "Capture limit reached.",
+        "permission-denied": "Microphone permission denied.",
       };
       setCaptureState({
         category,
         kind: "error",
-        message: messages[result] ?? result,
+        message: messages[category] ?? result,
       });
     }
   }, []);

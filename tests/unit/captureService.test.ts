@@ -1,8 +1,8 @@
 /// Tests for capture service IPC wrappers.
 ///
-/// Sets window.__TAURI__ to activate the Tauri path, then uses the
-/// mocked @tauri-apps/api/core from setup.ts. Also verifies
-/// non-Tauri (browser) guard behaviour.
+/// Mocks `@tauri-apps/api/core` (including `isTauri`) to control the
+/// Tauri/browser path. Tests exercise both paths without setting any
+/// runtime state or DOM globals.
 import {
   afterEach,
   beforeEach,
@@ -15,7 +15,17 @@ import {
 // Use the real captureService module, not the global stub from setup.ts.
 vi.unmock("../../src/services/capture/captureService");
 
-import { invoke } from "@tauri-apps/api/core";
+// Mock @tauri-apps/api/core so isTauri() and invoke() are controllable.
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+  isTauri: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(),
+}));
+
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import {
@@ -31,22 +41,19 @@ import {
 
 const mockInvoke = vi.mocked(invoke);
 const mockListen = vi.mocked(listen);
+const mockIsTauri = vi.mocked(isTauri);
 
 // ── Tauri path ────────────────────────────────────────────────────────────
 
 describe("captureService (Tauri)", () => {
   beforeEach(() => {
-    Object.defineProperty(window, "__TAURI__", {
-      configurable: true,
-      value: {},
-      writable: true,
-    });
+    mockIsTauri.mockReturnValue(true);
     vi.clearAllMocks();
+    mockIsTauri.mockReturnValue(true); // Re-set after clearAllMocks.
   });
 
   afterEach(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    delete (window as any).__TAURI__;
+    vi.restoreAllMocks();
   });
 
   it("queryPermission invokes capture_query_permission", () => {
@@ -98,11 +105,12 @@ describe("captureService (Tauri)", () => {
       });
     });
 
-  it("cancelCapture returns false for non-numeric generation", async () => {
-    const ok = await cancelCapture("bad");
-    expect(ok).toBe(false);
-    expect(mockInvoke).not.toHaveBeenCalled();
-  });
+  it("cancelCapture returns false for non-numeric generation",
+    async () => {
+      const ok = await cancelCapture("bad");
+      expect(ok).toBe(false);
+      expect(mockInvoke).not.toHaveBeenCalled();
+    });
 
   it("isCaptureActive returns the invoke result", async () => {
     mockInvoke.mockResolvedValue(true);
@@ -138,8 +146,11 @@ describe("captureService (Tauri)", () => {
       return () => {};
     });
     await onCaptureEvent(handler);
-    cb!({ payload: { kind: "capture-stopped" } });
-    expect(handler).toHaveBeenCalledWith({ kind: "capture-stopped" });
+    cb!({ payload: { kind: "capture-stopped", generation: 1 } });
+    expect(handler).toHaveBeenCalledWith({
+      kind: "capture-stopped",
+      generation: 1,
+    });
   });
 });
 
@@ -147,9 +158,9 @@ describe("captureService (Tauri)", () => {
 
 describe("captureService (browser)", () => {
   beforeEach(() => {
+    mockIsTauri.mockReturnValue(false);
     vi.clearAllMocks();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    delete (window as any).__TAURI__;
+    mockIsTauri.mockReturnValue(false);
   });
 
   it("queryPermission does not invoke IPC", () => {
@@ -169,13 +180,11 @@ describe("captureService (browser)", () => {
   });
 
   it("isCaptureActive returns false", async () => {
-    const active = await isCaptureActive();
-    expect(active).toBe(false);
+    expect(await isCaptureActive()).toBe(false);
   });
 
   it("listDevices returns empty array", async () => {
-    const devs = await listDevices();
-    expect(devs).toEqual([]);
+    expect(await listDevices()).toEqual([]);
   });
 
   it("stopCapture is a no-op outside Tauri", () => {
@@ -184,8 +193,7 @@ describe("captureService (browser)", () => {
   });
 
   it("cancelCapture returns false outside Tauri", async () => {
-    const ok = await cancelCapture("1");
-    expect(ok).toBe(false);
+    expect(await cancelCapture("1")).toBe(false);
   });
 
   it("onCaptureEvent returns no-op unlisten", async () => {

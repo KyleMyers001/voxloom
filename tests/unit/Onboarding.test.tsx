@@ -12,7 +12,7 @@ import { renderWithApp } from "./testUtils";
 
 // Controlled permission state and Tauri env flag for Onboarding tests.
 let mockPermissionStatus = "authorized";
-let mockIsTauri = true; // Tests run in native mode by default.
+const mockIsTauri = true; // Tests run in native mode by default.
 
 vi.mock("../../src/services/capture/useCaptureState", () => ({
   useCaptureState: () => ({
@@ -25,17 +25,18 @@ vi.mock("../../src/services/capture/useCaptureState", () => ({
   }),
 }));
 
-// Override the global isTauriEnv mock so the Onboarding shows the real
-// permission UI path (not the browser-unavailable path).
-vi.mock("../../src/services/capture/captureService", async (importOriginal) => {
-  const original = await importOriginal<
-    typeof import("../../src/services/capture/captureService")
-  >();
-  return {
-    ...original,
-    isTauriEnv: () => mockIsTauri,
-  };
-});
+// Override captureService to control isTauriEnv per test.
+vi.mock("../../src/services/capture/captureService", () => ({
+  cancelCapture: vi.fn().mockResolvedValue(true),
+  isCaptureActive: vi.fn().mockResolvedValue(false),
+  isTauriEnv: vi.fn(() => mockIsTauri),
+  listDevices: vi.fn().mockResolvedValue([]),
+  onCaptureEvent: vi.fn().mockResolvedValue(() => {}),
+  queryPermission: vi.fn(),
+  requestPermission: vi.fn(),
+  startMicTest: vi.fn().mockResolvedValue("1"),
+  stopCapture: vi.fn(),
+}));
 
 // -----------------------------------------------------------------------
 

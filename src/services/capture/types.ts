@@ -15,28 +15,33 @@ export interface TestCaptureMetadata {
 }
 
 /// All events the native coordinator may emit.
+/// Every event except DeviceList carries a `generation` for stale suppression.
 export type CaptureEvent =
   | {
+      generation: number;
       kind: "permission-status";
       status: PermissionStatus;
     }
   | {
       device_name: string;
+      generation: number;
       kind: "capture-started";
     }
-  | { kind: "activity-detected" }
+  | { generation: number; kind: "activity-detected" }
   | {
+      generation: number;
       kind: "test-complete";
       metadata: TestCaptureMetadata;
     }
-  | { kind: "capture-stopped" }
-  | { kind: "capture-cancelled" }
+  | { generation: number; kind: "capture-stopped" }
+  | { generation: number; kind: "capture-cancelled" }
   | {
       devices: string[];
       kind: "device-list";
     }
   | {
       category: CaptureErrorCategory;
+      generation: number;
       kind: "capture-error";
       message: string;
     };
