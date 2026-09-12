@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useApp } from "../../app/AppContext";
+import { canStartDictation } from "../../app/state";
 import { canRetry } from "../../domain/records";
 import type { HistoryStatus } from "../../domain/types";
 
@@ -15,7 +16,7 @@ function formatTime(timestamp: number): string {
 }
 
 export function History({ onToast }: HistoryProps) {
-  const { clipboard, dictation, dispatch, now, state } = useApp();
+  const { clipboard, dictation, history, now, state } = useApp();
   const [currentTime, setCurrentTime] = useState(now);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<HistoryStatus | "all">("all");
@@ -39,6 +40,10 @@ export function History({ onToast }: HistoryProps) {
   }
 
   function retry(record: (typeof records)[number]) {
+    if (!canStartDictation(state.dictation)) {
+      onToast("Finish the current dictation before retrying");
+      return;
+    }
     if (!canRetry(record, now())) {
       setCurrentTime(now());
       onToast("Recovery buffer expired");
@@ -112,6 +117,7 @@ export function History({ onToast }: HistoryProps) {
                   <button
                     aria-label="Retry transcription"
                     className="action-btn icon-btn"
+                    disabled={!canStartDictation(state.dictation)}
                     onClick={() => retry(record)}
                     title="Retry transcription"
                   >↻</button>
@@ -119,10 +125,7 @@ export function History({ onToast }: HistoryProps) {
                 <button
                   aria-label="Delete transcript"
                   className="action-btn danger icon-btn"
-                  onClick={() => dispatch({
-                    id: record.id,
-                    type: "delete-record",
-                  })}
+                  onClick={() => history.delete(record.id)}
                   title="Delete transcript"
                 >⌫</button>
               </div>

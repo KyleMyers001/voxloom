@@ -4,7 +4,7 @@ import { Dialog } from "../../components/Dialog";
 import { validateWord } from "../../domain/dictionary";
 
 export function Dictionary() {
-  const { dispatch, state } = useApp();
+  const { dictionary, state } = useApp();
   const [editing, setEditing] = useState<string>();
   const [error, setError] = useState("");
   const [open, setOpen] = useState(false);
@@ -30,7 +30,7 @@ export function Dictionary() {
       setError(result.error);
       return;
     }
-    dispatch({ editing, type: "save-word", word: result.word });
+    dictionary.save(result.word, editing);
     setOpen(false);
   }
 
@@ -71,7 +71,7 @@ export function Dictionary() {
                 <button
                   aria-label={`Delete ${word}`}
                   className="action-btn danger icon-btn"
-                  onClick={() => dispatch({ type: "delete-word", word })}
+                  onClick={() => dictionary.delete(word)}
                 >×</button>
               </div>
             </div>

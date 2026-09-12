@@ -42,12 +42,17 @@ export function Dialog({ children, label, onClose, opener }: DialogProps) {
     };
   }, [opener]);
 
-  function handleKeyDown(event: KeyboardEvent) {
-    if (event.key === "Escape") {
+  useEffect(() => {
+    const handleEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return;
       event.preventDefault();
       onClose();
-      return;
-    }
+    };
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [onClose]);
+
+  function handleKeyDown(event: KeyboardEvent) {
     if (event.key !== "Tab" || !panel.current) return;
     const focusable = [...panel.current.querySelectorAll<HTMLElement>(selector)]
       .filter((element) => !element.hidden);

@@ -1,4 +1,5 @@
 import { dictationReducer } from "../domain/dictationMachine";
+import { initialOnboarding } from "../domain/fixtures";
 import {
   canRetry,
   createFailedRecord,
@@ -11,9 +12,11 @@ import type {
   Screen,
   Settings,
 } from "../domain/types";
+import type { AppAction } from "./actions";
 import { createInitialState } from "./initialState";
 
 export { createInitialState } from "./initialState";
+export type { AppAction, SettingAction } from "./actions";
 
 export interface AppState {
   clipboardFailure: boolean;
@@ -26,39 +29,18 @@ export interface AppState {
   words: string[];
 }
 
-export type AppAction =
-  | { runId: number; type: "cancel-dictation" }
-  | { type: "complete-dictation"; now: number; runId: number }
-  | { type: "delete-record"; id: string }
-  | { type: "delete-word"; word: string }
-  | { type: "expire-recovery"; now: number }
-  | { type: "fail-dictation"; now: number; runId: number }
-  | {
-      completion: "automatic" | "held";
-      runId: number;
-      type: "process-dictation";
-    }
-  | { type: "reset"; now: number }
-  | { type: "retry"; id: string; now: number }
-  | { type: "scenario-empty" }
-  | { type: "set-clipboard-failure"; value: boolean }
-  | { type: "set-onboarding"; value: OnboardingState }
-  | { type: "set-screen"; screen: Screen }
-  | SettingAction
-  | { type: "set-waveform"; value: "silent" | "speaking" }
-  | { editing?: string; type: "save-word"; word: string }
-  | { type: "start-dictation" };
-
-export type SettingAction = {
-  [Key in keyof Settings]: {
-    key: Key;
-    type: "set-setting";
-    value: Settings[Key];
-  }
-}[keyof Settings];
-
 export function appReducer(state: AppState, action: AppAction): AppState {
   if (action.type === "reset") return createInitialState(action.now);
+  if (action.type === "reopen-onboarding") {
+    return {
+      ...state,
+      onboarding: {
+        ...initialOnboarding,
+        complete: state.onboarding.complete,
+        microphoneGranted: state.onboarding.microphoneGranted,
+      },
+    };
+  }
   if (action.type === "set-screen") return { ...state, screen: action.screen };
   if (action.type === "set-setting") {
     return {
@@ -68,6 +50,12 @@ export function appReducer(state: AppState, action: AppAction): AppState {
   }
   if (action.type === "set-onboarding") {
     return { ...state, onboarding: action.value };
+  }
+  if (action.type === "update-onboarding") {
+    return {
+      ...state,
+      onboarding: { ...state.onboarding, ...action.changes },
+    };
   }
   if (action.type === "set-clipboard-failure") {
     return { ...state, clipboardFailure: action.value };
@@ -179,7 +167,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
   }
   if (action.type === "retry") {
     const record = state.records.find(({ id }) => id === action.id);
-    if (state.dictation.kind === "processing" || !record ||
+    if (!canStartDictation(state.dictation) || !record ||
         !canRetry(record, action.now)) return state;
     return {
       ...state,
@@ -194,4 +182,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     };
   }
   return state;
+}
+
+export function canStartDictation(dictation: DictationState): boolean {
+  return dictation.kind !== "listening" && dictation.kind !== "processing";
 }

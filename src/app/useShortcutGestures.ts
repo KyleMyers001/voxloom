@@ -1,8 +1,9 @@
 import { useEffect, useRef } from "react";
-import type { AppAction, AppState } from "./state";
+import type { AppState } from "./state";
 import type { OnboardingState } from "../domain/types";
 import type {
   DictationLifecycle,
+  SetupLifecycle,
   ShortcutGesture,
 } from "../services/contracts";
 import { createShortcutController } from
@@ -10,9 +11,9 @@ import { createShortcutController } from
 
 interface GestureOptions {
   dictation: DictationLifecycle;
-  dispatch: (action: AppAction) => void;
   now: () => number;
   onboardingOpen: boolean;
+  setup: SetupLifecycle;
   shortcutOpen: boolean;
   state: AppState;
 }
@@ -52,6 +53,7 @@ function handleGesture(options: GestureOptions, gesture: ShortcutGesture) {
     return;
   }
   if (onboardingOpen) return;
+  if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
   if (gesture === "hold-start" || gesture === "latch-start") {
     dictation.start();
   } else if ((gesture === "hold-finish" ||
@@ -62,7 +64,6 @@ function handleGesture(options: GestureOptions, gesture: ShortcutGesture) {
 }
 
 function handlePractice(options: GestureOptions, gesture: ShortcutGesture) {
-  const current = options.state.onboarding;
   const changes: Partial<OnboardingState> = {};
   if (gesture === "hold-start") {
     changes.recognizedText =
@@ -77,8 +78,5 @@ function handlePractice(options: GestureOptions, gesture: ShortcutGesture) {
     changes.recognizedText = "Double-tap: keep --dry-run enabled.";
     changes.tapTested = true;
   }
-  options.dispatch({
-    type: "set-onboarding",
-    value: { ...current, ...changes },
-  });
+  options.setup.update(changes);
 }

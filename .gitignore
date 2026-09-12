@@ -2,7 +2,9 @@ dist/
 node_modules/
 .playwright-browsers/
 playwright-report/
+playwright-report-release/
 src-tauri/target/
 src-tauri/gen/
 test-results/
+test-results-release/
 *.tsbuildinfo

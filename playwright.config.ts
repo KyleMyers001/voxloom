@@ -5,6 +5,7 @@ export default defineConfig({
   outputDir: "test-results",
   reporter: [["html", { open: "never" }], ["list"]],
   testDir: "tests/e2e",
+  testIgnore: "release.spec.ts",
   use: {
     baseURL: "http://127.0.0.1:1420",
     screenshot: "only-on-failure",

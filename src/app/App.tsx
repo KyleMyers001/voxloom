@@ -23,7 +23,7 @@ const screens: { glyph: string; label: string; value: Screen }[] = [
 ];
 
 export function App() {
-  const { dictation, dispatch, now, state } = useApp();
+  const { dictation, dispatch, now, settings, setup, state } = useApp();
   const [onboardingOpen, setOnboardingOpen] = useState(
     !state.onboarding.complete,
   );
@@ -33,16 +33,18 @@ export function App() {
   useTheme(state.settings.appearance);
   useShortcutGestures({
     dictation,
-    dispatch,
     now,
     onboardingOpen,
+    setup,
     shortcutOpen,
     state,
   });
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
-      if (onboardingOpen || shortcutOpen) return;
+      if (onboardingOpen || shortcutOpen || document.querySelector(
+        '[role="dialog"][aria-modal="true"]'
+      )) return;
       const target = event.target as HTMLElement;
       if (event.key === "?" && !target.matches("input, select, textarea")) {
         modalOpener.current = target;
@@ -66,10 +68,7 @@ export function App() {
 
   function openSetup(opener: HTMLElement) {
     modalOpener.current = opener;
-    dispatch({
-      type: "set-onboarding",
-      value: { ...initialOnboarding, complete: state.onboarding.complete },
-    });
+    setup.reopen();
     setOnboardingOpen(true);
   }
 
@@ -81,19 +80,15 @@ export function App() {
 
   function openScenario(scenario: OnboardingScenario) {
     const collision = scenario === "collision";
-    dispatch({
-      type: "set-onboarding",
-      value: {
-        ...initialOnboarding,
-        microphoneGranted: collision,
-        permissionDenied: scenario === "permission-denied",
-        shortcutCollision: collision,
-        step: collision ? 2 : 1,
-      },
+    setup.replace({
+      ...initialOnboarding,
+      microphoneGranted: collision,
+      permissionDenied: scenario === "permission-denied",
+      shortcutCollision: collision,
+      step: collision ? 2 : 1,
     });
-    if (collision) dispatch({
+    if (collision) settings.update({
       key: "shortcut",
-      type: "set-setting",
       value: "Ctrl + Space",
     });
     setOnboardingOpen(true);

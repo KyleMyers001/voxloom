@@ -196,3 +196,23 @@ test("mock scenarios cover retry cancellation and expiry", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Retry transcription" }))
     .toHaveCount(0);
 });
+
+test("History retry cannot interrupt an active listening run", async (
+  { page },
+) => {
+  await page.goto("/");
+  await skipOnboarding(page);
+  await page.getByRole("button", { name: "Listening · silent" }).click();
+  await page.getByRole("button", { name: "History" }).click();
+  await page.getByLabel("History status").selectOption("failed");
+  const failed = page.getByRole("article").first();
+  await failed.hover();
+  await expect(page.getByRole("button", { name: "Retry transcription" }))
+    .toBeDisabled();
+  await expect(page.getByRole("img", { name: "silent mock waveform" }))
+    .toBeVisible();
+  await expect(page.getByRole("button", { name: "Cancel" })).toBeEnabled();
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("img", { name: "silent mock waveform" }))
+    .not.toBeVisible();
+});

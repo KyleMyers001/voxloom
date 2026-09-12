@@ -113,4 +113,54 @@ describe("appReducer", () => {
       runId: 2,
     });
   });
+
+  it("does not replace an active listening run with a retry", () => {
+    const initial = createInitialState(10_000);
+    const failed = initial.records.find((record) =>
+      record.status === "failed"
+    );
+    if (!failed) throw new Error("fixture failure missing");
+    const listening = appReducer(initial, { type: "start-dictation" });
+    const result = appReducer(listening, {
+      id: failed.id,
+      now: 10_001,
+      type: "retry",
+    });
+    expect(result).toBe(listening);
+    expect(result.dictation).toMatchObject({ kind: "listening", runId: 1 });
+  });
+
+  it(
+    "reopens setup transient state while preserving session permission",
+    () => {
+      const initial = createInitialState(10_000);
+      const configured = {
+        ...initial,
+        onboarding: {
+          complete: true,
+          holdTested: true,
+          microphoneGranted: true,
+          permissionDenied: true,
+          recognizedText: "fixture",
+          shortcutCollision: true,
+          step: 3 as const,
+          tapTested: true,
+        },
+      };
+      const reopened = appReducer(configured, { type: "reopen-onboarding" });
+      expect(reopened.onboarding).toEqual({
+        complete: true,
+        holdTested: false,
+        microphoneGranted: true,
+        permissionDenied: false,
+        recognizedText: "",
+        shortcutCollision: false,
+        step: 1,
+        tapTested: false,
+      });
+      const reset = appReducer(configured, { now: 20_000, type: "reset" });
+      expect(reset.onboarding.microphoneGranted).toBe(false);
+      expect(reset.onboarding.complete).toBe(false);
+    },
+  );
 });

@@ -93,6 +93,35 @@ describe("App integration", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("suppresses app shortcuts while a dictionary dialog is open", async () => {
+    const user = userEvent.setup();
+    renderWithApp(<App />);
+    await user.click(screen.getByRole("button", { name: "Skip" }));
+    await user.click(screen.getByRole("button", { name: "Dictionary" }));
+    await user.click(screen.getByRole("button", { name: "Add term" }));
+    const shortcut = {
+      code: "Space",
+      ctrlKey: true,
+      key: " ",
+      shiftKey: true,
+    };
+    fireEvent.keyDown(document, shortcut);
+    fireEvent.keyUp(document, shortcut);
+    await user.keyboard("?");
+    await user.keyboard("{Alt>}1{/Alt}");
+    expect(screen.getByRole("dialog", { name: "Add dictionary word" }))
+      .toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Keyboard shortcuts" }))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Dictionary" }))
+      .toHaveAttribute("aria-current", "page");
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    fireEvent.keyDown(document, shortcut);
+    expect(screen.getByRole("img")).toBeInTheDocument();
+    fireEvent.keyUp(document, shortcut);
+  });
+
   it("reopens clean setup and reset restores first-run fixtures", async () => {
     const user = userEvent.setup();
     renderWithApp(<App />);
@@ -120,6 +149,13 @@ describe("App integration", () => {
     const setup = screen.getByRole("button", { name: "Set up shortcuts" });
     await user.click(setup);
     expect(screen.getByText("Step 1 of 3")).toBeInTheDocument();
+    expect(screen.getByText("Mock microphone enabled")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText(/Press-and-hold · not tested/))
+      .toBeInTheDocument();
+    expect(screen.getByText(/Rapid double-tap · not tested/))
+      .toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(setup).toHaveFocus();
   });

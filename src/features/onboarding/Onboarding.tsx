@@ -8,13 +8,10 @@ interface OnboardingProps {
 }
 
 export function Onboarding({ onClose, opener }: OnboardingProps) {
-  const { dispatch, state } = useApp();
+  const { settings, setup, state } = useApp();
   const [error, setError] = useState("");
   const onboarding = state.onboarding;
-  const update = (changes: Partial<typeof onboarding>) => dispatch({
-    type: "set-onboarding",
-    value: { ...onboarding, ...changes },
-  });
+  const update = setup.update;
 
   function next() {
     setError("");
@@ -72,9 +69,8 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
           <h3>Choose your shortcut</h3>
           <p>Gestures work only while this app is focused.</p>
           <label className="field">Preferred app-local shortcut
-            <input onChange={(event) => dispatch({
+            <input onChange={(event) => settings.update({
               key: "shortcut",
-              type: "set-setting",
               value: event.target.value,
             })} value={state.settings.shortcut} />
           </label>
@@ -91,22 +87,24 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
             <textarea readOnly value={onboarding.recognizedText}
               placeholder="Practice output appears here." />
           </label>
-          {import.meta.env.DEV && <div className="onboarding-test">
+          <div className="onboarding-test">
             <span>Press-and-hold · {onboarding.holdTested ?
               "recognized" : "not tested"}</span>
-            <button className="btn" onClick={() => update({
+            {import.meta.env.DEV && <button className="btn" onClick={() =>
+              update({
               holdTested: true,
               recognizedText: "Hold: preserve the TypeScript identifier.",
-            })}>Test hold</button>
-          </div>}
-          {import.meta.env.DEV && <div className="onboarding-test">
+            })}>Test hold</button>}
+          </div>
+          <div className="onboarding-test">
             <span>Rapid double-tap · {onboarding.tapTested ?
               "recognized" : "not tested"}</span>
-            <button className="btn" onClick={() => update({
+            {import.meta.env.DEV && <button className="btn" onClick={() =>
+              update({
               recognizedText: "Double-tap: keep --dry-run enabled.",
               tapTested: true,
-            })}>Test double-tap</button>
-          </div>}
+            })}>Test double-tap</button>}
+          </div>
         </section>
       )}
       {error && <p className="form-error" role="alert">{error}</p>}

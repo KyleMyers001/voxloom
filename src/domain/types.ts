@@ -40,6 +40,13 @@ export interface Settings {
   transcriptionModel: string;
 }
 
+export type SettingUpdate = {
+  [Key in keyof Settings]: {
+    key: Key;
+    value: Settings[Key];
+  }
+}[keyof Settings];
+
 export interface OnboardingState {
   complete: boolean;
   holdTested: boolean;

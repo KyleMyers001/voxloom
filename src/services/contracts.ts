@@ -1,3 +1,5 @@
+import type { OnboardingState, SettingUpdate } from "../domain/types";
+
 export type ShortcutGesture =
   | "hold-finish"
   | "hold-start"
@@ -13,6 +15,25 @@ export interface DictationLifecycle {
   retry(recordId: string): void;
   speech(waveform: "silent" | "speaking"): void;
   start(): void;
+}
+
+export interface DictionaryCrud {
+  delete(word: string): void;
+  save(word: string, editing?: string): void;
+}
+
+export interface HistoryDeletion {
+  delete(recordId: string): void;
+}
+
+export interface SettingsStore {
+  update(change: SettingUpdate): void;
+}
+
+export interface SetupLifecycle {
+  replace(value: OnboardingState): void;
+  reopen(): void;
+  update(changes: Partial<OnboardingState>): void;
 }
 
 export interface ShortcutController {

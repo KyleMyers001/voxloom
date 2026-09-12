@@ -8,7 +8,19 @@ import {
 } from "react";
 import { createClipboardAdapter, type ClipboardAdapter } from
   "../services/clipboard";
-import type { DictationLifecycle } from "../services/contracts";
+import type {
+  DictationLifecycle,
+  DictionaryCrud,
+  HistoryDeletion,
+  SettingsStore,
+  SetupLifecycle,
+} from "../services/contracts";
+import {
+  createDictionaryService,
+  createHistoryService,
+  createSettingsService,
+  createSetupService,
+} from "../services/mock/appServices";
 import { createMockDictationService } from
   "../services/mock/dictationService";
 import { appReducer, createInitialState, type AppAction, type AppState } from
@@ -17,8 +29,12 @@ import { appReducer, createInitialState, type AppAction, type AppState } from
 interface AppContextValue {
   clipboard: ClipboardAdapter;
   dictation: DictationLifecycle;
+  dictionary: DictionaryCrud;
   dispatch: Dispatch<AppAction>;
+  history: HistoryDeletion;
   now: () => number;
+  settings: SettingsStore;
+  setup: SetupLifecycle;
   state: AppState;
 }
 
@@ -39,7 +55,21 @@ export function AppProvider({ children, clock = Date.now }: AppProviderProps) {
     () => createMockDictationService({ dispatch, now: clock }),
     [clock],
   );
-  const value = { clipboard, dictation, dispatch, now: clock, state };
+  const dictionary = useMemo(() => createDictionaryService(dispatch), []);
+  const history = useMemo(() => createHistoryService(dispatch), []);
+  const settings = useMemo(() => createSettingsService(dispatch), []);
+  const setup = useMemo(() => createSetupService(dispatch), []);
+  const value = {
+    clipboard,
+    dictation,
+    dictionary,
+    dispatch,
+    history,
+    now: clock,
+    settings,
+    setup,
+    state,
+  };
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
 

@@ -13,7 +13,7 @@ function formatTime(timestamp: number): string {
 }
 
 export function Home({ onToast }: HomeProps) {
-  const { clipboard, dispatch, state } = useApp();
+  const { clipboard, dispatch, settings, state } = useApp();
   const recent = [...state.records]
     .filter(({ status }) => status !== "failed")
     .sort((a, b) => b.createdAt - a.createdAt)
@@ -39,9 +39,8 @@ export function Home({ onToast }: HomeProps) {
                 <button
                   aria-pressed={state.settings.style === style}
                   key={style}
-                  onClick={() => dispatch({
+                  onClick={() => settings.update({
                     key: "style",
-                    type: "set-setting",
                     value: style,
                   })}
                 >
