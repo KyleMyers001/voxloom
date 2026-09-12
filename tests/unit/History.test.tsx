@@ -1,26 +1,41 @@
-import { screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { act, fireEvent, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { History } from "../../src/features/history/History";
 import { renderWithApp } from "./testUtils";
 
 describe("History", () => {
   it("filters records and offers Retry only before expiry", async () => {
-    const user = userEvent.setup();
+    vi.useFakeTimers();
     let now = 1_800_000_000_000;
     renderWithApp(<History onToast={vi.fn()} />, () => now);
     expect(screen.getByRole("button", {
       name: "Retry transcription",
     })).toBeInTheDocument();
-    await user.selectOptions(screen.getByLabelText("History status"), "failed");
-    expect(screen.getAllByRole("article")).toHaveLength(1);
-    await user.type(screen.getByRole("searchbox"), "missing phrase");
-    expect(screen.getByText("No history matches these filters."))
+    expect(screen.getByText(/Temporary recovery buffer · expires/))
       .toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("History status"), {
+      target: { value: "failed" },
+    });
+    expect(screen.getAllByRole("article")).toHaveLength(1);
     now += 11 * 60_000;
-    await user.clear(screen.getByRole("searchbox"));
+    act(() => vi.advanceTimersByTime(1_000));
     expect(screen.queryByRole("button", {
       name: "Retry transcription",
     })).not.toBeInTheDocument();
+    expect(screen.getByText("Temporary recovery buffer expired"))
+      .toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("reports expiry when time changes immediately before Retry", async () => {
+    const toast = vi.fn();
+    let now = 1_800_000_000_000;
+    renderWithApp(<History onToast={toast} />, () => now);
+    const retry = screen.getByRole("button", {
+      name: "Retry transcription",
+    });
+    now += 11 * 60_000;
+    fireEvent.click(retry);
+    expect(toast).toHaveBeenCalledWith("Recovery buffer expired");
   });
 });

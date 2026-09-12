@@ -1,5 +1,3 @@
-import { createRecords, initialOnboarding, initialSettings } from
-  "../domain/fixtures";
 import { dictationReducer } from "../domain/dictationMachine";
 import {
   canRetry,
@@ -13,6 +11,9 @@ import type {
   Screen,
   Settings,
 } from "../domain/types";
+import { createInitialState } from "./initialState";
+
+export { createInitialState } from "./initialState";
 
 export interface AppState {
   clipboardFailure: boolean;
@@ -26,40 +27,35 @@ export interface AppState {
 }
 
 export type AppAction =
-  | { type: "cancel-dictation" }
+  | { runId: number; type: "cancel-dictation" }
   | { type: "complete-dictation"; now: number; runId: number }
   | { type: "delete-record"; id: string }
   | { type: "delete-word"; word: string }
   | { type: "expire-recovery"; now: number }
   | { type: "fail-dictation"; now: number; runId: number }
-  | { type: "process-dictation"; runId: number }
+  | {
+      completion: "automatic" | "held";
+      runId: number;
+      type: "process-dictation";
+    }
   | { type: "reset"; now: number }
   | { type: "retry"; id: string; now: number }
   | { type: "scenario-empty" }
   | { type: "set-clipboard-failure"; value: boolean }
   | { type: "set-onboarding"; value: OnboardingState }
   | { type: "set-screen"; screen: Screen }
-  | {
-      key: keyof Settings;
-      type: "set-setting";
-      value: Settings[keyof Settings];
-    }
+  | SettingAction
   | { type: "set-waveform"; value: "silent" | "speaking" }
   | { editing?: string; type: "save-word"; word: string }
   | { type: "start-dictation" };
 
-export function createInitialState(now: number): AppState {
-  return {
-    clipboardFailure: false,
-    dictation: { kind: "ready" },
-    nextRunId: 1,
-    onboarding: { ...initialOnboarding },
-    records: createRecords(now),
-    screen: "home",
-    settings: { ...initialSettings },
-    words: ["JSON", "Postgres", "TanStack Query", "TypeScript"],
-  };
-}
+export type SettingAction = {
+  [Key in keyof Settings]: {
+    key: Key;
+    type: "set-setting";
+    value: Settings[Key];
+  }
+}[keyof Settings];
 
 export function appReducer(state: AppState, action: AppAction): AppState {
   if (action.type === "reset") return createInitialState(action.now);
@@ -106,12 +102,14 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     };
   }
   if (action.type === "start-dictation") {
+    const dictation = dictationReducer(state.dictation, {
+      runId: state.nextRunId,
+      type: "start",
+    });
+    if (dictation === state.dictation) return state;
     return {
       ...state,
-      dictation: dictationReducer(state.dictation, {
-        runId: state.nextRunId,
-        type: "start",
-      }),
+      dictation,
       nextRunId: state.nextRunId + 1,
     };
   }
@@ -125,23 +123,26 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     };
   }
   if (action.type === "process-dictation") {
-    return {
-      ...state,
-      dictation: dictationReducer(state.dictation, {
-        runId: action.runId,
-        type: "process",
-      }),
-    };
+    const dictation = dictationReducer(state.dictation, {
+      completion: action.completion,
+      runId: action.runId,
+      type: "process",
+    });
+    return dictation === state.dictation ? state : { ...state, dictation };
   }
   if (action.type === "cancel-dictation") {
-    return {
-      ...state,
-      dictation: dictationReducer(state.dictation, { type: "cancel" }),
-    };
+    const dictation = dictationReducer(state.dictation, {
+      runId: action.runId,
+      type: "cancel",
+    });
+    return dictation === state.dictation ? state : { ...state, dictation };
   }
   if (action.type === "complete-dictation") {
+    const sourceId = state.dictation.kind === "processing"
+      ? state.dictation.retrySourceId
+      : undefined;
     const record = createSuccessfulRecord({
-      id: `record-${state.nextRunId + 10}`,
+      id: sourceId ?? `record-${state.nextRunId + 10}`,
       now: action.now,
       style: state.settings.style,
     });
@@ -151,11 +152,17 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       type: "complete",
     });
     if (dictation === state.dictation) return state;
-    return { ...state, dictation, records: [record, ...state.records] };
+    const records = sourceId
+      ? state.records.map((item) => item.id === sourceId ? record : item)
+      : [record, ...state.records];
+    return { ...state, dictation, records };
   }
   if (action.type === "fail-dictation") {
+    const sourceId = state.dictation.kind === "processing"
+      ? state.dictation.retrySourceId
+      : undefined;
     const record = createFailedRecord({
-      id: `failed-${state.nextRunId + 10}`,
+      id: sourceId ?? `failed-${state.nextRunId + 10}`,
       now: action.now,
       style: state.settings.style,
     });
@@ -165,14 +172,23 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       type: "fail",
     });
     if (dictation === state.dictation) return state;
-    return { ...state, dictation, records: [record, ...state.records] };
+    const records = sourceId
+      ? state.records.map((item) => item.id === sourceId ? record : item)
+      : [record, ...state.records];
+    return { ...state, dictation, records };
   }
   if (action.type === "retry") {
     const record = state.records.find(({ id }) => id === action.id);
-    if (!record || !canRetry(record, action.now)) return state;
+    if (state.dictation.kind === "processing" || !record ||
+        !canRetry(record, action.now)) return state;
     return {
       ...state,
-      dictation: { kind: "processing", runId: state.nextRunId },
+      dictation: {
+        completion: "automatic",
+        kind: "processing",
+        retrySourceId: record.id,
+        runId: state.nextRunId,
+      },
       nextRunId: state.nextRunId + 1,
       screen: "home",
     };

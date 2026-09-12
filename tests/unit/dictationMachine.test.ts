@@ -9,7 +9,7 @@ describe("dictationReducer", () => {
     );
     const processing = dictationReducer(
       listening,
-      { runId: 4, type: "process" },
+      { completion: "held", runId: 4, type: "process" },
     );
     expect(dictationReducer(processing, {
       recordId: "record",
@@ -19,7 +19,11 @@ describe("dictationReducer", () => {
   });
 
   it("ignores illegal and stale completions", () => {
-    const processing = { kind: "processing", runId: 8 } as const;
+    const processing = {
+      completion: "held",
+      kind: "processing",
+      runId: 8,
+    } as const;
     expect(dictationReducer(processing, {
       recordId: "stale",
       runId: 7,
@@ -35,11 +39,21 @@ describe("dictationReducer", () => {
   it("cancels only active work", () => {
     expect(dictationReducer(
       { kind: "listening", runId: 3, waveform: "silent" },
-      { type: "cancel" },
+      { runId: 3, type: "cancel" },
     )).toEqual({ kind: "cancelled", runId: 3 });
     expect(dictationReducer(
       { kind: "success", recordId: "done", runId: 3 },
-      { type: "cancel" },
+      { runId: 3, type: "cancel" },
     )).toEqual({ kind: "success", recordId: "done", runId: 3 });
+  });
+
+  it("ignores a stale cancellation", () => {
+    const listening = {
+      kind: "listening",
+      runId: 9,
+      waveform: "silent",
+    } as const;
+    expect(dictationReducer(listening, { runId: 8, type: "cancel" }))
+      .toBe(listening);
   });
 });

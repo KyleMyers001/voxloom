@@ -1,10 +1,14 @@
 import type { DictationState } from "./types";
 
 export type DictationAction =
-  | { type: "cancel" }
+  | { runId: number; type: "cancel" }
   | { recordId: string; runId: number; type: "complete" }
   | { recordId: string; runId: number; type: "fail" }
-  | { runId: number; type: "process" }
+  | {
+      completion: "automatic" | "held";
+      runId: number;
+      type: "process";
+    }
   | { runId: number; type: "start" }
   | { type: "reset" }
   | { type: "speech"; waveform: "silent" | "speaking" };
@@ -21,7 +25,8 @@ export function dictationReducer(
   action: DictationAction,
 ): DictationState {
   if (action.type === "reset") return { kind: "ready" };
-  if (action.type === "start" && state.kind !== "processing") {
+  if (action.type === "start" && state.kind !== "listening" &&
+      state.kind !== "processing") {
     return { kind: "listening", runId: action.runId, waveform: "silent" };
   }
   if (action.type === "speech" && state.kind === "listening") {
@@ -29,9 +34,14 @@ export function dictationReducer(
   }
   if (action.type === "process" && state.kind === "listening" &&
       state.runId === action.runId) {
-    return { kind: "processing", runId: action.runId };
+    return {
+      completion: action.completion,
+      kind: "processing",
+      runId: action.runId,
+    };
   }
   if (action.type === "cancel" && hasRun(state) &&
+      state.runId === action.runId &&
       (state.kind === "listening" || state.kind === "processing")) {
     return { kind: "cancelled", runId: state.runId };
   }

@@ -8,11 +8,15 @@ import {
 } from "react";
 import { createClipboardAdapter, type ClipboardAdapter } from
   "../services/clipboard";
+import type { DictationLifecycle } from "../services/contracts";
+import { createMockDictationService } from
+  "../services/mock/dictationService";
 import { appReducer, createInitialState, type AppAction, type AppState } from
   "./state";
 
 interface AppContextValue {
   clipboard: ClipboardAdapter;
+  dictation: DictationLifecycle;
   dispatch: Dispatch<AppAction>;
   now: () => number;
   state: AppState;
@@ -31,7 +35,11 @@ export function AppProvider({ children, clock = Date.now }: AppProviderProps) {
     () => createClipboardAdapter(() => state.clipboardFailure),
     [state.clipboardFailure],
   );
-  const value = { clipboard, dispatch, now: clock, state };
+  const dictation = useMemo(
+    () => createMockDictationService({ dispatch, now: clock }),
+    [clock],
+  );
+  const value = { clipboard, dictation, dispatch, now: clock, state };
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
 

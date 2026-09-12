@@ -15,10 +15,14 @@ function Harness() {
       value: "speaking",
     })}>Speak</button>
     <button onClick={() => dispatch({
+      completion: "held",
       runId,
       type: "process-dictation",
     })}>Process</button>
-    <button onClick={() => dispatch({ type: "cancel-dictation" })}>
+    <button onClick={() => dispatch({
+      runId,
+      type: "cancel-dictation",
+    })}>
       Cancel
     </button>
     <Waveform />

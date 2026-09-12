@@ -1,13 +1,14 @@
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ScenarioPanel } from "../../src/dev/ScenarioPanel";
 import { renderWithApp } from "./testUtils";
 
 describe("ScenarioPanel", () => {
   it("drives deterministic mock states and reset", async () => {
     const user = userEvent.setup();
-    renderWithApp(<ScenarioPanel />);
+    const reset = vi.fn();
+    renderWithApp(<ScenarioPanel onOnboarding={vi.fn()} onReset={reset} />);
     await user.click(screen.getByRole("button", {
       name: "Listening · silent",
     }));
@@ -18,6 +19,6 @@ describe("ScenarioPanel", () => {
     await user.click(screen.getByLabelText("Copy failure"));
     expect(screen.getByLabelText("Copy failure")).toBeChecked();
     await user.click(screen.getByRole("button", { name: "Reset session" }));
-    expect(screen.getByLabelText("Copy failure")).not.toBeChecked();
+    expect(reset).toHaveBeenCalledOnce();
   });
 });

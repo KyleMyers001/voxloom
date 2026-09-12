@@ -1,36 +1,51 @@
 import { useApp } from "../app/AppContext";
 
-export function ScenarioPanel() {
-  const { dispatch, now, state } = useApp();
+export type OnboardingScenario = "collision" | "permission-denied";
+
+interface ScenarioPanelProps {
+  onOnboarding: (scenario: OnboardingScenario) => void;
+  onReset: () => void;
+}
+
+export function ScenarioPanel({
+  onOnboarding,
+  onReset,
+}: ScenarioPanelProps) {
+  const { dictation, dispatch, now, state } = useApp();
   const runId = "runId" in state.dictation ? state.dictation.runId : null;
 
   return (
     <section aria-label="Development scenarios" className="state-lab">
       <strong>Dev · mock scenarios</strong>
-      <button onClick={() => dispatch({ now: now(), type: "reset" })}>
+      <button onClick={onReset}>
         Reset session
+      </button>
+      <button onClick={onReset}>First-run setup</button>
+      <button onClick={() => onOnboarding("collision")}>
+        Shortcut collision
       </button>
       <button onClick={() => dispatch({ type: "scenario-empty" })}>
         Empty lists
       </button>
-      <button onClick={() => dispatch({ type: "start-dictation" })}>
+      <button onClick={dictation.start}>
         Listening · silent
       </button>
       <button onClick={() => {
-        dispatch({ type: "start-dictation" });
-        dispatch({ type: "set-waveform", value: "speaking" });
+        dictation.start();
+        dictation.speech("speaking");
       }}>Listening · speaking</button>
       <button disabled={runId === null} onClick={() => runId !== null &&
-        dispatch({ runId, type: "process-dictation" })}>Processing</button>
+        dictation.holdProcessing(runId)}>Processing</button>
       <button disabled={runId === null} onClick={() => runId !== null &&
-        dispatch({ now: now(), runId, type: "complete-dictation" })}>
+        dictation.complete(runId)}>
         Complete success
       </button>
       <button disabled={runId === null} onClick={() => runId !== null &&
-        dispatch({ now: now(), runId, type: "fail-dictation" })}>
+        dictation.fail(runId)}>
         Complete error
       </button>
-      <button onClick={() => dispatch({ type: "cancel-dictation" })}>
+      <button disabled={runId === null} onClick={() => runId !== null &&
+        dictation.cancel(runId)}>
         Cancel
       </button>
       <button onClick={() => dispatch({ now: now(), type: "expire-recovery" })}>
@@ -43,14 +58,9 @@ export function ScenarioPanel() {
         })} type="checkbox" />
         Copy failure
       </label>
-      <button onClick={() => dispatch({
-        type: "set-onboarding",
-        value: {
-          ...state.onboarding,
-          microphoneGranted: false,
-          permissionDenied: true,
-        },
-      })}>Permission denied</button>
+      <button onClick={() => onOnboarding("permission-denied")}>
+        Permission denied
+      </button>
       <p>Controls are synthetic. No audio or OS capability is used.</p>
     </section>
   );

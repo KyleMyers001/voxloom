@@ -9,6 +9,8 @@ All state is held in memory and **resets when the page or desktop window is
 reloaded**. Clipboard writes occur only after an explicit Copy activation and
 report failures truthfully. Development scenario controls are excluded from a
 normal production build; the mock dictation and onboarding flows remain usable.
+The default `Ctrl + Shift + Space` gesture works only while Voxloom is focused:
+hold and release, or rapidly double-tap to latch and activate once more to stop.
 
 ## Browser
 

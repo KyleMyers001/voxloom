@@ -1,6 +1,11 @@
 import { useApp } from "../../app/AppContext";
-import type { Appearance, Settings as SettingsType } from
-  "../../domain/types";
+import {
+  audioRetentions,
+  parseChoice,
+  transcriptRetentions,
+  writingStyles,
+} from "../../domain/settings";
+import type { Appearance } from "../../domain/types";
 
 interface SettingsProps {
   onSetup: (opener: HTMLElement) => void;
@@ -15,10 +20,6 @@ const appearances: { label: string; value: Appearance }[] = [
 
 export function Settings({ onSetup }: SettingsProps) {
   const { dispatch, state } = useApp();
-  const update = (
-    key: keyof SettingsType,
-    value: SettingsType[keyof SettingsType],
-  ) => dispatch({ key, type: "set-setting", value });
 
   return (
     <section aria-labelledby="settings-title">
@@ -37,13 +38,21 @@ export function Settings({ onSetup }: SettingsProps) {
         <div className="form-grid">
           <label className="field">Shortcut · simulated
             <input
-              onChange={(event) => update("shortcut", event.target.value)}
+              onChange={(event) => dispatch({
+                key: "shortcut",
+                type: "set-setting",
+                value: event.target.value,
+              })}
               value={state.settings.shortcut}
             />
           </label>
           <label className="field">Microphone · simulated
             <select
-              onChange={(event) => update("microphone", event.target.value)}
+              onChange={(event) => dispatch({
+                key: "microphone",
+                type: "set-setting",
+                value: event.target.value,
+              })}
               value={state.settings.microphone}
             >
               <option>System default · simulated</option>
@@ -52,14 +61,18 @@ export function Settings({ onSetup }: SettingsProps) {
           </label>
           <label className="field">Language
             <select value={state.settings.language} onChange={(event) =>
-              update("language", event.target.value)}>
+              dispatch({ key: "language", type: "set-setting",
+                value: event.target.value })}>
               <option>English (US)</option>
               <option>English (UK)</option>
             </select>
           </label>
           <label className="field">Current style
-            <select value={state.settings.style} onChange={(event) =>
-              update("style", event.target.value)}>
+            <select value={state.settings.style} onChange={(event) => dispatch({
+              key: "style",
+              type: "set-setting",
+              value: parseChoice(event.target.value, writingStyles),
+            })}>
               <option value="formal">Formal</option>
               <option value="casual">Casual</option>
               <option value="very-casual">Very Casual</option>
@@ -67,32 +80,46 @@ export function Settings({ onSetup }: SettingsProps) {
           </label>
           <label className="field">Transcription model · simulated
             <select value={state.settings.transcriptionModel}
-              onChange={(event) => update(
-                "transcriptionModel", event.target.value)}>
+              onChange={(event) => dispatch({
+                key: "transcriptionModel",
+                type: "set-setting",
+                value: event.target.value,
+              })}>
               <option>Pine Voice Small · local</option>
               <option>Pine Voice Medium · unavailable</option>
             </select>
           </label>
           <label className="field">Language-processing model · simulated
             <select value={state.settings.languageModel}
-              onChange={(event) => update(
-                "languageModel", event.target.value)}>
+              onChange={(event) => dispatch({
+                key: "languageModel",
+                type: "set-setting",
+                value: event.target.value,
+              })}>
               <option>Alder Text Small · local</option>
               <option>Alder Text Medium · unavailable</option>
             </select>
           </label>
           <label className="check">
             <input checked={state.settings.startAtLogin}
-              onChange={(event) => update(
-                "startAtLogin", event.target.checked)} type="checkbox" />
+              onChange={(event) => dispatch({ key: "startAtLogin",
+                type: "set-setting", value: event.target.checked })}
+              type="checkbox" />
             Start at login · simulated
           </label>
           <label className="check">
             <input checked={state.settings.clipboardFallback}
-              onChange={(event) => update(
-                "clipboardFallback", event.target.checked)} type="checkbox" />
-            Use clipboard if direct insertion fails
+              onChange={(event) => dispatch({ key: "clipboardFallback",
+                type: "set-setting", value: event.target.checked })}
+              type="checkbox" />
+            Use clipboard if simulated direct insertion fails
           </label>
+          <div className="field">
+            <label>Recording indicator</label>
+            <p className="empty-note">
+              Fixed bottom-center while listening or processing.
+            </p>
+          </div>
         </div>
       </section>
       <section className="card settings-section">
@@ -102,7 +129,11 @@ export function Settings({ onSetup }: SettingsProps) {
           {appearances.map(({ label, value }) => (
             <label className="appearance-option" key={value}>
               <input checked={state.settings.appearance === value}
-                name="appearance" onChange={() => update("appearance", value)}
+                name="appearance" onChange={() => dispatch({
+                  key: "appearance",
+                  type: "set-setting",
+                  value,
+                })}
                 type="radio" value={value} />
               <span>{label}</span>
               <span aria-hidden="true" className="appearance-swatch"
@@ -116,8 +147,14 @@ export function Settings({ onSetup }: SettingsProps) {
         <div className="form-grid">
           <label className="field">Transcript retention
             <select value={state.settings.transcriptRetention}
-              onChange={(event) => update(
-                "transcriptRetention", event.target.value)}>
+              onChange={(event) => dispatch({
+                key: "transcriptRetention",
+                type: "set-setting",
+                value: parseChoice(
+                  event.target.value,
+                  transcriptRetentions,
+                ),
+              })}>
               <option value="30-days">30 days</option>
               <option value="forever">Until deleted</option>
               <option value="off">Off</option>
@@ -125,8 +162,11 @@ export function Settings({ onSetup }: SettingsProps) {
           </label>
           <label className="field">Audio retention
             <select value={state.settings.audioRetention}
-              onChange={(event) => update(
-                "audioRetention", event.target.value)}>
+              onChange={(event) => dispatch({
+                key: "audioRetention",
+                type: "set-setting",
+                value: parseChoice(event.target.value, audioRetentions),
+              })}>
               <option value="off">Off · recommended</option>
               <option value="24-hours">24 hours</option>
               <option value="7-days">7 days</option>
@@ -147,6 +187,7 @@ export function Settings({ onSetup }: SettingsProps) {
             "Model unavailable · No download is performed.",
             "No speech detected · No transcript is created.",
             "Insertion failed · Clipboard result is reported truthfully.",
+            "Transcription failed · Temporary recovery buffers expire.",
           ].map((message) => <p className="recovery-item" key={message}>
             {message}</p>)}
         </div>

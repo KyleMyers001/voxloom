@@ -1,10 +1,48 @@
-import { screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { App } from "../../src/app/App";
 import { renderWithApp } from "./testUtils";
 
 describe("App integration", () => {
+  it("drives onboarding practices from configured gestures", async () => {
+    let now = 0;
+    const user = userEvent.setup();
+    renderWithApp(<App />, () => now);
+    await user.click(screen.getByRole("button", {
+      name: "Enable mock microphone",
+    }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    vi.useFakeTimers();
+    const key = {
+      code: "Space",
+      ctrlKey: true,
+      key: " ",
+      shiftKey: true,
+    };
+    fireEvent.keyDown(document, key);
+    now = 320;
+    act(() => vi.advanceTimersByTime(320));
+    fireEvent.keyUp(document, key);
+    expect(screen.getByText(/Press-and-hold · recognized/))
+      .toBeInTheDocument();
+    now = 400;
+    fireEvent.keyDown(document, key);
+    fireEvent.keyUp(document, key);
+    now = 500;
+    fireEvent.keyDown(document, key);
+    fireEvent.keyUp(document, key);
+    now = 600;
+    fireEvent.keyDown(document, key);
+    fireEvent.keyUp(document, key);
+    expect(screen.getByText(/Rapid double-tap · recognized/))
+      .toBeInTheDocument();
+    vi.useRealTimers();
+    await user.click(screen.getByRole("button", { name: "Finish" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("gates first run, completes dictation, and shares mutations", async () => {
     const user = userEvent.setup();
     renderWithApp(<App />);
@@ -12,23 +50,30 @@ describe("App integration", () => {
       name: "Set up Voxloom",
     })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Skip" }));
-    await user.click(screen.getByRole("button", {
-      name: "Start mock dictation",
-    }));
+    vi.useFakeTimers();
+    fireEvent.keyDown(document, {
+      code: "Space",
+      ctrlKey: true,
+      key: " ",
+      shiftKey: true,
+    });
+    act(() => vi.advanceTimersByTime(320));
     expect(screen.getByRole("img")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", {
-      name: "Finish mock dictation",
-    }));
-    await user.click(screen.getByRole("button", {
-      name: "Complete mock result",
-    }));
+    fireEvent.keyUp(document, {
+      code: "Space",
+      ctrlKey: true,
+      key: " ",
+      shiftKey: true,
+    });
+    act(() => vi.advanceTimersByTime(500));
+    vi.useRealTimers();
     expect(screen.getByText(
       "Keep the TypeScript boundary small and explicit.",
     )).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Settings" }));
     await user.selectOptions(screen.getByLabelText("Current style"), "casual");
     await user.keyboard("{Alt>}1{/Alt}");
-    expect(screen.getByRole("button", { name: "Casual" }))
+    expect(screen.getByRole("button", { name: /^Casual$/ }))
       .toHaveAttribute("aria-pressed", "true");
     await user.click(screen.getByRole("button", { name: "Dictionary" }));
     await user.click(screen.getByRole("button", { name: "Add term" }));
@@ -46,5 +91,56 @@ describe("App integration", () => {
       .toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("reopens clean setup and reset restores first-run fixtures", async () => {
+    const user = userEvent.setup();
+    renderWithApp(<App />);
+    await user.click(screen.getByRole("button", { name: "Skip" }));
+    await user.click(screen.getByRole("button", { name: "Empty lists" }));
+    expect(screen.getByText("No dictations yet.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Reset session" }));
+    expect(screen.getByText("Step 1 of 3")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Skip" }));
+    expect(screen.getAllByRole("button", { name: "Copy dictation" }))
+      .toHaveLength(5);
+
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole("button", {
+      name: "Set up shortcuts",
+    }));
+    await user.click(screen.getByRole("button", {
+      name: "Enable mock microphone",
+    }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("button", { name: "Test hold" }));
+    await user.click(screen.getByRole("button", { name: "Test double-tap" }));
+    await user.click(screen.getByRole("button", { name: "Finish" }));
+    const setup = screen.getByRole("button", { name: "Set up shortcuts" });
+    await user.click(setup);
+    expect(screen.getByText("Step 1 of 3")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(setup).toHaveFocus();
+  });
+
+  it("recovers permission denial and surfaces collision scenario", async () => {
+    const user = userEvent.setup();
+    renderWithApp(<App />);
+    await user.click(screen.getByRole("button", { name: "Skip" }));
+    await user.click(screen.getByRole("button", { name: "Permission denied" }));
+    expect(screen.getByText("Mock permission denied")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", {
+      name: "Enable mock microphone",
+    }));
+    expect(screen.getByText("Mock microphone enabled")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", {
+      name: "Close Set up Voxloom",
+    }));
+    await user.click(screen.getByRole("button", {
+      name: "Shortcut collision",
+    }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("collision");
   });
 });

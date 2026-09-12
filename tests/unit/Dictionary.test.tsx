@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { Dictionary } from "../../src/features/dictionary/Dictionary";
@@ -27,5 +27,21 @@ describe("Dictionary", () => {
     expect(screen.queryByText("Postgres")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Delete Vitest" }));
     expect(screen.getByText("No words found.")).toBeInTheDocument();
+  });
+
+  it("restores focus and supports backdrop dismissal", async () => {
+    const user = userEvent.setup();
+    renderWithApp(<Dictionary />);
+    const add = screen.getByRole("button", { name: "Add term" });
+    await user.click(add);
+    await user.keyboard("{Escape}");
+    expect(add).toHaveFocus();
+    await user.click(add);
+    const dialog = screen.getByRole("dialog", {
+      name: "Add dictionary word",
+    });
+    fireEvent.mouseDown(dialog);
+    expect(dialog).not.toBeInTheDocument();
+    expect(add).toHaveFocus();
   });
 });

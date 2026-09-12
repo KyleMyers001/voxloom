@@ -32,7 +32,7 @@ export function Home({ onToast }: HomeProps) {
     <section aria-labelledby="home-title">
       <div className="hero">
         <div>
-          <h1 id="home-title">Writing style</h1>
+          <h2 id="home-title">Writing style</h2>
           <div aria-label="Current writing style" className="style-switch">
             {(["formal", "casual", "very-casual"] as WritingStyle[])
               .map((style) => (

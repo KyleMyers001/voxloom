@@ -83,26 +83,30 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
       {onboarding.step === 3 && (
         <section className="onboarding-step">
           <h3>Quick test</h3>
+          <p>
+            Hold and release the configured shortcut, then rapidly double-tap
+            to latch and activate it once more to finish.
+          </p>
           <label className="field">Recognized fixture text
             <textarea readOnly value={onboarding.recognizedText}
               placeholder="Practice output appears here." />
           </label>
-          <div className="onboarding-test">
+          {import.meta.env.DEV && <div className="onboarding-test">
             <span>Press-and-hold · {onboarding.holdTested ?
               "recognized" : "not tested"}</span>
             <button className="btn" onClick={() => update({
               holdTested: true,
               recognizedText: "Hold: preserve the TypeScript identifier.",
             })}>Test hold</button>
-          </div>
-          <div className="onboarding-test">
+          </div>}
+          {import.meta.env.DEV && <div className="onboarding-test">
             <span>Rapid double-tap · {onboarding.tapTested ?
               "recognized" : "not tested"}</span>
             <button className="btn" onClick={() => update({
               recognizedText: "Double-tap: keep --dry-run enabled.",
               tapTested: true,
             })}>Test double-tap</button>
-          </div>
+          </div>}
         </section>
       )}
       {error && <p className="form-error" role="alert">{error}</p>}

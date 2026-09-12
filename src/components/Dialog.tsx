@@ -4,6 +4,7 @@ import {
   useEffect,
   useRef,
 } from "react";
+import { createPortal } from "react-dom";
 
 interface DialogProps {
   children: ReactNode;
@@ -23,8 +24,22 @@ export function Dialog({ children, label, onClose, opener }: DialogProps) {
   const panel = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const root = document.querySelector<HTMLElement>("#root");
+    const wasHidden = root?.getAttribute("aria-hidden");
+    const wasInert = root?.inert ?? false;
+    if (root) {
+      root.inert = true;
+      root.setAttribute("aria-hidden", "true");
+    }
     panel.current?.querySelector<HTMLElement>(selector)?.focus();
-    return () => opener?.focus();
+    return () => {
+      if (root) {
+        root.inert = wasInert;
+        if (wasHidden === null) root.removeAttribute("aria-hidden");
+        else root.setAttribute("aria-hidden", wasHidden ?? "true");
+      }
+      opener?.focus();
+    };
   }, [opener]);
 
   function handleKeyDown(event: KeyboardEvent) {
@@ -47,15 +62,19 @@ export function Dialog({ children, label, onClose, opener }: DialogProps) {
     }
   }
 
-  return (
+  return createPortal(
     <div
       aria-label={label}
       aria-modal="true"
       className="overlay"
+      onMouseDown={(event) => {
+        if (event.currentTarget === event.target) onClose();
+      }}
       onKeyDown={handleKeyDown}
       role="dialog"
     >
-      <div className="overlay__panel" ref={panel}>
+      <div className="overlay__panel" onMouseDown={(event) =>
+        event.stopPropagation()} ref={panel}>
         <button
           aria-label={`Close ${label}`}
           className="icon-btn modal-close"
@@ -65,6 +84,7 @@ export function Dialog({ children, label, onClose, opener }: DialogProps) {
         </button>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

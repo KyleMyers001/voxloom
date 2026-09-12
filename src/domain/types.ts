@@ -16,7 +16,12 @@ export interface DictationRecord {
 export type DictationState =
   | { kind: "ready" }
   | { kind: "listening"; runId: number; waveform: "silent" | "speaking" }
-  | { kind: "processing"; runId: number }
+  | {
+      completion: "automatic" | "held";
+      kind: "processing";
+      retrySourceId?: string;
+      runId: number;
+    }
   | { kind: "success"; recordId: string; runId: number }
   | { kind: "cancelled"; runId: number }
   | { kind: "error"; recordId: string; runId: number };

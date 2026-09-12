@@ -7,6 +7,7 @@ describe("appReducer", () => {
     const initial = createInitialState(1_000);
     const listening = appReducer(initial, { type: "start-dictation" });
     const processing = appReducer(listening, {
+      completion: "held",
       runId: 1,
       type: "process-dictation",
     });
@@ -27,7 +28,10 @@ describe("appReducer", () => {
   it("does not create success after cancellation", () => {
     const initial = createInitialState(1_000);
     const listening = appReducer(initial, { type: "start-dictation" });
-    const cancelled = appReducer(listening, { type: "cancel-dictation" });
+    const cancelled = appReducer(listening, {
+      runId: 1,
+      type: "cancel-dictation",
+    });
     const completion = appReducer(cancelled, {
       now: 2_000,
       runId: 1,
@@ -48,5 +52,65 @@ describe("appReducer", () => {
       now: failed.recoveryExpiresAt,
       type: "retry",
     })).toBe(state);
+  });
+
+  it("resolves a retry source without duplicating history", () => {
+    const initial = createInitialState(10_000);
+    const failed = initial.records.find((record) =>
+      record.status === "failed"
+    );
+    if (!failed) throw new Error("fixture failure missing");
+    const retrying = appReducer(initial, {
+      id: failed.id,
+      now: 10_001,
+      type: "retry",
+    });
+    const complete = appReducer(retrying, {
+      now: 10_100,
+      runId: 1,
+      type: "complete-dictation",
+    });
+    expect(complete.records).toHaveLength(initial.records.length);
+    expect(complete.records.find(({ id }) => id === failed.id)?.status)
+      .toBe("inserted");
+    expect(appReducer(complete, {
+      now: 10_200,
+      runId: 1,
+      type: "complete-dictation",
+    })).toBe(complete);
+  });
+
+  it("guards retry terminals and permits retry after cancel", () => {
+    const initial = createInitialState(10_000);
+    const failed = initial.records.find((record) =>
+      record.status === "failed"
+    );
+    if (!failed) throw new Error("fixture failure missing");
+    const retrying = appReducer(initial, {
+      id: failed.id,
+      now: 10_001,
+      type: "retry",
+    });
+    const staleActions = [
+      { now: 10_002, runId: 99, type: "fail-dictation" },
+      { now: 10_002, runId: 99, type: "complete-dictation" },
+      { runId: 99, type: "cancel-dictation" },
+    ] as const;
+    for (const action of staleActions) {
+      expect(appReducer(retrying, action)).toBe(retrying);
+    }
+    const cancelled = appReducer(retrying, {
+      runId: 1,
+      type: "cancel-dictation",
+    });
+    const repeated = appReducer(cancelled, {
+      id: failed.id,
+      now: 10_003,
+      type: "retry",
+    });
+    expect(repeated.dictation).toMatchObject({
+      retrySourceId: failed.id,
+      runId: 2,
+    });
   });
 });
