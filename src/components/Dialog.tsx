@@ -5,6 +5,7 @@ import {
   useRef,
 } from "react";
 import { createPortal } from "react-dom";
+import { beginModal } from "../app/modalState";
 
 interface DialogProps {
   children: ReactNode;
@@ -22,6 +23,8 @@ const selector = [
 
 export function Dialog({ children, label, onClose, opener }: DialogProps) {
   const panel = useRef<HTMLDivElement>(null);
+
+  useEffect(() => beginModal(), []);
 
   useEffect(() => {
     const root = document.querySelector<HTMLElement>("#root");

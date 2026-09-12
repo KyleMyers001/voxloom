@@ -67,4 +67,53 @@ describe("createShortcutController", () => {
     expect(gestures).toEqual(["latch-start", "latch-finish"]);
     controller.dispose();
   });
+
+  it("clears pending gesture state while disabled", () => {
+    vi.useFakeTimers();
+    let now = 0;
+    const gestures: ShortcutGesture[] = [];
+    const controller = createShortcutController({
+      clock: () => now,
+      onGesture: (gesture) => gestures.push(gesture),
+      shortcut: "Ctrl + Shift + Space",
+      target: document,
+    });
+
+    document.dispatchEvent(shortcutEvent("keydown"));
+    now = 100;
+    controller.setEnabled(false);
+    vi.advanceTimersByTime(320);
+    document.dispatchEvent(shortcutEvent("keyup"));
+    controller.setEnabled(true);
+    expect(gestures).toEqual([]);
+
+    now = 500;
+    document.dispatchEvent(shortcutEvent("keydown"));
+    vi.advanceTimersByTime(319);
+    expect(gestures).toEqual([]);
+    vi.advanceTimersByTime(1);
+    document.dispatchEvent(shortcutEvent("keyup"));
+    expect(gestures).toEqual(["hold-start", "hold-finish"]);
+
+    now = 850;
+    document.dispatchEvent(shortcutEvent("keydown"));
+    document.dispatchEvent(shortcutEvent("keyup"));
+    controller.setEnabled(false);
+    document.dispatchEvent(shortcutEvent("keydown"));
+    document.dispatchEvent(shortcutEvent("keyup"));
+    controller.setEnabled(true);
+    gestures.length = 0;
+    now = 1_000;
+    document.dispatchEvent(shortcutEvent("keydown"));
+    document.dispatchEvent(shortcutEvent("keyup"));
+    now = 1_100;
+    document.dispatchEvent(shortcutEvent("keydown"));
+    document.dispatchEvent(shortcutEvent("keyup"));
+    now = 1_180;
+    document.dispatchEvent(shortcutEvent("keydown"));
+    document.dispatchEvent(shortcutEvent("keyup"));
+    expect(gestures).toEqual(["latch-start", "latch-finish"]);
+    controller.dispose();
+    vi.useRealTimers();
+  });
 });

@@ -38,6 +38,7 @@ export interface SetupLifecycle {
 
 export interface ShortcutController {
   dispose(): void;
+  setEnabled(enabled: boolean): void;
 }
 
 export interface Scheduler {

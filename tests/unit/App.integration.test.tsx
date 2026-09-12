@@ -94,8 +94,9 @@ describe("App integration", () => {
   });
 
   it("suppresses app shortcuts while a dictionary dialog is open", async () => {
+    let now = 0;
     const user = userEvent.setup();
-    renderWithApp(<App />);
+    renderWithApp(<App />, () => now);
     await user.click(screen.getByRole("button", { name: "Skip" }));
     await user.click(screen.getByRole("button", { name: "Dictionary" }));
     await user.click(screen.getByRole("button", { name: "Add term" }));
@@ -117,9 +118,20 @@ describe("App integration", () => {
       .toHaveAttribute("aria-current", "page");
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
     await user.keyboard("{Escape}");
+    now = 10;
     fireEvent.keyDown(document, shortcut);
+    fireEvent.keyUp(document, shortcut);
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    vi.useFakeTimers();
+    now = 300;
+    fireEvent.keyDown(document, shortcut);
+    act(() => vi.advanceTimersByTime(319));
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(1));
     expect(screen.getByRole("img")).toBeInTheDocument();
     fireEvent.keyUp(document, shortcut);
+    act(() => vi.advanceTimersByTime(500));
+    vi.useRealTimers();
   });
 
   it("reopens clean setup and reset restores first-run fixtures", async () => {

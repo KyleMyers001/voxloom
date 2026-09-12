@@ -46,13 +46,27 @@ export function createShortcutController({
   let latched = false;
   let lastTap: number | null = null;
   let tapTimer: number | null = null;
+  let enabled = true;
 
   function clear(timer: number | null) {
     if (timer !== null) scheduler.clear(timer);
   }
 
+  function reset() {
+    clear(holdTimer);
+    clear(tapTimer);
+    downAt = null;
+    holdTimer = null;
+    holding = false;
+    ignoreUp = false;
+    latched = false;
+    lastTap = null;
+    tapTimer = null;
+  }
+
   function keyDown(event: Event) {
     const key = event as KeyboardEvent;
+    if (!enabled) return;
     if (key.repeat || downAt !== null || !matches(key, shortcut)) return;
     key.preventDefault();
     if (latched) {
@@ -80,6 +94,7 @@ export function createShortcutController({
 
   function keyUp(event: Event) {
     const key = event as KeyboardEvent;
+    if (!enabled) return;
     if (!matches(key, shortcut)) return;
     key.preventDefault();
     if (ignoreUp) {
@@ -103,10 +118,13 @@ export function createShortcutController({
   target.addEventListener("keyup", keyUp);
   return {
     dispose() {
-      clear(holdTimer);
-      clear(tapTimer);
+      reset();
       target.removeEventListener("keydown", keyDown);
       target.removeEventListener("keyup", keyUp);
+    },
+    setEnabled(value) {
+      enabled = value;
+      if (!enabled) reset();
     },
   };
 }

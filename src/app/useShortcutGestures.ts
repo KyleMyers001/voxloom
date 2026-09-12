@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { hasOpenModal, subscribeModal } from "./modalState";
 import type { AppState } from "./state";
 import type { OnboardingState } from "../domain/types";
 import type {
@@ -19,6 +20,9 @@ interface GestureOptions {
 }
 
 export function useShortcutGestures(options: GestureOptions) {
+  const controllerRef = useRef<ReturnType<
+    typeof createShortcutController
+  > | null>(null);
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
@@ -29,8 +33,23 @@ export function useShortcutGestures(options: GestureOptions) {
       shortcut: options.state.settings.shortcut,
       target: document,
     });
-    return () => controller.dispose();
+    controllerRef.current = controller;
+    const update = () => controller.setEnabled(
+      canReceiveGestures(optionsRef.current),
+    );
+    const unsubscribe = subscribeModal(update);
+    update();
+    return () => {
+      controllerRef.current = null;
+      unsubscribe();
+      controller.dispose();
+    };
   }, [options.now, options.state.settings.shortcut]);
+
+  useEffect(() => {
+    controllerRef.current?.setEnabled(canReceiveGestures(options));
+  }, [options.onboardingOpen, options.shortcutOpen,
+    options.state.onboarding.step]);
 
   useEffect(() => {
     const { dictation, state } = options;
@@ -53,7 +72,6 @@ function handleGesture(options: GestureOptions, gesture: ShortcutGesture) {
     return;
   }
   if (onboardingOpen) return;
-  if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
   if (gesture === "hold-start" || gesture === "latch-start") {
     dictation.start();
   } else if ((gesture === "hold-finish" ||
@@ -61,6 +79,11 @@ function handleGesture(options: GestureOptions, gesture: ShortcutGesture) {
       state.dictation.kind === "listening") {
     dictation.finish(state.dictation.runId);
   }
+}
+
+function canReceiveGestures(options: GestureOptions): boolean {
+  if (options.onboardingOpen) return options.state.onboarding.step === 3;
+  return !options.shortcutOpen && !hasOpenModal();
 }
 
 function handlePractice(options: GestureOptions, gesture: ShortcutGesture) {

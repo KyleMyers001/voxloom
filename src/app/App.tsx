@@ -12,6 +12,7 @@ import { Home } from "../features/home/Home";
 import { Onboarding } from "../features/onboarding/Onboarding";
 import { Settings } from "../features/settings/Settings";
 import { useApp } from "./AppContext";
+import { hasOpenModal } from "./modalState";
 import { useShortcutGestures } from "./useShortcutGestures";
 import { useTheme } from "./useTheme";
 
@@ -42,9 +43,7 @@ export function App() {
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
-      if (onboardingOpen || shortcutOpen || document.querySelector(
-        '[role="dialog"][aria-modal="true"]'
-      )) return;
+      if (onboardingOpen || shortcutOpen || hasOpenModal()) return;
       const target = event.target as HTMLElement;
       if (event.key === "?" && !target.matches("input, select, textarea")) {
         modalOpener.current = target;
