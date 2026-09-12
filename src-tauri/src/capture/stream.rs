@@ -11,7 +11,7 @@
 ///   inside the callback — no branching allocation.
 /// - `cpal::Stream` is !Send on macOS; it is opened and dropped exclusively
 ///   on the worker thread via `with_stream`. No unsafe Send impl is used.
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -38,6 +38,10 @@ pub enum DeviceSelection {
 
 /// Metadata returned with the ring consumer when a stream is opened.
 pub struct StreamMeta {
+    /// True while the real-time callback may accept new frames.
+    pub accepting: Arc<AtomicBool>,
+    /// Number of callbacks currently writing accepted frames.
+    pub callbacks_in_flight: Arc<AtomicUsize>,
     /// Display name only — not identity.
     pub device_name: String,
     /// Native device sample rate in Hz.
@@ -90,6 +94,8 @@ where
 
     let overflow = Arc::new(AtomicBool::new(false));
     let stream_error = Arc::new(AtomicBool::new(false));
+    let accepting = Arc::new(AtomicBool::new(true));
+    let callbacks_in_flight = Arc::new(AtomicUsize::new(0));
 
     // Build the stream — stays local to this function's stack frame.
     let stream = build_stream(
@@ -98,6 +104,8 @@ where
         sample_format,
         channels,
         producer,
+        Arc::clone(&accepting),
+        Arc::clone(&callbacks_in_flight),
         Arc::clone(&overflow),
         Arc::clone(&stream_error),
     )?;
@@ -107,6 +115,8 @@ where
         .map_err(|e| format!("capture-unavailable: {e}"))?;
 
     let meta = StreamMeta {
+        accepting,
+        callbacks_in_flight,
         consumer,
         device_name,
         native_rate,
@@ -129,7 +139,7 @@ pub fn list_input_device_names() -> Vec<String> {
         .unwrap_or_default()
 }
 
-// ── Internals ─────────────────────────────────────────────────────────────
+// Internals
 
 /// Build a raw input stream, converting all supported CPAL sample formats
 /// to mono f32 inside the callback.
@@ -145,6 +155,8 @@ fn build_stream(
     sample_format: SampleFormat,
     channels: u16,
     mut producer: HeapProd<f32>,
+    accepting: Arc<AtomicBool>,
+    callbacks_in_flight: Arc<AtomicUsize>,
     overflow: Arc<AtomicBool>,
     stream_error: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, String> {
@@ -153,6 +165,8 @@ fn build_stream(
     macro_rules! build_typed {
         ($T:ty) => {{
             let ch = channels as usize;
+            let accepting2 = Arc::clone(&accepting);
+            let in_flight2 = Arc::clone(&callbacks_in_flight);
             let of2 = Arc::clone(&overflow);
             let se2 = Arc::clone(&stream_error);
             device.build_input_stream_raw(
@@ -163,10 +177,18 @@ fn build_stream(
                         Some(s) => s,
                         None => return,
                     };
-                    write_mono_f32(samples, ch, &mut producer, &of2);
+                    write_mono_f32(
+                        samples,
+                        ch,
+                        &mut producer,
+                        &accepting2,
+                        &in_flight2,
+                        &of2,
+                    );
                 },
                 move |_err: StreamError| {
-                    // Device disconnect / revocation — distinct from overflow.
+                    // Device disconnect or revocation is distinct from
+                    // overflow.
                     se2.store(true, Ordering::Release);
                 },
                 None,
@@ -201,12 +223,19 @@ fn write_mono_f32<T>(
     interleaved: &[T],
     channels: usize,
     producer: &mut HeapProd<f32>,
+    accepting: &AtomicBool,
+    callbacks_in_flight: &AtomicUsize,
     overflow: &AtomicBool,
 ) where
     T: Copy,
     f32: cpal::FromSample<T>,
 {
     use cpal::Sample;
+    callbacks_in_flight.fetch_add(1, Ordering::AcqRel);
+    let _lease = CallbackLease(callbacks_in_flight);
+    if !accepting.load(Ordering::Acquire) {
+        return;
+    }
     let step = channels.max(1);
     for frame in interleaved.chunks(step) {
         let sum: f32 =
@@ -216,6 +245,14 @@ fn write_mono_f32<T>(
             overflow.store(true, Ordering::Release);
             return;
         }
+    }
+}
+
+struct CallbackLease<'a>(&'a AtomicUsize);
+
+impl Drop for CallbackLease<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -277,13 +314,28 @@ mod tests {
         out
     }
 
-    // ── write_mono_f32 ────────────────────────────────────────────────
+    fn open_gate() -> Arc<AtomicBool> {
+        Arc::new(AtomicBool::new(true))
+    }
+
+    fn no_callbacks() -> AtomicUsize {
+        AtomicUsize::new(0)
+    }
+
+    // write_mono_f32
 
     #[test]
     fn f32_mono_passthrough() {
         let (mut prod, cons) = make_ring(16);
         let ov = Arc::new(AtomicBool::new(false));
-        write_mono_f32(&[0.25f32, 0.5, -0.5], 1, &mut prod, &ov);
+        write_mono_f32(
+            &[0.25f32, 0.5, -0.5],
+            1,
+            &mut prod,
+            &open_gate(),
+            &no_callbacks(),
+            &ov,
+        );
         assert!(!ov.load(Ordering::Acquire));
         assert_eq!(drain(cons), vec![0.25f32, 0.5, -0.5]);
     }
@@ -293,7 +345,14 @@ mod tests {
         let (mut prod, cons) = make_ring(16);
         let ov = Arc::new(AtomicBool::new(false));
         // [1.0, -1.0] → avg 0.0; [0.5, 0.5] → avg 0.5
-        write_mono_f32(&[1.0f32, -1.0, 0.5, 0.5], 2, &mut prod, &ov);
+        write_mono_f32(
+            &[1.0f32, -1.0, 0.5, 0.5],
+            2,
+            &mut prod,
+            &open_gate(),
+            &no_callbacks(),
+            &ov,
+        );
         let out = drain(cons);
         assert_eq!(out.len(), 2);
         assert!(out[0].abs() < 1e-6);
@@ -304,7 +363,14 @@ mod tests {
     fn i16_max_converts_near_plus_one() {
         let (mut prod, cons) = make_ring(4);
         let ov = Arc::new(AtomicBool::new(false));
-        write_mono_f32(&[i16::MAX], 1, &mut prod, &ov);
+        write_mono_f32(
+            &[i16::MAX],
+            1,
+            &mut prod,
+            &open_gate(),
+            &no_callbacks(),
+            &ov,
+        );
         let out = drain(cons);
         assert!((out[0] - 1.0).abs() < 0.001);
     }
@@ -313,7 +379,14 @@ mod tests {
     fn i16_min_converts_near_minus_one() {
         let (mut prod, cons) = make_ring(4);
         let ov = Arc::new(AtomicBool::new(false));
-        write_mono_f32(&[i16::MIN], 1, &mut prod, &ov);
+        write_mono_f32(
+            &[i16::MIN],
+            1,
+            &mut prod,
+            &open_gate(),
+            &no_callbacks(),
+            &ov,
+        );
         let out = drain(cons);
         assert!((out[0] - (-1.0)).abs() < 0.001);
     }
@@ -322,7 +395,14 @@ mod tests {
     fn u16_midpoint_converts_near_zero() {
         let (mut prod, cons) = make_ring(4);
         let ov = Arc::new(AtomicBool::new(false));
-        write_mono_f32(&[32768u16], 1, &mut prod, &ov);
+        write_mono_f32(
+            &[32768u16],
+            1,
+            &mut prod,
+            &open_gate(),
+            &no_callbacks(),
+            &ov,
+        );
         let out = drain(cons);
         assert!(out[0].abs() < 0.001, "u16 midpoint maps to ~0.0");
     }
@@ -331,7 +411,14 @@ mod tests {
     fn i32_extrema_convert_to_pm1() {
         let (mut prod, cons) = make_ring(4);
         let ov = Arc::new(AtomicBool::new(false));
-        write_mono_f32(&[i32::MAX, i32::MIN], 1, &mut prod, &ov);
+        write_mono_f32(
+            &[i32::MAX, i32::MIN],
+            1,
+            &mut prod,
+            &open_gate(),
+            &no_callbacks(),
+            &ov,
+        );
         let out = drain(cons);
         assert!((out[0] - 1.0).abs() < 0.001);
         assert!((out[1] - (-1.0)).abs() < 0.001);
@@ -341,7 +428,14 @@ mod tests {
     fn u32_midpoint_converts_near_zero() {
         let (mut prod, cons) = make_ring(4);
         let ov = Arc::new(AtomicBool::new(false));
-        write_mono_f32(&[u32::MAX / 2], 1, &mut prod, &ov);
+        write_mono_f32(
+            &[u32::MAX / 2],
+            1,
+            &mut prod,
+            &open_gate(),
+            &no_callbacks(),
+            &ov,
+        );
         let out = drain(cons);
         assert!(out[0].abs() < 0.001, "u32 midpoint maps to ~0.0");
     }
@@ -350,7 +444,14 @@ mod tests {
     fn overflow_flag_latches_when_ring_full() {
         let (mut prod, _cons) = make_ring(2);
         let ov = Arc::new(AtomicBool::new(false));
-        write_mono_f32(&[0.1f32, 0.2, 0.3, 0.4], 1, &mut prod, &ov);
+        write_mono_f32(
+            &[0.1f32, 0.2, 0.3, 0.4],
+            1,
+            &mut prod,
+            &open_gate(),
+            &no_callbacks(),
+            &ov,
+        );
         assert!(ov.load(Ordering::Acquire));
     }
 
@@ -358,12 +459,38 @@ mod tests {
     fn silence_produces_zero_frames() {
         let (mut prod, cons) = make_ring(16);
         let ov = Arc::new(AtomicBool::new(false));
-        write_mono_f32(&[0.0f32; 8], 1, &mut prod, &ov);
+        write_mono_f32(
+            &[0.0f32; 8],
+            1,
+            &mut prod,
+            &open_gate(),
+            &no_callbacks(),
+            &ov,
+        );
         let out = drain(cons);
         assert!(out.iter().all(|&s| s == 0.0));
     }
 
-    // ── DeviceSelection debug ─────────────────────────────────────────
+    #[test]
+    fn closed_gate_discards_frames_without_overflow() {
+        let (mut producer, consumer) = make_ring(2);
+        let accepting = AtomicBool::new(false);
+        let callbacks_in_flight = AtomicUsize::new(0);
+        let overflow = AtomicBool::new(false);
+        write_mono_f32(
+            &[0.1f32, 0.2, 0.3],
+            1,
+            &mut producer,
+            &accepting,
+            &callbacks_in_flight,
+            &overflow,
+        );
+        assert!(drain(consumer).is_empty());
+        assert_eq!(callbacks_in_flight.load(Ordering::Acquire), 0);
+        assert!(!overflow.load(Ordering::Acquire));
+    }
+
+    // DeviceSelection debug
 
     #[test]
     fn device_selection_debug_shows_name() {

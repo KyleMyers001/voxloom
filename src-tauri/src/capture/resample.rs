@@ -8,9 +8,8 @@
 ///   BlackmanHarris2  — ≥90 dB ideal stopband attenuation.
 ///   Cubic             — balance accuracy/CPU on the worker thread.
 ///
-/// `flush()` drains the FIR delay by feeding zeros after the partial chunk,
-/// then trims the output to the expected canonical duration so that no
-/// silence tail or FIR-delay artefact is included.
+/// Output accounting removes Rubato's startup delay exactly once, then emits
+/// exactly round(input_frames * 16_000 / native_rate) canonical frames.
 use rubato::{
     Resampler, SincFixedIn, SincInterpolationParameters,
     SincInterpolationType, WindowFunction,
@@ -33,12 +32,16 @@ const SINC_PARAMS: SincInterpolationParameters =
 const MAX_RATIO_RELATIVE: f64 = 1.0;
 
 pub struct Downmixer {
+    accepted_input: u64,
+    delay_remaining: usize,
+    emitted_output: u64,
+    flushed: bool,
+    #[cfg(test)]
+    flush_calls: usize,
+    native_rate: u32,
     resampler: Option<SincFixedIn<f32>>,
-    /// Resampling ratio (TARGET_RATE / native_rate); 1.0 in passthrough.
-    ratio: f64,
-    /// Pre-allocated output buffer.
     out_buf: Vec<Vec<f32>>,
-    /// Native-rate mono frames below CHUNK_FRAMES not yet resampled.
+    processed_input: u64,
     staging: Vec<f32>,
 }
 
@@ -51,7 +54,8 @@ impl Downmixer {
                 "capture-unavailable: native_rate must be > 0",
             ));
         }
-        let (resampler, out_buf) = if native_rate != TARGET_RATE {
+        let (delay_remaining, resampler, out_buf) =
+            if native_rate != TARGET_RATE {
             let ratio = TARGET_RATE as f64 / native_rate as f64;
             if !ratio.is_finite() || ratio <= 0.0 {
                 return Err(format!(
@@ -72,18 +76,25 @@ impl Downmixer {
                 )
             })?;
             let max_out = r.output_frames_max();
-            (Some(r), vec![vec![0.0f32; max_out]; 1])
+            (
+                r.output_delay(),
+                Some(r),
+                vec![vec![0.0f32; max_out]; 1],
+            )
         } else {
-            (None, Vec::new())
+            (0, None, Vec::new())
         };
 
         Ok(Downmixer {
+            accepted_input: 0,
+            delay_remaining,
+            emitted_output: 0,
+            flushed: false,
+            #[cfg(test)]
+            flush_calls: 0,
+            native_rate,
             out_buf,
-            ratio: if native_rate != TARGET_RATE {
-                TARGET_RATE as f64 / native_rate as f64
-            } else {
-                1.0
-            },
+            processed_input: 0,
             resampler,
             staging: Vec::with_capacity(CHUNK_FRAMES * 2),
         })
@@ -91,116 +102,125 @@ impl Downmixer {
 
     /// Push mono f32 frames. Returns resampled (or passthrough) frames.
     pub fn process(&mut self, mono: &[f32]) -> Result<Vec<f32>, String> {
+        if self.flushed {
+            return Err(String::from(
+                "capture-unavailable: resampler already flushed",
+            ));
+        }
+        self.accepted_input = self
+            .accepted_input
+            .checked_add(mono.len() as u64)
+            .ok_or_else(|| String::from("input-limit-exceeded"))?;
         if self.resampler.is_none() {
+            self.emitted_output = self.accepted_input;
+            self.processed_input = self.accepted_input;
             return Ok(mono.to_vec());
         }
 
         self.staging.extend_from_slice(mono);
-        let resampler = self.resampler.as_mut().unwrap();
         let mut output = Vec::new();
 
         while self.staging.len() >= CHUNK_FRAMES {
             let window: Vec<f32> =
                 self.staging.drain(..CHUNK_FRAMES).collect();
-            let (_, n_out) = resampler
-                .process_into_buffer(
-                    &[window.as_slice()],
-                    &mut self.out_buf,
-                    None,
-                )
-                .map_err(|e| {
-                    format!(
-                        "capture-unavailable: resampler error: {e}"
-                    )
-                })?;
-            output.extend_from_slice(&self.out_buf[0][..n_out]);
+            let n_out = self.process_chunk(&window)?;
+            self.processed_input += CHUNK_FRAMES as u64;
+            let target = self.canonical_frames(self.processed_input);
+            self.collect_aligned(n_out, target, &mut output);
         }
 
         Ok(output)
     }
 
-    /// Flush remaining frames from staging and drain the FIR group delay.
-    ///
-    /// Steps:
-    /// 1. Compute the expected output frame count for the staged input.
-    /// 2. Pad staging to CHUNK_FRAMES with silence and process.
-    /// 3. Feed additional silence chunks until the filter delay is drained.
-    /// 4. Trim the combined output to exactly `expected_frames`.
+    /// Drain staged input and FIR tail to the exact canonical frame count.
     pub fn flush(&mut self) -> Result<Vec<f32>, String> {
-        if self.staging.is_empty() {
+        #[cfg(test)]
+        {
+            self.flush_calls += 1;
+        }
+        if self.flushed {
             return Ok(Vec::new());
         }
+        self.flushed = true;
         if self.resampler.is_none() {
-            return Ok(std::mem::take(&mut self.staging));
+            return Ok(Vec::new());
         }
 
-        let resampler = self.resampler.as_mut().unwrap();
-        let ratio = self.ratio;
-        let output_delay = resampler.output_delay();
-
-        let original_len = self.staging.len();
-        // Expected output frames for the real (unpadded) input.
-        let expected_frames =
-            ((original_len as f64 * ratio).round() as usize)
-                .min(original_len * 2 + output_delay + 2);
-
-        // Drain enough silence to push real signal through FIR delay.
-        // We need `expected_frames + output_delay` output frames total,
-        // which requires processing enough input chunks.
-        let total_out_needed = expected_frames + output_delay;
-        // How many CHUNK_FRAMES of silence needed after the padded chunk.
-        // Each CHUNK produces approximately CHUNK_FRAMES * ratio outputs.
-        let approx_out_per_chunk = (CHUNK_FRAMES as f64 * ratio).ceil()
-            as usize + 1;
-        let extra_silence_chunks =
-            (total_out_needed / approx_out_per_chunk) + 2;
-
-        // Pad staging to CHUNK_FRAMES.
-        self.staging.resize(CHUNK_FRAMES, 0.0);
-        let mut combined_out = Vec::with_capacity(
-            total_out_needed + approx_out_per_chunk,
+        let target = self.canonical_frames(self.accepted_input);
+        let mut output = Vec::with_capacity(
+            (target.saturating_sub(self.emitted_output)) as usize,
         );
+        if !self.staging.is_empty() {
+            let real_frames = self.staging.len() as u64;
+            self.staging.resize(CHUNK_FRAMES, 0.0);
+            let window = std::mem::take(&mut self.staging);
+            let n_out = self.process_chunk(&window)?;
+            self.processed_input += real_frames;
+            self.collect_aligned(n_out, target, &mut output);
+        }
 
-        // Process padded staging chunk.
-        let window = std::mem::take(&mut self.staging);
-        let (_, n_out) = resampler
-            .process_into_buffer(
-                &[window.as_slice()],
-                &mut self.out_buf,
-                None,
-            )
-            .map_err(|e| {
-                format!(
-                    "capture-unavailable: resampler flush error: {e}"
-                )
-            })?;
-        combined_out.extend_from_slice(&self.out_buf[0][..n_out]);
-
-        // Feed silence to drain the FIR delay.
+        let raw_needed = self.delay_remaining
+            + target.saturating_sub(self.emitted_output) as usize;
+        let raw_per_chunk = self
+            .resampler
+            .as_ref()
+            .map(Resampler::output_frames_next)
+            .unwrap_or(1)
+            .max(1);
+        let max_chunks = raw_needed.div_ceil(raw_per_chunk) + 2;
         let silence = vec![0.0f32; CHUNK_FRAMES];
-        for _ in 0..extra_silence_chunks {
-            if combined_out.len() >= expected_frames {
+        for _ in 0..max_chunks {
+            if self.emitted_output >= target {
                 break;
             }
-            let (_, n_out) = resampler
-                .process_into_buffer(
-                    &[silence.as_slice()],
-                    &mut self.out_buf,
-                    None,
-                )
-                .map_err(|e| {
-                    format!(
-                        "capture-unavailable: resampler delay-drain \
-                         error: {e}"
-                    )
-                })?;
-            combined_out
-                .extend_from_slice(&self.out_buf[0][..n_out]);
+            let n_out = self.process_chunk(&silence)?;
+            self.collect_aligned(n_out, target, &mut output);
         }
+        if self.emitted_output != target {
+            return Err(format!(
+                "capture-unavailable: resampler tail ended at {} of {} frames",
+                self.emitted_output, target,
+            ));
+        }
+        Ok(output)
+    }
 
-        // Trim to the expected number of real output frames.
-        combined_out.truncate(expected_frames);
-        Ok(combined_out)
+    #[cfg(test)]
+    pub fn flush_calls(&self) -> usize {
+        self.flush_calls
+    }
+
+    fn canonical_frames(&self, input_frames: u64) -> u64 {
+        let numerator = input_frames as u128 * TARGET_RATE as u128;
+        ((numerator + self.native_rate as u128 / 2)
+            / self.native_rate as u128) as u64
+    }
+
+    fn collect_aligned(
+        &mut self,
+        raw_len: usize,
+        target: u64,
+        output: &mut Vec<f32>,
+    ) {
+        let skip = self.delay_remaining.min(raw_len);
+        self.delay_remaining -= skip;
+        let available = raw_len - skip;
+        let remaining = target.saturating_sub(self.emitted_output) as usize;
+        let take = available.min(remaining);
+        output.extend_from_slice(&self.out_buf[0][skip..skip + take]);
+        self.emitted_output += take as u64;
+    }
+
+    fn process_chunk(&mut self, input: &[f32]) -> Result<usize, String> {
+        let resampler = self.resampler.as_mut().ok_or_else(|| {
+            String::from("capture-unavailable: missing resampler")
+        })?;
+        let (_, produced) = resampler
+            .process_into_buffer(&[input], &mut self.out_buf, None)
+            .map_err(|error| {
+                format!("capture-unavailable: resampler error: {error}")
+            })?;
+        Ok(produced)
     }
 }
 
@@ -222,7 +242,33 @@ mod tests {
         (s.iter().map(|x| x * x).sum::<f32>() / s.len() as f32).sqrt()
     }
 
-    // ── Construction ──────────────────────────────────────────────────
+    fn canonical_frames(input_frames: usize, native_rate: u32) -> usize {
+        let numerator = input_frames as u128 * TARGET_RATE as u128;
+        ((numerator + native_rate as u128 / 2) / native_rate as u128)
+            as usize
+    }
+
+    fn normalize(
+        input: &[f32],
+        native_rate: u32,
+        call_sizes: &[usize],
+    ) -> Vec<f32> {
+        let mut downmixer = Downmixer::new(native_rate).unwrap();
+        let mut output = Vec::new();
+        let mut offset = 0;
+        let mut call_index = 0;
+        while offset < input.len() {
+            let requested = call_sizes[call_index % call_sizes.len()];
+            let end = (offset + requested).min(input.len());
+            output.extend(downmixer.process(&input[offset..end]).unwrap());
+            offset = end;
+            call_index += 1;
+        }
+        output.extend(downmixer.flush().unwrap());
+        output
+    }
+
+    // Construction
 
     #[test]
     fn zero_rate_returns_err() {
@@ -230,7 +276,7 @@ mod tests {
         assert!(result.is_err(), "rate 0 must return Err");
     }
 
-    // ── Passthrough ───────────────────────────────────────────────────
+    // Passthrough
 
     #[test]
     fn passthrough_preserves_samples_exactly() {
@@ -251,29 +297,22 @@ mod tests {
         assert!(d.flush().unwrap().is_empty());
     }
 
-    // ── Resampling: 44100 → 16000 ─────────────────────────────────────
+    // Resampling: 44100 → 16000
 
-    /// Duration: total output frames must track input × ratio within 5%.
     #[test]
-    fn resampling_output_duration_tracks_input() {
-        let native = 44_100u32;
-        let mut d = Downmixer::new(native).unwrap();
-        let n_chunks = 6;
-        let input = sine(400.0, native, CHUNK_FRAMES * n_chunks);
-        let out = d.process(&input).unwrap();
-        let tail = d.flush().unwrap();
-        let total = out.len() + tail.len();
-        let expected =
-            (CHUNK_FRAMES * n_chunks) as f64 * TARGET_RATE as f64
-                / native as f64;
-        let ratio = total as f64 / expected;
-        assert!(
-            ratio > 0.95 && ratio < 1.05,
-            "output/expected ratio {ratio:.3} outside [0.95, 1.05]; \
-             out={}, tail={}, expected={expected:.0}",
-            out.len(),
-            tail.len()
-        );
+    fn canonical_length_is_exact_for_44100_and_48000() {
+        let lengths = [1, 2, 17, 1_023, 1_024, 1_025, 3_405];
+        for native_rate in [44_100, 48_000] {
+            for input_len in lengths {
+                let input = sine(400.0, native_rate, input_len);
+                let output = normalize(&input, native_rate, &[73, 1_024, 19]);
+                assert_eq!(
+                    output.len(),
+                    canonical_frames(input_len, native_rate),
+                    "wrong canonical length for {input_len} at {native_rate}",
+                );
+            }
+        }
     }
 
     /// Passband: a 400 Hz tone must survive with < 1 dB attenuation.
@@ -334,98 +373,73 @@ mod tests {
         }
     }
 
-    /// Chunk boundaries: total output accumulates correctly across calls.
     #[test]
-    fn chunked_processing_accumulates_correctly() {
-        let native = 48_000u32;
-        let mut d = Downmixer::new(native).unwrap();
-        let total_in = CHUNK_FRAMES * 6;
-        let input = sine(300.0, native, total_in);
-        let mut total_out = 0usize;
-        for chunk in input.chunks(CHUNK_FRAMES) {
-            total_out += d.process(chunk).unwrap().len();
+    fn fragmented_calls_match_single_call_sample_for_sample() {
+        let native_rate = 44_100;
+        let input = sine(731.0, native_rate, CHUNK_FRAMES * 4 + 317);
+        let single = normalize(&input, native_rate, &[input.len()]);
+        let fragmented = normalize(&input, native_rate, &[1, 37, 1_023, 5]);
+        assert_eq!(fragmented.len(), single.len());
+        for (index, (actual, expected)) in
+            fragmented.iter().zip(single.iter()).enumerate()
+        {
+            assert!(
+                (actual - expected).abs() < 1e-6,
+                "chunking changed frame {index}: {actual} vs {expected}",
+            );
         }
-        total_out += d.flush().unwrap().len();
-        let expected =
-            total_in as f64 * TARGET_RATE as f64 / native as f64;
-        let ratio = total_out as f64 / expected;
-        assert!(
-            ratio > 0.90 && ratio < 1.10,
-            "chunked ratio {ratio:.3} outside [0.90, 1.10]"
-        );
     }
 
-    /// Flush tail: feeding a partial chunk produces a non-empty flush result
-    /// AND the tail duration is proportional to the unpadded input.
     #[test]
-    fn flush_tail_duration_is_proportional() {
-        let native = 44_100u32;
-        let mut d = Downmixer::new(native).unwrap();
-        let partial_len = CHUNK_FRAMES / 2;
-        let partial = sine(400.0, native, partial_len);
-        let out = d.process(&partial).unwrap();
-        // process() should return nothing (staging < CHUNK_FRAMES).
-        assert!(
-            out.is_empty(),
-            "partial chunk should produce no process() output"
+    fn exact_block_flush_drains_remaining_aligned_frames() {
+        let native_rate = 48_000;
+        let input = sine(400.0, native_rate, CHUNK_FRAMES);
+        let mut downmixer = Downmixer::new(native_rate).unwrap();
+        let output = downmixer.process(&input).unwrap();
+        let tail = downmixer.flush().unwrap();
+        assert!(!tail.is_empty(), "exact blocks still have an FIR tail");
+        assert_eq!(
+            output.len() + tail.len(),
+            canonical_frames(input.len(), native_rate),
         );
-        let flushed = d.flush().unwrap();
-        let expected_frames =
-            (partial_len as f64 * TARGET_RATE as f64 / native as f64)
-                .round() as usize;
-        // Allow ±2 frames for rounding.
-        assert!(
-            flushed.len() > 0,
-            "flush must return non-empty tail for partial chunk"
-        );
-        let ratio = flushed.len() as f64 / expected_frames as f64;
-        assert!(
-            ratio > 0.80 && ratio < 1.20,
-            "flush tail length {} vs expected {expected_frames} \
-             (ratio {ratio:.2}) outside [0.80, 1.20]",
-            flushed.len()
-        );
+        assert!(downmixer.flush().unwrap().is_empty());
     }
 
-    /// Flush tail carries signal: the tail must contain signal from the real
-    /// input, not just silence from the zero-padding.
     #[test]
-    fn flush_tail_contains_signal_not_silence() {
-        let native = 44_100u32;
-        let mut d = Downmixer::new(native).unwrap();
-        let partial = sine(400.0, native, CHUNK_FRAMES / 2);
-        let in_rms = rms(&partial);
-        let _ = d.process(&partial).unwrap();
-        let flushed = d.flush().unwrap();
-        if flushed.is_empty() {
-            return; // No tail to check.
+    fn trailing_impulse_remains_aligned_after_flush() {
+        for native_rate in [44_100, 48_000] {
+            let input_len = CHUNK_FRAMES * 3 + 317;
+            let impulse_index = input_len - 97;
+            let mut input = vec![0.0; input_len];
+            input[impulse_index] = 1.0;
+            let startup_delay = Downmixer::new(native_rate)
+                .unwrap()
+                .delay_remaining;
+            let output = normalize(&input, native_rate, &[211, 17, 1_024]);
+            let actual_peak = output
+                .iter()
+                .enumerate()
+                .max_by(|left, right| left.1.abs().total_cmp(&right.1.abs()))
+                .map(|(index, _)| index)
+                .unwrap();
+            let expected_peak = canonical_frames(impulse_index, native_rate)
+                .saturating_sub(startup_delay);
+            // Rubato's documented file-output pattern discards its leading
+            // delay, so aligned source positions move left by that amount.
+            assert!(
+                actual_peak.abs_diff(expected_peak) <= 2,
+                "trailing peak misaligned at {native_rate}: \
+                 actual {actual_peak}, expected {expected_peak}",
+            );
         }
-        let out_rms = rms(&flushed);
-        // Tail should have meaningful signal, not pure silence.
-        assert!(
-            out_rms > in_rms * 0.1,
-            "flush tail rms {out_rms:.4} is less than 10% of input \
-             rms {in_rms:.4} — tail appears to be silence, not signal"
-        );
     }
 
-    /// 48000 → 16000 (integer ratio 3:1): verify it works and
-    /// output duration is canonical.
     #[test]
-    fn rate_48000_integer_ratio_resampling() {
-        let native = 48_000u32;
-        let mut d = Downmixer::new(native).unwrap();
-        let input = sine(400.0, native, CHUNK_FRAMES * 3);
-        let out = d.process(&input).unwrap();
-        // At 48→16 ratio 1/3, 3 chunks of CHUNK_FRAMES ≈ CHUNK_FRAMES output.
-        assert!(!out.is_empty());
-        let tail = d.flush().unwrap();
-        let total = out.len() + tail.len();
-        let expected = CHUNK_FRAMES; // exactly 3 input chunks × 1/3 ratio
-        let ratio = total as f64 / expected as f64;
-        assert!(
-            ratio > 0.9 && ratio < 1.1,
-            "48→16 ratio {ratio:.3} outside [0.9, 1.1]"
-        );
+    fn passthrough_tiny_partial_exact_and_multiblock_are_exact() {
+        for input_len in [1, 17, 1_024, 1_025, 4_333] {
+            let input = sine(400.0, TARGET_RATE, input_len);
+            let output = normalize(&input, TARGET_RATE, &[3, 1_024, 11]);
+            assert_eq!(output, input);
+        }
     }
 }

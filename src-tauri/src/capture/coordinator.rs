@@ -20,7 +20,7 @@
 /// exercise the full lifecycle matrix without a live audio device or TCC.
 use std::collections::VecDeque;
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     mpsc, Arc, Mutex,
 };
 use std::thread;
@@ -42,6 +42,54 @@ const FULL_SAFETY_SECS: u64 = 120;
 const TEST_SAFETY_SECS: u64 = 10;
 const WATCHDOG_IDLE_SECS: u64 = 5;
 const ACTIVITY_THRESHOLD: f32 = 0.001; // −60 dBFS
+
+#[derive(Clone, Copy)]
+struct CaptureLimits {
+    full_bound: Duration,
+    poll_interval: Duration,
+    test_bound: Duration,
+    watchdog_grace: Duration,
+    watchdog_idle: Duration,
+}
+
+impl CaptureLimits {
+    fn production() -> Self {
+        CaptureLimits {
+            full_bound: Duration::from_secs(FULL_SAFETY_SECS),
+            poll_interval: Duration::from_millis(10),
+            test_bound: Duration::from_secs(TEST_SAFETY_SECS),
+            watchdog_grace: Duration::from_secs(1),
+            watchdog_idle: Duration::from_secs(WATCHDOG_IDLE_SECS),
+        }
+    }
+}
+
+trait LoopRuntime: Send + Sync + 'static {
+    fn now(&self) -> Duration;
+    fn wait(&self, duration: Duration);
+}
+
+struct SystemLoopRuntime {
+    epoch: Instant,
+}
+
+impl SystemLoopRuntime {
+    fn new() -> Self {
+        SystemLoopRuntime {
+            epoch: Instant::now(),
+        }
+    }
+}
+
+impl LoopRuntime for SystemLoopRuntime {
+    fn now(&self) -> Duration {
+        self.epoch.elapsed()
+    }
+
+    fn wait(&self, duration: Duration) {
+        thread::sleep(duration);
+    }
+}
 
 // Session events
 
@@ -134,6 +182,10 @@ pub trait PermissionBackend: Send + Sync + 'static {
 /// Mirrors `stream::StreamMeta` for the real backend; tests supply
 /// their own ring consumer + flags.
 pub struct CaptureStreamMeta {
+    /// True while the callback may accept new frames.
+    pub accepting: Arc<AtomicBool>,
+    /// Number of callbacks currently writing accepted frames.
+    pub callbacks_in_flight: Arc<AtomicUsize>,
     pub device_name: String,
     pub native_rate: u32,
     pub consumer: ringbuf::HeapCons<f32>,
@@ -141,8 +193,6 @@ pub struct CaptureStreamMeta {
     pub overflow: Arc<AtomicBool>,
     /// Latched true on device error → `capture-unavailable`.
     pub stream_error: Arc<AtomicBool>,
-    /// Latched true by fake backend to signal clean end-of-stream in tests.
-    pub clean_stop: Arc<AtomicBool>,
 }
 
 /// Stream backend seam.
@@ -191,9 +241,9 @@ impl StreamBackend for CpalStreamBackend {
         F: FnOnce(CaptureStreamMeta) -> R,
     {
         stream::with_stream(selection, |meta: StreamMeta| {
-            let clean_stop = Arc::new(AtomicBool::new(false));
             f(CaptureStreamMeta {
-                clean_stop,
+                accepting: meta.accepting,
+                callbacks_in_flight: meta.callbacks_in_flight,
                 consumer: meta.consumer,
                 device_name: meta.device_name,
                 native_rate: meta.native_rate,
@@ -249,7 +299,9 @@ pub struct Coordinator<
     S: StreamBackend = CpalStreamBackend,
 > {
     generation: AtomicU64,
+    limits: CaptureLimits,
     permission: Arc<P>,
+    runtime: Arc<dyn LoopRuntime>,
     state: Arc<Mutex<CoordinatorState>>,
     stream_backend: Arc<S>,
 }
@@ -261,7 +313,9 @@ impl Coordinator {
     pub fn new() -> Self {
         Coordinator {
             generation: AtomicU64::new(0),
+            limits: CaptureLimits::production(),
             permission: Arc::new(RealPermissionBackend),
+            runtime: Arc::new(SystemLoopRuntime::new()),
             state: Arc::new(Mutex::new(CoordinatorState {
                 cancelled_requests: VecDeque::new(),
                 reservation: None,
@@ -282,7 +336,29 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
     pub fn with_backends(permission: P, stream_backend: S) -> Self {
         Coordinator {
             generation: AtomicU64::new(0),
+            limits: CaptureLimits::production(),
             permission: Arc::new(permission),
+            runtime: Arc::new(SystemLoopRuntime::new()),
+            state: Arc::new(Mutex::new(CoordinatorState {
+                cancelled_requests: VecDeque::new(),
+                reservation: None,
+            })),
+            stream_backend: Arc::new(stream_backend),
+        }
+    }
+
+    #[cfg(test)]
+    fn with_loop_runtime<R: LoopRuntime>(
+        permission: P,
+        stream_backend: S,
+        runtime: R,
+        limits: CaptureLimits,
+    ) -> Self {
+        Coordinator {
+            generation: AtomicU64::new(0),
+            limits,
+            permission: Arc::new(permission),
+            runtime: Arc::new(runtime),
             state: Arc::new(Mutex::new(CoordinatorState {
                 cancelled_requests: VecDeque::new(),
                 reservation: None,
@@ -410,7 +486,9 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
         };
 
         let permission = Arc::clone(&self.permission);
+        let runtime = Arc::clone(&self.runtime);
         let stream_backend = Arc::clone(&self.stream_backend);
+        let limits = self.limits;
         let worker_status = status.clone();
 
         thread::spawn(move || {
@@ -425,7 +503,9 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
                 cancel_flag,
                 selection,
                 test_mode,
+                limits,
                 permission,
+                runtime,
                 state_arc,
                 stream_backend,
                 &emit,
@@ -485,7 +565,9 @@ fn run_session<P, S, E>(
     cancel: Arc<AtomicBool>,
     selection: DeviceSelection,
     test_mode: bool,
+    limits: CaptureLimits,
     permission: Arc<P>,
+    runtime: Arc<dyn LoopRuntime>,
     state: Arc<Mutex<CoordinatorState>>,
     stream_backend: Arc<S>,
     emit: &E,
@@ -625,33 +707,34 @@ fn run_session<P, S, E>(
                 });
 
                 let mut buffer = CaptureBuffer::new();
-                let bound = Duration::from_secs(
-                    if test_mode {
-                        TEST_SAFETY_SECS
-                    } else {
-                        FULL_SAFETY_SECS
-                    },
-                );
-                let start = Instant::now();
-                let mut last_sample = Instant::now();
+                let bound = if test_mode {
+                    limits.test_bound
+                } else {
+                    limits.full_bound
+                };
+                let start = runtime.now();
+                let mut last_sample = start;
                 let mut activity_emitted = false;
                 let mut consumer = meta.consumer;
 
                 let term = capture_loop(
                     &mut consumer,
+                    &meta.accepting,
+                    &meta.callbacks_in_flight,
                     &meta.overflow,
                     &meta.stream_error,
-                    &meta.clean_stop,
                     &cancel,
                     &mut downmixer,
                     &mut buffer,
                     bound,
+                    limits,
                     &mut last_sample,
                     &mut activity_emitted,
                     start,
                     gen,
                     &request_id,
                     emit,
+                    runtime.as_ref(),
                 );
                 (term, buffer)
             },
@@ -747,23 +830,25 @@ enum LoopTerminal {
 /// Drain ring buffer, resample, accumulate, detect activity.
 /// Both `overflow` and `stream_error` are checked each iteration with
 /// distinct error categories.
-/// `clean_stop` is a test-only seam; real backends always leave it false.
 #[allow(clippy::too_many_arguments)]
 fn capture_loop<E: Fn(SessionEvent)>(
     consumer: &mut ringbuf::HeapCons<f32>,
+    accepting: &AtomicBool,
+    callbacks_in_flight: &AtomicUsize,
     overflow: &AtomicBool,
     stream_error: &AtomicBool,
-    clean_stop: &AtomicBool,
     cancel: &AtomicBool,
     downmixer: &mut Downmixer,
     buffer: &mut CaptureBuffer,
     bound: Duration,
-    last_sample: &mut Instant,
+    limits: CaptureLimits,
+    last_sample: &mut Duration,
     activity_emitted: &mut bool,
-    start: Instant,
+    start: Duration,
     gen: u64,
     request_id: &str,
     emit: &E,
+    runtime: &dyn LoopRuntime,
 ) -> LoopTerminal {
     let mut drain_buf = vec![0.0f32; RING_CAPACITY];
 
@@ -772,10 +857,19 @@ fn capture_loop<E: Fn(SessionEvent)>(
             return LoopTerminal::Cancelled;
         }
 
+        let now = runtime.now();
+        let deadline_reached = now.saturating_sub(start) >= bound;
+        if deadline_reached {
+            accepting.store(false, Ordering::Release);
+            if callbacks_in_flight.load(Ordering::Acquire) > 0 {
+                runtime.wait(limits.poll_interval);
+                continue;
+            }
+        }
         let n = consumer.pop_slice(&mut drain_buf);
 
         if n > 0 {
-            *last_sample = Instant::now();
+            *last_sample = now;
             let mono = match downmixer.process(&drain_buf[..n]) {
                 Ok(m) => m,
                 Err(e) => {
@@ -823,15 +917,9 @@ fn capture_loop<E: Fn(SessionEvent)>(
             );
         }
 
-        // Test-only: clean end-of-stream signal from fake backend.
-        if clean_stop.load(Ordering::Acquire) {
-            if let Ok(tail) = downmixer.flush() {
-                let _ = buffer.push(&tail);
-            }
-            return LoopTerminal::Clean;
-        }
-
-        if start.elapsed() >= bound {
+        // Once the deadline is reached, continue until the bounded queue is
+        // observed empty, then flush the resampler exactly once.
+        if deadline_reached && n == 0 {
             match downmixer.flush() {
                 Ok(tail) if !tail.is_empty() => {
                     if buffer.push(&tail).is_err() {
@@ -852,9 +940,9 @@ fn capture_loop<E: Fn(SessionEvent)>(
             return LoopTerminal::Clean;
         }
 
-        if start.elapsed() > Duration::from_secs(1)
-            && last_sample.elapsed()
-                > Duration::from_secs(WATCHDOG_IDLE_SECS)
+        if !deadline_reached
+            && now.saturating_sub(start) > limits.watchdog_grace
+            && now.saturating_sub(*last_sample) > limits.watchdog_idle
         {
             return LoopTerminal::Error(
                 String::from("capture-unavailable"),
@@ -862,7 +950,9 @@ fn capture_loop<E: Fn(SessionEvent)>(
             );
         }
 
-        std::thread::sleep(Duration::from_millis(10));
+        if !deadline_reached {
+            runtime.wait(limits.poll_interval);
+        }
     }
 }
 
@@ -871,7 +961,8 @@ fn capture_loop<E: Fn(SessionEvent)>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{atomic::AtomicUsize, Arc, Mutex};
+    use crate::capture::buffer::{MAX_FRAMES, TARGET_RATE};
+    use std::sync::{Arc, Mutex};
 
     // Fake backends
 
@@ -887,23 +978,68 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct VirtualRuntime {
+        elapsed_millis: AtomicU64,
+    }
+
+    impl LoopRuntime for VirtualRuntime {
+        fn now(&self) -> Duration {
+            Duration::from_millis(
+                self.elapsed_millis.load(Ordering::Acquire),
+            )
+        }
+
+        fn wait(&self, duration: Duration) {
+            let millis = duration.as_millis().max(1) as u64;
+            self.elapsed_millis.fetch_add(millis, Ordering::AcqRel);
+        }
+    }
+
+    struct DrainingRuntime {
+        callbacks_in_flight: Arc<AtomicUsize>,
+        waits: AtomicUsize,
+    }
+
+    impl LoopRuntime for DrainingRuntime {
+        fn now(&self) -> Duration {
+            Duration::from_millis(30)
+        }
+
+        fn wait(&self, _duration: Duration) {
+            self.waits.fetch_add(1, Ordering::AcqRel);
+            self.callbacks_in_flight.store(0, Ordering::Release);
+        }
+    }
+
+    fn short_test_limits() -> CaptureLimits {
+        CaptureLimits {
+            full_bound: Duration::from_millis(300),
+            poll_interval: Duration::from_millis(10),
+            test_bound: Duration::from_millis(30),
+            watchdog_grace: Duration::from_secs(1),
+            watchdog_idle: Duration::from_secs(1),
+        }
+    }
+
     struct FakeStreamBackend {
+        native_rate: u32,
         samples: Vec<f32>,
         open_error: Option<String>,
+        resource_alive: Option<Arc<AtomicBool>>,
         /// Pre-latch ring overflow flag (→ input-limit-exceeded).
         simulate_overflow: bool,
         /// Pre-latch stream_error flag (→ capture-unavailable).
         simulate_stream_error: bool,
-        /// Signal clean end-of-stream after samples are consumed.
-        simulate_clean_stop: bool,
     }
 
     impl FakeStreamBackend {
         fn new(samples: Vec<f32>) -> Self {
             FakeStreamBackend {
+                native_rate: TARGET_RATE,
                 open_error: None,
+                resource_alive: None,
                 samples,
-                simulate_clean_stop: false,
                 simulate_overflow: false,
                 simulate_stream_error: false,
             }
@@ -930,12 +1066,11 @@ mod tests {
             }
             drop(prod);
             let meta = CaptureStreamMeta {
-                clean_stop: Arc::new(AtomicBool::new(
-                    self.simulate_clean_stop,
-                )),
+                accepting: Arc::new(AtomicBool::new(true)),
+                callbacks_in_flight: Arc::new(AtomicUsize::new(0)),
                 consumer: cons,
                 device_name: String::from("Fake"),
-                native_rate: 16_000,
+                native_rate: self.native_rate,
                 overflow: Arc::new(AtomicBool::new(
                     self.simulate_overflow,
                 )),
@@ -943,7 +1078,14 @@ mod tests {
                     self.simulate_stream_error,
                 )),
             };
-            Ok(f(meta))
+            if let Some(alive) = &self.resource_alive {
+                alive.store(true, Ordering::Release);
+            }
+            let output = f(meta);
+            if let Some(alive) = &self.resource_alive {
+                alive.store(false, Ordering::Release);
+            }
+            Ok(output)
         }
 
         fn list_devices(&self) -> Vec<String> {
@@ -967,17 +1109,19 @@ mod tests {
         {
             use ringbuf::traits::Split;
 
-            let clean_stop = self.opens.fetch_add(1, Ordering::AcqRel) == 0;
+            let stream_error =
+                self.opens.fetch_add(1, Ordering::AcqRel) == 0;
             let rb = ringbuf::HeapRb::<f32>::new(RING_CAPACITY);
             let (_producer, consumer) = rb.split();
             self.resource_alive.store(true, Ordering::Release);
             let output = f(CaptureStreamMeta {
-                clean_stop: Arc::new(AtomicBool::new(clean_stop)),
+                accepting: Arc::new(AtomicBool::new(true)),
+                callbacks_in_flight: Arc::new(AtomicUsize::new(0)),
                 consumer,
                 device_name: String::from("Restart Fake"),
                 native_rate: 16_000,
                 overflow: Arc::new(AtomicBool::new(false)),
-                stream_error: Arc::new(AtomicBool::new(false)),
+                stream_error: Arc::new(AtomicBool::new(stream_error)),
             });
             self.resource_alive.store(false, Ordering::Release);
             Ok(output)
@@ -993,6 +1137,18 @@ mod tests {
         s: S,
     ) -> Coordinator<P, S> {
         Coordinator::with_backends(p, s)
+    }
+
+    fn mk_timed<P: PermissionBackend, S: StreamBackend>(
+        permission: P,
+        stream_backend: S,
+    ) -> Coordinator<P, S> {
+        Coordinator::with_loop_runtime(
+            permission,
+            stream_backend,
+            VirtualRuntime::default(),
+            short_test_limits(),
+        )
     }
 
     fn mk_emit() -> (
@@ -1171,7 +1327,7 @@ mod tests {
         let callback_resource = Arc::clone(&resource_alive);
         let (restart_tx, restart_rx) = mpsc::channel();
         let emit = move |event: SessionEvent| {
-            if matches!(event, SessionEvent::TestComplete { .. }) {
+            if matches!(event, SessionEvent::CaptureError { .. }) {
                 assert!(
                     !callback_resource.load(Ordering::Acquire),
                     "stream resource must be released before terminal event",
@@ -1486,14 +1642,18 @@ mod tests {
     // Test mode
 
     #[test]
+    fn production_limits_are_ten_and_one_hundred_twenty_seconds() {
+        let limits = CaptureLimits::production();
+        assert_eq!(limits.test_bound, Duration::from_secs(10));
+        assert_eq!(limits.full_bound, Duration::from_secs(120));
+    }
+
+    #[test]
     fn test_mode_with_activity_must_emit_test_complete() {
-        // Use simulate_clean_stop: true so the loop terminates cleanly
-        // (not via watchdog) and the coordinator emits TestComplete.
-        let c = mk(
+        let c = mk_timed(
             FakePermission(MicPermission::Authorized),
             FakeStreamBackend {
                 samples: vec![0.5f32; 160],
-                simulate_clean_stop: true,
                 ..FakeStreamBackend::new(vec![])
             },
         );
@@ -1527,11 +1687,10 @@ mod tests {
 
     #[test]
     fn test_mode_silence_no_activity_event() {
-        let c = mk(
+        let c = mk_timed(
             FakePermission(MicPermission::Authorized),
             FakeStreamBackend {
                 samples: vec![0.0f32; 160],
-                simulate_clean_stop: true,
                 ..FakeStreamBackend::new(vec![])
             },
         );
@@ -1547,6 +1706,75 @@ mod tests {
             !log.lock().unwrap().contains(&String::from("activity")),
             "silence must not emit activity"
         );
+    }
+
+    #[test]
+    fn test_auto_stop_normalizes_and_reports_all_queued_audio() {
+        let native_rate = 44_100;
+        let input_frames = 2_205;
+        let resource_alive = Arc::new(AtomicBool::new(false));
+        let c = mk_timed(
+            FakePermission(MicPermission::Authorized),
+            FakeStreamBackend {
+                native_rate,
+                resource_alive: Some(Arc::clone(&resource_alive)),
+                samples: vec![0.5; input_frames],
+                ..FakeStreamBackend::new(vec![])
+            },
+        );
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events_for_emit = Arc::clone(&events);
+        let resource_for_emit = Arc::clone(&resource_alive);
+        let status = c
+            .start_session(
+                String::from("normalized-test"),
+                DeviceSelection::SystemDefault,
+                true,
+                move |event| {
+                    if matches!(event, SessionEvent::TestComplete { .. }) {
+                        assert!(
+                            !resource_for_emit.load(Ordering::Acquire),
+                            "stream must be released before terminal",
+                        );
+                    }
+                    events_for_emit.lock().unwrap().push(event);
+                },
+            )
+            .unwrap();
+        idle_wait(&c, Duration::from_secs(3));
+
+        let events = events.lock().unwrap();
+        let terminals: Vec<_> = events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    SessionEvent::TestComplete { .. }
+                        | SessionEvent::CaptureStopped { .. }
+                        | SessionEvent::CaptureCancelled { .. }
+                        | SessionEvent::CaptureError { .. }
+                )
+            })
+            .collect();
+        assert_eq!(terminals.len(), 1, "auto-stop must emit one terminal");
+        let metadata = terminals
+            .iter()
+            .find_map(|event| match event {
+                SessionEvent::TestComplete {
+                    generation,
+                    metadata,
+                    request_id,
+                } => {
+                    assert_eq!(*generation, status.generation);
+                    assert_eq!(request_id, &status.request_id);
+                    Some(metadata)
+                }
+                _ => None,
+            })
+            .expect("test timer must end with TestComplete");
+        assert_eq!(metadata.frame_count, 800);
+        assert!((metadata.duration_secs - 0.05).abs() < 1e-9);
+        assert!(c.status().is_none());
     }
 
     // Overflow flags
@@ -1616,11 +1844,10 @@ mod tests {
         // Verify that the PermissionStatus event from a session carries the
         // correct generation by checking the log tag includes generation info.
         // (Full generation field verification requires matching event structs.)
-        let c = mk(
+        let c = mk_timed(
             FakePermission(MicPermission::Authorized),
             FakeStreamBackend {
                 samples: vec![0.5f32; 80],
-                simulate_clean_stop: true,
                 ..FakeStreamBackend::new(vec![])
             },
         );
@@ -1700,125 +1927,256 @@ mod tests {
     fn capture_loop_accumulates_then_cancel_terminates() {
         use ringbuf::traits::{Producer, Split};
         let rb = ringbuf::HeapRb::<f32>::new(RING_CAPACITY);
-        let (mut prod, mut cons) = rb.split();
-        for _ in 0..480 {
-            let _ = prod.try_push(0.5f32);
-        }
+        let (mut producer, mut consumer) = rb.split();
+        assert_eq!(producer.push_slice(&[0.5; 480]), 480);
         let cancel = Arc::new(AtomicBool::new(false));
-        let cancel2 = Arc::clone(&cancel);
+        let cancel_for_thread = Arc::clone(&cancel);
         thread::spawn(move || {
             thread::sleep(Duration::from_millis(80));
-            cancel2.store(true, Ordering::Release);
+            cancel_for_thread.store(true, Ordering::Release);
         });
-
+        let accepting = AtomicBool::new(true);
+        let callbacks_in_flight = AtomicUsize::new(0);
         let overflow = AtomicBool::new(false);
         let stream_error = AtomicBool::new(false);
-        let clean_stop = AtomicBool::new(false);
-        let mut dm = Downmixer::new(16_000).unwrap();
-        let mut buf = CaptureBuffer::new();
-        let mut last = Instant::now();
-        let mut act = false;
-        let emit_noop = |_: SessionEvent| {};
+        let mut downmixer = Downmixer::new(TARGET_RATE).unwrap();
+        let mut buffer = CaptureBuffer::new();
+        let runtime = SystemLoopRuntime::new();
+        let start = runtime.now();
+        let mut last_sample = start;
+        let mut activity = false;
 
-        let term = capture_loop(
-            &mut cons,
+        let terminal = capture_loop(
+            &mut consumer,
+            &accepting,
+            &callbacks_in_flight,
             &overflow,
             &stream_error,
-            &clean_stop,
             &cancel,
-            &mut dm,
-            &mut buf,
-            Duration::from_secs(120),
-            &mut last,
-            &mut act,
-            Instant::now(),
+            &mut downmixer,
+            &mut buffer,
+            Duration::from_secs(FULL_SAFETY_SECS),
+            CaptureLimits::production(),
+            &mut last_sample,
+            &mut activity,
+            start,
             1,
             "request",
-            &emit_noop,
+            &|_| {},
+            &runtime,
         );
 
-        assert!(
-            matches!(term, LoopTerminal::Cancelled),
-            "expected Cancelled"
-        );
-        assert!(act, "0.5 samples trigger activity");
-        assert!(buf.len() > 0);
-        drop(prod);
+        assert!(matches!(terminal, LoopTerminal::Cancelled));
+        assert!(activity);
+        assert_eq!(buffer.len(), 480);
     }
 
     #[test]
     fn capture_loop_overflow_returns_input_limit_exceeded() {
         use ringbuf::traits::Split;
-        let mut cons = ringbuf::HeapRb::<f32>::new(8).split().1;
+        let mut consumer = ringbuf::HeapRb::<f32>::new(8).split().1;
         let overflow = AtomicBool::new(true);
         let stream_error = AtomicBool::new(false);
-        let clean_stop = AtomicBool::new(false);
-        let cancel = AtomicBool::new(false);
-        let mut dm = Downmixer::new(16_000).unwrap();
-        let mut buf = CaptureBuffer::new();
-        let mut last = Instant::now();
-        let mut act = false;
-        let emit_noop = |_: SessionEvent| {};
-
-        let term = capture_loop(
-            &mut cons, &overflow, &stream_error, &clean_stop,
-            &cancel, &mut dm, &mut buf,
-            Duration::from_secs(120), &mut last, &mut act,
-            Instant::now(), 1, "request", &emit_noop,
+        let terminal = run_immediate_loop(
+            &mut consumer,
+            &overflow,
+            &stream_error,
         );
-        assert!(
-            matches!(term, LoopTerminal::Error(ref c, _)
-                if c == "input-limit-exceeded"),
-        );
+        assert!(matches!(terminal, LoopTerminal::Error(ref category, _)
+            if category == "input-limit-exceeded"));
     }
 
     #[test]
     fn capture_loop_stream_error_returns_capture_unavailable() {
         use ringbuf::traits::Split;
-        let mut cons = ringbuf::HeapRb::<f32>::new(8).split().1;
+        let mut consumer = ringbuf::HeapRb::<f32>::new(8).split().1;
         let overflow = AtomicBool::new(false);
         let stream_error = AtomicBool::new(true);
-        let clean_stop = AtomicBool::new(false);
-        let cancel = AtomicBool::new(false);
-        let mut dm = Downmixer::new(16_000).unwrap();
-        let mut buf = CaptureBuffer::new();
-        let mut last = Instant::now();
-        let mut act = false;
-        let emit_noop = |_: SessionEvent| {};
-
-        let term = capture_loop(
-            &mut cons, &overflow, &stream_error, &clean_stop,
-            &cancel, &mut dm, &mut buf,
-            Duration::from_secs(120), &mut last, &mut act,
-            Instant::now(), 1, "request", &emit_noop,
+        let terminal = run_immediate_loop(
+            &mut consumer,
+            &overflow,
+            &stream_error,
         );
-        assert!(
-            matches!(term, LoopTerminal::Error(ref c, _)
-                if c == "capture-unavailable"),
-            "stream error must be capture-unavailable"
-        );
+        assert!(matches!(terminal, LoopTerminal::Error(ref category, _)
+            if category == "capture-unavailable"));
     }
 
     #[test]
-    fn capture_loop_clean_stop_returns_clean() {
-        use ringbuf::traits::Split;
-        let mut cons = ringbuf::HeapRb::<f32>::new(8).split().1;
+    fn capture_loop_deadline_drains_queue_and_flushes_once() {
+        use ringbuf::traits::{Producer, Split};
+        let rb = ringbuf::HeapRb::<f32>::new(512);
+        let (mut producer, mut consumer) = rb.split();
+        assert_eq!(producer.push_slice(&[0.5; 480]), 480);
+        let accepting = AtomicBool::new(true);
+        let callbacks_in_flight = AtomicUsize::new(0);
         let overflow = AtomicBool::new(false);
         let stream_error = AtomicBool::new(false);
-        let clean_stop = AtomicBool::new(true); // Pre-set.
         let cancel = AtomicBool::new(false);
-        let mut dm = Downmixer::new(16_000).unwrap();
-        let mut buf = CaptureBuffer::new();
-        let mut last = Instant::now();
-        let mut act = false;
-        let emit_noop = |_: SessionEvent| {};
+        let mut downmixer = Downmixer::new(TARGET_RATE).unwrap();
+        let mut buffer = CaptureBuffer::new();
+        let runtime = VirtualRuntime {
+            elapsed_millis: AtomicU64::new(30),
+        };
+        let start = Duration::ZERO;
+        let mut last_sample = start;
+        let mut activity = false;
 
-        let term = capture_loop(
-            &mut cons, &overflow, &stream_error, &clean_stop,
-            &cancel, &mut dm, &mut buf,
-            Duration::from_secs(120), &mut last, &mut act,
-            Instant::now(), 1, "request", &emit_noop,
+        let terminal = capture_loop(
+            &mut consumer,
+            &accepting,
+            &callbacks_in_flight,
+            &overflow,
+            &stream_error,
+            &cancel,
+            &mut downmixer,
+            &mut buffer,
+            Duration::from_millis(30),
+            short_test_limits(),
+            &mut last_sample,
+            &mut activity,
+            start,
+            1,
+            "request",
+            &|_| {},
+            &runtime,
         );
-        assert!(matches!(term, LoopTerminal::Clean));
+
+        assert!(matches!(terminal, LoopTerminal::Clean));
+        assert_eq!(buffer.len(), 480, "deadline must drain queued frames");
+        assert_eq!(
+            downmixer.flush_calls(),
+            1,
+            "deadline must flush exactly once",
+        );
+        assert!(!accepting.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn capture_loop_waits_for_accepted_callback_before_draining() {
+        use ringbuf::traits::{Producer, Split};
+        let rb = ringbuf::HeapRb::<f32>::new(8);
+        let (mut producer, mut consumer) = rb.split();
+        assert_eq!(producer.push_slice(&[0.5]), 1);
+        let accepting = AtomicBool::new(true);
+        let callbacks_in_flight = Arc::new(AtomicUsize::new(1));
+        let overflow = AtomicBool::new(false);
+        let stream_error = AtomicBool::new(false);
+        let cancel = AtomicBool::new(false);
+        let mut downmixer = Downmixer::new(TARGET_RATE).unwrap();
+        let mut buffer = CaptureBuffer::new();
+        let runtime = DrainingRuntime {
+            callbacks_in_flight: Arc::clone(&callbacks_in_flight),
+            waits: AtomicUsize::new(0),
+        };
+        let mut last_sample = Duration::ZERO;
+        let mut activity = false;
+
+        let terminal = capture_loop(
+            &mut consumer,
+            &accepting,
+            callbacks_in_flight.as_ref(),
+            &overflow,
+            &stream_error,
+            &cancel,
+            &mut downmixer,
+            &mut buffer,
+            Duration::from_millis(30),
+            short_test_limits(),
+            &mut last_sample,
+            &mut activity,
+            Duration::ZERO,
+            1,
+            "request",
+            &|_| {},
+            &runtime,
+        );
+
+        assert!(matches!(terminal, LoopTerminal::Clean));
+        assert_eq!(runtime.waits.load(Ordering::Acquire), 1);
+        assert_eq!(buffer.len(), 1);
+        assert!(!accepting.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn capture_loop_reports_when_flush_exceeds_bounded_buffer() {
+        use ringbuf::traits::{Producer, Split};
+        let rb = ringbuf::HeapRb::<f32>::new(8);
+        let (mut producer, mut consumer) = rb.split();
+        assert_eq!(producer.push_slice(&[0.5; 3]), 3);
+        let accepting = AtomicBool::new(true);
+        let callbacks_in_flight = AtomicUsize::new(0);
+        let overflow = AtomicBool::new(false);
+        let stream_error = AtomicBool::new(false);
+        let cancel = AtomicBool::new(false);
+        let mut downmixer = Downmixer::new(48_000).unwrap();
+        let mut buffer = CaptureBuffer::new();
+        buffer.push(&vec![0.0; MAX_FRAMES]).unwrap();
+        let runtime = VirtualRuntime {
+            elapsed_millis: AtomicU64::new(30),
+        };
+        let start = Duration::ZERO;
+        let mut last_sample = start;
+        let mut activity = false;
+
+        let terminal = capture_loop(
+            &mut consumer,
+            &accepting,
+            &callbacks_in_flight,
+            &overflow,
+            &stream_error,
+            &cancel,
+            &mut downmixer,
+            &mut buffer,
+            Duration::from_millis(30),
+            short_test_limits(),
+            &mut last_sample,
+            &mut activity,
+            start,
+            1,
+            "request",
+            &|_| {},
+            &runtime,
+        );
+
+        assert!(matches!(terminal, LoopTerminal::Error(ref category, _)
+            if category == "input-limit-exceeded"));
+        assert_eq!(downmixer.flush_calls(), 1);
+        assert_eq!(buffer.len(), MAX_FRAMES);
+        assert!(!accepting.load(Ordering::Acquire));
+    }
+
+    fn run_immediate_loop(
+        consumer: &mut ringbuf::HeapCons<f32>,
+        overflow: &AtomicBool,
+        stream_error: &AtomicBool,
+    ) -> LoopTerminal {
+        let accepting = AtomicBool::new(true);
+        let callbacks_in_flight = AtomicUsize::new(0);
+        let cancel = AtomicBool::new(false);
+        let mut downmixer = Downmixer::new(TARGET_RATE).unwrap();
+        let mut buffer = CaptureBuffer::new();
+        let runtime = VirtualRuntime::default();
+        let start = runtime.now();
+        let mut last_sample = start;
+        let mut activity = false;
+        capture_loop(
+            consumer,
+            &accepting,
+            &callbacks_in_flight,
+            overflow,
+            stream_error,
+            &cancel,
+            &mut downmixer,
+            &mut buffer,
+            Duration::from_secs(FULL_SAFETY_SECS),
+            CaptureLimits::production(),
+            &mut last_sample,
+            &mut activity,
+            start,
+            1,
+            "request",
+            &|_| {},
+            &runtime,
+        )
     }
 }

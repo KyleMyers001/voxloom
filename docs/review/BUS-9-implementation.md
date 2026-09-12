@@ -2,7 +2,8 @@
 
 Branch: `bus-9-native-capture`.
 
-This checkpoint documents Slice A only. It does not claim BUS-9 is complete.
+This checkpoint documents approved Slice A and proposed Slice B. It does not
+claim BUS-9 is complete.
 No microphone was opened and no TCC state was read or changed during this
 slice.
 
@@ -70,6 +71,40 @@ The ESLint global ignore list now includes:
 The same paths were already present in `.gitignore`. Source files remain in
 lint scope.
 
+## Slice B: normalized duration and production auto-stop
+
+`Downmixer` now tracks total accepted native frames, native frames processed
+through Rubato, startup delay still to discard, and canonical frames emitted.
+It removes Rubato's reported startup delay once and emits exactly:
+
+```text
+round(input_frames * 16_000 / native_rate)
+```
+
+The implementation uses integer nearest rounding so duration conversion is
+deterministic and does not accumulate floating-point error across chunks.
+Full and fragmented calls therefore produce identical samples and exact frame
+counts. Flush runs for completed captures even at exact input-block boundaries.
+It zero-pads a partial block when needed and feeds a bounded number of silent
+Rubato blocks until the aligned canonical tail is complete. A repeated flush
+is idempotent.
+
+The existing windowed-sinc parameters and anti-aliasing tests are unchanged.
+No resampling work moved into the real-time callback; it remains on the
+capture worker. PCM remains bounded, in-memory mono `f32`, and never crosses
+IPC or logging boundaries.
+
+The capture loop now receives a monotonic runtime and duration limits. The
+production limits remain ten seconds for microphone tests and 120 seconds for
+full capture. Tests use the same deadline branch with a virtual monotonic
+clock and shorter bounds. At the deadline, the loop atomically closes the
+real-time callback's acceptance gate, drains the now-finite bounded ring,
+waits for a callback that already passed the gate to finish, flushes the
+resampler exactly once, and emits one terminal event after scoped stream
+teardown and reservation release. The gate and in-flight lease use only
+atomics in the callback; they add no allocation, blocking, logging, or IPC.
+The old fake clean-stop signal has been removed.
+
 ## Direct test coverage added or changed
 
 - Service tests verify real-runtime detection, browser fail-closed behavior,
@@ -83,6 +118,19 @@ lint scope.
 - Native coordinator tests verify atomic status reservation, exact request-ID
   cancellation before start, isolation of the next request, active status,
   and request ID plus generation on emitted session events.
+- Resampler tests cover exact frame counts at 44.1 and 48 kHz for tiny,
+  partial, exact-block, and multiblock inputs; 16 kHz passthrough; fragmented
+  versus single-call equality; exact-block tail drain; and a trailing impulse
+  at the delay-compensated canonical index. Existing passband, stopband, and
+  silence assertions remain active.
+- Coordinator timing tests assert the production ten/120-second defaults,
+  drive the real deadline and flush branch with a virtual clock, drain queued
+  input, count one flush, and verify a 44.1 kHz test produces exact 16 kHz
+  metadata, one terminal, a released stream resource and reservation, and an
+  `input-limit-exceeded` error if the flushed tail exceeds the bounded buffer.
+- Stream adapter tests verify that a closed deadline gate discards subsequent
+  callback frames without overflowing the ring. A capture-loop test verifies
+  that an already accepted callback finishes before queue draining begins.
 - Browser component and Playwright coverage verify unavailable copy and
   disabled microphone controls.
 
@@ -90,7 +138,7 @@ lint scope.
 
 ```text
 cargo test
-  58 passed; 0 failed; no warnings
+  64 passed; 0 failed; no warnings
 
 npm run typecheck
   passed
@@ -101,6 +149,23 @@ npm run lint
 npm run test:unit
   81 passed in 25 files
 
+npm run build
+  passed
+
+npm run test:e2e:release
+  1 passed
+
+cargo check
+  passed; no warnings
+
+cargo fmt -- --check
+  reports the repository's existing rustfmt differences, beginning in
+  unchanged buffer.rs and consumer.rs; no broad formatting rewrite applied
+```
+
+Slice A also verified:
+
+```text
 npm run test:e2e -- --grep 'screens, settings'
   1 passed
 
@@ -110,12 +175,14 @@ npm run tauri -- build --debug --no-bundle --ci
 
 The earlier unsigned app bundle and effective
 `NSMicrophoneUsageDescription` inspection were performed by the main agent;
-they were not repeated in Slice A.
+they were not repeated in Slice B.
 
-## Audited file sizes after Slice A
+## Audited file sizes after Slice B
 
 ```text
-src-tauri/src/capture/coordinator.rs        1603 lines
+src-tauri/src/capture/coordinator.rs        2182 lines
+src-tauri/src/capture/resample.rs            445 lines
+src-tauri/src/capture/stream.rs               504 lines
 src-tauri/src/lib.rs                         152 lines
 src/services/capture/captureService.ts        65 lines
 src/services/capture/types.ts                 87 lines
@@ -123,12 +190,9 @@ src/services/capture/useCaptureState.ts       311 lines
 tests/unit/useCaptureState.test.ts            274 lines
 ```
 
-## Explicitly remaining after Slice A
+## Explicitly remaining after Slice B
 
 The following reviewed work is deferred to separately gated slices:
 
-1. Correct FIR delay removal and exact canonical resampler duration/tail.
-2. Stable native device identity, selection refresh, hot-plug, and switching.
-3. Production-clock coverage of the real ten-second auto-stop path and
-   removal of the fake clean-stop success seam.
-4. Foreground microphone and natural permission-state checks by the user.
+1. Stable native device identity, selection refresh, hot-plug, and switching.
+2. Foreground microphone and natural permission-state checks by the user.
