@@ -24,7 +24,10 @@ const screens: { glyph: string; label: string; value: Screen }[] = [
 ];
 
 export function App() {
-  const { dictation, dispatch, historyDurable, now, settings, setup, state } = useApp();
+  const {
+    dictation, dispatch, historyDurable, now, settings, settingsDurable, setup,
+    state,
+  } = useApp();
   const [onboardingOpen, setOnboardingOpen] = useState(
     !state.onboarding.complete,
   );
@@ -34,12 +37,24 @@ export function App() {
   const modalOpener = useRef<HTMLElement | null>(null);
   useTheme(state.settings.appearance);
 
+  // Close onboarding when durable settings hydrate with complete=true.
+  useEffect(() => {
+    if (state.onboarding.complete) setOnboardingOpen(false);
+  }, [state.onboarding.complete]);
+
   useEffect(() => {
     if (!state.historyError) return;
     setToast(state.historyError);
     const timer = window.setTimeout(() => setToast(""), 4_000);
     return () => window.clearTimeout(timer);
   }, [state.historyError]);
+
+  useEffect(() => {
+    if (!state.settingsError) return;
+    setToast(state.settingsError);
+    const timer = window.setTimeout(() => setToast(""), 4_000);
+    return () => window.clearTimeout(timer);
+  }, [state.settingsError]);
 
   useShortcutGestures({
     dictation,
@@ -86,6 +101,7 @@ export function App() {
     dispatch({
       now: now(),
       persistHistory: historyDurable,
+      persistSettings: settingsDurable,
       type: "reset",
       wipeHistory,
     });

@@ -2,6 +2,7 @@ import type {
   DictationRecord,
   OnboardingState,
   Screen,
+  Settings,
   SettingUpdate,
 } from "../domain/types";
 
@@ -17,6 +18,11 @@ export type AppAction =
   | { type: "fail-dictation"; now: number; runId: number }
   | { type: "hydrate-records"; records: DictationRecord[] }
   | {
+      onboardingComplete: boolean;
+      settings: Settings;
+      type: "hydrate-settings";
+    }
+  | {
       completion: "automatic" | "held";
       runId: number;
       type: "process-dictation";
@@ -24,6 +30,8 @@ export type AppAction =
   | {
       /** When true (Tauri durable history), do not reseed fixture rows. */
       persistHistory?: boolean;
+      /** When true, keep durable settings / onboarding-complete on reset. */
+      persistSettings?: boolean;
       type: "reset";
       now: number;
       /** Explicit confirm only — clears durable records (persists empty). */
@@ -34,6 +42,7 @@ export type AppAction =
   | { type: "scenario-empty" }
   | { type: "set-clipboard-failure"; value: boolean }
   | { type: "set-history-error"; message: string | null }
+  | { type: "set-settings-error"; message: string | null }
   | { type: "set-onboarding"; value: OnboardingState }
   | { changes: Partial<OnboardingState>; type: "update-onboarding" }
   | { type: "set-screen"; screen: Screen }

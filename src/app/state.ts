@@ -23,6 +23,8 @@ export interface AppState {
   dictation: DictationState;
   /** Load/save failure message for durable history; null when healthy. */
   historyError: string | null;
+  /** Load/save failure message for durable settings; null when healthy. */
+  settingsError: string | null;
   nextRunId: number;
   onboarding: OnboardingState;
   records: DictationRecord[];
@@ -34,15 +36,32 @@ export interface AppState {
 export function appReducer(state: AppState, action: AppAction): AppState {
   if (action.type === "reset") {
     const persistHistory = action.persistHistory === true;
-    const next = createInitialState(action.now, { persistHistory });
+    const persistSettings = action.persistSettings === true;
+    const next = createInitialState(action.now, {
+      persistHistory,
+      persistSettings,
+    });
+    let result = next;
     if (persistHistory && action.wipeHistory !== true) {
       // Session UI reset only — keep durable rows so history.json is not
       // overwritten with fixture seed data.
-      return { ...next, records: state.records };
+      result = { ...result, records: state.records };
+    }
+    if (persistSettings) {
+      // Keep durable settings + onboarding-complete so settings.json is not
+      // overwritten with fixture defaults on DEV Reset.
+      result = {
+        ...result,
+        onboarding: {
+          ...result.onboarding,
+          complete: state.onboarding.complete,
+        },
+        settings: state.settings,
+      };
     }
     // wipeHistory + persistHistory → empty records (persist effect saves []).
     // Non-persist → fixture seed via createInitialState (browser / unit).
-    return next;
+    return result;
   }
   if (action.type === "reopen-onboarding") {
     return {
@@ -113,6 +132,21 @@ export function appReducer(state: AppState, action: AppAction): AppState {
   if (action.type === "set-history-error") {
     if (state.historyError === action.message) return state;
     return { ...state, historyError: action.message };
+  }
+  if (action.type === "hydrate-settings") {
+    return {
+      ...state,
+      onboarding: {
+        ...state.onboarding,
+        complete: action.onboardingComplete,
+      },
+      settings: action.settings,
+      settingsError: null,
+    };
+  }
+  if (action.type === "set-settings-error") {
+    if (state.settingsError === action.message) return state;
+    return { ...state, settingsError: action.message };
   }
   if (action.type === "delete-record") {
     return {
