@@ -17,6 +17,8 @@ remains deferred.
 | Cancel | Discards audio; **no** STT / Copy |
 | Feedback | Toast + inline status (listening / transcribing / copied / error) |
 | Copy only | Still no insert / gestures |
+| Native clipboard | Desktop uses `@tauri-apps/plugin-clipboard-manager` (no WebKit user-activation). Browser/mock keeps `navigator.clipboard`. |
+| Soft-fail Copy | If STT succeeds but Copy fails, transcript still shows + warning toast |
 
 ## Clara smoke (Mac)
 
@@ -28,10 +30,14 @@ npm run tauri -- dev -- --features whisper
 1. Settings → Speech-to-text models → **Download** tiny (if missing) → select it.
 2. Home → **Dictate** → **Start capture** → speak → **Stop**.
 3. Expect “Transcribing…” then “Transcript copied to clipboard” (and inline
-   last transcript). No console `invoke` required.
+   last transcript). No console `invoke` required. Clipboard write is native
+   (not `navigator.clipboard`), so async STT after Stop must not hit WebKit
+   `NotAllowedError`.
 4. Repeat Start → **Cancel** → confirm no transcript / no Copy.
 5. With model **missing**, Start should error with a Settings download hint
    (no silent fetch).
+6. If Copy somehow fails after STT, expect transcript still shown plus a
+   warning toast (“clipboard copy failed”) — not a full dogfood error.
 
 ## Verification
 

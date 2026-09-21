@@ -6,6 +6,7 @@ import type { ClipboardAdapter } from "../../../src/services/clipboard";
 import type { CaptureState } from "../../../src/services/capture/types";
 import type { UseCaptureStateResult } from
   "../../../src/services/capture/useCaptureState";
+import type { DogfoodResult } from "../../../src/services/stt/dogfoodPath";
 import {
   createMockSttEngine,
   createMockSttModelStore,
@@ -36,20 +37,25 @@ function stubCapture(state: CaptureState): UseCaptureStateResult {
   };
 }
 
+async function mockDogfoodSuccess(
+  { modelId, audio }: { modelId: string; audio: { duration_ms: number; id: string; sample_rate_hz: number } },
+): Promise<DogfoodResult> {
+  const engine = createMockSttEngine({ modelId });
+  const transcript = await engine.transcribe({
+    durationMs: audio.duration_ms,
+    id: audio.id,
+    sampleRateHz: audio.sample_rate_hz,
+  });
+  return { copied: true, transcript };
+}
+
 describe("useDogfoodCapture", () => {
   it("auto-runs dogfoodTranscribeAndCopy after clean stop with audio", async () => {
     const clip = clipboard();
     const store = createMockSttModelStore();
     await store.download("whisper-tiny.en");
 
-    const dogfood = vi.fn(async ({ modelId, audio }) => {
-      const engine = createMockSttEngine({ modelId });
-      return engine.transcribe({
-        durationMs: audio.duration_ms,
-        id: audio.id,
-        sampleRateHz: audio.sample_rate_hz,
-      });
-    });
+    const dogfood = vi.fn(mockDogfoodSuccess);
 
     let captureState: CaptureState = { kind: "idle" };
     const startFullCaptureSession = vi.fn(async () => {
@@ -110,6 +116,46 @@ describe("useDogfoodCapture", () => {
       }),
     );
     await waitFor(() => expect(result.current.phase).toBe("success"));
+    expect(result.current.transcript?.text).toBeTruthy();
+    expect(result.current.message).toMatch(/copied to clipboard/i);
+  });
+
+  it("surfaces transcript + warning toast when Copy soft-fails", async () => {
+    const store = createMockSttModelStore();
+    await store.download("whisper-tiny.en");
+    const toast = vi.fn();
+
+    const dogfood = vi.fn(async (): Promise<DogfoodResult> => ({
+      copied: false,
+      copyWarning: "NotAllowedError",
+      transcript: { language: "en", text: "still here" },
+    }));
+
+    let captureState: CaptureState = {
+      audio: {
+        duration_ms: 500,
+        id: "pcm-copy-fail",
+        sample_rate_hz: 16_000,
+      },
+      kind: "stopped",
+    };
+
+    const { result } = renderHook(() => useDogfoodCapture({
+      captureApi: stubCapture(captureState),
+      clipboard: clipboard(),
+      createModelStore: () => store,
+      dogfood: dogfood as never,
+      modelId: "whisper-tiny.en",
+      onToast: toast,
+    }));
+
+    await waitFor(() => expect(result.current.phase).toBe("success"));
+    expect(result.current.transcript?.text).toBe("still here");
+    expect(result.current.message).toMatch(/clipboard copy failed/i);
+    expect(result.current.message).toMatch(/NotAllowedError/);
+    expect(toast).toHaveBeenCalledWith(
+      expect.stringMatching(/clipboard copy failed/i),
+    );
   });
 
   it("errors clearly when the selected model is not downloaded", async () => {

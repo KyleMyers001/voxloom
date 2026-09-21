@@ -3,6 +3,7 @@ export { copyTranscript, copyTranscriptToClipboard } from "./copySink";
 export {
   dogfoodTranscribeAndCopy,
   type CaptureAudioMeta,
+  type DogfoodResult,
   type DogfoodTranscribeOptions,
 } from "./dogfoodPath";
 export { createSttEngine, createSttModelStore } from "./factory";

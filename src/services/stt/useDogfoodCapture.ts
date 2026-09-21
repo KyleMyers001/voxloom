@@ -132,9 +132,18 @@ export function useDogfoodCapture(
         clipboard: clipboardRef.current,
         modelId,
       });
-      setTranscript(result);
+      setTranscript(result.transcript);
       setPhase("success");
-      announce("Transcript copied to clipboard");
+      if (result.copied) {
+        announce("Transcript copied to clipboard");
+      } else {
+        const detail = result.copyWarning
+          ? `: ${result.copyWarning}`
+          : "";
+        announce(
+          `Transcript ready, but clipboard copy failed${detail}`,
+        );
+      }
     } catch (error: unknown) {
       setPhase("error");
       announce(errorText(error));
