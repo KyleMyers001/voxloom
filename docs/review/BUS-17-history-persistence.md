@@ -41,7 +41,7 @@ npm run tauri -- dev -- --features whisper
 ```
 
 1. Settings → STT models → ensure tiny downloaded + selected.
-2. Settings → transcript retention → **30 days** or **Forever** (not Off).
+2. Settings → transcript retention → **30 days** or **Until deleted** (not Off).
 3. Prefer **Scenario → Empty lists** so Recent is blank.
 4. Home → **Dictate** → Start → speak → Stop → expect Copy toast + Recent row.
 5. Quit the app fully → relaunch → **Recent** and **History** still show the row;
