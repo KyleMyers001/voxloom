@@ -46,6 +46,11 @@ vi.mock("../../src/services/capture/captureService", () => ({
   onCaptureEvent: vi.fn().mockResolvedValue(() => {}),
   queryPermission: vi.fn(),
   requestPermission: vi.fn(),
+  startFullCapture: vi.fn().mockResolvedValue({
+    generation: 1,
+    mode: "full",
+    request_id: "request-id",
+  }),
   startMicTest: vi.fn().mockResolvedValue({
     generation: 1,
     mode: "test",
@@ -56,18 +61,22 @@ vi.mock("../../src/services/capture/captureService", () => ({
 afterEach(cleanup);
 
 beforeEach(() => {
-  Object.defineProperty(navigator, "clipboard", {
-    configurable: true,
-    value: { writeText: vi.fn().mockResolvedValue(undefined) },
-  });
+  if (typeof navigator !== "undefined") {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+    });
+  }
 });
 
-Object.defineProperty(window, "matchMedia", {
-  configurable: true,
-  value: vi.fn().mockImplementation((query: string) => ({
-    addEventListener: vi.fn(),
-    matches: false,
-    media: query,
-    removeEventListener: vi.fn(),
-  })),
-});
+if (typeof window !== "undefined") {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      addEventListener: vi.fn(),
+      matches: false,
+      media: query,
+      removeEventListener: vi.fn(),
+    })),
+  });
+}

@@ -1,4 +1,5 @@
 import type { ClipboardAdapter } from "../clipboard";
+import type { Transcript } from "./types";
 
 /**
  * Copy-before-insert sink (ADR / BUS-10).
@@ -9,4 +10,15 @@ export async function copyTranscriptToClipboard(
   clipboard: ClipboardAdapter,
 ): Promise<void> {
   await clipboard.copy(text);
+}
+
+/**
+ * Convenience: copy a Transcript through the Copy sink.
+ * Insert / gesture delivery remains BUS-12–14.
+ */
+export async function copyTranscript(
+  transcript: Transcript,
+  clipboard: ClipboardAdapter,
+): Promise<void> {
+  await copyTranscriptToClipboard(transcript.text, clipboard);
 }

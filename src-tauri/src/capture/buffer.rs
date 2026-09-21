@@ -49,7 +49,6 @@ impl CaptureBuffer {
     }
 
     /// True when no frames have been stored.
-    #[allow(dead_code)] // used by tests and future BUS-10 caller
     pub fn is_empty(&self) -> bool {
         self.frames.is_empty()
     }

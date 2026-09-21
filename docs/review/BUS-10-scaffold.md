@@ -37,3 +37,7 @@ app start.
 
 `npm run test:unit` (vitest) covers mock store progress, cancel, deterministic
 transcript, and copy-sink clipboard writes.
+
+## Follow-up
+
+Real whisper wiring: `docs/review/BUS-10-whisper.md`.

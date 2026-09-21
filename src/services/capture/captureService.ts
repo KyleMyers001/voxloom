@@ -50,6 +50,21 @@ export async function startMicTest(
   });
 }
 
+
+export async function startFullCapture(
+  requestId: string,
+  preferredDeviceId?: string,
+): Promise<CaptureStatus> {
+  if (!isTauri()) {
+    throw new Error("capture-unavailable");
+  }
+  return invoke<CaptureStatus>("capture_start", {
+    preferredDeviceId: preferredDeviceId ?? null,
+    requestId,
+    testMode: false,
+  });
+}
+
 export async function cancelCapture(requestId: string): Promise<boolean> {
   if (!isTauri()) return false;
   return invoke<boolean>("capture_cancel", { requestId });

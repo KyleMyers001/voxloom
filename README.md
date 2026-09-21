@@ -32,6 +32,24 @@ npm run tauri dev
 The Tauri shell has no application capabilities or native commands. Windows is
 not verified by this repository.
 
+
+
+## Local STT (whisper.cpp)
+
+Speech-to-text is local-first (see `docs/decisions/local-stt-whisper.md`).
+The TypeScript layer talks to `SttEngine` / `SttModelStore`; a mock adapter
+backs UI tests. The Tauri shell exposes `stt_*` commands for model
+download (explicit user action only) and transcription.
+
+Real whisper.cpp linkage is **opt-in** on macOS:
+
+```sh
+brew install cmake   # once
+npm run tauri -- dev -- --features whisper
+```
+
+Details: `docs/review/BUS-10-whisper.md`.
+
 ## Verification
 
 ```sh

@@ -39,6 +39,7 @@ use crate::capture::{
         StreamMeta, RING_CAPACITY,
     },
 };
+use crate::capture::pcm_store::PcmBufferStore;
 
 // Constants
 
@@ -124,6 +125,9 @@ pub enum SessionEvent {
     CaptureStopped {
         generation: u64,
         request_id: String,
+        /// Opaque local PCM handle for STT (BUS-10). Absent when empty.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        audio: Option<crate::capture::pcm_store::AudioBufferHandleDto>,
     },
     CaptureCancelled {
         generation: u64,
@@ -315,6 +319,7 @@ pub struct Coordinator<
 > {
     generation: AtomicU64,
     limits: CaptureLimits,
+    pcm_store: Arc<PcmBufferStore>,
     permission: Arc<P>,
     runtime: Arc<dyn LoopRuntime>,
     state: Arc<Mutex<CoordinatorState>>,
@@ -326,9 +331,14 @@ pub type CaptureCoordinator = Coordinator;
 
 impl Coordinator {
     pub fn new() -> Self {
+        Self::with_pcm_store(Arc::new(PcmBufferStore::new()))
+    }
+
+    pub fn with_pcm_store(pcm_store: Arc<PcmBufferStore>) -> Self {
         Coordinator {
             generation: AtomicU64::new(0),
             limits: CaptureLimits::production(),
+            pcm_store,
             permission: Arc::new(RealPermissionBackend),
             runtime: Arc::new(SystemLoopRuntime::new()),
             state: Arc::new(Mutex::new(CoordinatorState {
@@ -352,6 +362,7 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
         Coordinator {
             generation: AtomicU64::new(0),
             limits: CaptureLimits::production(),
+            pcm_store: Arc::new(PcmBufferStore::new()),
             permission: Arc::new(permission),
             runtime: Arc::new(SystemLoopRuntime::new()),
             state: Arc::new(Mutex::new(CoordinatorState {
@@ -372,6 +383,7 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
         Coordinator {
             generation: AtomicU64::new(0),
             limits,
+            pcm_store: Arc::new(PcmBufferStore::new()),
             permission: Arc::new(permission),
             runtime: Arc::new(runtime),
             state: Arc::new(Mutex::new(CoordinatorState {
@@ -509,6 +521,7 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
         let permission = Arc::clone(&self.permission);
         let runtime = Arc::clone(&self.runtime);
         let stream_backend = Arc::clone(&self.stream_backend);
+        let pcm_store = Arc::clone(&self.pcm_store);
         let limits = self.limits;
         let worker_status = status.clone();
 
@@ -529,6 +542,7 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
                 runtime,
                 state_arc,
                 stream_backend,
+                pcm_store,
                 &emit,
             );
         });
@@ -591,6 +605,7 @@ fn run_session<P, S, E>(
     runtime: Arc<dyn LoopRuntime>,
     state: Arc<Mutex<CoordinatorState>>,
     stream_backend: Arc<S>,
+    pcm_store: Arc<PcmBufferStore>,
     emit: &E,
 ) where
     P: PermissionBackend,
@@ -796,7 +811,11 @@ fn run_session<P, S, E>(
                     emit,
                 );
             } else {
-                drop(buffer);
+                let audio = if buffer.is_empty() {
+                    None
+                } else {
+                    Some(pcm_store.deposit(buffer))
+                };
                 emit_terminal(
                     &state,
                     gen,
@@ -804,6 +823,7 @@ fn run_session<P, S, E>(
                     SessionEvent::CaptureStopped {
                         generation: gen,
                         request_id: request_id.clone(),
+                        audio,
                     },
                     emit,
                 );
@@ -2144,6 +2164,7 @@ mod tests {
             if let SessionEvent::CaptureStopped {
                 generation,
                 request_id,
+                audio: _,
             } = event
             {
                 event_count.fetch_add(1, Ordering::AcqRel);
@@ -2434,6 +2455,7 @@ mod tests {
                 | SessionEvent::CaptureStopped {
                     generation,
                     request_id,
+                    ..
                 }
                 | SessionEvent::CaptureCancelled {
                     generation,
