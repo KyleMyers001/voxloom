@@ -131,7 +131,7 @@ describe("useDogfoodCapture", () => {
       transcript: { language: "en", text: "still here" },
     }));
 
-    let captureState: CaptureState = {
+    const captureState: CaptureState = {
       audio: {
         duration_ms: 500,
         id: "pcm-copy-fail",

@@ -2,14 +2,25 @@
   "compilerOptions": {
     "composite": true,
     "jsx": "react-jsx",
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "noEmit": true,
     "skipLibCheck": true,
     "strict": true,
     "target": "ES2023",
-    "types": ["vite/client", "vitest/globals"]
+    "types": [
+      "vite/client",
+      "vitest/globals",
+      "node"
+    ]
   },
-  "include": ["src", "tests/unit"]
+  "include": [
+    "src",
+    "tests/unit"
+  ]
 }
