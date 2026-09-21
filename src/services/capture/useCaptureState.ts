@@ -14,7 +14,9 @@ import {
   onCaptureEvent,
   queryPermission,
   requestPermission,
+  startFullCapture,
   startMicTest,
+  stopCapture,
 } from "./captureService";
 import type {
   CaptureErrorCategory,
@@ -37,6 +39,8 @@ type ListenerResult =
   | { error: string; ok: false };
 
 export interface UseCaptureStateResult {
+  /** Discard in-flight capture (no PCM deposit / no STT). */
+  cancelActiveCapture: () => void;
   captureReady: boolean;
   captureState: CaptureState;
   deviceListError: string | null;
@@ -47,6 +51,13 @@ export interface UseCaptureStateResult {
   refreshDevices: () => Promise<void>;
   requestMicPermission: () => void;
   runMicTest: (deviceId?: string) => Promise<void>;
+  /** Start full-mode capture for STT dogfood (not mic test). */
+  startFullCaptureSession: (deviceId?: string) => Promise<void>;
+  /**
+   * Clean-stop full capture: deposits PCM and emits `capture-stopped.audio`.
+   * Prefer over cancel when the utterance should reach STT.
+   */
+  stopFullCapture: () => Promise<void>;
   stopMicTest: () => void;
 }
 
@@ -235,6 +246,11 @@ export function useCaptureState(): UseCaptureStateResult {
           category: event.category,
           kind: "error",
           message: event.message,
+        });
+      } else if (event.kind === "capture-stopped") {
+        setCaptureState({
+          audio: event.audio,
+          kind: "stopped",
         });
       } else {
         setCaptureState({ kind: "idle" });
@@ -461,6 +477,86 @@ export function useCaptureState(): UseCaptureStateResult {
     return true;
   }, [captureReady]);
 
+  const startFullCaptureSession = useCallback(async (deviceId?: string) => {
+    if (ownerRef.current !== null) return;
+
+    const requestId = createCaptureRequestId();
+    ownerRef.current = {
+      generation: null,
+      mode: "full",
+      requestId,
+    };
+    setCaptureState({
+      device: "Starting…",
+      generation: 0,
+      kind: "active",
+      request_id: requestId,
+    });
+
+    const listener = await listenerRef.current;
+    if (!listener?.ok || !mountedRef.current) {
+      if (ownerRef.current?.requestId === requestId) {
+        ownerRef.current = null;
+      }
+      if (mountedRef.current) {
+        setCaptureState({
+          category: "capture-unavailable",
+          kind: "error",
+          message: listener?.ok === false
+            ? listener.error
+            : errorMessages["capture-unavailable"],
+        });
+      }
+      return;
+    }
+
+    try {
+      const status = await startFullCapture(requestId, deviceId);
+      if (!mountedRef.current
+          || ownerRef.current?.requestId !== requestId) return;
+      if (status.request_id !== requestId) {
+        ownerRef.current = null;
+        setCaptureState({
+          category: "capture-unavailable",
+          kind: "error",
+          message: errorMessages["capture-unavailable"],
+        });
+        return;
+      }
+      ownerRef.current.generation = status.generation;
+      setCaptureState((previous) => previous.kind === "active"
+        && previous.request_id === requestId
+        ? { ...previous, generation: status.generation }
+        : previous);
+    } catch (error: unknown) {
+      if (!mountedRef.current
+          || ownerRef.current?.requestId !== requestId) return;
+      ownerRef.current = null;
+      setCaptureState({ kind: "error", ...normalizeError(error) });
+    }
+  }, []);
+
+  const stopFullCapture = useCallback(async () => {
+    const owner = ownerRef.current;
+    if (!owner || owner.mode !== "full") return;
+    try {
+      await stopCapture();
+    } catch (error: unknown) {
+      if (mountedRef.current) {
+        setCaptureState({ kind: "error", ...normalizeError(error) });
+      }
+    }
+  }, []);
+
+  const cancelActiveCapture = useCallback(() => {
+    const owner = ownerRef.current;
+    if (owner) {
+      void cancelCapture(owner.requestId).catch(() => {});
+    }
+    // Optimistic UX; terminal event still updates to cancelled/idle.
+    setCaptureState({ kind: "cancelled" });
+  }, []);
+
   const stopMicTest = useCallback(() => {
     const owner = ownerRef.current;
     if (owner) {
@@ -470,6 +566,7 @@ export function useCaptureState(): UseCaptureStateResult {
   }, []);
 
   return {
+    cancelActiveCapture,
     captureReady,
     captureState,
     deviceListError,
@@ -480,6 +577,8 @@ export function useCaptureState(): UseCaptureStateResult {
     refreshDevices,
     requestMicPermission,
     runMicTest,
+    startFullCaptureSession,
+    stopFullCapture,
     stopMicTest,
   };
 }

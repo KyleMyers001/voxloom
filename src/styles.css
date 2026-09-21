@@ -816,3 +816,29 @@ textarea {
 .stt-model-selected-note {
   margin: 0;
 }
+
+.dogfood-capture-actions {
+  margin-top: 12px;
+}
+
+.dogfood-transcript {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 12px;
+}
+
+.dogfood-transcript__label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.dogfood-transcript p {
+  margin: 0;
+}

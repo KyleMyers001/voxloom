@@ -37,3 +37,11 @@ export {
   type SttModelStatus,
   type Transcript,
 } from "./types";
+
+export { useDogfoodCapture } from "./useDogfoodCapture";
+export type {
+  DogfoodPhase,
+  UseDogfoodCaptureOptions,
+  UseDogfoodCaptureResult,
+} from "./useDogfoodCapture";
+
