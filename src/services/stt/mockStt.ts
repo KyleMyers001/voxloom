@@ -1,5 +1,7 @@
 import type { SttEngine, SttModelStore } from "./contracts";
 import {
+  DEFAULT_STT_MODEL_ID,
+  STT_MODEL_CATALOG,
   SttError,
   type AudioBufferHandle,
   type SttDownloadProgress,
@@ -7,24 +9,11 @@ import {
   type Transcript,
 } from "./types";
 
-const DEFAULT_MODELS: readonly SttModelInfo[] = [
-  {
-    id: "whisper-tiny.en",
-    label: "Whisper Tiny (English)",
-    sizeBytes: 75_000_000,
-    status: "missing",
-  },
-  {
-    id: "whisper-base.en",
-    label: "Whisper Base (English)",
-    sizeBytes: 142_000_000,
-    status: "missing",
-  },
-];
-
 const DETERMINISTIC_TEXT = "mock transcript from local STT scaffold";
 
 export interface MockSttOptions {
+  /** Explicit model id bound to the engine (required for real path parity). */
+  modelId?: string;
   /** Deterministic transcript text (defaults to a fixed scaffold string). */
   transcriptText?: string;
   /** Simulated download steps (default 3). Progress fires between 0 and 1. */
@@ -44,7 +33,10 @@ export function createMockSttModelStore(
 ): SttModelStore {
   const steps = Math.max(1, options.downloadSteps ?? 3);
   const models = new Map<string, MutableModel>(
-    DEFAULT_MODELS.map((m) => [m.id, { ...m }]),
+    STT_MODEL_CATALOG.map((m) => [
+      m.id,
+      { ...m, status: "missing" as const },
+    ]),
   );
   const cancelled = new Set<string>();
   const inFlight = new Set<string>();
@@ -117,13 +109,26 @@ export function createMockSttModelStore(
   };
 }
 
+function requireModelId(modelId: string | undefined): string {
+  const id = (modelId ?? "").trim();
+  if (!id) {
+    throw new SttError(
+      "model-missing",
+      "SttEngine requires an explicit non-empty modelId",
+    );
+  }
+  return id;
+}
+
 /** Deterministic mock engine — no whisper.cpp, no network. */
 export function createMockSttEngine(
   options: MockSttOptions = {},
 ): SttEngine {
+  const modelId = requireModelId(options.modelId ?? DEFAULT_STT_MODEL_ID);
   const text = options.transcriptText ?? DETERMINISTIC_TEXT;
 
   return {
+    modelId,
     async transcribe(audio: AudioBufferHandle): Promise<Transcript> {
       if (!audio.id) {
         throw new SttError(

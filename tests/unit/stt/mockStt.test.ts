@@ -1,10 +1,11 @@
+// @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import {
   createMockSttEngine,
   createMockSttModelStore,
   MOCK_TRANSCRIPT_TEXT,
 } from "../../../src/services/stt/mockStt";
-import { SttError } from "../../../src/services/stt/types";
+import { DEFAULT_STT_MODEL_ID, SttError } from "../../../src/services/stt/types";
 
 describe("createMockSttModelStore", () => {
   it("lists models as missing without downloading on construct", async () => {
@@ -59,7 +60,27 @@ describe("createMockSttModelStore", () => {
   });
 });
 
-describe("createMockSttEngine", () => {
+describe("createMockSttEngine modelId requirement", () => {
+  it("exposes explicit modelId (defaults to English-first tiny)", async () => {
+    const engine = createMockSttEngine();
+    expect(engine.modelId).toBe(DEFAULT_STT_MODEL_ID);
+  });
+
+  it("honors an explicit modelId option", () => {
+    const engine = createMockSttEngine({ modelId: "whisper-base.en" });
+    expect(engine.modelId).toBe("whisper-base.en");
+  });
+
+  it("rejects empty modelId", () => {
+    expect(() => createMockSttEngine({ modelId: "  " })).toThrow(SttError);
+    try {
+      createMockSttEngine({ modelId: "" });
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toMatchObject({ code: "model-missing" });
+    }
+  });
+
   it("returns deterministic transcript text", async () => {
     const engine = createMockSttEngine();
     const result = await engine.transcribe({

@@ -1,4 +1,7 @@
 mod capture;
+mod stt;
+
+use std::sync::Arc;
 
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -9,8 +12,10 @@ use capture::{
         DeviceSelection, InputDeviceDescriptor, SYSTEM_DEFAULT_ID,
     },
 };
+use capture::pcm_store::PcmBufferStore;
+use stt::{store::ModelStore, SttState};
 
-// IPC commands
+// IPC commands — capture
 
 /// Query the current microphone permission without prompting.
 /// Emits a `capture:event` PermissionStatus with generation 0 (not a session).
@@ -89,10 +94,11 @@ fn capture_start(
         })
 }
 
-/// Cancel any active capture session.
+/// Clean-stop any active capture session (deposit PCM + capture-stopped).
+/// Distinct from `capture_cancel`, which discards audio.
 #[tauri::command]
 fn capture_stop(coordinator: State<CaptureCoordinator>) {
-    coordinator.cancel_any();
+    coordinator.stop_any();
 }
 
 /// Cancel one client request, including a start whose response is pending.
@@ -125,7 +131,20 @@ fn capture_list_devices(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(CaptureCoordinator::new())
+        .setup(|app| {
+            let buffers = Arc::new(PcmBufferStore::new());
+            let models = ModelStore::from_app(app.handle())
+                .unwrap_or_else(|_| {
+                    ModelStore::new(
+                        std::env::temp_dir().join("voxloom-models"),
+                    )
+                });
+            let coordinator =
+                CaptureCoordinator::with_pcm_store(Arc::clone(&buffers));
+            app.manage(coordinator);
+            app.manage(SttState::new(models, buffers));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             capture_cancel,
             capture_list_devices,
@@ -134,6 +153,11 @@ pub fn run() {
             capture_start,
             capture_status,
             capture_stop,
+            stt::stt_cancel_download,
+            stt::stt_download_model,
+            stt::stt_list_models,
+            stt::stt_model_status,
+            stt::stt_transcribe,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {

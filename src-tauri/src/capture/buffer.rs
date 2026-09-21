@@ -1,8 +1,8 @@
 /// Bounded mono f32 PCM accumulation buffer.
 ///
 /// Pre-allocated at creation; push rejects once full, returning an overflow
-/// error so the caller can surface `input-limit-exceeded` without blocking or
-/// allocating in the real-time callback path.
+/// error so the caller can end the session cleanly (deposit captured PCM)
+/// without blocking or allocating in the real-time callback path.
 use std::time::Duration;
 
 /// Target sample rate for normalised capture output.
@@ -49,7 +49,6 @@ impl CaptureBuffer {
     }
 
     /// True when no frames have been stored.
-    #[allow(dead_code)] // used by tests and future BUS-10 caller
     pub fn is_empty(&self) -> bool {
         self.frames.is_empty()
     }

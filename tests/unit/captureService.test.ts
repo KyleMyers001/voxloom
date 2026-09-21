@@ -17,6 +17,7 @@ import {
   onCaptureEvent,
   queryPermission,
   requestPermission,
+  startFullCapture,
   startMicTest,
 } from "../../src/services/capture/captureService";
 
@@ -70,6 +71,23 @@ describe("captureService in Tauri", () => {
     });
     expect(mockInvoke).toHaveBeenNthCalledWith(2, "capture_cancel", {
       requestId: "request-id",
+    });
+  });
+
+
+  it("starts a full capture session for STT handoff", async () => {
+    const status = {
+      generation: 5,
+      mode: "full" as const,
+      request_id: "full-id",
+    };
+    mockInvoke.mockResolvedValue(status);
+    await expect(startFullCapture("full-id", "input-2"))
+      .resolves.toEqual(status);
+    expect(mockInvoke).toHaveBeenCalledWith("capture_start", {
+      preferredDeviceId: "input-2",
+      requestId: "full-id",
+      testMode: false,
     });
   });
 

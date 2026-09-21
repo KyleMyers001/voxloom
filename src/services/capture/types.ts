@@ -50,7 +50,15 @@ export type CaptureEvent =
       kind: "test-complete";
       metadata: TestCaptureMetadata;
     })
-  | (SessionCorrelation & { kind: "capture-stopped" })
+  | (SessionCorrelation & {
+      kind: "capture-stopped";
+      /** Present after stop or 120s/capacity limit; PCM stays native-side. */
+      audio?: {
+        duration_ms: number;
+        id: string;
+        sample_rate_hz: number;
+      };
+    })
   | (SessionCorrelation & { kind: "capture-cancelled" })
   | (SessionCorrelation & {
       category: CaptureErrorCategory;

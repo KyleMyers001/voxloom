@@ -1,5 +1,6 @@
 export type { SttEngine, SttModelStore } from "./contracts";
-export { copyTranscriptToClipboard } from "./copySink";
+export { copyTranscript, copyTranscriptToClipboard } from "./copySink";
+export { audioHandleFromCapture } from "./fromCapture";
 export {
   createMockSttEngine,
   createMockSttModelStore,
@@ -7,6 +8,14 @@ export {
 } from "./mockStt";
 export type { MockSttOptions } from "./mockStt";
 export {
+  createWhisperSttEngine,
+  createWhisperSttModelStore,
+  isWhisperNativeAvailable,
+} from "./whisperAdapter";
+export type { WhisperEngineOptions } from "./whisperAdapter";
+export {
+  DEFAULT_STT_MODEL_ID,
+  STT_MODEL_CATALOG,
   SttError,
   type AudioBufferHandle,
   type SttDownloadProgress,

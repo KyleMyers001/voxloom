@@ -50,9 +50,34 @@ export async function startMicTest(
   });
 }
 
+
+export async function startFullCapture(
+  requestId: string,
+  preferredDeviceId?: string,
+): Promise<CaptureStatus> {
+  if (!isTauri()) {
+    throw new Error("capture-unavailable");
+  }
+  return invoke<CaptureStatus>("capture_start", {
+    preferredDeviceId: preferredDeviceId ?? null,
+    requestId,
+    testMode: false,
+  });
+}
+
+/** Discard in-flight capture (no PCM deposit). */
 export async function cancelCapture(requestId: string): Promise<boolean> {
   if (!isTauri()) return false;
   return invoke<boolean>("capture_cancel", { requestId });
+}
+
+/**
+ * Clean-stop active capture: deposits PCM and emits `capture-stopped.audio`
+ * for STT. Prefer this over `cancelCapture` when ending an utterance.
+ */
+export async function stopCapture(): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("capture_stop");
 }
 
 export async function getCaptureStatus(): Promise<CaptureStatus | null> {
