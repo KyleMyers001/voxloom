@@ -61,7 +61,11 @@ export function ScenarioPanel({
       <button onClick={() => onOnboarding("permission-denied")}>
         Permission denied
       </button>
-      <p>Controls are synthetic. No audio or OS capability is used.</p>
+      <p>
+        Controls are synthetic. No audio or OS capability is used.
+        With durable history on, Reset asks before wiping{" "}
+        <code>history.json</code>.
+      </p>
     </section>
   );
 }

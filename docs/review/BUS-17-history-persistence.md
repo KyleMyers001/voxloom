@@ -50,6 +50,11 @@ npm run tauri -- dev -- --features whisper
 7. **Start → Cancel** → no new row (unchanged).
 8. Optional: Settings → transcript retention → **Off** → quit → relaunch →
    durable list empty (session rows from before Off are not reloaded).
+9. **DEV Reset vs store (Clara):** with at least one durable row present,
+   open Dev → **Reset session** → choose **Keep durable history** → skip
+   onboarding → History/Recent still show the real row (not fixture seed).
+   Quit → relaunch → same real history. Optional destructive: Reset →
+   **Wipe durable history** → quit → relaunch → history empty (intentional).
 
 ## Verification (Linux CI / box)
 
@@ -61,9 +66,10 @@ npm run test:unit
 
 ## Residual risks
 
-- DEV **Reset session** reseeds fixture history and can overwrite durable
-  `history.json` while Tauri persistence is enabled — prefer Empty lists /
-  Delete for smoke, not Reset.
+- DEV **Reset session** no longer silently overwrites durable `history.json`
+  with fixtures: with persistence on it prompts **Keep durable history**
+  (default-safe) vs **Wipe durable history** (explicit). Prefer Empty lists /
+  Delete when you only want a blank session UI without touching the store.
 - Settings themselves are not durable yet (retention returns to default on
   relaunch until a settings-persistence ticket).
 - No automatic recovery UI for a corrupt `history.json` (manual delete of the

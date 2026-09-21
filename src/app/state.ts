@@ -32,7 +32,18 @@ export interface AppState {
 }
 
 export function appReducer(state: AppState, action: AppAction): AppState {
-  if (action.type === "reset") return createInitialState(action.now);
+  if (action.type === "reset") {
+    const persistHistory = action.persistHistory === true;
+    const next = createInitialState(action.now, { persistHistory });
+    if (persistHistory && action.wipeHistory !== true) {
+      // Session UI reset only — keep durable rows so history.json is not
+      // overwritten with fixture seed data.
+      return { ...next, records: state.records };
+    }
+    // wipeHistory + persistHistory → empty records (persist effect saves []).
+    // Non-persist → fixture seed via createInitialState (browser / unit).
+    return next;
+  }
   if (action.type === "reopen-onboarding") {
     return {
       ...state,

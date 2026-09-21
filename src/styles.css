@@ -478,6 +478,13 @@ textarea {
   padding: 12px 0;
 }
 
+.overlay__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
 .quiet-button {
   border: 0;
   color: var(--muted);
