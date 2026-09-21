@@ -3,6 +3,8 @@ import type {
   OnboardingState,
   Settings,
 } from "./types";
+import { SYSTEM_DEFAULT_DEVICE_ID } from
+  "../services/capture/types";
 
 const minute = 60_000;
 
@@ -48,7 +50,9 @@ export const initialSettings: Settings = {
   clipboardFallback: true,
   language: "English (US)",
   languageModel: "Alder Text Small · local",
-  microphone: "System default · simulated",
+  // Sentinel value that the Settings mic select treats as
+  // "use system default". Must match the <option> value in Settings.tsx.
+  microphone: SYSTEM_DEFAULT_DEVICE_ID,
   shortcut: "Ctrl + Shift + Space",
   startAtLogin: false,
   style: "formal",

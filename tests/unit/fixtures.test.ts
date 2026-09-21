@@ -4,6 +4,8 @@ import {
   initialOnboarding,
   initialSettings,
 } from "../../src/domain/fixtures";
+import { SYSTEM_DEFAULT_DEVICE_ID } from
+  "../../src/services/capture/types";
 
 describe("fixtures", () => {
   it("uses privacy-safe defaults and controlled recovery timing", () => {
@@ -13,6 +15,7 @@ describe("fixtures", () => {
     );
     expect(initialSettings.audioRetention).toBe("off");
     expect(initialSettings.appearance).toBe("system");
+    expect(initialSettings.microphone).toBe(SYSTEM_DEFAULT_DEVICE_ID);
     expect(initialOnboarding.complete).toBe(false);
     expect(failed?.recoveryExpiresAt).toBe(now + 10 * 60_000);
   });

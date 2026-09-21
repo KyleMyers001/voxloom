@@ -10,8 +10,9 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": false,
     "security": {
-      "capabilities": []
+      "capabilities": ["main"]
     },
     "windows": [
       {
@@ -19,13 +20,16 @@
         "label": "main",
         "minHeight": 620,
         "minWidth": 640,
-        "title": "Voxloom · Mock Prototype",
+        "title": "Voxloom · Native Prototype",
         "width": 1120
       }
     ]
   },
   "bundle": {
     "active": false,
-    "icon": []
+    "icon": [],
+    "macOS": {
+      "infoPlist": "Info.plist"
+    }
   }
 }

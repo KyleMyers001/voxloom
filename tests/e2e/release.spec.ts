@@ -19,7 +19,8 @@ test("release onboarding requires and recognizes both real gestures", async (
 ) => {
   await page.goto("/");
   await expect(page.getByLabel("Development scenarios")).toHaveCount(0);
-  await page.getByRole("button", { name: "Enable mock microphone" }).click();
+  // Step 1: in browser (non-Tauri) native capture is unavailable;
+  // Next is not blocked by permission — proceed directly.
   await page.getByRole("button", { name: "Next" }).click();
   await page.getByRole("button", { name: "Next" }).click();
   await expect(page.getByText("Press-and-hold · not tested")).toBeVisible();

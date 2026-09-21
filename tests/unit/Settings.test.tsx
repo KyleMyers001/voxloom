@@ -1,23 +1,174 @@
+/// Settings component tests.
+///
+/// The capture hook is mocked to avoid live IPC. Real permission flow,
+/// real device list, and real mic test are covered in manual tests
+/// documented in docs/review/BUS-9-implementation.md.
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Settings } from "../../src/features/settings/Settings";
 import { renderWithApp } from "./testUtils";
 
+// --- Capture hook mock -------------------------------------------------
+const captureMocks = vi.hoisted(() => ({
+  captureReady: true,
+  devices: [
+    { available: true, id: "input-1", label: "Built-in Microphone" },
+    { available: true, id: "input-2", label: "USB Audio" },
+  ],
+  prepareDeviceChange: vi.fn().mockResolvedValue(true),
+  refreshDevices: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("../../src/services/capture/useCaptureState", () => ({
+  useCaptureState: () => ({
+    captureReady: captureMocks.captureReady,
+    captureState: { kind: "idle" },
+    deviceListError: null,
+    devices: captureMocks.devices,
+    devicesLoading: false,
+    permissionStatus: "authorized",
+    prepareDeviceChange: captureMocks.prepareDeviceChange,
+    refreshDevices: captureMocks.refreshDevices,
+    requestMicPermission: vi.fn(),
+    runMicTest: vi.fn().mockResolvedValue(undefined),
+    stopMicTest: vi.fn(),
+  }),
+}));
+
+vi.mock("../../src/services/capture/captureService", () => ({
+  isTauriEnv: vi.fn().mockReturnValue(true),
+}));
+// -----------------------------------------------------------------------
+
 describe("Settings", () => {
-  it("updates controls and labels simulated capabilities", async () => {
+  beforeEach(() => {
+    captureMocks.captureReady = true;
+    captureMocks.devices = [
+      { available: true, id: "input-1", label: "Built-in Microphone" },
+      { available: true, id: "input-2", label: "USB Audio" },
+    ];
+    captureMocks.prepareDeviceChange.mockReset();
+    captureMocks.prepareDeviceChange.mockResolvedValue(true);
+    captureMocks.refreshDevices.mockClear();
+  });
+
+  it("updates style and appearance controls", async () => {
     const user = userEvent.setup();
-    const setup = vi.fn();
-    renderWithApp(<Settings onSetup={setup} />);
-    await user.selectOptions(screen.getByLabelText("Current style"), "casual");
+    renderWithApp(<Settings onSetup={vi.fn()} />);
+    await user.selectOptions(
+      screen.getByLabelText("Current style"),
+      "casual",
+    );
     expect(screen.getByLabelText("Current style")).toHaveValue("casual");
     await user.click(screen.getByLabelText("Sodium Rain"));
     expect(screen.getByLabelText("Sodium Rain")).toBeChecked();
-    await user.click(screen.getByRole("button", {
-      name: "Set up shortcuts",
-    }));
+  });
+
+  it("calls onSetup when Set up shortcuts clicked", async () => {
+    const user = userEvent.setup();
+    const setup = vi.fn();
+    renderWithApp(<Settings onSetup={setup} />);
+    await user.click(
+      screen.getByRole("button", { name: "Set up shortcuts" }),
+    );
     expect(setup).toHaveBeenCalledOnce();
-    expect(screen.getAllByText(/simulated/i).length).toBeGreaterThan(2);
-    expect(screen.getByText(/resets on reload/i)).toBeInTheDocument();
+  });
+
+  it("labels shortcuts and models as simulated", () => {
+    renderWithApp(<Settings onSetup={vi.fn()} />);
+    expect(
+      screen.getAllByText(/simulated/i).length,
+    ).toBeGreaterThan(2);
+  });
+
+  it("does not claim audio resets on reload", () => {
+    renderWithApp(<Settings onSetup={vi.fn()} />);
+    // The old false copy "resets on reload" is gone; verify replacement.
+    expect(screen.queryByText(/resets on reload/i)).toBeNull();
+    expect(screen.getByText(/captured locally/i)).toBeInTheDocument();
+  });
+
+  it("renders real device names in the microphone select", () => {
+    renderWithApp(<Settings onSetup={vi.fn()} />);
+    expect(
+      screen.getByRole("option", { name: "Built-in Microphone" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "USB Audio" }),
+    ).toBeInTheDocument();
+  });
+
+  it("locks device controls until native ownership is known", () => {
+    captureMocks.captureReady = false;
+    renderWithApp(<Settings onSetup={vi.fn()} />);
+
+    expect(screen.getByLabelText(/Microphone/)).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Refresh microphones" }))
+      .toBeDisabled();
+    expect(screen.getByRole("button", { name: "Test Microphone" }))
+      .toBeDisabled();
+  });
+
+  it("waits for teardown before committing a device change", async () => {
+    const user = userEvent.setup();
+    captureMocks.prepareDeviceChange.mockReturnValueOnce(
+      new Promise<boolean>(() => {}),
+    );
+    renderWithApp(<Settings onSetup={vi.fn()} />);
+
+    await user.selectOptions(screen.getByLabelText(/Microphone/), "input-2");
+    expect(captureMocks.prepareDeviceChange).toHaveBeenCalledOnce();
+    expect(screen.getByLabelText(/Microphone/)).toHaveValue(
+      "system-default",
+    );
+  });
+
+  it("does not commit a device change when teardown fails", async () => {
+    const user = userEvent.setup();
+    captureMocks.prepareDeviceChange.mockResolvedValueOnce(false);
+    renderWithApp(<Settings onSetup={vi.fn()} />);
+
+    await user.selectOptions(screen.getByLabelText(/Microphone/), "input-2");
+    expect(screen.getByLabelText(/Microphone/)).toHaveValue(
+      "system-default",
+    );
+  });
+
+  it("retains a missing selected device as unavailable", async () => {
+    const user = userEvent.setup();
+    renderWithApp(<Settings onSetup={vi.fn()} />);
+    await user.selectOptions(screen.getByLabelText(/Microphone/), "input-2");
+    expect(screen.getByLabelText(/Microphone/)).toHaveValue("input-2");
+
+    captureMocks.devices = [
+      { available: true, id: "input-1", label: "Built-in Microphone" },
+    ];
+    await user.selectOptions(screen.getByLabelText("Current style"), "casual");
+
+    expect(screen.getByLabelText(/Microphone/)).toHaveValue("input-2");
+    expect(screen.getByRole("option", {
+      name: "USB Audio (unavailable)",
+    })).toBeDisabled();
+    expect(screen.getByRole("button", {
+      name: "Test Microphone",
+    })).toBeDisabled();
+  });
+
+  it("shows Test Microphone button when authorized", () => {
+    renderWithApp(<Settings onSetup={vi.fn()} />);
+    expect(
+      screen.getByRole("button", { name: "Test Microphone" }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows honest recovery copy for microphone denied", () => {
+    renderWithApp(<Settings onSetup={vi.fn()} />);
+    expect(
+      screen.getByText(/Microphone denied/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Privacy.*Security.*Microphone/i),
+    ).toBeInTheDocument();
   });
 });
