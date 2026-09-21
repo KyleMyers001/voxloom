@@ -3,6 +3,7 @@ export { copyTranscript, copyTranscriptToClipboard } from "./copySink";
 export {
   dogfoodTranscribeAndCopy,
   type CaptureAudioMeta,
+  type DogfoodResult,
   type DogfoodTranscribeOptions,
 } from "./dogfoodPath";
 export { createSttEngine, createSttModelStore } from "./factory";
@@ -37,3 +38,11 @@ export {
   type SttModelStatus,
   type Transcript,
 } from "./types";
+
+export { useDogfoodCapture } from "./useDogfoodCapture";
+export type {
+  DogfoodPhase,
+  UseDogfoodCaptureOptions,
+  UseDogfoodCaptureResult,
+} from "./useDogfoodCapture";
+

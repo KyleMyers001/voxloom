@@ -94,6 +94,15 @@ export type CaptureState =
     }
   | { kind: "cancelled" }
   | {
+      /** Clean stop / 120s bound — optional opaque audio for STT dogfood. */
+      audio?: {
+        duration_ms: number;
+        id: string;
+        sample_rate_hz: number;
+      };
+      kind: "stopped";
+    }
+  | {
       category: CaptureErrorCategory;
       kind: "error";
       message: string;

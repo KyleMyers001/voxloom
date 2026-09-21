@@ -118,7 +118,7 @@ export function App() {
           onReset={resetSession}
         />}
         <p className="review-note">
-          Shortcut remains simulated. STT model pick lives in Settings.
+          Shortcut remains simulated. Dictate on Home uses Settings STT model → Copy.
         </p>
       </aside>
       <main className="main">

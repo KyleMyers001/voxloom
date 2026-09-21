@@ -31,4 +31,12 @@ describe("Home", () => {
     })[0]);
     expect(toast).toHaveBeenCalledWith("Copy failed");
   });
+
+  it("shows the Dictate capture panel on Home", () => {
+    renderWithApp(<Home onToast={vi.fn()} />);
+    expect(screen.getByRole("heading", { name: "Dictate" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start capture" })).toBeDisabled();
+    expect(screen.getByText(/Native capture requires the Tauri shell/i))
+      .toBeInTheDocument();
+  });
 });

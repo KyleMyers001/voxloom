@@ -1,5 +1,7 @@
 import { useApp } from "../../app/AppContext";
 import type { WritingStyle } from "../../domain/types";
+import { isTauriEnv } from "../../services/capture/captureService";
+import { useDogfoodCapture } from "../../services/stt/useDogfoodCapture";
 
 interface HomeProps {
   onToast: (message: string) => void;
@@ -18,6 +20,18 @@ export function Home({ onToast }: HomeProps) {
     .filter(({ status }) => status !== "failed")
     .sort((a, b) => b.createdAt - a.createdAt)
     .slice(0, 5);
+
+  const dogfood = useDogfoodCapture({
+    clipboard,
+    modelId: state.settings.transcriptionModel,
+    onToast,
+    preferredDeviceId: state.settings.microphone,
+  });
+
+  const isNative = isTauriEnv();
+  const recording = dogfood.phase === "recording"
+    || dogfood.captureState.kind === "active";
+  const busy = dogfood.phase === "transcribing";
 
   async function copy(text: string) {
     try {
@@ -51,6 +65,80 @@ export function Home({ onToast }: HomeProps) {
           </div>
         </div>
       </div>
+
+      <div className="card" aria-labelledby="capture-title">
+        <div className="card__head">
+          <h2 id="capture-title">Dictate</h2>
+        </div>
+        <p className="empty-note">
+          Full capture → selected Settings model → Copy
+          (no insert). Stop deposits audio and runs STT automatically;
+          Cancel discards with no transcription.
+        </p>
+        {!isNative && (
+          <p className="form-error" role="status">
+            Native capture requires the Tauri shell (Mac smoke).
+          </p>
+        )}
+        <div className="action-group dogfood-capture-actions">
+          {!recording && !busy && (
+            <button
+              className="btn accent"
+              disabled={!isNative || busy}
+              onClick={() => { void dogfood.start(); }}
+              type="button"
+            >
+              Start capture
+            </button>
+          )}
+          {recording && (
+            <>
+              <button
+                className="btn accent"
+                disabled={busy}
+                onClick={() => { void dogfood.stop(); }}
+                type="button"
+              >
+                Stop
+              </button>
+              <button
+                className="quiet-button"
+                disabled={busy}
+                onClick={() => dogfood.cancel()}
+                type="button"
+              >
+                Cancel
+              </button>
+            </>
+          )}
+          {busy && (
+            <span className="empty-note" role="status">Transcribing…</span>
+          )}
+        </div>
+        {dogfood.message && (
+          <p
+            className={
+              dogfood.phase === "error" || dogfood.phase === "cancelled"
+                ? "form-error"
+                : "empty-note"
+            }
+            data-phase={dogfood.phase}
+            role="status"
+          >
+            {dogfood.message}
+          </p>
+        )}
+        {dogfood.transcript?.text && (
+          <div className="dogfood-transcript" aria-live="polite">
+            <h3 className="dogfood-transcript__label">Last transcript</h3>
+            <p>{dogfood.transcript.text}</p>
+          </div>
+        )}
+        <p className="empty-note">
+          Model: {state.settings.transcriptionModel}
+        </p>
+      </div>
+
       <div className="card">
         <div className="card__head">
           <h2>Recent dictations</h2>

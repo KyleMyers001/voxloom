@@ -131,6 +131,7 @@ fn capture_list_devices(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             let buffers = Arc::new(PcmBufferStore::new());
             let models = ModelStore::from_app(app.handle())

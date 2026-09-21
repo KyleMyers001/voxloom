@@ -10,7 +10,9 @@ const mocks = vi.hoisted(() => ({
   onCaptureEvent: vi.fn(),
   queryPermission: vi.fn(),
   requestPermission: vi.fn(),
+  startFullCapture: vi.fn(),
   startMicTest: vi.fn(),
+  stopCapture: vi.fn(),
 }));
 
 vi.unmock("../../src/services/capture/useCaptureState");
@@ -531,4 +533,94 @@ describe("useCaptureState request ownership", () => {
         "Microphone capture is not available.",
       );
     });
+});
+
+
+describe("useCaptureState full capture dogfood wiring", () => {
+  let handler: ((event: CaptureEvent) => void) | null;
+  let nextId: number;
+  let unlisten: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    handler = null;
+    nextId = 1;
+    unlisten = vi.fn();
+    mocks.cancelCapture.mockResolvedValue(true);
+    mocks.createCaptureRequestId.mockImplementation(
+      () => `request-${nextId++}`,
+    );
+    mocks.getCaptureStatus.mockResolvedValue(null);
+    mocks.isTauriEnv.mockReturnValue(true);
+    mocks.listDevices.mockResolvedValue([]);
+    mocks.onCaptureEvent.mockImplementation(async (callback) => {
+      handler = callback;
+      return unlisten;
+    });
+    mocks.queryPermission.mockResolvedValue(undefined);
+    mocks.requestPermission.mockResolvedValue(undefined);
+    mocks.startFullCapture.mockImplementation(async (requestId) => ({
+      generation: 3,
+      mode: "full",
+      request_id: requestId,
+    }));
+    mocks.startMicTest.mockImplementation(async (requestId) => ({
+      generation: 7,
+      mode: "test",
+      request_id: requestId,
+    }));
+    mocks.stopCapture.mockResolvedValue(undefined);
+  });
+
+  it("full capture stop exposes audio on stopped state", async () => {
+    const { result } = renderHook(() => useCaptureState());
+    await waitFor(() => expect(handler).not.toBeNull());
+
+    await act(async () => {
+      await result.current.startFullCaptureSession();
+    });
+    expect(mocks.startFullCapture).toHaveBeenCalled();
+    const requestId = mocks.startFullCapture.mock.calls[0][0] as string;
+
+    act(() => handler?.({
+      audio: {
+        duration_ms: 500,
+        id: "pcm-ui-1",
+        sample_rate_hz: 16_000,
+      },
+      generation: 3,
+      kind: "capture-stopped",
+      request_id: requestId,
+    }));
+
+    expect(result.current.captureState).toEqual({
+      audio: {
+        duration_ms: 500,
+        id: "pcm-ui-1",
+        sample_rate_hz: 16_000,
+      },
+      kind: "stopped",
+    });
+  });
+
+  it("cancel does not deposit audio", async () => {
+    const { result } = renderHook(() => useCaptureState());
+    await waitFor(() => expect(handler).not.toBeNull());
+
+    await act(async () => {
+      await result.current.startFullCaptureSession();
+    });
+    const requestId = mocks.startFullCapture.mock.calls[0][0] as string;
+
+    act(() => {
+      result.current.cancelActiveCapture();
+    });
+    act(() => handler?.({
+      generation: 3,
+      kind: "capture-cancelled",
+      request_id: requestId,
+    }));
+    expect(result.current.captureState).toEqual({ kind: "cancelled" });
+    expect(mocks.stopCapture).not.toHaveBeenCalled();
+  });
 });
