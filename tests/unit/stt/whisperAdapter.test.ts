@@ -57,6 +57,33 @@ describe("createWhisperSttEngine", () => {
     });
   });
 
+  it("transcribe awaits native async result (text from invoke, not early)", async () => {
+    let resolveInvoke: (value: unknown) => void = () => {};
+    mockInvoke.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveInvoke = resolve;
+        }),
+    );
+    const engine = createWhisperSttEngine({ modelId: "whisper-tiny.en" });
+    const pending = engine.transcribe({
+      durationMs: 50,
+      id: "pcm-slow",
+      sampleRateHz: 16_000,
+    });
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    resolveInvoke({ language: "en", text: "done after native finish" });
+    await expect(pending).resolves.toMatchObject({
+      text: "done after native finish",
+    });
+    expect(settled).toBe(true);
+  });
+
   it("maps native JSON errors to SttError", async () => {
     mockInvoke.mockRejectedValue(
       JSON.stringify({ code: "model-missing", message: "not downloaded" }),
@@ -76,6 +103,8 @@ describe("createWhisperSttModelStore", () => {
   beforeEach(() => {
     mockInvoke.mockReset();
     mockIsTauri.mockReturnValue(true);
+    mockListen.mockReset();
+    mockListen.mockImplementation(async () => () => {});
   });
 
   it("construct does not download", () => {
@@ -88,6 +117,78 @@ describe("createWhisperSttModelStore", () => {
     const store = createWhisperSttModelStore();
     await store.download("whisper-tiny.en");
     expect(mockInvoke).toHaveBeenCalledWith("stt_download_model", {
+      modelId: "whisper-tiny.en",
+    });
+  });
+
+  it("download subscribes to progress before invoke and does not complete on progress alone", async () => {
+    const callOrder: string[] = [];
+    let progressHandler:
+      | ((event: { payload: { modelId: string; ratio: number } }) => void)
+      | undefined;
+
+    mockListen.mockImplementation(
+      (async (
+        _event: string,
+        handler: (event: { payload: { modelId: string; ratio: number } }) => void,
+      ) => {
+        callOrder.push("listen");
+        progressHandler = handler;
+        return () => {
+          callOrder.push("unlisten");
+        };
+      }) as typeof mockListen,
+    );
+
+    let resolveDownload: (value?: unknown) => void = () => {};
+    mockInvoke.mockImplementation(((cmd: string) => {
+      callOrder.push(`invoke:${cmd}`);
+      if (cmd === "stt_download_model") {
+        return new Promise((resolve) => {
+          resolveDownload = resolve;
+        });
+      }
+      return Promise.resolve(undefined);
+    }) as typeof mockInvoke);
+
+    const store = createWhisperSttModelStore();
+    const onProgress = vi.fn();
+    const pending = store.download("whisper-tiny.en", onProgress);
+
+    await vi.waitFor(() => {
+      expect(callOrder).toEqual([
+        "listen",
+        "invoke:stt_download_model",
+      ]);
+    });
+
+    // Simulate native progress including a premature-looking ratio.
+    progressHandler?.({
+      payload: { modelId: "whisper-tiny.en", ratio: 0.999 },
+    });
+    progressHandler?.({
+      payload: { modelId: "whisper-tiny.en", ratio: 1 },
+    });
+    expect(onProgress).toHaveBeenCalled();
+    // Promise must still be pending until invoke resolves.
+    let done = false;
+    void pending.then(() => {
+      done = true;
+    });
+    await Promise.resolve();
+    expect(done).toBe(false);
+
+    resolveDownload(undefined);
+    await pending;
+    expect(done).toBe(true);
+    expect(callOrder).toContain("unlisten");
+  });
+
+  it("cancel invokes stt_cancel_download (works while download is async)", async () => {
+    mockInvoke.mockResolvedValue(undefined);
+    const store = createWhisperSttModelStore();
+    await store.cancel("whisper-tiny.en");
+    expect(mockInvoke).toHaveBeenCalledWith("stt_cancel_download", {
       modelId: "whisper-tiny.en",
     });
   });
