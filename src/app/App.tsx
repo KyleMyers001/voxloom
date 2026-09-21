@@ -32,6 +32,14 @@ export function App() {
   const [toast, setToast] = useState("");
   const modalOpener = useRef<HTMLElement | null>(null);
   useTheme(state.settings.appearance);
+
+  useEffect(() => {
+    if (!state.historyError) return;
+    setToast(state.historyError);
+    const timer = window.setTimeout(() => setToast(""), 4_000);
+    return () => window.clearTimeout(timer);
+  }, [state.historyError]);
+
   useShortcutGestures({
     dictation,
     now,

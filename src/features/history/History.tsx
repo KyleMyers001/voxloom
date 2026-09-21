@@ -57,7 +57,7 @@ export function History({ onToast }: HistoryProps) {
       <div className="hero">
         <div>
           <h1 id="history-title">History</h1>
-          <p>Transcripts stay in this session. Audio retention is off.</p>
+          <p>Transcripts persist on this device (Settings → retention). Audio retention is separate.</p>
         </div>
       </div>
       <div className="card">
@@ -90,7 +90,9 @@ export function History({ onToast }: HistoryProps) {
                 <h3>{record.text}</h3>
                 <p className="empty-note">
                   {record.durationSeconds}s · {record.status[0].toUpperCase()}
-                  {record.status.slice(1)} · Pine Voice Small · {
+                  {record.status.slice(1)} · {
+                    record.model ?? "Local STT"
+                  } · {
                     record.style === "very-casual" ? "Very Casual" :
                       `${record.style[0].toUpperCase()}${record.style.slice(1)}`
                   }

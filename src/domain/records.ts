@@ -13,6 +13,8 @@ export interface DogfoodRecordInput {
   /** Capture duration in milliseconds (converted to whole seconds). */
   durationMs: number;
   id: string;
+  /** STT model id used for this transcript, when known. */
+  model?: string | null;
   now: number;
   style: WritingStyle;
   text: string;
@@ -32,6 +34,7 @@ export function createFailedRecord({
     createdAt: now,
     durationSeconds: 12,
     id,
+    model: null,
     recoveryExpiresAt: now + 10 * 60_000,
     status: "failed",
     style,
@@ -48,6 +51,7 @@ export function createSuccessfulRecord({
     createdAt: now,
     durationSeconds: 12,
     id,
+    model: null,
     recoveryExpiresAt: null,
     status: "inserted",
     style,
@@ -56,7 +60,7 @@ export function createSuccessfulRecord({
 }
 
 /**
- * Build a session History row after dogfood STT (+ optional Copy).
+ * Build a History row after dogfood STT (+ optional Copy).
  * Returns null for blank/whitespace transcripts so we never pollute
  * Recent / History with fake success rows (blank-audio flakes).
  *
@@ -77,6 +81,7 @@ export function createDogfoodRecord(
     createdAt: input.now,
     durationSeconds,
     id: input.id,
+    model: input.model ?? null,
     recoveryExpiresAt: status === "failed" ? input.now + 10 * 60_000 : null,
     status,
     style: input.style,

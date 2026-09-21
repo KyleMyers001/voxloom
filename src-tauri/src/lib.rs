@@ -1,4 +1,5 @@
 mod capture;
+mod history;
 mod stt;
 
 use std::sync::Arc;
@@ -154,6 +155,8 @@ pub fn run() {
             capture_start,
             capture_status,
             capture_stop,
+            history::history_load,
+            history::history_save,
             stt::stt_cancel_download,
             stt::stt_download_model,
             stt::stt_list_models,

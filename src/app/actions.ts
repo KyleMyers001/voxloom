@@ -15,6 +15,7 @@ export type AppAction =
   | { type: "delete-word"; word: string }
   | { type: "expire-recovery"; now: number }
   | { type: "fail-dictation"; now: number; runId: number }
+  | { type: "hydrate-records"; records: DictationRecord[] }
   | {
       completion: "automatic" | "held";
       runId: number;
@@ -25,6 +26,7 @@ export type AppAction =
   | { type: "retry"; id: string; now: number }
   | { type: "scenario-empty" }
   | { type: "set-clipboard-failure"; value: boolean }
+  | { type: "set-history-error"; message: string | null }
   | { type: "set-onboarding"; value: OnboardingState }
   | { changes: Partial<OnboardingState>; type: "update-onboarding" }
   | { type: "set-screen"; screen: Screen }

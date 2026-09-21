@@ -21,6 +21,8 @@ export type { AppAction, SettingAction } from "./actions";
 export interface AppState {
   clipboardFailure: boolean;
   dictation: DictationState;
+  /** Load/save failure message for durable history; null when healthy. */
+  historyError: string | null;
   nextRunId: number;
   onboarding: OnboardingState;
   records: DictationRecord[];
@@ -86,8 +88,20 @@ export function appReducer(state: AppState, action: AppAction): AppState {
   if (action.type === "append-record") {
     return {
       ...state,
+      historyError: null,
       records: [action.record, ...state.records],
     };
+  }
+  if (action.type === "hydrate-records") {
+    return {
+      ...state,
+      historyError: null,
+      records: action.records,
+    };
+  }
+  if (action.type === "set-history-error") {
+    if (state.historyError === action.message) return state;
+    return { ...state, historyError: action.message };
   }
   if (action.type === "delete-record") {
     return {

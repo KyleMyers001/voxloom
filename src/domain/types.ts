@@ -7,6 +7,8 @@ export interface DictationRecord {
   createdAt: number;
   durationSeconds: number;
   id: string;
+  /** Transcription model id when known (dogfood / persisted); null for fixtures. */
+  model: string | null;
   recoveryExpiresAt: number | null;
   status: HistoryStatus;
   style: WritingStyle;

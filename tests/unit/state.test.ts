@@ -170,6 +170,7 @@ describe("appReducer", () => {
       createdAt: 2_000,
       durationSeconds: 3,
       id: "dogfood-pcm-x",
+      model: "whisper-tiny.en",
       recoveryExpiresAt: null,
       status: "copied" as const,
       style: "formal" as const,
@@ -179,4 +180,30 @@ describe("appReducer", () => {
     expect(next.records[0]).toEqual(record);
     expect(next.records).toHaveLength(initial.records.length + 1);
   });
+
+  it("hydrates durable records and clears history errors", () => {
+    const initial = createInitialState(1_000, { persistHistory: true });
+    expect(initial.records).toEqual([]);
+    const errored = appReducer(initial, {
+      message: "boom",
+      type: "set-history-error",
+    });
+    const row = {
+      createdAt: 3_000,
+      durationSeconds: 1,
+      id: "persisted-1",
+      model: null,
+      recoveryExpiresAt: null,
+      status: "copied" as const,
+      style: "casual" as const,
+      text: "from disk",
+    };
+    const hydrated = appReducer(errored, {
+      records: [row],
+      type: "hydrate-records",
+    });
+    expect(hydrated.records).toEqual([row]);
+    expect(hydrated.historyError).toBeNull();
+  });
+
 });
