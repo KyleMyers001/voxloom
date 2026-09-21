@@ -17,7 +17,7 @@ sink). This slice wires a real local path behind those contracts.
 | `src/services/stt/mockStt.ts` | Mock remains for UI / unit tests |
 | `src/services/stt/copySink.ts` | Copy-only sink (clipboard); no insert / gestures |
 | `src-tauri/src/stt/` | Model catalog + explicit download, PCM buffer store (`capture/pcm_store.rs`), engine, IPC |
-| Capture handoff | Clean **full** capture deposits PCM into `PcmBufferStore` and emits `capture-stopped.audio` handle metadata (no PCM over IPC) |
+| Capture handoff | Full-mode **stop** and **120 s / capacity limit** deposit PCM into `PcmBufferStore` and emit `capture-stopped.audio` (no PCM over IPC). **Cancel** discards. |
 
 English-first catalog default: `whisper-tiny.en` (user must confirm download).
 Also listed: `whisper-base.en`.
@@ -52,7 +52,8 @@ reviewable and avoids cmake/ggml on CI). Real transcription is opt-in.
 3. In the app (or via invoke from the webview console / a future settings UI):
    - `stt_list_models` — tiny/base English show as `missing` until downloaded.
    - **User confirms** → `stt_download_model` with `whisper-tiny.en` (or base).
-   - Capture full audio → on `capture-stopped`, read `audio` handle.
+   - Capture full audio → **stop** (or hit 120 s bound) → on `capture-stopped`, read `audio` handle.
+     (`cancel` discards; do not cancel if you want STT.)
    - `stt_transcribe` with `{ modelId, bufferId }` → transcript.
    - `copyTranscriptToClipboard` / existing clipboard adapter → **Copy only**.
 
@@ -72,12 +73,22 @@ progress events stay consistent.
 ## Capture → STT boundary
 
 - BUS-9 capture events still never carry PCM bytes.
-- On clean **full** (non-test) stop, samples move into `PcmBufferStore`.
-- `capture-stopped` may include `audio: { id, duration_ms, sample_rate_hz }`.
-- Renderer maps that with `audioHandleFromCapture` → `SttEngine.transcribe`.
+- Renderer maps `capture-stopped.audio` with `audioHandleFromCapture` →
+  `SttEngine.transcribe` → Copy sink.
 - `stt_transcribe` **consumes** the buffer (single-use handle).
 
-Test / cancelled / error paths still drop PCM without depositing.
+### Stop / limit / cancel (Clara re-smoke)
+
+| Path | IPC | PCM | Terminal |
+|------|-----|-----|----------|
+| User **stop** (`capture_stop` / `stopCapture`) | clean end-of-utterance | **deposit** into `PcmBufferStore` | `capture-stopped` with `audio: { id, duration_ms, sample_rate_hz }` |
+| **120 s / buffer capacity** limit | same as stop (dogfood) | **deposit** (keep captured audio) | `capture-stopped` + `audio` — **not** `capture-error` / `input-limit-exceeded` |
+| User **cancel** (`capture_cancel` / `cancelCapture`) | abandon | **discard** | `capture-cancelled` (no `audio`) |
+| Hard errors (permission, device, identity, ring overflow) | failure | **discard** | `capture-error` |
+
+Mac smoke: full capture → either stop before 120 s **or** let the bound fire →
+expect `capture-stopped` with opaque `audio.id` → `stt_transcribe` → Copy.
+Do **not** expect `input-limit-exceeded` to drop audio at the safety bound.
 
 ## Deferred
 

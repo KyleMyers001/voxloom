@@ -52,7 +52,7 @@ export type CaptureEvent =
     })
   | (SessionCorrelation & {
       kind: "capture-stopped";
-      /** Present after a clean full capture; PCM stays native-side. */
+      /** Present after stop or 120s/capacity limit; PCM stays native-side. */
       audio?: {
         duration_ms: number;
         id: string;

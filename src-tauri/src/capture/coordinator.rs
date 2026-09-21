@@ -8,7 +8,16 @@
 /// Capture-session events carry client request ID and native generation so
 /// the renderer can suppress stale events from a previous session.
 ///
-/// Cancel is observable at every phase:
+/// Stop vs cancel (BUS-10 dogfood contract):
+/// - **Stop** (`stop_any` / `capture_stop`): end-of-utterance — deposit PCM
+///   (full mode) and emit `CaptureStopped` with opaque `audio` handle.
+/// - **Cancel** (`cancel_request` / `cancel_any` / `capture_cancel`): discard
+///   PCM and emit `CaptureCancelled`.
+/// - **120 s / buffer capacity limit**: treated like a successful stop for
+///   dogfood — deposit what was captured and emit `CaptureStopped`, not a
+///   hard `input-limit-exceeded` error that drops audio.
+///
+/// Cancel/stop are observable at every phase:
 /// - PermissionWait: polled every 100 ms while the OS dialog is open.
 /// - Pre-stream: checked before calling `StreamBackend::with_stream`.
 /// - CaptureLoop: checked each iteration.
@@ -281,6 +290,8 @@ impl StreamBackend for CpalStreamBackend {
 
 struct Reservation {
     cancel: Arc<AtomicBool>,
+    /// User stop: deposit + CaptureStopped (distinct from cancel/discard).
+    stop: Arc<AtomicBool>,
     status: CaptureStatus,
 }
 
@@ -359,10 +370,23 @@ impl Default for Coordinator {
 impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
     #[allow(dead_code)]
     pub fn with_backends(permission: P, stream_backend: S) -> Self {
+        Self::with_backends_store(
+            permission,
+            stream_backend,
+            Arc::new(PcmBufferStore::new()),
+        )
+    }
+
+    #[allow(dead_code)]
+    pub fn with_backends_store(
+        permission: P,
+        stream_backend: S,
+        pcm_store: Arc<PcmBufferStore>,
+    ) -> Self {
         Coordinator {
             generation: AtomicU64::new(0),
             limits: CaptureLimits::production(),
-            pcm_store: Arc::new(PcmBufferStore::new()),
+            pcm_store,
             permission: Arc::new(permission),
             runtime: Arc::new(SystemLoopRuntime::new()),
             state: Arc::new(Mutex::new(CoordinatorState {
@@ -397,6 +421,11 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
     #[allow(dead_code)]
     pub fn is_active(&self) -> bool {
         self.status().is_some()
+    }
+
+    /// Shared PCM store (tests + STT wiring).
+    pub fn pcm_store(&self) -> Arc<PcmBufferStore> {
+        Arc::clone(&self.pcm_store)
     }
 
     pub fn status(&self) -> Option<CaptureStatus> {
@@ -454,6 +483,19 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
         }
     }
 
+    /// Request a clean stop of the active session (deposit PCM in full mode).
+    pub fn stop_any(&self) {
+        if let Some(reservation) = self
+            .state
+            .lock()
+            .unwrap()
+            .reservation
+            .as_ref()
+        {
+            reservation.stop.store(true, Ordering::Release);
+        }
+    }
+
     #[allow(dead_code)]
     pub fn current_generation(&self) -> u64 {
         self.generation.load(Ordering::Acquire)
@@ -480,8 +522,8 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
             return Err(String::from("invalid-request-id"));
         }
 
-        // Reserve status + cancel flag atomically before spawning the worker.
-        let (cancel_flag, state_arc, status) = {
+        // Reserve status + cancel/stop flags atomically before spawning.
+        let (cancel_flag, stop_flag, state_arc, status) = {
             let mut state = self.state.lock().unwrap();
             if let Some(reservation) = state.reservation.as_ref() {
                 if reservation.status.request_id == request_id {
@@ -502,6 +544,7 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
                 request_id: request_id.clone(),
             };
             let flag = Arc::new(AtomicBool::new(false));
+            let stop = Arc::new(AtomicBool::new(false));
             let cancelled_index = state
                 .cancelled_requests
                 .iter()
@@ -513,9 +556,10 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
             flag.store(was_cancelled, Ordering::Release);
             state.reservation = Some(Reservation {
                 cancel: Arc::clone(&flag),
+                stop: Arc::clone(&stop),
                 status: status.clone(),
             });
-            (flag, Arc::clone(&self.state), status)
+            (flag, stop, Arc::clone(&self.state), status)
         };
 
         let permission = Arc::clone(&self.permission);
@@ -535,6 +579,7 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
                 worker_status.generation,
                 request_id,
                 cancel_flag,
+                stop_flag,
                 selection,
                 test_mode,
                 limits,
@@ -562,6 +607,10 @@ fn valid_request_id(request_id: &str) -> bool {
 }
 
 fn is_cancelled(flag: &AtomicBool) -> bool {
+    flag.load(Ordering::Acquire)
+}
+
+fn is_stopped(flag: &AtomicBool) -> bool {
     flag.load(Ordering::Acquire)
 }
 
@@ -594,10 +643,31 @@ fn emit_terminal<E: Fn(SessionEvent)>(
     emit(event);
 }
 
+
+fn emit_early_stop<E: Fn(SessionEvent)>(
+    state: &Mutex<CoordinatorState>,
+    generation: u64,
+    request_id: &str,
+    emit: &E,
+) {
+    emit_terminal(
+        state,
+        generation,
+        request_id,
+        SessionEvent::CaptureStopped {
+            generation,
+            request_id: request_id.to_owned(),
+            audio: None,
+        },
+        emit,
+    );
+}
+
 fn run_session<P, S, E>(
     gen: u64,
     request_id: String,
     cancel: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
     selection: DeviceSelection,
     test_mode: bool,
     limits: CaptureLimits,
@@ -633,8 +703,12 @@ fn run_session<P, S, E>(
         );
         return;
     }
+    if is_stopped(&stop) {
+        emit_early_stop(&state, gen, &request_id, emit);
+        return;
+    }
 
-    // Phase 2: Request if not-determined, polling cancel every 100 ms.
+    // Phase 2: Request if not-determined, polling cancel/stop every 100 ms.
     let authorized = match permission.query() {
         MicPermission::Authorized => true,
         MicPermission::NotDetermined => {
@@ -656,6 +730,12 @@ fn run_session<P, S, E>(
                                     request_id: request_id.clone(),
                                 },
                                 emit,
+                            );
+                            return;
+                        }
+                        if is_stopped(&stop) {
+                            emit_early_stop(
+                                &state, gen, &request_id, emit,
                             );
                             return;
                         }
@@ -699,7 +779,7 @@ fn run_session<P, S, E>(
         return;
     }
 
-    // Phase 3: Cancel check before stream open.
+    // Phase 3: Cancel/stop check before stream open.
     if is_cancelled(&cancel) {
         emit_terminal(
             &state,
@@ -713,6 +793,10 @@ fn run_session<P, S, E>(
         );
         return;
     }
+    if is_stopped(&stop) {
+        emit_early_stop(&state, gen, &request_id, emit);
+        return;
+    }
 
     // Phase 4: Open stream — stays local to this thread via `with_stream`.
     // The stream is created, used, and dropped inside this closure.
@@ -722,6 +806,9 @@ fn run_session<P, S, E>(
             |meta: CaptureStreamMeta| {
                 if is_cancelled(&cancel) {
                     return (LoopTerminal::Cancelled, CaptureBuffer::new());
+                }
+                if is_stopped(&stop) {
+                    return (LoopTerminal::Clean, CaptureBuffer::new());
                 }
 
                 let mut downmixer =
@@ -760,6 +847,7 @@ fn run_session<P, S, E>(
                     &meta.overflow,
                     &meta.stream_error,
                     &cancel,
+                    &stop,
                     &mut downmixer,
                     &mut buffer,
                     bound,
@@ -879,6 +967,7 @@ fn capture_loop<E: Fn(SessionEvent)>(
     overflow: &AtomicBool,
     stream_error: &AtomicBool,
     cancel: &AtomicBool,
+    stop: &AtomicBool,
     downmixer: &mut Downmixer,
     buffer: &mut CaptureBuffer,
     bound: Duration,
@@ -899,8 +988,12 @@ fn capture_loop<E: Fn(SessionEvent)>(
         }
 
         let now = runtime.now();
+        let stop_requested = is_stopped(stop);
         let deadline_reached = now.saturating_sub(start) >= bound;
-        if deadline_reached {
+        // User stop and the 120 s / capacity bound share the clean drain path:
+        // close accepting, wait for in-flight callbacks, drain, flush, Clean.
+        let ending = deadline_reached || stop_requested;
+        if ending {
             // Paired with the callback's SeqCst lease protocol. A callback
             // that observed `accepting = true` is globally ordered before
             // this store, so this load sees its lease unless its write and
@@ -935,13 +1028,10 @@ fn capture_loop<E: Fn(SessionEvent)>(
                 });
             }
 
+            // Capacity / 120 s sample bound: keep captured PCM and treat as
+            // a successful end-of-utterance (deposit via Clean), not an error.
             if buffer.push(&mono).is_err() {
-                return LoopTerminal::Error(
-                    String::from("input-limit-exceeded"),
-                    format!(
-                        "Capture limit ({FULL_SAFETY_SECS} s) reached."
-                    ),
-                );
+                return LoopTerminal::Clean;
             }
         }
 
@@ -969,17 +1059,13 @@ fn capture_loop<E: Fn(SessionEvent)>(
             );
         }
 
-        // Once the deadline is reached, continue until the bounded queue is
-        // observed empty, then flush the resampler exactly once.
-        if deadline_reached && n == 0 {
+        // Once ending (deadline or user stop), continue until the bounded
+        // queue is observed empty, then flush the resampler exactly once.
+        if ending && n == 0 {
             match downmixer.flush() {
                 Ok(tail) if !tail.is_empty() => {
-                    if buffer.push(&tail).is_err() {
-                        return LoopTerminal::Error(
-                            String::from("input-limit-exceeded"),
-                            String::from("Flush overflow."),
-                        );
-                    }
+                    // Flush that would exceed capacity: keep existing PCM.
+                    let _ = buffer.push(&tail);
                 }
                 Ok(_) => {}
                 Err(e) => {
@@ -992,7 +1078,7 @@ fn capture_loop<E: Fn(SessionEvent)>(
             return LoopTerminal::Clean;
         }
 
-        if !deadline_reached
+        if !ending
             && now.saturating_sub(start) > limits.watchdog_grace
             && now.saturating_sub(*last_sample) > limits.watchdog_idle
         {
@@ -1002,7 +1088,7 @@ fn capture_loop<E: Fn(SessionEvent)>(
             );
         }
 
-        if !deadline_reached {
+        if !ending {
             runtime.wait(limits.poll_interval);
         }
     }
@@ -2484,6 +2570,7 @@ mod tests {
         let (mut producer, mut consumer) = rb.split();
         assert_eq!(producer.push_slice(&[0.5; 480]), 480);
         let cancel = Arc::new(AtomicBool::new(false));
+        let stop = AtomicBool::new(false);
         let cancel_for_thread = Arc::clone(&cancel);
         thread::spawn(move || {
             thread::sleep(Duration::from_millis(80));
@@ -2507,6 +2594,7 @@ mod tests {
             &overflow,
             &stream_error,
             &cancel,
+            &stop,
             &mut downmixer,
             &mut buffer,
             Duration::from_secs(FULL_SAFETY_SECS),
@@ -2584,6 +2672,7 @@ mod tests {
         let overflow = AtomicBool::new(false);
         let stream_error = AtomicBool::new(false);
         let cancel = AtomicBool::new(false);
+        let stop = AtomicBool::new(false);
         let mut downmixer = Downmixer::new(TARGET_RATE).unwrap();
         let mut buffer = CaptureBuffer::new();
         let runtime = VirtualRuntime {
@@ -2600,6 +2689,7 @@ mod tests {
             &overflow,
             &stream_error,
             &cancel,
+            &stop,
             &mut downmixer,
             &mut buffer,
             Duration::from_millis(30),
@@ -2634,6 +2724,7 @@ mod tests {
         let overflow = AtomicBool::new(false);
         let stream_error = AtomicBool::new(false);
         let cancel = AtomicBool::new(false);
+        let stop = AtomicBool::new(false);
         let mut downmixer = Downmixer::new(TARGET_RATE).unwrap();
         let mut buffer = CaptureBuffer::new();
         let runtime = DrainingRuntime {
@@ -2650,6 +2741,7 @@ mod tests {
             &overflow,
             &stream_error,
             &cancel,
+            &stop,
             &mut downmixer,
             &mut buffer,
             Duration::from_millis(30),
@@ -2670,7 +2762,7 @@ mod tests {
     }
 
     #[test]
-    fn capture_loop_reports_when_flush_exceeds_bounded_buffer() {
+    fn capture_loop_flush_over_capacity_still_ends_clean() {
         use ringbuf::traits::{Producer, Split};
         let rb = ringbuf::HeapRb::<f32>::new(8);
         let (mut producer, mut consumer) = rb.split();
@@ -2680,6 +2772,7 @@ mod tests {
         let overflow = AtomicBool::new(false);
         let stream_error = AtomicBool::new(false);
         let cancel = AtomicBool::new(false);
+        let stop = AtomicBool::new(false);
         let mut downmixer = Downmixer::new(48_000).unwrap();
         let mut buffer = CaptureBuffer::new();
         buffer.push(&vec![0.0; MAX_FRAMES]).unwrap();
@@ -2697,6 +2790,7 @@ mod tests {
             &overflow,
             &stream_error,
             &cancel,
+            &stop,
             &mut downmixer,
             &mut buffer,
             Duration::from_millis(30),
@@ -2710,11 +2804,223 @@ mod tests {
             &runtime,
         );
 
-        assert!(matches!(terminal, LoopTerminal::Error(ref category, _)
-            if category == "input-limit-exceeded"));
+        assert!(matches!(terminal, LoopTerminal::Clean),
+            "capacity / flush limit must deposit via Clean, not error");
         assert_eq!(downmixer.flush_calls(), 1);
         assert_eq!(buffer.len(), MAX_FRAMES);
         assert!(!accepting.is_open());
+    }
+
+
+    #[test]
+    fn capture_loop_buffer_capacity_returns_clean_not_error() {
+        use ringbuf::traits::{Producer, Split};
+        let rb = ringbuf::HeapRb::<f32>::new(512);
+        let (mut producer, mut consumer) = rb.split();
+        assert_eq!(producer.push_slice(&[0.5; 64]), 64);
+        let accepting = open_gate();
+        let callbacks_in_flight = AtomicUsize::new(0);
+        let overflow = AtomicBool::new(false);
+        let stream_error = AtomicBool::new(false);
+        let cancel = AtomicBool::new(false);
+        let stop = AtomicBool::new(false);
+        let mut downmixer = Downmixer::new(TARGET_RATE).unwrap();
+        let mut buffer = CaptureBuffer::new();
+        buffer.push(&vec![0.0; MAX_FRAMES]).unwrap();
+        let runtime = VirtualRuntime::default();
+        let start = runtime.now();
+        let mut last_sample = start;
+        let mut activity = false;
+
+        let terminal = capture_loop(
+            &mut consumer,
+            &accepting,
+            &callbacks_in_flight,
+            &overflow,
+            &stream_error,
+            &cancel,
+            &stop,
+            &mut downmixer,
+            &mut buffer,
+            Duration::from_secs(FULL_SAFETY_SECS),
+            CaptureLimits::production(),
+            &mut last_sample,
+            &mut activity,
+            start,
+            1,
+            "request",
+            &|_| {},
+            &runtime,
+        );
+
+        assert!(
+            matches!(terminal, LoopTerminal::Clean),
+            "120 s / capacity limit must end Clean so PCM can deposit"
+        );
+        assert_eq!(buffer.len(), MAX_FRAMES);
+    }
+
+    #[test]
+    fn capture_loop_user_stop_returns_clean() {
+        use ringbuf::traits::{Producer, Split};
+        let rb = ringbuf::HeapRb::<f32>::new(RING_CAPACITY);
+        let (mut producer, mut consumer) = rb.split();
+        assert_eq!(producer.push_slice(&[0.5; 480]), 480);
+        let cancel = AtomicBool::new(false);
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_for_thread = Arc::clone(&stop);
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(80));
+            stop_for_thread.store(true, Ordering::Release);
+        });
+        let accepting = open_gate();
+        let callbacks_in_flight = AtomicUsize::new(0);
+        let overflow = AtomicBool::new(false);
+        let stream_error = AtomicBool::new(false);
+        let mut downmixer = Downmixer::new(TARGET_RATE).unwrap();
+        let mut buffer = CaptureBuffer::new();
+        let runtime = SystemLoopRuntime::new();
+        let start = runtime.now();
+        let mut last_sample = start;
+        let mut activity = false;
+
+        let terminal = capture_loop(
+            &mut consumer,
+            &accepting,
+            &callbacks_in_flight,
+            &overflow,
+            &stream_error,
+            &cancel,
+            stop.as_ref(),
+            &mut downmixer,
+            &mut buffer,
+            Duration::from_secs(FULL_SAFETY_SECS),
+            CaptureLimits::production(),
+            &mut last_sample,
+            &mut activity,
+            start,
+            1,
+            "request",
+            &|_| {},
+            &runtime,
+        );
+
+        assert!(matches!(terminal, LoopTerminal::Clean));
+        assert!(buffer.len() >= 480);
+    }
+
+    #[test]
+    fn stop_any_deposits_pcm_and_emits_capture_stopped_with_audio() {
+        let store = Arc::new(PcmBufferStore::new());
+        let c = Coordinator::with_backends_store(
+            FakePermission(MicPermission::Authorized),
+            FakeStreamBackend::new(vec![0.5f32; 480]),
+            Arc::clone(&store),
+        );
+        let events: Arc<Mutex<Vec<SessionEvent>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let events2 = Arc::clone(&events);
+        let status = c
+            .start_session(
+                String::from("stop-deposit"),
+                DeviceSelection::SystemDefault,
+                false,
+                move |e| {
+                    events2.lock().unwrap().push(e);
+                },
+            )
+            .unwrap();
+        assert!(wait_for_event(&events, |e| {
+            matches!(e, SessionEvent::CaptureStarted { .. })
+        }, Duration::from_secs(3)));
+        c.stop_any();
+        assert!(wait_for_event(&events, |e| {
+            matches!(e, SessionEvent::CaptureStopped { .. })
+        }, Duration::from_secs(3)));
+        idle_wait(&c, Duration::from_secs(3));
+
+        let evs = events.lock().unwrap().clone();
+        let stopped = evs.iter().find_map(|e| match e {
+            SessionEvent::CaptureStopped {
+                generation,
+                request_id,
+                audio,
+            } => {
+                assert_eq!(*generation, status.generation);
+                assert_eq!(request_id, &status.request_id);
+                Some(audio.clone())
+            }
+            _ => None,
+        });
+        let audio = stopped
+            .expect("stop must emit CaptureStopped")
+            .expect("stop must deposit non-empty PCM");
+        assert!(!audio.id.is_empty());
+        assert_eq!(store.len(), 1);
+        assert!(store.take(&audio.id).is_some());
+        assert!(!evs.iter().any(|e| matches!(
+            e,
+            SessionEvent::CaptureError { .. }
+                | SessionEvent::CaptureCancelled { .. }
+        )));
+    }
+
+    #[test]
+    fn cancel_any_discards_pcm_without_deposit() {
+        let store = Arc::new(PcmBufferStore::new());
+        let c = Coordinator::with_backends_store(
+            FakePermission(MicPermission::Authorized),
+            FakeStreamBackend::new(vec![0.5f32; 480]),
+            Arc::clone(&store),
+        );
+        let events: Arc<Mutex<Vec<SessionEvent>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let events2 = Arc::clone(&events);
+        c.start_session(
+            String::from("cancel-discard"),
+            DeviceSelection::SystemDefault,
+            false,
+            move |e| {
+                events2.lock().unwrap().push(e);
+            },
+        )
+        .unwrap();
+        assert!(wait_for_event(&events, |e| {
+            matches!(e, SessionEvent::CaptureStarted { .. })
+        }, Duration::from_secs(3)));
+        c.cancel_any();
+        assert!(wait_for_event(&events, |e| {
+            matches!(e, SessionEvent::CaptureCancelled { .. })
+        }, Duration::from_secs(3)));
+        idle_wait(&c, Duration::from_secs(3));
+
+        assert_eq!(store.len(), 0, "cancel must not deposit PCM");
+        let evs = events.lock().unwrap();
+        assert!(evs.iter().any(|e| matches!(
+            e,
+            SessionEvent::CaptureCancelled { .. }
+        )));
+        assert!(!evs.iter().any(|e| matches!(
+            e,
+            SessionEvent::CaptureStopped { .. }
+        )));
+    }
+
+    fn wait_for_event(
+        events: &Arc<Mutex<Vec<SessionEvent>>>,
+        pred: impl Fn(&SessionEvent) -> bool,
+        timeout: Duration,
+    ) -> bool {
+        let start = Instant::now();
+        loop {
+            if events.lock().unwrap().iter().any(&pred) {
+                return true;
+            }
+            if start.elapsed() > timeout {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
     }
 
     fn run_immediate_loop(
@@ -2739,6 +3045,7 @@ mod tests {
     ) -> LoopTerminal {
         let callbacks_in_flight = AtomicUsize::new(0);
         let cancel = AtomicBool::new(false);
+        let stop = AtomicBool::new(false);
         let mut downmixer = Downmixer::new(TARGET_RATE).unwrap();
         let mut buffer = CaptureBuffer::new();
         let runtime = VirtualRuntime::default();
@@ -2752,6 +3059,7 @@ mod tests {
             overflow,
             stream_error,
             &cancel,
+            &stop,
             &mut downmixer,
             &mut buffer,
             Duration::from_secs(FULL_SAFETY_SECS),

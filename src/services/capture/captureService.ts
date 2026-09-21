@@ -65,9 +65,19 @@ export async function startFullCapture(
   });
 }
 
+/** Discard in-flight capture (no PCM deposit). */
 export async function cancelCapture(requestId: string): Promise<boolean> {
   if (!isTauri()) return false;
   return invoke<boolean>("capture_cancel", { requestId });
+}
+
+/**
+ * Clean-stop active capture: deposits PCM and emits `capture-stopped.audio`
+ * for STT. Prefer this over `cancelCapture` when ending an utterance.
+ */
+export async function stopCapture(): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("capture_stop");
 }
 
 export async function getCaptureStatus(): Promise<CaptureStatus | null> {

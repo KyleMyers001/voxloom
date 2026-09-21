@@ -94,10 +94,11 @@ fn capture_start(
         })
 }
 
-/// Cancel any active capture session.
+/// Clean-stop any active capture session (deposit PCM + capture-stopped).
+/// Distinct from `capture_cancel`, which discards audio.
 #[tauri::command]
 fn capture_stop(coordinator: State<CaptureCoordinator>) {
-    coordinator.cancel_any();
+    coordinator.stop_any();
 }
 
 /// Cancel one client request, including a start whose response is pending.
