@@ -17,6 +17,7 @@ export type AppAction =
   | { type: "expire-recovery"; now: number }
   | { type: "fail-dictation"; now: number; runId: number }
   | { type: "hydrate-records"; records: DictationRecord[] }
+  | { type: "hydrate-words"; words: string[] }
   | {
       onboardingComplete: boolean;
       settings: Settings;
@@ -28,6 +29,8 @@ export type AppAction =
       type: "process-dictation";
     }
   | {
+      /** When true, keep durable dictionary words on reset. */
+      persistDictionary?: boolean;
       /** When true (Tauri durable history), do not reseed fixture rows. */
       persistHistory?: boolean;
       /** When true, keep durable settings / onboarding-complete on reset. */
@@ -41,6 +44,7 @@ export type AppAction =
   | { type: "retry"; id: string; now: number }
   | { type: "scenario-empty" }
   | { type: "set-clipboard-failure"; value: boolean }
+  | { type: "set-dictionary-error"; message: string | null }
   | { type: "set-history-error"; message: string | null }
   | { type: "set-settings-error"; message: string | null }
   | { type: "set-onboarding"; value: OnboardingState }

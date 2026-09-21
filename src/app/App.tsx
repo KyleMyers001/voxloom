@@ -25,7 +25,7 @@ const screens: { glyph: string; label: string; value: Screen }[] = [
 
 export function App() {
   const {
-    dictation, dispatch, historyDurable, now, settings, settingsDurable, setup,
+    dictation, dispatch, dictionaryDurable, historyDurable, now, settings, settingsDurable, setup,
     state,
   } = useApp();
   const [onboardingOpen, setOnboardingOpen] = useState(
@@ -55,6 +55,13 @@ export function App() {
     const timer = window.setTimeout(() => setToast(""), 4_000);
     return () => window.clearTimeout(timer);
   }, [state.settingsError]);
+
+  useEffect(() => {
+    if (!state.dictionaryError) return;
+    setToast(state.dictionaryError);
+    const timer = window.setTimeout(() => setToast(""), 4_000);
+    return () => window.clearTimeout(timer);
+  }, [state.dictionaryError]);
 
   useShortcutGestures({
     dictation,
@@ -100,6 +107,7 @@ export function App() {
     setResetPromptOpen(false);
     dispatch({
       now: now(),
+      persistDictionary: dictionaryDurable,
       persistHistory: historyDurable,
       persistSettings: settingsDurable,
       type: "reset",

@@ -19,6 +19,10 @@ import type {
   SetupLifecycle,
 } from "../services/contracts";
 import {
+  createDefaultDictionaryStore,
+  type DurableDictionaryStore,
+} from "../services/dictionary";
+import {
   createDefaultHistoryStore,
   type HistoryStore,
 } from "../services/history";
@@ -43,6 +47,8 @@ interface AppContextValue {
   clipboard: ClipboardAdapter;
   dictation: DictationLifecycle;
   dictionary: DictionaryCrud;
+  /** True when Tauri (or test) durable dictionary.json persistence is on. */
+  dictionaryDurable: boolean;
   dispatch: Dispatch<AppAction>;
   history: HistoryDeletion;
   /** True when Tauri (or test) durable history.json persistence is on. */
@@ -61,6 +67,14 @@ interface AppProviderProps {
   children: ReactNode;
   clock?: () => number;
   /**
+   * Injectable dictionary persistence (tests). When omitted, Tauri enables
+   * durable app-data IO; browser / jsdom stay memory-only and disabled.
+   */
+  dictionaryPersistence?: {
+    enabled: boolean;
+    store: DurableDictionaryStore;
+  };
+  /**
    * Injectable history persistence (tests). When omitted, Tauri enables
    * durable app-data IO; browser / jsdom stay memory-only and disabled.
    */
@@ -75,9 +89,14 @@ interface AppProviderProps {
 export function AppProvider({
   children,
   clock = Date.now,
+  dictionaryPersistence,
   historyPersistence,
   settingsPersistence,
 }: AppProviderProps) {
+  const dictionaryPers = useMemo(
+    () => dictionaryPersistence ?? createDefaultDictionaryStore(),
+    [dictionaryPersistence],
+  );
   const historyPers = useMemo(
     () => historyPersistence ?? createDefaultHistoryStore(),
     [historyPersistence],
@@ -90,6 +109,7 @@ export function AppProvider({
     appReducer,
     clock(),
     (now) => createInitialState(now, {
+      persistDictionary: dictionaryPers.enabled,
       persistHistory: historyPers.enabled,
       persistSettings: settingsPers.enabled,
     }),
@@ -118,7 +138,13 @@ export function AppProvider({
   const allowHistoryPersistRef = useRef(!historyPers.enabled);
   const historyPersistGenRef = useRef(0);
 
-  // Boot: load durable settings first, then history (retention depends on
+  const dictionaryHydratedRef = useRef(!dictionaryPers.enabled);
+  const allowDictionaryPersistRef = useRef(!dictionaryPers.enabled);
+  const dictionaryPersistGenRef = useRef(0);
+  /** Last successfully saved words — roll back UI on save failure. */
+  const lastSavedWordsRef = useRef<string[] | null>(null);
+
+  // Boot: load durable settings first, then dictionary + history (retention
   // hydrated settings). Corrupt settings → defaults + toast; never touch
   // history.json from the settings path.
   useEffect(() => {
@@ -156,6 +182,31 @@ export function AppProvider({
         allowSettingsPersistRef.current = false;
       }
 
+      if (dictionaryPers.enabled) {
+        const dictResult = await dictionaryPers.store.load();
+        if (cancelled) return;
+        if (dictResult.ok) {
+          dispatch({ type: "hydrate-words", words: dictResult.file.words });
+          lastSavedWordsRef.current = dictResult.file.words;
+          allowDictionaryPersistRef.current = true;
+        } else {
+          // Safe empty already in state; surface error; still allow first
+          // successful write so the user can recover without touching
+          // settings.json / history.json.
+          allowDictionaryPersistRef.current = true;
+          lastSavedWordsRef.current = dictResult.file.words;
+          dispatch({
+            message: dictResult.error,
+            type: "set-dictionary-error",
+          });
+        }
+        dictionaryHydratedRef.current = true;
+        dictionaryPersistGenRef.current += 1;
+      } else {
+        dictionaryHydratedRef.current = true;
+        allowDictionaryPersistRef.current = false;
+      }
+
       if (!historyPers.enabled) {
         historyHydratedRef.current = true;
         allowHistoryPersistRef.current = false;
@@ -182,7 +233,7 @@ export function AppProvider({
       cancelled = true;
     };
     // Intentional once-on-mount boot load (persistence identity is stable).
-  }, [clock, historyPers, settingsPers]);
+  }, [clock, dictionaryPers, historyPers, settingsPers]);
 
   // Persist settings after hydrate whenever settings or onboarding-complete
   // change. Strategy: optimistic UI (reducer updates immediately) with
@@ -241,6 +292,43 @@ export function AppProvider({
     state.settings,
   ]);
 
+  // Persist dictionary after hydrate whenever words change. Optimistic UI
+  // with rollback to last successful save on write failure.
+  useEffect(() => {
+    if (
+      !dictionaryPers.enabled
+      || !dictionaryHydratedRef.current
+      || !allowDictionaryPersistRef.current
+    ) {
+      return;
+    }
+    const last = lastSavedWordsRef.current;
+    if (last && JSON.stringify(last) === JSON.stringify(state.words)) {
+      return;
+    }
+    const snapshot = [...state.words];
+    const gen = dictionaryPersistGenRef.current;
+    void (async () => {
+      try {
+        await dictionaryPers.store.save(snapshot);
+        if (gen !== dictionaryPersistGenRef.current) return;
+        lastSavedWordsRef.current = snapshot;
+        dispatch({ message: null, type: "set-dictionary-error" });
+      } catch (error: unknown) {
+        if (gen !== dictionaryPersistGenRef.current) return;
+        const message = error instanceof Error ? error.message : String(error);
+        const rollback = lastSavedWordsRef.current;
+        if (rollback) {
+          dispatch({ type: "hydrate-words", words: rollback });
+        }
+        dispatch({
+          message: `Failed to save dictionary: ${message}`,
+          type: "set-dictionary-error",
+        });
+      }
+    })();
+  }, [dictionaryPers, state.words]);
+
   // Persist history after a successful hydrate whenever records or retention
   // change.
   useEffect(() => {
@@ -281,6 +369,7 @@ export function AppProvider({
     clipboard,
     dictation,
     dictionary,
+    dictionaryDurable: dictionaryPers.enabled,
     dispatch,
     history,
     historyDurable: historyPers.enabled,

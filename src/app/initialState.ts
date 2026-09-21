@@ -7,6 +7,12 @@ import type { AppState } from "./state";
 
 export interface InitialStateOptions {
   /**
+   * When true (Tauri shell with durable dictionary), start with an empty
+   * word list so fixture seed data does not flash or overwrite disk
+   * before hydrate completes.
+   */
+  persistDictionary?: boolean;
+  /**
    * When true (Tauri shell with durable history), start with an empty
    * record list so fixture seed data does not flash or overwrite disk
    * before hydrate completes.
@@ -26,6 +32,7 @@ export function createInitialState(
   return {
     clipboardFailure: false,
     dictation: { kind: "ready" },
+    dictionaryError: null,
     historyError: null,
     settingsError: null,
     nextRunId: 1,
@@ -33,6 +40,8 @@ export function createInitialState(
     records: options.persistHistory ? [] : createRecords(now),
     screen: "home",
     settings: { ...initialSettings },
-    words: ["JSON", "Postgres", "TanStack Query", "TypeScript"],
+    words: options.persistDictionary
+      ? []
+      : ["JSON", "Postgres", "TanStack Query", "TypeScript"],
   };
 }

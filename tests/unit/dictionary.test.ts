@@ -19,4 +19,15 @@ describe("validateWord", () => {
       ok: false,
     });
   });
+
+  it("allows edit-to-same-word (including case-only change)", () => {
+    expect(validateWord("TypeScript", ["TypeScript"], "TypeScript")).toEqual({
+      ok: true,
+      word: "TypeScript",
+    });
+    expect(validateWord("typescript", ["TypeScript"], "TypeScript")).toEqual({
+      ok: true,
+      word: "typescript",
+    });
+  });
 });
