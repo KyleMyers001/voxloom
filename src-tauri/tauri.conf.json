@@ -43,7 +43,8 @@
       "infoPlist": "Info.plist",
       "entitlements": "Entitlements.plist",
       "hardenedRuntime": true,
-      "minimumSystemVersion": "10.15"
+      "minimumSystemVersion": "10.15",
+      "signingIdentity": "-"
     }
   }
 }
