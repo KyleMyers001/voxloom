@@ -26,13 +26,35 @@ Open `http://localhost:1420`.
 With the Rust and macOS build toolchains installed:
 
 ```sh
-npm run tauri dev
+npm run tauri -- dev
 ```
 
-The Tauri shell has no application capabilities or native commands. Windows is
-not verified by this repository.
+Dev runs under the Tauri helper; System Settings → Privacy → Microphone may
+list your terminal (e.g. WezTerm), not Voxloom. For real TCC client identity,
+build a packaged `.app` (see below).
 
+Windows is not verified by this repository.
 
+### Packaged `.app` (TCC identity)
+
+```sh
+# Mic / UI identity smoke
+npm run tauri -- build --bundles app
+
+# Full local STT (requires cmake)
+brew install cmake   # once
+npm run tauri -- build --bundles app -- --features whisper
+```
+
+App path:
+
+```text
+src-tauri/target/release/bundle/macos/Voxloom.app
+```
+
+Open it, request mic access, then confirm **Voxloom** appears under
+System Settings → Privacy & Security → Microphone. Details and deny/revoke
+gaps: `docs/review/BUS-10-packaged-tcc.md`.
 
 ## Local STT (whisper.cpp)
 

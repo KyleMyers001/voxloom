@@ -4,7 +4,11 @@
 /// access. Exposes all four AVAuthorizationStatus values:
 /// NotDetermined, Authorized, Denied, Restricted.
 ///
-/// Never resets TCC or modifies system permission state.
+/// The same API is used in `tauri-dev` and in a packaged `Voxloom.app`.
+/// TCC client *identity* comes from the process bundle (Info.plist +
+/// codesign), not from a separate request path — hence the packaged-app
+/// bundle work in BUS-10. Never resets TCC or modifies system permission
+/// state; deny/revoke remain System Settings only.
 /// The non-macOS stub returns `Denied` so the coordinator fails closed.
 #[cfg(target_os = "macos")]
 mod macos {

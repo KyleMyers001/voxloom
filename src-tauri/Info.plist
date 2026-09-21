@@ -3,6 +3,10 @@
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <key>CFBundleDisplayName</key>
+  <string>Voxloom</string>
+  <key>CFBundleName</key>
+  <string>Voxloom</string>
   <key>NSMicrophoneUsageDescription</key>
   <string>Voxloom captures audio locally for transcription. No audio leaves your device.</string>
 </dict>
