@@ -748,3 +748,71 @@ textarea {
 
   .wave i { animation: none; }
 }
+
+.stt-model-list {
+  display: grid;
+  gap: 12px;
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.stt-model-row {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.stt-model-select {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+}
+
+.stt-model-select span {
+  display: grid;
+  gap: 2px;
+}
+
+.stt-model-id {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stt-model-status {
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  width: fit-content;
+}
+
+.stt-model-status[data-status="available"] {
+  color: var(--accent, #3d8f6e);
+}
+
+.stt-model-status[data-status="missing"],
+.stt-model-status[data-status="failed"] {
+  color: var(--danger);
+}
+
+.stt-model-status[data-status="downloading"] {
+  color: var(--muted);
+}
+
+.stt-model-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.stt-model-progress {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stt-model-selected-note {
+  margin: 0;
+}

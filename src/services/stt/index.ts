@@ -1,5 +1,11 @@
 export type { SttEngine, SttModelStore } from "./contracts";
 export { copyTranscript, copyTranscriptToClipboard } from "./copySink";
+export {
+  dogfoodTranscribeAndCopy,
+  type CaptureAudioMeta,
+  type DogfoodTranscribeOptions,
+} from "./dogfoodPath";
+export { createSttEngine, createSttModelStore } from "./factory";
 export { audioHandleFromCapture } from "./fromCapture";
 export {
   createMockSttEngine,
@@ -7,6 +13,13 @@ export {
   MOCK_TRANSCRIPT_TEXT,
 } from "./mockStt";
 export type { MockSttOptions } from "./mockStt";
+export {
+  catalogModelIds,
+  isKnownSttModelId,
+  resolveTranscriptionModelId,
+} from "./resolveModelId";
+export { useSttModels } from "./useSttModels";
+export type { UseSttModelsOptions, UseSttModelsResult } from "./useSttModels";
 export {
   createWhisperSttEngine,
   createWhisperSttModelStore,

@@ -10,6 +10,7 @@ import { isTauriEnv } from "../../services/capture/captureService";
 import { SYSTEM_DEFAULT_DEVICE_ID } from
   "../../services/capture/types";
 import { useCaptureState } from "../../services/capture/useCaptureState";
+import { useSttModels } from "../../services/stt/useSttModels";
 import type { Appearance } from "../../domain/types";
 
 interface SettingsProps {
@@ -43,6 +44,23 @@ export function Settings({ onSetup }: SettingsProps) {
     runMicTest,
     stopMicTest,
   } = useCaptureState();
+
+  const {
+    cancelDownload,
+    downloadModel,
+    error: sttError,
+    loading: sttLoading,
+    models: sttModels,
+    progress: sttProgress,
+    selectModel,
+    selectedModelId,
+  } = useSttModels({
+    onSelect: (modelId) => settings.update({
+      key: "transcriptionModel",
+      value: modelId,
+    }),
+    selectedModelId: state.settings.transcriptionModel,
+  });
 
   const isNative = isTauriEnv();
   const micAuthorized = permissionStatus === "authorized";
@@ -243,20 +261,6 @@ export function Settings({ onSetup }: SettingsProps) {
           </label>
 
           <label className="field">
-            Transcription model · simulated
-            <select
-              onChange={(event) => settings.update({
-                key: "transcriptionModel",
-                value: event.target.value,
-              })}
-              value={state.settings.transcriptionModel}
-            >
-              <option>Pine Voice Small · local</option>
-              <option>Pine Voice Medium · unavailable</option>
-            </select>
-          </label>
-
-          <label className="field">
             Language-processing model · simulated
             <select
               onChange={(event) => settings.update({
@@ -301,6 +305,91 @@ export function Settings({ onSetup }: SettingsProps) {
             </p>
           </div>
         </div>
+      </section>
+
+      <section className="card settings-section" aria-labelledby="stt-models-title">
+        <div className="card__head">
+          <h2 id="stt-models-title">Speech-to-text models</h2>
+        </div>
+        <p className="empty-note">
+          Local whisper models. Download only when you click Download —
+          opening Settings or starting the app never fetches a model.
+        </p>
+        {sttLoading && (
+          <p className="empty-note" role="status">Loading model list…</p>
+        )}
+        {sttError && (
+          <p className="form-error" role="alert">{sttError}</p>
+        )}
+        <ul className="stt-model-list">
+          {sttModels.map((model) => {
+            const downloading = model.status === "downloading"
+              || sttProgress?.modelId === model.id;
+            const selected = selectedModelId === model.id;
+            const ratio = sttProgress?.modelId === model.id
+              ? sttProgress.ratio
+              : null;
+            return (
+              <li className="stt-model-row" key={model.id}>
+                <label className="stt-model-select">
+                  <input
+                    checked={selected}
+                    name="stt-model"
+                    onChange={() => selectModel(model.id)}
+                    type="radio"
+                    value={model.id}
+                  />
+                  <span>
+                    <strong>{model.label}</strong>
+                    <span className="stt-model-id">{model.id}</span>
+                  </span>
+                </label>
+                <span className="stt-model-status" data-status={model.status}>
+                  {model.status}
+                </span>
+                <div className="stt-model-actions">
+                  {downloading ? (
+                    <>
+                      <span className="stt-model-progress" role="status">
+                        {ratio === null
+                          ? "Downloading…"
+                          : `${Math.round(ratio * 100)}%`}
+                      </span>
+                      <button
+                        className="btn"
+                        onClick={() => { void cancelDownload(model.id); }}
+                        type="button"
+                      >
+                        Cancel download
+                      </button>
+                    </>
+                  ) : model.status === "available" ? (
+                    <span className="empty-note">On disk</span>
+                  ) : (
+                    <button
+                      className="btn"
+                      onClick={() => { void downloadModel(model.id).catch(() => {}); }}
+                      type="button"
+                    >
+                      Download
+                    </button>
+                  )}
+                </div>
+                {selected && (
+                  <p className="empty-note stt-model-selected-note">
+                    Selected for transcription
+                    {model.status !== "available"
+                      ? " · download required before dogfood STT"
+                      : ""}
+                  </p>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+        {!sttLoading && sttModels.length === 0 && (
+          <p className="empty-note">No models in catalog.</p>
+        )}
       </section>
 
       <section className="card settings-section">
@@ -370,8 +459,8 @@ export function Settings({ onSetup }: SettingsProps) {
         </div>
         <p className="empty-note">
           Audio is captured locally and not stored. No audio or transcript
-          is sent to a remote service. Transcription and shortcut triggering
-          remain simulated in this build.
+          is sent to a remote service. Shortcut triggering remains simulated;
+          STT model pick / download is live when the Tauri shell is available.
         </p>
       </section>
 
@@ -382,7 +471,7 @@ export function Settings({ onSetup }: SettingsProps) {
             "Microphone denied \u00b7 Enable in System Settings > " +
               "Privacy & Security > Microphone.",
             "Shortcut collision \u00b7 Choose another app-local gesture.",
-            "Model unavailable \u00b7 No download is performed.",
+            "Model unavailable \u00b7 Download an STT model in Settings.",
             "No audio activity detected \u00b7 No transcript is created.",
             "Insertion failed \u00b7 Clipboard result is reported " +
               "truthfully.",

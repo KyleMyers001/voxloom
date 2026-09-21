@@ -3,8 +3,8 @@
 Branch: `bus-10-async-stt` (from whisper wiring on `main`).
 
 Emma / Clara follow-up #2 after dogfood BUS-10: **do not freeze the UI** while
-models download or whisper runs. Packaged TCC and Settings model-pick remain
-out of scope.
+models download or whisper runs. Packaged TCC remains out of scope; Settings model-pick is a separate
+follow-up (`bus-10-settings-model-pick`).
 
 ## What changed
 
@@ -52,5 +52,5 @@ cd src-tauri && cargo test
 ## Deferred (still not this PR)
 
 - Packaged-app TCC client identity
-- Settings UI for model pick / download progress
+- Settings UI for model pick / download progress → see `docs/review/BUS-10-settings-model-pick.md`
 - Insert / gestures (BUS-12–14)

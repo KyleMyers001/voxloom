@@ -97,7 +97,7 @@ UI freezes during sync download/transcribe are addressed in
 
 ## Deferred
 
-- Settings UI for model pick / download progress (API is ready).
+- Settings UI for model pick / download progress → `docs/review/BUS-10-settings-model-pick.md`.
 - BUS-12–14 insert / gesture delivery.
 - Packaged-app TCC client identity (known BUS-9 follow-up).
 - Cleanup LLM (llama.cpp) — out of MVP per ADR.

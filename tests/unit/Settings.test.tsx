@@ -171,4 +171,44 @@ describe("Settings", () => {
       screen.getByText(/Privacy.*Security.*Microphone/i),
     ).toBeInTheDocument();
   });
+
+  it("lists STT models without starting a download on open", async () => {
+    renderWithApp(<Settings onSetup={vi.fn()} />);
+    expect(
+      await screen.findByRole("heading", { name: "Speech-to-text models" }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByText("whisper-tiny.en"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("button", { name: "Download" }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.queryByRole("button", { name: "Cancel download" }),
+    ).toBeNull();
+  });
+
+  it("selects a modelId into settings without downloading", async () => {
+    const user = userEvent.setup();
+    renderWithApp(<Settings onSetup={vi.fn()} />);
+    await screen.findByText("whisper-base.en");
+    const baseRadio = screen.getByRole("radio", {
+      name: /Whisper Base \(English\)/i,
+    });
+    await user.click(baseRadio);
+    expect(baseRadio).toBeChecked();
+    expect(
+      screen.getByText(/Selected for transcription/i),
+    ).toBeInTheDocument();
+  });
+
+  it("downloads a model only after explicit Download click", async () => {
+    const user = userEvent.setup();
+    renderWithApp(<Settings onSetup={vi.fn()} />);
+    await screen.findByText("whisper-tiny.en");
+    const downloads = screen.getAllByRole("button", { name: "Download" });
+    await user.click(downloads[0]);
+    expect(await screen.findByText("On disk")).toBeInTheDocument();
+    expect(screen.getByText("available")).toBeInTheDocument();
+  });
 });
