@@ -5,9 +5,11 @@ desktop design. Every transcript, device, permission, shortcut, model, and
 recovery state is synthetic. No audio is captured, no native permission is
 requested, and no product network service is used.
 
-All state is held in memory and **resets when the page or desktop window is
-reloaded**. Clipboard writes occur only after an explicit Copy activation and
-report failures truthfully. Development scenario controls are excluded from a
+Browser / Vite-only shells keep UI state in memory (reload clears it). The
+Tauri desktop shell durably persists **Settings**, **History**, and the
+**Word dictionary** under the app data directory (`settings.json`,
+`history.json`, `dictionary.json`). Clipboard writes occur only after an
+explicit Copy activation and report failures truthfully. Development scenario controls are excluded from a
 normal production build; the mock dictation and onboarding flows remain usable.
 The default `Ctrl + Shift + Space` gesture works only while Voxloom is focused:
 hold and release, or rapidly double-tap to latch and activate once more to stop.

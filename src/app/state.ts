@@ -21,6 +21,8 @@ export type { AppAction, SettingAction } from "./actions";
 export interface AppState {
   clipboardFailure: boolean;
   dictation: DictationState;
+  /** Load/save failure message for durable dictionary; null when healthy. */
+  dictionaryError: string | null;
   /** Load/save failure message for durable history; null when healthy. */
   historyError: string | null;
   /** Load/save failure message for durable settings; null when healthy. */
@@ -35,9 +37,11 @@ export interface AppState {
 
 export function appReducer(state: AppState, action: AppAction): AppState {
   if (action.type === "reset") {
+    const persistDictionary = action.persistDictionary === true;
     const persistHistory = action.persistHistory === true;
     const persistSettings = action.persistSettings === true;
     const next = createInitialState(action.now, {
+      persistDictionary,
       persistHistory,
       persistSettings,
     });
@@ -58,6 +62,11 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         },
         settings: state.settings,
       };
+    }
+    if (persistDictionary) {
+      // Keep durable dictionary words so dictionary.json is not overwritten
+      // with fixture seed data on DEV Reset.
+      result = { ...result, words: state.words };
     }
     // wipeHistory + persistHistory → empty records (persist effect saves []).
     // Non-persist → fixture seed via createInitialState (browser / unit).
@@ -147,6 +156,17 @@ export function appReducer(state: AppState, action: AppAction): AppState {
   if (action.type === "set-settings-error") {
     if (state.settingsError === action.message) return state;
     return { ...state, settingsError: action.message };
+  }
+  if (action.type === "hydrate-words") {
+    return {
+      ...state,
+      dictionaryError: null,
+      words: action.words,
+    };
+  }
+  if (action.type === "set-dictionary-error") {
+    if (state.dictionaryError === action.message) return state;
+    return { ...state, dictionaryError: action.message };
   }
   if (action.type === "delete-record") {
     return {

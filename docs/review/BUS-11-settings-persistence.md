@@ -50,8 +50,8 @@ and, on failure, re-hydrates the last successful snapshot and toasts.
 
 ## Deferred (follow-up)
 
-- Canonical **Word dictionary durable CRUD** (BUS-11 full story). In-memory
-  dictionary words remain session-only in this slice.
+- Canonical **Word dictionary durable CRUD** — shipped in
+  `docs/review/BUS-11-dictionary-persistence.md`.
 
 ## Clara smoke (Mac)
 
@@ -82,7 +82,7 @@ npm run test:unit
 
 ## Residual risks
 
-- Dictionary words are not durable yet (explicit follow-up).
+- Dictionary durability: see `BUS-11-dictionary-persistence.md`.
 - Brief flash of fixture defaults is possible before settings hydrate on cold
   start (same class of race as history empty→hydrate).
 - Corrupt `settings.json` recovers to defaults on next successful save; no

@@ -318,3 +318,32 @@ describe("appReducer", () => {
     expect(reset.onboarding.complete).toBe(true);
   });
 
+
+  it("hydrates durable dictionary words and clears dictionary errors", () => {
+    const initial = createInitialState(1_000, { persistDictionary: true });
+    expect(initial.words).toEqual([]);
+    const errored = appReducer(initial, {
+      message: "dictionary boom",
+      type: "set-dictionary-error",
+    });
+    const hydrated = appReducer(errored, {
+      type: "hydrate-words",
+      words: ["Persisted"],
+    });
+    expect(hydrated.words).toEqual(["Persisted"]);
+    expect(hydrated.dictionaryError).toBeNull();
+  });
+
+  it("preserves durable dictionary words on reset when persistDictionary is on", () => {
+    const hydrated = appReducer(
+      createInitialState(1_000, { persistDictionary: true }),
+      { type: "hydrate-words", words: ["KeepMe"] },
+    );
+    const reset = appReducer(hydrated, {
+      now: 20_000,
+      persistDictionary: true,
+      type: "reset",
+    });
+    expect(reset.words).toEqual(["KeepMe"]);
+  });
+

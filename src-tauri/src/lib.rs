@@ -1,4 +1,5 @@
 mod capture;
+mod dictionary;
 mod history;
 mod settings;
 mod stt;
@@ -156,6 +157,8 @@ pub fn run() {
             capture_start,
             capture_status,
             capture_stop,
+            dictionary::dictionary_load,
+            dictionary::dictionary_save,
             history::history_load,
             history::history_save,
             settings::settings_load,
