@@ -155,6 +155,7 @@ export function useDogfoodCapture(
         copied: result.copied,
         durationMs: audio.duration_ms,
         id: `dogfood-${audio.id}`,
+        model: modelId,
         now: nowRef.current(),
         style: styleRef.current,
         text: result.transcript.text,

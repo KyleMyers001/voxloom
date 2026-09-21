@@ -264,6 +264,7 @@ describe("useDogfoodCapture", () => {
       expect.objectContaining({
         durationSeconds: 2,
         id: "dogfood-pcm-hist-ok",
+        model: "whisper-tiny.en",
         status: "copied",
         style: "casual",
         text: expect.any(String),

@@ -42,6 +42,7 @@ describe("createDogfoodRecord", () => {
       createdAt: 1_000,
       durationSeconds: 2,
       id: "dogfood-pcm-1",
+      model: null,
       recoveryExpiresAt: null,
       status: "copied",
       style: "casual",
@@ -82,5 +83,18 @@ describe("createDogfoodRecord", () => {
       style: "formal",
       text: "   \n\t  ",
     })).toBeNull();
+  });
+
+  it("stamps model when provided", () => {
+    const record = createDogfoodRecord({
+      copied: true,
+      durationMs: 1_000,
+      id: "dogfood-model",
+      model: "whisper-tiny.en",
+      now: 10,
+      style: "formal",
+      text: "hi",
+    });
+    expect(record?.model).toBe("whisper-tiny.en");
   });
 });

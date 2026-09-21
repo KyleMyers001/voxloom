@@ -26,6 +26,7 @@ export function createRecords(now: number): DictationRecord[] {
     createdAt: now - Number(age) * minute,
     durationSeconds: 7 + index * 4,
     id: String(id),
+    model: null,
     recoveryExpiresAt: status === "failed" ? now + 10 * minute : null,
     status: status as DictationRecord["status"],
     style: index % 2 ? "casual" : "formal",
