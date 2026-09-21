@@ -22,6 +22,7 @@ describe("packaged-app TCC config", () => {
           infoPlist: string;
           entitlements: string;
           hardenedRuntime: boolean;
+          signingIdentity: string | null;
         };
       };
       app: { windows: Array<{ title: string }> };
@@ -35,6 +36,9 @@ describe("packaged-app TCC config", () => {
     expect(conf.bundle.macOS.infoPlist).toBe("Info.plist");
     expect(conf.bundle.macOS.entitlements).toBe("Entitlements.plist");
     expect(conf.bundle.macOS.hardenedRuntime).toBe(true);
+    // Ad-hoc "-" is required so Tauri runs codesign with Entitlements.plist
+    // (see entitlementsCodesignConfig.test.ts / BUS-10-entitlements-codesign).
+    expect(conf.bundle.macOS.signingIdentity).toBe("-");
     expect(conf.bundle.icon).toEqual(
       expect.arrayContaining([
         "icons/32x32.png",

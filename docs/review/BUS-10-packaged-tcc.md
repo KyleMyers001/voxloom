@@ -101,6 +101,12 @@ codesign -d --entitlements :- \
   | grep -A1 audio-input || true
 ```
 
+> **Follow-up:** Clara’s first packaged smoke saw linker-only ad-hoc signing
+> (no embedded entitlements) because `signingIdentity` was unset. That is
+> fixed on `bus-10-entitlements-codesign` — see
+> `docs/review/BUS-10-entitlements-codesign.md` and
+> `npm run macos:assert-entitlements`.
+
 ## Clara smoke — mic identity
 
 1. Build with `--bundles app` (and `--features whisper` if also checking

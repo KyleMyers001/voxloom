@@ -56,6 +56,16 @@ Open it, request mic access, then confirm **Voxloom** appears under
 System Settings → Privacy & Security → Microphone. Details and deny/revoke
 gaps: `docs/review/BUS-10-packaged-tcc.md`.
 
+After build, confirm codesign embedded the mic entitlement (ad-hoc or
+Developer ID):
+
+```sh
+npm run macos:assert-entitlements
+# codesign -d --entitlements :- src-tauri/target/release/bundle/macos/Voxloom.app
+```
+
+See `docs/review/BUS-10-entitlements-codesign.md` if the dump is empty.
+
 ## Local STT (whisper.cpp)
 
 Speech-to-text is local-first (see `docs/decisions/local-stt-whisper.md`).
