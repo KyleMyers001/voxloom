@@ -57,7 +57,9 @@ export const initialSettings: Settings = {
   startAtLogin: false,
   style: "formal",
   transcriptRetention: "30-days",
-  transcriptionModel: "Pine Voice Small · local",
+  // Explicit STT modelId (ADR / BUS-10 settings pick). Legacy simulated
+  // labels are resolved to this default via resolveTranscriptionModelId.
+  transcriptionModel: "whisper-tiny.en",
 };
 
 export const initialWords = [

@@ -118,7 +118,7 @@ export function App() {
           onReset={resetSession}
         />}
         <p className="review-note">
-          Shortcut and transcription remain simulated.
+          Shortcut remains simulated. STT model pick lives in Settings.
         </p>
       </aside>
       <main className="main">

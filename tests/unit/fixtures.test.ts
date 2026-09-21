@@ -16,6 +16,7 @@ describe("fixtures", () => {
     expect(initialSettings.audioRetention).toBe("off");
     expect(initialSettings.appearance).toBe("system");
     expect(initialSettings.microphone).toBe(SYSTEM_DEFAULT_DEVICE_ID);
+    expect(initialSettings.transcriptionModel).toBe("whisper-tiny.en");
     expect(initialOnboarding.complete).toBe(false);
     expect(failed?.recoveryExpiresAt).toBe(now + 10 * 60_000);
   });
