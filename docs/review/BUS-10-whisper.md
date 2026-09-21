@@ -90,6 +90,11 @@ Mac smoke: full capture → either stop before 120 s **or** let the bound fire �
 expect `capture-stopped` with opaque `audio.id` → `stt_transcribe` → Copy.
 Do **not** expect `input-limit-exceeded` to drop audio at the safety bound.
 
+## Follow-up: async download / transcribe
+
+UI freezes during sync download/transcribe are addressed in
+`docs/review/BUS-10-async-stt.md` (`bus-10-async-stt`).
+
 ## Deferred
 
 - Settings UI for model pick / download progress (API is ready).

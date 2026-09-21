@@ -1,5 +1,9 @@
 /// Tauri-backed whisper STT adapter — BUS-10.
 /// Talks to native `stt_*` commands. No silent downloads; modelId is explicit.
+///
+/// Native `stt_download_model` / `stt_transcribe` are async commands that run
+/// blocking work on a pool (`spawn_blocking`). The webview stays responsive;
+/// `invoke` still resolves only when the native work finishes (or errors).
 
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -70,6 +74,10 @@ function requireModelId(modelId: string): string {
 /**
  * Native model store. Constructing the store does not download anything.
  * `download` must be called after explicit user intent.
+ *
+ * Progress events may report ratios up to ~0.999 while bytes stream; ratio
+ * `1.0` and the resolved `download()` promise both mean the file is on disk.
+ * Do not treat intermediate progress as completion.
  */
 export function createWhisperSttModelStore(): SttModelStore {
   return {
@@ -112,6 +120,8 @@ export function createWhisperSttModelStore(): SttModelStore {
       }
       let unlisten: UnlistenFn | undefined;
       try {
+        // Subscribe before invoke so early progress events are not missed.
+        // Completion is the invoke resolution — not a progress ratio alone.
         if (onProgress) {
           unlisten = await listen<SttDownloadProgress>(
             DOWNLOAD_PROGRESS_EVENT,
@@ -138,6 +148,7 @@ export function createWhisperSttModelStore(): SttModelStore {
         );
       }
       try {
+        // Sync native command — safe while download runs on the blocking pool.
         await invoke("stt_cancel_download", { modelId });
       } catch (error) {
         throw mapNativeError(error);
@@ -155,6 +166,8 @@ export interface WhisperEngineOptions {
  * Native whisper engine bound to an explicit modelId.
  * Does not download on construct; transcribe fails with model-missing
  * until the user has downloaded that model via SttModelStore.
+ *
+ * `transcribe` awaits the async native command (whisper off the UI thread).
  */
 export function createWhisperSttEngine(
   options: WhisperEngineOptions,
