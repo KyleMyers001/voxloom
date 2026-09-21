@@ -83,6 +83,12 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       words: state.words.filter((word) => word !== action.word),
     };
   }
+  if (action.type === "append-record") {
+    return {
+      ...state,
+      records: [action.record, ...state.records],
+    };
+  }
   if (action.type === "delete-record") {
     return {
       ...state,

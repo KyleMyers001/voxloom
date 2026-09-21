@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canRetry,
+  createDogfoodRecord,
   createFailedRecord,
   createSuccessfulRecord,
 } from "../../src/domain/records";
@@ -24,5 +25,62 @@ describe("record factories", () => {
     });
     expect(record.status).toBe("inserted");
     expect(record.recoveryExpiresAt).toBeNull();
+  });
+});
+
+describe("createDogfoodRecord", () => {
+  it("uses copied status when clipboard write succeeded", () => {
+    const record = createDogfoodRecord({
+      copied: true,
+      durationMs: 1_500,
+      id: "dogfood-pcm-1",
+      now: 1_000,
+      style: "casual",
+      text: "  hello world  ",
+    });
+    expect(record).toEqual({
+      createdAt: 1_000,
+      durationSeconds: 2,
+      id: "dogfood-pcm-1",
+      recoveryExpiresAt: null,
+      status: "copied",
+      style: "casual",
+      text: "hello world",
+    });
+  });
+
+  it("uses failed status when Copy soft-failed but text exists", () => {
+    const record = createDogfoodRecord({
+      copied: false,
+      durationMs: 900,
+      id: "dogfood-pcm-2",
+      now: 5_000,
+      style: "formal",
+      text: "still here",
+    });
+    expect(record?.status).toBe("failed");
+    expect(record?.text).toBe("still here");
+    expect(record?.durationSeconds).toBe(1);
+    expect(record?.recoveryExpiresAt).toBe(5_000 + 10 * 60_000);
+    expect(canRetry(record!, 5_001)).toBe(true);
+  });
+
+  it("returns null for blank or whitespace-only transcripts", () => {
+    expect(createDogfoodRecord({
+      copied: true,
+      durationMs: 400,
+      id: "dogfood-blank",
+      now: 1,
+      style: "formal",
+      text: "",
+    })).toBeNull();
+    expect(createDogfoodRecord({
+      copied: true,
+      durationMs: 400,
+      id: "dogfood-ws",
+      now: 1,
+      style: "formal",
+      text: "   \n\t  ",
+    })).toBeNull();
   });
 });

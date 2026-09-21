@@ -163,4 +163,20 @@ describe("appReducer", () => {
       expect(reset.onboarding.complete).toBe(false);
     },
   );
+
+  it("prepends an append-record dogfood history row", () => {
+    const initial = createInitialState(1_000);
+    const record = {
+      createdAt: 2_000,
+      durationSeconds: 3,
+      id: "dogfood-pcm-x",
+      recoveryExpiresAt: null,
+      status: "copied" as const,
+      style: "formal" as const,
+      text: "session history from dogfood",
+    };
+    const next = appReducer(initial, { record, type: "append-record" });
+    expect(next.records[0]).toEqual(record);
+    expect(next.records).toHaveLength(initial.records.length + 1);
+  });
 });
