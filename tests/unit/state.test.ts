@@ -273,3 +273,48 @@ describe("appReducer", () => {
   });
 
 });
+
+  it("hydrates durable settings and clears settings errors", () => {
+    const initial = createInitialState(1_000, { persistSettings: true });
+    const errored = appReducer(initial, {
+      message: "settings boom",
+      type: "set-settings-error",
+    });
+    const nextSettings = {
+      ...initial.settings,
+      appearance: "dark" as const,
+      transcriptRetention: "forever" as const,
+    };
+    const hydrated = appReducer(errored, {
+      onboardingComplete: true,
+      settings: nextSettings,
+      type: "hydrate-settings",
+    });
+    expect(hydrated.settings).toEqual(nextSettings);
+    expect(hydrated.onboarding.complete).toBe(true);
+    expect(hydrated.settingsError).toBeNull();
+  });
+
+  it("preserves durable settings on reset when persistSettings is on", () => {
+    const configured = {
+      ...createInitialState(1_000, { persistSettings: true }),
+      onboarding: {
+        ...createInitialState(1_000).onboarding,
+        complete: true,
+      },
+      settings: {
+        ...createInitialState(1_000).settings,
+        style: "casual" as const,
+        transcriptRetention: "forever" as const,
+      },
+    };
+    const reset = appReducer(configured, {
+      now: 20_000,
+      persistSettings: true,
+      type: "reset",
+    });
+    expect(reset.settings.transcriptRetention).toBe("forever");
+    expect(reset.settings.style).toBe("casual");
+    expect(reset.onboarding.complete).toBe(true);
+  });
+

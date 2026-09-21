@@ -12,6 +12,11 @@ export interface InitialStateOptions {
    * before hydrate completes.
    */
   persistHistory?: boolean;
+  /**
+   * When true (Tauri shell with durable settings), start from fixture
+   * defaults until hydrate replaces them from settings.json.
+   */
+  persistSettings?: boolean;
 }
 
 export function createInitialState(
@@ -22,6 +27,7 @@ export function createInitialState(
     clipboardFailure: false,
     dictation: { kind: "ready" },
     historyError: null,
+    settingsError: null,
     nextRunId: 1,
     onboarding: { ...initialOnboarding },
     records: options.persistHistory ? [] : createRecords(now),
