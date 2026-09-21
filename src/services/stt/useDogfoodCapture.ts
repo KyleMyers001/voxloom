@@ -4,6 +4,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { createDogfoodRecord } from "../../domain/records";
+import type { DictationRecord, WritingStyle } from "../../domain/types";
 import type { ClipboardAdapter } from "../clipboard";
 import {
   SYSTEM_DEFAULT_DEVICE_ID,
@@ -34,10 +36,19 @@ export interface UseDogfoodCaptureOptions {
   clipboard: ClipboardAdapter;
   /** Settings `transcriptionModel` (resolved before STT). */
   modelId: string;
+  /** Clock for history `createdAt` (defaults to Date.now). */
+  now?: () => number;
+  /**
+   * Session History append after a non-blank dogfood transcript.
+   * Cancel / blank audio / STT errors never call this.
+   */
+  onHistoryRecord?: (record: DictationRecord) => void;
   /** Toast / announce callback for loading / success / error. */
   onToast?: (message: string) => void;
   /** Preferred mic id; system default means omit and let native pick. */
   preferredDeviceId?: string;
+  /** Writing style stamped onto the history row. */
+  style?: WritingStyle;
   /** Test seam: inject capture API instead of the live hook result. */
   captureApi?: UseCaptureStateResult;
   /** Test seam: model store (status checks; never download). */
@@ -104,6 +115,12 @@ export function useDogfoodCapture(
   clipboardRef.current = options.clipboard;
   const toastRef = useRef(options.onToast);
   toastRef.current = options.onToast;
+  const historyRef = useRef(options.onHistoryRecord);
+  historyRef.current = options.onHistoryRecord;
+  const styleRef = useRef(options.style ?? "formal");
+  styleRef.current = options.style ?? "formal";
+  const nowRef = useRef(options.now ?? Date.now);
+  nowRef.current = options.now ?? Date.now;
 
   const announce = useCallback((text: string) => {
     setMessage(text);
@@ -134,6 +151,17 @@ export function useDogfoodCapture(
       });
       setTranscript(result.transcript);
       setPhase("success");
+      const record = createDogfoodRecord({
+        copied: result.copied,
+        durationMs: audio.duration_ms,
+        id: `dogfood-${audio.id}`,
+        now: nowRef.current(),
+        style: styleRef.current,
+        text: result.transcript.text,
+      });
+      if (record) {
+        historyRef.current?.(record);
+      }
       if (result.copied) {
         announce("Transcript copied to clipboard");
       } else {

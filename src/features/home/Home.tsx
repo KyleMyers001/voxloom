@@ -15,7 +15,7 @@ function formatTime(timestamp: number): string {
 }
 
 export function Home({ onToast }: HomeProps) {
-  const { clipboard, dispatch, settings, state } = useApp();
+  const { clipboard, dispatch, now, settings, state } = useApp();
   const recent = [...state.records]
     .filter(({ status }) => status !== "failed")
     .sort((a, b) => b.createdAt - a.createdAt)
@@ -24,8 +24,13 @@ export function Home({ onToast }: HomeProps) {
   const dogfood = useDogfoodCapture({
     clipboard,
     modelId: state.settings.transcriptionModel,
+    now,
+    onHistoryRecord: (record) => {
+      dispatch({ record, type: "append-record" });
+    },
     onToast,
     preferredDeviceId: state.settings.microphone,
+    style: state.settings.style,
   });
 
   const isNative = isTauriEnv();

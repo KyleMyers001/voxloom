@@ -1,4 +1,5 @@
 import type {
+  DictationRecord,
   OnboardingState,
   Screen,
   SettingUpdate,
@@ -7,6 +8,7 @@ import type {
 export type SettingAction = SettingUpdate & { type: "set-setting" };
 
 export type AppAction =
+  | { type: "append-record"; record: DictationRecord }
   | { runId: number; type: "cancel-dictation" }
   | { type: "complete-dictation"; now: number; runId: number }
   | { type: "delete-record"; id: string }
