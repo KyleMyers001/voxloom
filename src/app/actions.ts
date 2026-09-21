@@ -21,7 +21,14 @@ export type AppAction =
       runId: number;
       type: "process-dictation";
     }
-  | { type: "reset"; now: number }
+  | {
+      /** When true (Tauri durable history), do not reseed fixture rows. */
+      persistHistory?: boolean;
+      type: "reset";
+      now: number;
+      /** Explicit confirm only — clears durable records (persists empty). */
+      wipeHistory?: boolean;
+    }
   | { type: "reopen-onboarding" }
   | { type: "retry"; id: string; now: number }
   | { type: "scenario-empty" }

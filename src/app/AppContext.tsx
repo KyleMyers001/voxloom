@@ -38,6 +38,8 @@ interface AppContextValue {
   dictionary: DictionaryCrud;
   dispatch: Dispatch<AppAction>;
   history: HistoryDeletion;
+  /** True when Tauri (or test) durable history.json persistence is on. */
+  historyDurable: boolean;
   now: () => number;
   settings: SettingsStore;
   setup: SetupLifecycle;
@@ -163,6 +165,7 @@ export function AppProvider({
     dictionary,
     dispatch,
     history,
+    historyDurable: persistence.enabled,
     now: clock,
     settings,
     setup,

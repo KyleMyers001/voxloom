@@ -24,12 +24,13 @@ const screens: { glyph: string; label: string; value: Screen }[] = [
 ];
 
 export function App() {
-  const { dictation, dispatch, now, settings, setup, state } = useApp();
+  const { dictation, dispatch, historyDurable, now, settings, setup, state } = useApp();
   const [onboardingOpen, setOnboardingOpen] = useState(
     !state.onboarding.complete,
   );
   const [shortcutOpen, setShortcutOpen] = useState(false);
   const [toast, setToast] = useState("");
+  const [resetPromptOpen, setResetPromptOpen] = useState(false);
   const modalOpener = useRef<HTMLElement | null>(null);
   useTheme(state.settings.appearance);
 
@@ -79,10 +80,24 @@ export function App() {
     setOnboardingOpen(true);
   }
 
-  function resetSession() {
+  function performReset(wipeHistory: boolean) {
     modalOpener.current = null;
-    dispatch({ now: now(), type: "reset" });
+    setResetPromptOpen(false);
+    dispatch({
+      now: now(),
+      persistHistory: historyDurable,
+      type: "reset",
+      wipeHistory,
+    });
     setOnboardingOpen(true);
+  }
+
+  function requestResetSession() {
+    if (historyDurable) {
+      setResetPromptOpen(true);
+      return;
+    }
+    performReset(false);
   }
 
   function openScenario(scenario: OnboardingScenario) {
@@ -123,7 +138,7 @@ export function App() {
         </nav>
         {import.meta.env.DEV && <ScenarioPanel
           onOnboarding={openScenario}
-          onReset={resetSession}
+          onReset={requestResetSession}
         />}
         <p className="review-note">
           Shortcut remains simulated. Dictate on Home uses Settings STT model → Copy.
@@ -147,6 +162,27 @@ export function App() {
         <kbd>{state.settings.shortcut}</kbd></div>
       <div className="overlay__row"><span>Navigate screens</span>
         <kbd>Alt + 1…4</kbd></div>
+    </Dialog>}
+    {resetPromptOpen && <Dialog label="Reset session"
+      onClose={() => setResetPromptOpen(false)}
+      opener={modalOpener.current}>
+      <h2>Reset session</h2>
+      <p>
+        Durable history is on. Choose whether to keep <code>history.json</code>
+        or wipe it. Fixture seed data is never written without an explicit wipe.
+      </p>
+      <div className="overlay__actions">
+        <button onClick={() => performReset(false)} type="button">
+          Keep durable history
+        </button>
+        <button className="danger" onClick={() => performReset(true)}
+          type="button">
+          Wipe durable history
+        </button>
+        <button onClick={() => setResetPromptOpen(false)} type="button">
+          Cancel
+        </button>
+      </div>
     </Dialog>}
     <Toast message={toast} />
   </>;

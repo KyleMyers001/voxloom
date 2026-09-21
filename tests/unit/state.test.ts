@@ -206,4 +206,70 @@ describe("appReducer", () => {
     expect(hydrated.historyError).toBeNull();
   });
 
+  it("preserves durable records on reset when persistHistory is on", () => {
+    const row = {
+      createdAt: 3_000,
+      durationSeconds: 1,
+      id: "durable-keep",
+      model: "whisper-tiny.en",
+      recoveryExpiresAt: null,
+      status: "copied" as const,
+      style: "formal" as const,
+      text: "keep me",
+    };
+    const hydrated = appReducer(
+      createInitialState(1_000, { persistHistory: true }),
+      { records: [row], type: "hydrate-records" },
+    );
+    const configured = {
+      ...hydrated,
+      onboarding: { ...hydrated.onboarding, complete: true },
+      screen: "history" as const,
+    };
+    const reset = appReducer(configured, {
+      now: 20_000,
+      persistHistory: true,
+      type: "reset",
+    });
+    expect(reset.onboarding.complete).toBe(false);
+    expect(reset.screen).toBe("home");
+    expect(reset.records).toEqual([row]);
+    expect(reset.records.map((r) => r.id)).not.toContain("record-1");
+  });
+
+  it("wipes durable records on reset only when wipeHistory is set", () => {
+    const row = {
+      createdAt: 3_000,
+      durationSeconds: 1,
+      id: "durable-wipe",
+      model: null,
+      recoveryExpiresAt: null,
+      status: "copied" as const,
+      style: "casual" as const,
+      text: "wipe me",
+    };
+    const hydrated = appReducer(
+      createInitialState(1_000, { persistHistory: true }),
+      { records: [row], type: "hydrate-records" },
+    );
+    const wiped = appReducer(hydrated, {
+      now: 20_000,
+      persistHistory: true,
+      type: "reset",
+      wipeHistory: true,
+    });
+    expect(wiped.records).toEqual([]);
+    expect(wiped.records.map((r) => r.id)).not.toContain("record-1");
+  });
+
+  it("reseeds fixture history on reset when persistence is off", () => {
+    const emptied = appReducer(createInitialState(1_000), {
+      type: "scenario-empty",
+    });
+    expect(emptied.records).toEqual([]);
+    const reset = appReducer(emptied, { now: 20_000, type: "reset" });
+    expect(reset.records.length).toBeGreaterThan(0);
+    expect(reset.records.some((r) => r.id === "record-1")).toBe(true);
+  });
+
 });
