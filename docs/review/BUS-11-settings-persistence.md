@@ -83,8 +83,8 @@ npm run test:unit
 ## Residual risks
 
 - Dictionary durability: see `BUS-11-dictionary-persistence.md`.
-- Brief flash of fixture defaults is possible before settings hydrate on cold
-  start (same class of race as history empty→hydrate).
+- Cold-start fixture flash for Settings is addressed by
+  `BUS-boot-hydrate-polish.md` (`bootReady` gate).
 - Corrupt `settings.json` recovers to defaults on next successful save; no
   dedicated recovery UI.
 - Browser / Vite-only shells stay memory-only (documented).
