@@ -1,3 +1,4 @@
+import { isTauri } from "@tauri-apps/api/core";
 import { useEffect, useRef } from "react";
 import { hasOpenModal, subscribeModal } from "./modalState";
 import type { AppState } from "./state";
@@ -6,51 +7,155 @@ import type {
   DictationLifecycle,
   SetupLifecycle,
   ShortcutContext,
+  ShortcutController,
   ShortcutGesture,
 } from "../services/contracts";
 import { createShortcutController } from
   "../services/shortcutController";
+import {
+  createNativeShortcutController,
+  createOverlayBridge,
+  type NativeShortcutController,
+  type OverlayBridge,
+} from "../services/shortcut";
 
 interface GestureOptions {
   dictation: DictationLifecycle;
   now: () => number;
   onboardingOpen: boolean;
+  onShortcutError?: (message: string) => void;
   setup: SetupLifecycle;
   shortcutOpen: boolean;
   state: AppState;
 }
 
+const browserScheduler = {
+  clear: (timer: number) => window.clearTimeout(timer),
+  set: (callback: () => void, delay: number) =>
+    window.setTimeout(callback, delay),
+};
+
 export function useShortcutGestures(options: GestureOptions) {
-  const controllerRef = useRef<ReturnType<
-    typeof createShortcutController
-  > | null>(null);
+  const documentControllerRef = useRef<ShortcutController | null>(null);
+  const nativeControllerRef = useRef<NativeShortcutController | null>(null);
+  const overlayRef = useRef<OverlayBridge | null>(null);
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
+  // Document mock path (Vite / tests) — always available when not Tauri.
   useEffect(() => {
+    if (isTauri()) return;
     const controller = createShortcutController({
       clock: options.now,
       onGesture: (gesture) => handleGesture(optionsRef.current, gesture),
       shortcut: options.state.settings.shortcut,
       target: document,
     });
-    controllerRef.current = controller;
+    documentControllerRef.current = controller;
     const update = () => controller.setContext(
       interactionContext(optionsRef.current),
     );
     const unsubscribe = subscribeModal(update);
     update();
     return () => {
-      controllerRef.current = null;
+      documentControllerRef.current = null;
       unsubscribe();
       controller.dispose();
     };
   }, [options.now, options.state.settings.shortcut]);
 
+  // Native global shortcut (Tauri desktop).
   useEffect(() => {
-    controllerRef.current?.setContext(interactionContext(options));
+    if (!isTauri()) return;
+    const controller = createNativeShortcutController({
+      clock: options.now,
+      onGesture: (gesture) => handleGesture(optionsRef.current, gesture),
+      onRegisterFailure: (message) => {
+        optionsRef.current.onShortcutError?.(message);
+      },
+      scheduler: browserScheduler,
+    });
+    nativeControllerRef.current = controller;
+    const overlay = createOverlayBridge();
+    overlayRef.current = overlay;
+
+    let cancelled = false;
+    void (async () => {
+      const outcome = await controller.setShortcut(
+        optionsRef.current.state.settings.shortcut,
+      );
+      if (cancelled) return;
+      if (!outcome.ok && outcome.message) {
+        optionsRef.current.onShortcutError?.(outcome.message);
+      }
+      controller.setContext(interactionContext(optionsRef.current));
+    })();
+
+    const update = () =>
+      controller.setContext(interactionContext(optionsRef.current));
+    const unsubscribe = subscribeModal(update);
+
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        controller.resetPartial();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      cancelled = true;
+      nativeControllerRef.current = null;
+      overlayRef.current = null;
+      unsubscribe();
+      document.removeEventListener("visibilitychange", onVisibility);
+      void controller.dispose();
+      void overlay.dispose();
+    };
+  }, [options.now]);
+
+  // Re-register when Settings shortcut changes (native only).
+  useEffect(() => {
+    const native = nativeControllerRef.current;
+    if (!native || !isTauri()) return;
+    let cancelled = false;
+    void (async () => {
+      const outcome = await native.setShortcut(
+        options.state.settings.shortcut,
+      );
+      if (cancelled) return;
+      if (!outcome.ok && outcome.message) {
+        options.onShortcutError?.(outcome.message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [options.onShortcutError, options.state.settings.shortcut]);
+
+  useEffect(() => {
+    const ctx = interactionContext(options);
+    documentControllerRef.current?.setContext(ctx);
+    nativeControllerRef.current?.setContext(ctx);
   }, [options.onboardingOpen, options.shortcutOpen,
     options.state.onboarding.step]);
+
+  // Overlay visibility follows dictation lifecycle (listening/processing).
+  useEffect(() => {
+    const overlay = overlayRef.current;
+    if (!overlay) return;
+    void overlay.sync(options.state.dictation);
+    // Cancel / error / success clear gesture partials so latch cannot resume.
+    const kind = options.state.dictation.kind;
+    if (
+      kind === "cancelled" ||
+      kind === "error" ||
+      kind === "success" ||
+      kind === "ready"
+    ) {
+      nativeControllerRef.current?.resetPartial();
+      // Document path resets via context; also clear if mid-hold somehow.
+    }
+  }, [options.state.dictation]);
 
   useEffect(() => {
     const { dictation, state } = options;
@@ -73,7 +178,14 @@ function handleGesture(options: GestureOptions, gesture: ShortcutGesture) {
     return;
   }
   if (onboardingOpen) return;
+  // Busy / processing: ignore start; finish only while listening.
   if (gesture === "hold-start" || gesture === "latch-start") {
+    if (
+      state.dictation.kind === "listening" ||
+      state.dictation.kind === "processing"
+    ) {
+      return;
+    }
     dictation.start();
   } else if ((gesture === "hold-finish" ||
       gesture === "latch-finish") &&
