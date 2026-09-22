@@ -1,6 +1,8 @@
 mod capture;
 mod dictionary;
 mod history;
+mod hold_release;
+mod overlay;
 mod settings;
 mod stt;
 
@@ -135,6 +137,7 @@ fn capture_list_devices(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
             let buffers = Arc::new(PcmBufferStore::new());
             let models = ModelStore::from_app(app.handle())
@@ -161,6 +164,11 @@ pub fn run() {
             dictionary::dictionary_save,
             history::history_load,
             history::history_save,
+            hold_release::hold_release_arm,
+            hold_release::hold_release_disarm,
+            overlay::overlay_ensure,
+            overlay::overlay_hide,
+            overlay::overlay_show,
             settings::settings_load,
             settings::settings_save,
             stt::stt_cancel_download,

@@ -127,7 +127,7 @@ export function Settings({ onSetup }: SettingsProps) {
           </button>
         </div>
         <div className="form-grid">
-          <label className="field">Shortcut · simulated
+          <label className="field">Shortcut
             <input
               onChange={(event) => settings.update({
                 key: "shortcut",
@@ -459,8 +459,8 @@ export function Settings({ onSetup }: SettingsProps) {
         </div>
         <p className="empty-note">
           Audio is captured locally and not stored. No audio or transcript
-          is sent to a remote service. Shortcut triggering remains simulated;
-          STT model pick / download is live when the Tauri shell is available.
+          is sent to a remote service. Global shortcut registration is live in the Tauri shell (register-or-revert to last-known-good on conflict);
+          STT model pick / download is live when the shell is available.
         </p>
       </section>
 
@@ -470,7 +470,7 @@ export function Settings({ onSetup }: SettingsProps) {
           {[
             "Microphone denied \u00b7 Enable in System Settings > " +
               "Privacy & Security > Microphone.",
-            "Shortcut collision \u00b7 Choose another app-local gesture.",
+            "Shortcut collision \u00b7 Choose another combo; prior binding is kept.",
             "Model unavailable \u00b7 Download an STT model in Settings.",
             "No audio activity detected \u00b7 No transcript is created.",
             "Insertion failed \u00b7 Clipboard result is reported " +

@@ -75,11 +75,13 @@ describe("Settings", () => {
     expect(setup).toHaveBeenCalledOnce();
   });
 
-  it("labels shortcuts and models as simulated", () => {
+  it("labels remaining mock settings without calling shortcut simulated", () => {
     renderWithApp(<Settings onSetup={vi.fn()} />);
+    expect(screen.getByLabelText(/shortcut/i)).toBeInTheDocument();
     expect(
       screen.getAllByText(/simulated/i).length,
-    ).toBeGreaterThan(2);
+    ).toBeGreaterThan(0);
+    expect(screen.getByText(/register-or-revert/i)).toBeInTheDocument();
   });
 
   it("does not claim audio resets on reload", () => {

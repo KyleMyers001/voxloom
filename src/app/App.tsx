@@ -80,10 +80,19 @@ export function App() {
     return () => window.clearTimeout(timer);
   }, [state.dictionaryError]);
 
+  function announce(message: string) {
+    setToast(message);
+    window.setTimeout(() => setToast(""), 1_800);
+  }
+
   useShortcutGestures({
     dictation,
     now,
     onboardingOpen,
+    onShortcutError: (message) => {
+      setToast(message);
+      window.setTimeout(() => setToast(""), 4_000);
+    },
     setup,
     shortcutOpen,
     state,
@@ -107,11 +116,6 @@ export function App() {
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
   }, [dispatch, onboardingOpen, shortcutOpen]);
-
-  function announce(message: string) {
-    setToast(message);
-    window.setTimeout(() => setToast(""), 1_800);
-  }
 
   function openSetup(opener: HTMLElement) {
     modalOpener.current = opener;
@@ -182,7 +186,7 @@ export function App() {
           onReset={requestResetSession}
         />}
         <p className="review-note">
-          Shortcut remains simulated. Dictate on Home uses Settings STT model → Copy.
+          Global shortcut binds in the desktop shell (hold / double-tap). Dictate on Home uses Settings STT model → Copy.
         </p>
       </aside>
       <main className="main">
@@ -210,7 +214,7 @@ export function App() {
     {shortcutOpen && <Dialog label="Keyboard shortcuts"
       onClose={() => setShortcutOpen(false)} opener={modalOpener.current}>
       <h2>Keyboard shortcuts</h2>
-      <p>Hold or double-tap works only while this app is focused.</p>
+      <p>Hold or double-tap the configured shortcut (global in the desktop shell; app-focused in browser preview).</p>
       <div className="overlay__row"><span>Configured gesture</span>
         <kbd>{state.settings.shortcut}</kbd></div>
       <div className="overlay__row"><span>Navigate screens</span>

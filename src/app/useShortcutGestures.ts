@@ -1,3 +1,4 @@
+import { isTauri } from "@tauri-apps/api/core";
 import { useEffect, useRef } from "react";
 import { hasOpenModal, subscribeModal } from "./modalState";
 import type { AppState } from "./state";
@@ -6,51 +7,188 @@ import type {
   DictationLifecycle,
   SetupLifecycle,
   ShortcutContext,
+  ShortcutController,
   ShortcutGesture,
 } from "../services/contracts";
 import { createShortcutController } from
   "../services/shortcutController";
+import {
+  createNativeShortcutController,
+  createOverlayBridge,
+  createPendingFinishGate,
+  type NativeShortcutController,
+  type OverlayBridge,
+  type PendingFinishGate,
+} from "../services/shortcut";
 
 interface GestureOptions {
   dictation: DictationLifecycle;
   now: () => number;
   onboardingOpen: boolean;
+  onShortcutError?: (message: string) => void;
   setup: SetupLifecycle;
   shortcutOpen: boolean;
   state: AppState;
 }
 
+const browserScheduler = {
+  clear: (timer: number) => window.clearTimeout(timer),
+  set: (callback: () => void, delay: number) =>
+    window.setTimeout(callback, delay),
+};
+
 export function useShortcutGestures(options: GestureOptions) {
-  const controllerRef = useRef<ReturnType<
-    typeof createShortcutController
-  > | null>(null);
+  const documentControllerRef = useRef<ShortcutController | null>(null);
+  const nativeControllerRef = useRef<NativeShortcutController | null>(null);
+  const overlayRef = useRef<OverlayBridge | null>(null);
+  const pendingFinishRef = useRef<PendingFinishGate | null>(null);
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
+  // Shared pending-finish gate (hold release can race React listening commit).
+  if (pendingFinishRef.current === null) {
+    pendingFinishRef.current = createPendingFinishGate({
+      finish: (runId) => optionsRef.current.dictation.finish(runId),
+      listeningRunId: () => {
+        const { dictation } = optionsRef.current.state;
+        return dictation.kind === "listening" ? dictation.runId : null;
+      },
+    });
+  }
+
+  // Document mock path (Vite / tests) — always available when not Tauri.
   useEffect(() => {
+    if (isTauri()) return;
     const controller = createShortcutController({
       clock: options.now,
-      onGesture: (gesture) => handleGesture(optionsRef.current, gesture),
+      onGesture: (gesture) => handleGesture(
+        optionsRef.current,
+        gesture,
+        pendingFinishRef.current,
+      ),
       shortcut: options.state.settings.shortcut,
       target: document,
     });
-    controllerRef.current = controller;
+    documentControllerRef.current = controller;
     const update = () => controller.setContext(
       interactionContext(optionsRef.current),
     );
     const unsubscribe = subscribeModal(update);
     update();
     return () => {
-      controllerRef.current = null;
+      documentControllerRef.current = null;
       unsubscribe();
       controller.dispose();
     };
   }, [options.now, options.state.settings.shortcut]);
 
+  // Native global shortcut (Tauri desktop).
   useEffect(() => {
-    controllerRef.current?.setContext(interactionContext(options));
+    if (!isTauri()) return;
+    const controller = createNativeShortcutController({
+      clock: options.now,
+      onGesture: (gesture) => handleGesture(
+        optionsRef.current,
+        gesture,
+        pendingFinishRef.current,
+      ),
+      onRegisterFailure: (message) => {
+        optionsRef.current.onShortcutError?.(message);
+      },
+      scheduler: browserScheduler,
+    });
+    nativeControllerRef.current = controller;
+    const overlay = createOverlayBridge();
+    overlayRef.current = overlay;
+
+    let cancelled = false;
+    void (async () => {
+      const outcome = await controller.setShortcut(
+        optionsRef.current.state.settings.shortcut,
+      );
+      if (cancelled) return;
+      if (!outcome.ok && outcome.message) {
+        optionsRef.current.onShortcutError?.(outcome.message);
+      }
+      controller.setContext(interactionContext(optionsRef.current));
+    })();
+
+    const update = () =>
+      controller.setContext(interactionContext(optionsRef.current));
+    const unsubscribe = subscribeModal(update);
+
+    // Do NOT resetPartial / clear pending on document visibilitychange.
+    // ADR §3: other-app focus must keep an in-flight native hold alive;
+    // visibility hidden is normal while dictating into another app.
+    // (Document mock still resets on hide — it would miss keyup.)
+
+    return () => {
+      cancelled = true;
+      nativeControllerRef.current = null;
+      overlayRef.current = null;
+      unsubscribe();
+      pendingFinishRef.current?.clear();
+      void controller.dispose();
+      void overlay.dispose();
+    };
+  }, [options.now]);
+
+  // Re-register when Settings shortcut *changes* (native only).
+  // Mount effect owns the initial bind; skipping that first run avoids a
+  // parallel setShortcut for the same combo on boot (Mac RegisterEventHotKey
+  // race). Controller still serializes setShortcut as a safety net.
+  const boundShortcutRef = useRef<string | null>(null);
+  useEffect(() => {
+    const native = nativeControllerRef.current;
+    if (!native || !isTauri()) return;
+    const shortcut = options.state.settings.shortcut;
+    if (boundShortcutRef.current === null) {
+      boundShortcutRef.current = shortcut;
+      return;
+    }
+    if (boundShortcutRef.current === shortcut) return;
+    boundShortcutRef.current = shortcut;
+    let cancelled = false;
+    void (async () => {
+      const outcome = await native.setShortcut(shortcut);
+      if (cancelled) return;
+      if (!outcome.ok && outcome.message) {
+        options.onShortcutError?.(outcome.message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [options.onShortcutError, options.state.settings.shortcut]);
+
+  useEffect(() => {
+    const ctx = interactionContext(options);
+    documentControllerRef.current?.setContext(ctx);
+    nativeControllerRef.current?.setContext(ctx);
   }, [options.onboardingOpen, options.shortcutOpen,
     options.state.onboarding.step]);
+
+  // Overlay visibility follows dictation lifecycle (listening/processing).
+  useEffect(() => {
+    const overlay = overlayRef.current;
+    if (!overlay) return;
+    void overlay.sync(options.state.dictation);
+    const kind = options.state.dictation.kind;
+    if (kind === "listening") {
+      pendingFinishRef.current?.onListening();
+    }
+    // Cancel / error / success clear gesture partials so latch cannot resume.
+    if (
+      kind === "cancelled" ||
+      kind === "error" ||
+      kind === "success" ||
+      kind === "ready"
+    ) {
+      pendingFinishRef.current?.clear();
+      nativeControllerRef.current?.resetPartial();
+      // Document path resets via context; also clear if mid-hold somehow.
+    }
+  }, [options.state.dictation]);
 
   useEffect(() => {
     const { dictation, state } = options;
@@ -65,7 +203,11 @@ export function useShortcutGestures(options: GestureOptions) {
   }, [options.dictation, options.state.dictation]);
 }
 
-function handleGesture(options: GestureOptions, gesture: ShortcutGesture) {
+function handleGesture(
+  options: GestureOptions,
+  gesture: ShortcutGesture,
+  pending: PendingFinishGate | null,
+) {
   const { dictation, onboardingOpen, shortcutOpen, state } = options;
   if (shortcutOpen) return;
   if (onboardingOpen && state.onboarding.step === 3) {
@@ -73,12 +215,24 @@ function handleGesture(options: GestureOptions, gesture: ShortcutGesture) {
     return;
   }
   if (onboardingOpen) return;
+  // Busy / processing: ignore start; finish only while listening (or pending).
   if (gesture === "hold-start" || gesture === "latch-start") {
+    if (
+      state.dictation.kind === "listening" ||
+      state.dictation.kind === "processing"
+    ) {
+      return;
+    }
+    pending?.resetForStart();
     dictation.start();
-  } else if ((gesture === "hold-finish" ||
-      gesture === "latch-finish") &&
-      state.dictation.kind === "listening") {
-    dictation.finish(state.dictation.runId);
+  } else if (gesture === "hold-finish" || gesture === "latch-finish") {
+    if (state.dictation.kind === "listening") {
+      const runId = state.dictation.runId;
+      if (pending) pending.requestFinish(true, runId);
+      else dictation.finish(runId);
+    } else if (pending) {
+      pending.requestFinish(false, null);
+    }
   }
 }
 
