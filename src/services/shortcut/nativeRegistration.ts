@@ -1,5 +1,5 @@
 import { isTauri } from "@tauri-apps/api/core";
-import type { Scheduler, ShortcutGesture } from "../contracts";
+import type { Scheduler, ShortcutContext, ShortcutGesture } from "../contracts";
 import { DOUBLE_TAP_MS, HOLD_MS } from "./constants";
 import { toPluginHotkey } from "./formatHotkey";
 import { createGestureMachine, type GestureMachine } from "./gestureMachine";
@@ -88,20 +88,32 @@ export function createNativeShortcutController({
   let disposed = false;
   let generation = 0;
   let holdWatchArmed = false;
+  /** True only while Mac hold-release monitor owns finish (arm returned true). */
+  let holdWatchMonitoring = false;
+  let context: ShortcutContext = "product";
   let unlistenHoldRelease: (() => void) | null = null;
 
   function disarmHoldWatch() {
     if (!holdWatchArmed) return;
     holdWatchArmed = false;
+    holdWatchMonitoring = false;
     void holdRelease.disarm().catch(() => undefined);
   }
 
   function armHoldWatch() {
     if (!active || disposed) return;
     holdWatchArmed = true;
-    void holdRelease.arm(active).catch(() => {
-      holdWatchArmed = false;
-    });
+    holdWatchMonitoring = false;
+    void holdRelease
+      .arm(active)
+      .then((monitoring) => {
+        if (!holdWatchArmed || disposed) return;
+        holdWatchMonitoring = monitoring;
+      })
+      .catch(() => {
+        holdWatchArmed = false;
+        holdWatchMonitoring = false;
+      });
   }
 
   const machine = createGestureMachine({
@@ -130,8 +142,14 @@ export function createNativeShortcutController({
       const gen = generation;
       await api.register(hotkey, (edge) => {
         if (disposed || gen !== generation) return;
+        // While the Mac hold-release monitor owns finish, ignore OS Released.
+        // Carbon often emits a spurious Released on app focus loss; trusting
+        // it tears down listening/overlay even though the chord is still held.
+        if (edge === "released" && holdWatchMonitoring) {
+          return;
+        }
         machine.handle(edge);
-        // OS Released also tears down the hold watch.
+        // OS Released also tears down the hold watch (non-Mac / pre-monitor).
         if (edge === "released") disarmHoldWatch();
       });
     },
@@ -180,6 +198,10 @@ export function createNativeShortcutController({
       machine.resetPartial();
     },
     setContext: (ctx) => {
+      // Identical context must not disarm an in-progress hold (e.g. modal
+      // subscribe re-fire, or boot setContext after setShortcut).
+      if (context === ctx) return;
+      context = ctx;
       disarmHoldWatch();
       machine.setContext(ctx);
     },

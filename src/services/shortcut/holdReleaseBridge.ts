@@ -3,7 +3,12 @@ import { isTauri } from "@tauri-apps/api/core";
 export const HOLD_RELEASE_EVENT = "shortcut:hold-release";
 
 export interface HoldReleaseApi {
-  arm(pluginHotkey: string): Promise<void>;
+  /**
+   * Arm Mac hold-release monitor. Resolves `true` when a real monitor owns
+   * finish (ignore spurious OS Released); `false` when OS Released remains
+   * authoritative (non-macOS stub / unavailable).
+   */
+  arm(pluginHotkey: string): Promise<boolean>;
   disarm(): Promise<void>;
   isAvailable(): boolean;
   /**
@@ -18,9 +23,11 @@ export function createTauriHoldReleaseApi(): HoldReleaseApi {
   return {
     isAvailable: () => isTauri(),
     async arm(pluginHotkey) {
-      if (!isTauri()) return;
+      if (!isTauri()) return false;
       const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("hold_release_arm", { hotkey: pluginHotkey });
+      return await invoke<boolean>("hold_release_arm", {
+        hotkey: pluginHotkey,
+      });
     },
     async disarm() {
       if (!isTauri()) return;

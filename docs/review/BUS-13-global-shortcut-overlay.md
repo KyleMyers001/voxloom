@@ -21,7 +21,7 @@ does **not** prove native OS-wide registration.
 |----|----------------|
 | 1. Shortcut works while another app focused; unregister/re-register | `nativeRegistration.ts` + `registerOrRevert.ts` + `tauri-plugin-global-shortcut`; capabilities on `main` |
 | 2. Hold 320 ms / double-tap 260 ms | `gestureMachine.ts` constants (`HOLD_MS` / `DOUBLE_TAP_MS`) driven by Pressed/Released |
-| 3. Partial gesture reset (dialogs, setup, suspend/resume, context) | `setContext` / `resetPartial`; visibilitychange + pagehide; modal/`ShortcutContext` null |
+| 3. Partial gesture reset (dialogs, setup, suspend/resume, context) | `setContext` / `resetPartial`; modal/`ShortcutContext` null; document mock: visibilitychange + pagehide; **native: other-app focus does not reset** |
 | 4. Overlay: bottom-center, 24 segments, listening/processing only, reduced-motion, no focus steal | `overlay.rs` + `overlayBridge.ts` + `overlay.html` (`focusable: false`, `focused: false`) |
 | 5. Multi-display/fullscreen must not redirect delivery | Overlay only — no insert/delivery; positions on current/primary monitor |
 | 6. Busy/cancel/error prevent concurrent capture / stale completion | Dictation machine + gesture start ignored while listening/processing; cancel/error clears overlay + partials |
@@ -80,7 +80,9 @@ Do **not** treat browser unit tests as proof of native global registration.
 | `src/services/shortcut/overlayBridge.ts` | Show/hide + waveform sync |
 | `src-tauri/src/overlay.rs` | Non-focusable overlay window |
 | `overlay.html` / `src/overlay/*` | Overlay UI (waveform only) |
-| `src/app/useShortcutGestures.ts` | Native vs document wiring |
+| `src/app/useShortcutGestures.ts` | Native vs document wiring (no native visibility teardown) |
+| `src/services/shortcut/focusPolicy.ts` | Document hide may reset; native-global must not |
+| `src-tauri/src/hold_release.rs` | Mac hold-release monitor; `arm` returns monitoring bool |
 
 
 ## Mac hold-release failure mode (Clara) — fixed this slice
@@ -161,6 +163,63 @@ Hold-release / pending-finish from the prior Mac fix are unchanged.
 |---|------|-------|--------|
 | C12 | Boot: single bind, no false conflict toast; hold still works | **Human Mac** | Pending re-smoke |
 
+
+## Focus-gated hold teardown (Clara + Kyle on dc69a71) — fixed this slice
+
+**Failure:** Dictation hotkey session was **focus-gated**. With Voxloom focused,
+`Ctrl+Shift+F` (or current combo) registered and the overlay sustained while
+held. Alt-tab / focus another app: overlay flashed then disappeared and in-app
+listening bars dropped at the same time — full session teardown, not overlay
+paint alone. App console silent around focus-loss. Serialize bind fix (C12)
+was already good; local one-register guard had been dropped after pulling
+`dc69a71`. Kyle reproduced: overlay only stayed while Voxloom was focused.
+
+**Root cause (combined):**
+
+1. Native `useShortcutGestures` listened for `visibilitychange` → `hidden` and
+   called `resetPartial()` (+ cleared pending-finish). That disarmed the Mac
+   hold-release watch and cleared gesture `holding` on ordinary other-app
+   focus — contrary to ADR §3.
+2. While a hold was active, Carbon / `plugin-global-shortcut` often emitted a
+   spurious **Released** on app focus loss. The controller treated that as a
+   real key-up → `hold-finish` → listening/overlay teardown even though the
+   chord was still physically held. The Mac hold-release watch exists to own
+   finish; OS Released must not override it while the monitor is active.
+3. `setContext` always disarmed the hold watch even when the context value was
+   unchanged (boot / modal subscribe re-fire), which could drop an in-progress
+   hold without a modal actually opening.
+
+**Fix (minimal):**
+
+1. Remove native `visibilitychange` → `resetPartial` / pending clear. Document
+   mock keeps hide/pagehide reset (`shouldResetGesturesOnDocumentHidden`).
+2. When Mac `hold_release_arm` returns monitoring=`true`, **ignore OS Released**
+   for that hold; finish only via `shortcut:hold-release` (tap/poll) or
+   cancel/latch paths. Non-macOS stub returns `false` so OS Released still
+   finishes holds on Linux.
+3. `setContext` no-ops when the value is unchanged (no disarm).
+4. Keep: no global Escape; hold-only key-up monitor + teardown on
+   finish/cancel; pending-finish race fix; serialized boot register / no false
+   bind toast.
+
+### Clara re-smoke (focus-independent hold) — **do this first**
+
+1. Build/run this PR tip on Mac (packaged or `tauri dev` with entitlements).
+2. **Start hold from another app:** Focus TextEdit / Notes (not Voxloom). Hold
+   the configured shortcut past ~320 ms → overlay + listening must start and
+   **stay** until key release (modifiers-first and key-first).
+3. **Alt-tab during hold:** Focus Voxloom, start hold past threshold (overlay
+   up). Without releasing the chord, switch focus to another app (click or
+   Cmd+Tab carefully while keeping the chord down). Overlay + listening must
+   **survive** focus loss and only end on chord release.
+4. Confirm no false “Could not bind…” toast on cold boot (C12); Escape still
+   not stolen globally (C9).
+
+| # | Item | Owner | Result |
+|---|------|-------|--------|
+| C13 | Other-app-focused hold starts and sustains until release | **Human Mac** | Pending re-smoke |
+| C14 | In-progress hold survives Voxloom blur / alt-tab; ends only on release | **Human Mac** | Pending re-smoke |
+
 ## Residual risks
 
 | Residual | Notes |
@@ -173,4 +232,5 @@ Hold-release / pending-finish from the prior Mac fix are unchanged.
 | Mac HotKey Released drop | Mitigated: NSEvent + CGEvent hold-release watch while hold active; Clara C10/C11 |
 | Hold-finish vs listening race | Mitigated: pending-finish gate |
 | Boot double-setShortcut race | Mitigated: serialize + same-combo no-op; Settings effect skips initial bind (C12) |
+| Focus-gated hold / blur teardown | Mitigated: no native visibility reset; ignore OS Released while Mac hold monitor owns finish; setContext identity no-op (C13/C14) |
 | CGEvent tap may need Accessibility | Session-state poll fallback covers other-app focus without AX; tap is hold-scoped only |

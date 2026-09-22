@@ -15,7 +15,7 @@ function makeScheduler(): Scheduler {
 
 function makeHoldRelease(): HoldReleaseApi {
   return {
-    arm: async () => undefined,
+    arm: async () => false,
     disarm: async () => undefined,
     isAvailable: () => false,
     listen: async () => () => undefined,
@@ -120,6 +120,177 @@ describe("createNativeShortcutController setShortcut", () => {
     expect(controller.activeHotkey()).toBe("Control+Shift+Space");
     expect(onRegisterFailure).toHaveBeenCalledTimes(1);
     expect(onRegisterFailure.mock.calls[0]![0]).toContain("Kept prior shortcut");
+
+    await controller.dispose();
+  });
+});
+
+describe("createNativeShortcutController focus-safe hold", () => {
+  function makeTrackingScheduler() {
+    const callbacks = new Map<number, () => void>();
+    let timer = 0;
+    const scheduler: Scheduler = {
+      clear: (id) => {
+        callbacks.delete(id);
+      },
+      set: (callback) => {
+        timer += 1;
+        callbacks.set(timer, callback);
+        return timer;
+      },
+    };
+    const flush = (id: number) => {
+      const cb = callbacks.get(id);
+      if (cb) {
+        callbacks.delete(id);
+        cb();
+      }
+    };
+    return { flush, scheduler };
+  }
+
+  it("ignores OS Released while Mac hold monitor is active; watch finishes", async () => {
+    let onEdge: ((edge: "pressed" | "released") => void) | null = null;
+    let onHoldRelease: (() => void) | null = null;
+    const api: NativeShortcutApi = {
+      isAvailable: () => true,
+      async register(_hotkey, edge) {
+        onEdge = edge;
+      },
+      async unregister() {},
+      async unregisterAll() {},
+    };
+    const holdRelease: HoldReleaseApi = {
+      isAvailable: () => true,
+      arm: async () => true,
+      disarm: async () => undefined,
+      listen: async (cb) => {
+        onHoldRelease = cb;
+        return () => undefined;
+      },
+    };
+    const gestures: string[] = [];
+    const { flush, scheduler } = makeTrackingScheduler();
+    const controller = createNativeShortcutController({
+      api,
+      clock: () => 0,
+      holdMs: 10,
+      holdRelease,
+      onGesture: (g) => gestures.push(g),
+      scheduler,
+    });
+
+    await controller.setShortcut("Ctrl + Shift + F");
+    // Allow listen() microtask to attach.
+    await Promise.resolve();
+    expect(onEdge).not.toBeNull();
+
+    onEdge!("pressed");
+    flush(1); // hold-start → arms monitor
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(gestures).toEqual(["hold-start"]);
+
+    // Spurious Carbon Released (focus loss) must not finish while monitor owns it.
+    onEdge!("released");
+    expect(gestures).toEqual(["hold-start"]);
+
+    // Real chord break via hold-release watch.
+    onHoldRelease!();
+    expect(gestures).toEqual(["hold-start", "hold-finish"]);
+
+    await controller.dispose();
+  });
+
+  it("still finishes via OS Released when hold monitor is not active", async () => {
+    let onEdge: ((edge: "pressed" | "released") => void) | null = null;
+    const api: NativeShortcutApi = {
+      isAvailable: () => true,
+      async register(_hotkey, edge) {
+        onEdge = edge;
+      },
+      async unregister() {},
+      async unregisterAll() {},
+    };
+    const holdRelease: HoldReleaseApi = {
+      isAvailable: () => false,
+      arm: async () => false,
+      disarm: async () => undefined,
+      listen: async () => () => undefined,
+    };
+    const gestures: string[] = [];
+    const { flush, scheduler } = makeTrackingScheduler();
+    const controller = createNativeShortcutController({
+      api,
+      clock: () => 0,
+      holdMs: 10,
+      holdRelease,
+      onGesture: (g) => gestures.push(g),
+      scheduler,
+    });
+
+    await controller.setShortcut("Ctrl + Shift + F");
+    onEdge!("pressed");
+    flush(1);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(gestures).toEqual(["hold-start"]);
+
+    onEdge!("released");
+    expect(gestures).toEqual(["hold-start", "hold-finish"]);
+
+    await controller.dispose();
+  });
+
+  it("setContext with the same value does not cancel an active hold", async () => {
+    let onEdge: ((edge: "pressed" | "released") => void) | null = null;
+    let disarmCalls = 0;
+    const api: NativeShortcutApi = {
+      isAvailable: () => true,
+      async register(_hotkey, edge) {
+        onEdge = edge;
+      },
+      async unregister() {},
+      async unregisterAll() {},
+    };
+    const holdRelease: HoldReleaseApi = {
+      isAvailable: () => true,
+      arm: async () => true,
+      disarm: async () => {
+        disarmCalls += 1;
+      },
+      listen: async () => () => undefined,
+    };
+    const gestures: string[] = [];
+    const { flush, scheduler } = makeTrackingScheduler();
+    const controller = createNativeShortcutController({
+      api,
+      clock: () => 0,
+      holdMs: 10,
+      holdRelease,
+      onGesture: (g) => gestures.push(g),
+      scheduler,
+    });
+
+    await controller.setShortcut("Ctrl + Shift + F");
+    onEdge!("pressed");
+    flush(1);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(gestures).toEqual(["hold-start"]);
+    const disarmsAfterArm = disarmCalls;
+
+    // Re-assert product context (modal subscribe / boot) must be a no-op.
+    controller.setContext("product");
+    expect(disarmCalls).toBe(disarmsAfterArm);
+    expect(gestures).toEqual(["hold-start"]);
+
+    // Context null (modal) still resets.
+    controller.setContext(null);
+    expect(disarmCalls).toBeGreaterThan(disarmsAfterArm);
+    gestures.length = 0;
+    onEdge!("released");
+    expect(gestures).toEqual([]);
 
     await controller.dispose();
   });

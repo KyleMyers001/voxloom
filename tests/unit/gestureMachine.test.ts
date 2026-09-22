@@ -135,4 +135,23 @@ describe("createGestureMachine", () => {
     expect(gestures).toEqual(["hold-start", "hold-finish"]);
     machine.dispose();
   });
+
+  it("setContext same value does not clear mid-hold (blur ≠ cancel)", () => {
+    const gestures: ShortcutGesture[] = [];
+    const { flush, scheduler } = makeScheduler();
+    const machine = createGestureMachine({
+      clock: () => 0,
+      holdMs: 320,
+      onGesture: (g) => gestures.push(g),
+      scheduler,
+    });
+    machine.handle("pressed");
+    flush(1);
+    expect(gestures).toEqual(["hold-start"]);
+    machine.setContext("product");
+    machine.handle("released");
+    expect(gestures).toEqual(["hold-start", "hold-finish"]);
+    machine.dispose();
+  });
+
 });

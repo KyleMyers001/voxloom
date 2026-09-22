@@ -391,7 +391,10 @@ mod macos {
         Ok(())
     }
 
-    pub fn arm(app: AppHandle, plugin_hotkey: String) -> Result<(), String> {
+    /// Returns `true` when a real hold-release monitor is active (tap and/or
+    /// session-state poll). Callers on Mac should treat this as owning finish
+    /// and ignore spurious Carbon `HotKey Released` (e.g. on focus loss).
+    pub fn arm(app: AppHandle, plugin_hotkey: String) -> Result<bool, String> {
         let chord = parse_plugin_hotkey(&plugin_hotkey)?;
         let _ = disarm_inner();
         EMITTED.store(false, Ordering::SeqCst);
@@ -399,7 +402,7 @@ mod macos {
         let armed = start_watch(app, chord, generation);
         let mut guard = ARMED.lock().map_err(|e| e.to_string())?;
         *guard = Some(armed);
-        Ok(())
+        Ok(true)
     }
 
     pub fn disarm() -> Result<(), String> {
@@ -412,8 +415,9 @@ mod macos {
 mod stub {
     use tauri::AppHandle;
 
-    pub fn arm(_app: AppHandle, _plugin_hotkey: String) -> Result<(), String> {
-        Ok(())
+    pub fn arm(_app: AppHandle, _plugin_hotkey: String) -> Result<bool, String> {
+        // No monitor on non-macOS — OS Pressed/Released remain authoritative.
+        Ok(false)
     }
 
     pub fn disarm() -> Result<(), String> {
@@ -430,7 +434,7 @@ use stub::{arm as arm_impl, disarm as disarm_impl};
 /// Arm Mac hold-release watch for the plugin-format hotkey
 /// (e.g. `Control+Shift+F`).
 #[tauri::command]
-pub fn hold_release_arm(app: AppHandle, hotkey: String) -> Result<(), String> {
+pub fn hold_release_arm(app: AppHandle, hotkey: String) -> Result<bool, String> {
     arm_impl(app, hotkey)
 }
 

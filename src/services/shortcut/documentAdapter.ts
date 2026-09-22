@@ -2,6 +2,7 @@ import type { ShortcutController, ShortcutGesture } from "../contracts";
 import type { Scheduler } from "../contracts";
 import { DOUBLE_TAP_MS, HOLD_MS } from "./constants";
 import { matchesShortcut } from "./formatHotkey";
+import { shouldResetGesturesOnDocumentHidden } from "./focusPolicy";
 import { createGestureMachine } from "./gestureMachine";
 
 const browserScheduler: Scheduler = {
@@ -55,7 +56,12 @@ export function createDocumentShortcutController({
   }
 
   function onVisibility() {
-    if (document.visibilityState === "hidden") machine.resetPartial();
+    if (
+      document.visibilityState === "hidden" &&
+      shouldResetGesturesOnDocumentHidden("document-focused")
+    ) {
+      machine.resetPartial();
+    }
   }
 
   function onPageHide() {

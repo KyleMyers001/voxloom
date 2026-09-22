@@ -1,4 +1,8 @@
 export { DOUBLE_TAP_MS, HOLD_MS, OVERLAY_WINDOW_LABEL } from "./constants";
+export {
+  shouldResetGesturesOnDocumentHidden,
+  type ShortcutInputSource,
+} from "./focusPolicy";
 export { createDocumentShortcutController } from "./documentAdapter";
 export { matchesShortcut, toPluginHotkey } from "./formatHotkey";
 export {

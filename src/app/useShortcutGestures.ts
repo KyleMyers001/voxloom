@@ -117,20 +117,16 @@ export function useShortcutGestures(options: GestureOptions) {
       controller.setContext(interactionContext(optionsRef.current));
     const unsubscribe = subscribeModal(update);
 
-    const onVisibility = () => {
-      if (document.visibilityState === "hidden") {
-        controller.resetPartial();
-        pendingFinishRef.current?.clear();
-      }
-    };
-    document.addEventListener("visibilitychange", onVisibility);
+    // Do NOT resetPartial / clear pending on document visibilitychange.
+    // ADR §3: other-app focus must keep an in-flight native hold alive;
+    // visibility hidden is normal while dictating into another app.
+    // (Document mock still resets on hide — it would miss keyup.)
 
     return () => {
       cancelled = true;
       nativeControllerRef.current = null;
       overlayRef.current = null;
       unsubscribe();
-      document.removeEventListener("visibilitychange", onVisibility);
       pendingFinishRef.current?.clear();
       void controller.dispose();
       void overlay.dispose();
