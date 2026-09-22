@@ -9,8 +9,48 @@
 //!
 //! Tear-down on disarm / cancel / error / latch paths. Does **not** grab Escape.
 //! Non-macOS builds expose no-op commands so Linux `cargo check` stays green.
+//!
+//! ## Poll / tap signal rules (Clara Mac false-fire)
+//!
+//! Under `RegisterEventHotKey`, `CGEventSourceKeyState` for the letter key can
+//! read **false** while the key is still physically held. Treat **required
+//! modifiers still down ⇒ chord held** as the primary poll signal. A short
+//! poll debounce (consecutive broken ticks) is only a backup against flaky
+//! flag reads — never a substitute when mods are still down. Tap
+//! `flagsChanged` does not emit immediately (poll confirms). Letter key-up
+//! from the event tap still finishes (key-first); do not trust KeyState poll
+//! for the letter alone.
 
 use tauri::AppHandle;
+
+/// Consecutive poll ticks that must look broken before emitting release.
+/// Backup only — modifiers-still-down always wins as "held".
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub const BROKEN_POLL_DEBOUNCE_TICKS: u32 = 2;
+
+/// Pure hold decision from one session-state sample (testable on all platforms).
+///
+/// When the chord requires modifiers, **mods_match** is authoritative: letter
+/// `KeyState` may lie under Carbon HotKey. Debounce is applied by the caller
+/// across ticks, not here.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn chord_held_from_sample(requires_modifiers: bool, key_down: bool, mods_match: bool) -> bool {
+    if requires_modifiers {
+        // PRIMARY: required modifiers still down ⇒ still held (even if !key_down).
+        return mods_match;
+    }
+    key_down
+}
+
+/// Update broken-tick streak; returns `(new_streak, should_emit_release)`.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn note_broken_poll_tick(streak: u32, held: bool) -> (u32, bool) {
+    if held {
+        return (0, false);
+    }
+    let next = streak.saturating_add(1);
+    (next, next >= BROKEN_POLL_DEBOUNCE_TICKS)
+}
 
 #[cfg(target_os = "macos")]
 mod macos {
@@ -21,6 +61,8 @@ mod macos {
     use std::time::Duration;
 
     use tauri::{AppHandle, Emitter};
+
+    use super::{chord_held_from_sample, note_broken_poll_tick};
 
     pub const HOLD_RELEASE_EVENT: &str = "shortcut:hold-release";
 
@@ -106,15 +148,17 @@ mod macos {
     }
 
     impl Chord {
+        fn requires_modifiers(self) -> bool {
+            self.need_control || self.need_shift || self.need_option || self.need_command
+        }
+
         fn still_held(self) -> bool {
             // SAFETY: CoreGraphics session-state queries; no pointers.
             let key_down =
                 unsafe { CGEventSourceKeyState(SESSION_STATE, self.key_code) };
-            if !key_down {
-                return false;
-            }
             let flags = unsafe { CGEventSourceFlagsState(SESSION_STATE) };
-            self.flags_match(flags)
+            let mods_match = self.flags_match(flags);
+            chord_held_from_sample(self.requires_modifiers(), key_down, mods_match)
         }
 
         fn flags_match(self, flags: u64) -> bool {
@@ -133,17 +177,20 @@ mod macos {
             true
         }
 
-        fn broken_by_event(self, etype: u32, event: CGEventRef) -> bool {
+        /// Tap events that may finish the hold immediately.
+        ///
+        /// Letter key-up still finishes (key-first release). `flagsChanged` does
+        /// **not** emit here — it can false-trigger; the session-state poll
+        /// (mods-primary + debounce) confirms modifier breaks.
+        fn tap_emits_release(self, etype: u32, event: CGEventRef) -> bool {
             if etype == EVENT_KEY_UP {
                 // SAFETY: event is a live CGEvent from the tap callback.
                 let code =
                     unsafe { CGEventGetIntegerValueField(event, FIELD_KEYBOARD_EVENT_KEYCODE) };
                 return code as u16 == self.key_code;
             }
-            if etype == EVENT_FLAGS_CHANGED {
-                let flags = unsafe { CGEventGetFlags(event) };
-                return !self.flags_match(flags);
-            }
+            // EVENT_FLAGS_CHANGED: never immediate emit (debounce via poll).
+            let _ = event;
             false
         }
     }
@@ -258,13 +305,21 @@ mod macos {
         })
     }
 
-    fn emit_release(app: &AppHandle, generation: u64) {
+    fn diag_emit_source(source: &str) {
+        // Dev/diag only — no PII (hotkey/chord not logged).
+        #[cfg(debug_assertions)]
+        eprintln!("[hold-release] emit source={source}");
+        let _ = source;
+    }
+
+    fn emit_release(app: &AppHandle, generation: u64, source: &str) {
         if GENERATION.load(Ordering::SeqCst) != generation {
             return;
         }
         if EMITTED.swap(true, Ordering::SeqCst) {
             return;
         }
+        diag_emit_source(source);
         let _ = app.emit(HOLD_RELEASE_EVENT, ());
         let _ = disarm_inner();
     }
@@ -279,8 +334,10 @@ mod macos {
             return event;
         }
         let ctx = &*(user_info as *const TapCtx);
-        if ctx.chord.broken_by_event(etype, event) {
-            emit_release(&ctx.app, ctx.generation);
+        // flagsChanged: do not emit here (poll debounce). Letter key-up: emit
+        // for key-first release (event tap is trustworthy; KeyState poll is not).
+        if ctx.chord.tap_emits_release(etype, event) {
+            emit_release(&ctx.app, ctx.generation, "tap");
         }
         event
     }
@@ -324,13 +381,18 @@ mod macos {
         thread::Builder::new()
             .name("voxloom-hold-release".into())
             .spawn(move || {
+                // Brief settle so the Pressed-edge session state is stable.
                 thread::sleep(Duration::from_millis(20));
+                let mut broken_streak = 0u32;
                 while !stop_flag.load(Ordering::SeqCst) {
                     if GENERATION.load(Ordering::SeqCst) != generation {
                         break;
                     }
-                    if !chord.still_held() {
-                        emit_release(&app, generation);
+                    let held = chord.still_held();
+                    let (next, should_emit) = note_broken_poll_tick(broken_streak, held);
+                    broken_streak = next;
+                    if should_emit {
+                        emit_release(&app, generation, "poll");
                         break;
                     }
                     thread::sleep(Duration::from_millis(16));
@@ -344,8 +406,8 @@ mod macos {
         if let Some((tap, source, ctx)) =
             try_install_tap(app.clone(), chord, generation)
         {
-            // Also keep a light poll so modifier-first release is caught even if
-            // the tap filters oddly; stop flag shared.
+            // Poll owns mods-first finish (mods-primary + debounce). Tap owns
+            // letter key-up (key-first); flagsChanged does not emit from tap.
             let poll_stop = start_poll_fallback(app, chord, generation);
             Armed {
                 poll_stop,
@@ -442,4 +504,55 @@ pub fn hold_release_arm(app: AppHandle, hotkey: String) -> Result<bool, String> 
 #[tauri::command]
 pub fn hold_release_disarm() -> Result<(), String> {
     disarm_impl()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{chord_held_from_sample, note_broken_poll_tick, BROKEN_POLL_DEBOUNCE_TICKS};
+
+    #[test]
+    fn mods_still_down_means_held_even_when_letter_keystate_false() {
+        assert!(chord_held_from_sample(true, false, true));
+        assert!(chord_held_from_sample(true, true, true));
+    }
+
+    #[test]
+    fn mods_broken_means_not_held_for_modifier_chord() {
+        assert!(!chord_held_from_sample(true, true, false));
+        assert!(!chord_held_from_sample(true, false, false));
+    }
+
+    #[test]
+    fn bare_key_uses_letter_keystate() {
+        assert!(chord_held_from_sample(false, true, true));
+        assert!(chord_held_from_sample(false, true, false));
+        assert!(!chord_held_from_sample(false, false, true));
+        assert!(!chord_held_from_sample(false, false, false));
+    }
+
+    #[test]
+    fn debounce_requires_n_consecutive_broken_polls() {
+        assert_eq!(BROKEN_POLL_DEBOUNCE_TICKS, 2);
+        let (s1, emit1) = note_broken_poll_tick(0, false);
+        assert_eq!(s1, 1);
+        assert!(!emit1);
+        let (s2, emit2) = note_broken_poll_tick(s1, false);
+        assert_eq!(s2, 2);
+        assert!(emit2);
+    }
+
+    #[test]
+    fn held_sample_resets_broken_streak() {
+        let (s, emit) = note_broken_poll_tick(1, true);
+        assert_eq!(s, 0);
+        assert!(!emit);
+    }
+
+    #[test]
+    fn single_broken_tick_does_not_emit() {
+        // Backup debounce must not fire on one flaky flags read.
+        let (s, emit) = note_broken_poll_tick(0, false);
+        assert_eq!(s, 1);
+        assert!(!emit);
+    }
 }

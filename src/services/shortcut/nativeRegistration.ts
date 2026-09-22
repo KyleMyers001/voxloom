@@ -88,31 +88,54 @@ export function createNativeShortcutController({
   let disposed = false;
   let generation = 0;
   let holdWatchArmed = false;
-  /** True only while Mac hold-release monitor owns finish (arm returned true). */
+  /**
+   * True while the Mac hold-release monitor owns finish. Set **synchronously**
+   * on arm so Carbon Released that arrives before the async invoke resolves is
+   * ignored (Clara: Released-after-arm race). Cleared if arm returns false/fails.
+   */
   let holdWatchMonitoring = false;
+  /** OS Released seen while monitoring was optimistic; flush if arm declines. */
+  let suppressedOsReleased = false;
   let context: ShortcutContext = "product";
   let unlistenHoldRelease: (() => void) | null = null;
+  /** Flush suppressed Carbon Released if arm declines monitoring (non-Mac). */
+  let flushSuppressedOsRelease: (() => void) | null = null;
 
   function disarmHoldWatch() {
     if (!holdWatchArmed) return;
     holdWatchArmed = false;
     holdWatchMonitoring = false;
+    suppressedOsReleased = false;
     void holdRelease.disarm().catch(() => undefined);
   }
 
   function armHoldWatch() {
     if (!active || disposed) return;
     holdWatchArmed = true;
-    holdWatchMonitoring = false;
+    // Optimistic: Carbon Released can finish the hold before async arm/tap
+    // setup completes. Own finish immediately; reconcile when arm resolves.
+    holdWatchMonitoring = true;
+    suppressedOsReleased = false;
     void holdRelease
       .arm(active)
       .then((monitoring) => {
         if (!holdWatchArmed || disposed) return;
         holdWatchMonitoring = monitoring;
+        if (!monitoring && suppressedOsReleased) {
+          // Non-Mac / monitor declined: OS Released remains authoritative.
+          suppressedOsReleased = false;
+          flushSuppressedOsRelease?.();
+        } else {
+          suppressedOsReleased = false;
+        }
       })
       .catch(() => {
         holdWatchArmed = false;
         holdWatchMonitoring = false;
+        if (suppressedOsReleased) {
+          suppressedOsReleased = false;
+          flushSuppressedOsRelease?.();
+        }
       });
   }
 
@@ -137,20 +160,34 @@ export function createNativeShortcutController({
     scheduler,
   });
 
+  flushSuppressedOsRelease = () => {
+    machine.handle("released");
+    disarmHoldWatch();
+  };
+
   const binder: ShortcutBinder = {
     async register(hotkey) {
       const gen = generation;
       await api.register(hotkey, (edge) => {
         if (disposed || gen !== generation) return;
         // While the Mac hold-release monitor owns finish, ignore OS Released.
-        // Carbon often emits a spurious Released on app focus loss; trusting
-        // it tears down listening/overlay even though the chord is still held.
+        // Carbon often emits a spurious Released on app focus loss / ~20ms after
+        // hold-start; trusting it tears down listening/overlay while held.
         if (edge === "released" && holdWatchMonitoring) {
+          suppressedOsReleased = true;
+          if (import.meta.env.DEV) {
+            console.debug("[hold-release] ignore source=carbon-released");
+          }
           return;
         }
         machine.handle(edge);
         // OS Released also tears down the hold watch (non-Mac / pre-monitor).
-        if (edge === "released") disarmHoldWatch();
+        if (edge === "released") {
+          if (import.meta.env.DEV) {
+            console.debug("[hold-release] emit source=carbon-released");
+          }
+          disarmHoldWatch();
+        }
       });
     },
     async unregister(hotkey) {

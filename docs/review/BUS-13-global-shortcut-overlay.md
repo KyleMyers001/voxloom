@@ -92,7 +92,7 @@ Do **not** treat browser unit tests as proof of native global registration.
 | `overlay.html` / `src/overlay/*` | Overlay UI (waveform only) |
 | `src/app/useShortcutGestures.ts` | Native vs document wiring (no native visibility teardown) |
 | `src/services/shortcut/focusPolicy.ts` | Document hide may reset; native-global must not |
-| `src-tauri/src/hold_release.rs` | Mac hold-release monitor; `arm` returns monitoring bool |
+| `src-tauri/src/hold_release.rs` | Mac hold-release monitor; mods-primary poll + debounce; `arm` returns monitoring bool |
 
 
 ## Mac hold-release failure mode (Clara) — fixed this slice
@@ -230,6 +230,59 @@ was already good; local one-register guard had been dropped after pulling
 | C13 | Other-app-focused hold starts and sustains until release | **Human Mac** | Pending re-smoke |
 | C14 | In-progress hold survives Voxloom blur / alt-tab; ends only on release | **Human Mac** | Pending re-smoke |
 
+## Hold-release poll false-fire (Clara Notes-focused) — fixed this slice
+
+**Failure:** On Clara Mac tip (`e21872d` / `db19b09`), Notes-focused
+`Ctrl+Shift+F` hold starts (~320 ms) then **drops immediately** while keys are
+still down — overlay + in-app listening bars vanish together. Not a focus/blur
+reset (that path was already fixed).
+
+**Root cause:**
+
+1. **Primary:** Mac hold-release session-state poll used
+   `CGEventSourceKeyState` for the letter key. Under `RegisterEventHotKey`, that
+   read is **false** even while the key is physically held → poll emits
+   `shortcut:hold-release` ~20 ms after hold-start → session teardown.
+2. **Secondary:** Carbon `HotKey Released` can arrive before async
+   `hold_release_arm` resolves, so `holdWatchMonitoring` was still `false` and
+   OS Released finished the hold. Tap `flagsChanged` without debounce could also
+   false-trigger.
+
+**Fix (Sophie GO / Emma soft constraint):**
+
+1. **Poll primary signal:** required modifiers still down ⇒ chord still held,
+   even when letter `KeyState` is false. Do **not** treat letter-false alone as
+   broken. Short 2-tick broken debounce is **backup only** (flaky flag reads) —
+   never a substitute when mods are still down.
+2. **Sync monitoring:** set `holdWatchMonitoring=true` synchronously on arm
+   (before async tap/invoke completes) so Carbon Released is ignored while
+   armed; if arm later returns `false`, flush any suppressed OS Released so
+   non-Mac stays correct.
+3. **Tap `flagsChanged`:** do not emit release immediately; poll confirms
+   modifier breaks with debounce. Letter key-up from the event tap still finishes
+   (key-first).
+4. **Diag:** one-line emit/ignore source log (`poll` / `tap` / `carbon-released`)
+   in debug/DEV only — no PII.
+
+Preserve: no global Escape; pending-finish race; serialized boot bind; no
+native visibility→`resetPartial`; Emma TS tests still pass.
+
+### Clara re-smoke (Notes hold false-fire) — **do this first**
+
+1. Build/run this PR tip on Mac (packaged or `tauri dev` with entitlements).
+2. Focus **Notes** (not Voxloom). Hold `Ctrl+Shift+F` (or current Settings combo)
+   for **≥1 s** past the ~320 ms threshold.
+3. Overlay + listening must **start and stay up** for the full hold — must **not**
+   vanish ~20 ms after start while keys remain down.
+4. Release **modifiers first**, then the key → overlay/session finish.
+5. Repeat **key-first** (letter up, then mods) → must also finish cleanly.
+6. Confirm Escape is still not stolen globally; cold boot still has no false
+   bind toast (C12).
+
+| # | Item | Owner | Result |
+|---|------|-------|--------|
+| C15 | Notes-focused hold ≥1s stays up until real release (mods-first + key-first) | **Human Mac** | Pending re-smoke |
+
 ## Residual risks
 
 | Residual | Notes |
@@ -244,3 +297,4 @@ was already good; local one-register guard had been dropped after pulling
 | Boot double-setShortcut race | Mitigated: serialize + same-combo no-op; Settings effect skips initial bind (C12) |
 | Focus-gated hold / blur teardown | Mitigated: no native visibility reset; ignore OS Released while Mac hold monitor owns finish; setContext identity no-op (C13/C14) |
 | CGEvent tap may need Accessibility | Session-state poll fallback covers other-app focus without AX; tap is hold-scoped only |
+| Hold-release KeyState false-fire | Mitigated: mods-primary poll + 2-tick debounce backup; sync monitoring ignores early Carbon Released; tap flagsChanged deferred to poll (C15) |
