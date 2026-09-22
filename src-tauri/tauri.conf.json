@@ -10,10 +10,11 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "macOSPrivateApi": false,
+    "macOSPrivateApi": true,
     "security": {
       "capabilities": [
-        "main"
+        "main",
+        "overlay"
       ]
     },
     "windows": [

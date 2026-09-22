@@ -506,6 +506,23 @@ textarea {
   z-index: 10;
 }
 
+.recording--overlay {
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  bottom: auto;
+  left: 50%;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recording--overlay .wave i {
+    animation: none;
+    opacity: 0.85;
+  }
+}
+
+
 .recent-row {
   align-items: center;
   border-top: 1px solid var(--border);
