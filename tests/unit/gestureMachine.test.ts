@@ -114,4 +114,25 @@ describe("createGestureMachine", () => {
     expect(gestures).toEqual(["latch-start", "latch-finish"]);
     machine.dispose();
   });
+
+  it("finishes hold on synthetic Released after Pressed (Mac watch path)", () => {
+    const gestures: ShortcutGesture[] = [];
+    const { flush, scheduler } = makeScheduler();
+    const machine = createGestureMachine({
+      clock: () => 0,
+      holdMs: 320,
+      onGesture: (g) => gestures.push(g),
+      scheduler,
+    });
+    machine.handle("pressed");
+    flush(1);
+    expect(gestures).toEqual(["hold-start"]);
+    // Synthetic Released from hold-release watch (HotKey Released missing).
+    machine.handle("released");
+    expect(gestures).toEqual(["hold-start", "hold-finish"]);
+    // Duplicate Released is a no-op.
+    machine.handle("released");
+    expect(gestures).toEqual(["hold-start", "hold-finish"]);
+    machine.dispose();
+  });
 });

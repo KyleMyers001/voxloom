@@ -1,6 +1,7 @@
 mod capture;
 mod dictionary;
 mod history;
+mod hold_release;
 mod overlay;
 mod settings;
 mod stt;
@@ -163,6 +164,8 @@ pub fn run() {
             dictionary::dictionary_save,
             history::history_load,
             history::history_save,
+            hold_release::hold_release_arm,
+            hold_release::hold_release_disarm,
             overlay::overlay_ensure,
             overlay::overlay_hide,
             overlay::overlay_show,

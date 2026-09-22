@@ -82,6 +82,50 @@ Do **not** treat browser unit tests as proof of native global registration.
 | `overlay.html` / `src/overlay/*` | Overlay UI (waveform only) |
 | `src/app/useShortcutGestures.ts` | Native vs document wiring |
 
+
+## Mac hold-release failure mode (Clara) — fixed this slice
+
+**Failure:** On Clara Mac, `Ctrl+Shift+F` / `Ctrl+Shift+Space` starts hold
+dictation/overlay, but releasing keys never stops it. Carbon
+`RegisterEventHotKey` registers `kEventHotKeyReleased`, yet macOS often never
+delivers Released when modifiers lift first (same class of missing-release bug
+`global-hotkey` addressed on Linux). Secondary: a Released that *does* arrive
+can race before React commits `dictation.kind === "listening"`, so
+`hold-finish` is dropped and the overlay/session sticks.
+
+**Fix (BUS-12 ADR escalation, minimal):**
+
+1. While hold is active (`hold-start`), arm a macOS-only hold-release watch
+   (`src-tauri/src/hold_release.rs`): listen-only CGEvent tap for key-up +
+   flagsChanged on the bound chord, with CGEvent session-state poll fallback
+   when the tap cannot be created. Chord break emits `shortcut:hold-release`
+   → gesture machine `released` → `hold-finish`. Tear-down on hold-finish,
+   latch paths, cancel/error/`resetPartial`/dispose. **No global Escape.**
+2. `createPendingFinishGate` — if finish arrives before listening commits, keep
+   a pending flag and flush once listening lands.
+3. Busy/cancel/error paths still clear overlay + partial gestures (+ pending).
+
+Non-macOS builds expose no-op `hold_release_arm` / `hold_release_disarm` so
+Linux `cargo check` stays green. Insertion remains BUS-14.
+
+### Clara re-smoke (hold-release) — do this first
+
+1. Build/run the PR branch on Mac (packaged or `tauri dev` with entitlements).
+2. Focus **another app** (e.g. TextEdit / Notes).
+3. Hold `Ctrl+Shift+Space` (or current Settings combo) past ~320 ms → overlay
+   appears / listening starts.
+4. **Release modifiers first**, then the key (and also key-first) → overlay
+   must hide and dictation must finish (no stuck listening/processing).
+5. Repeat with a short tap (no hold) and a double-tap latch; confirm latch still
+   finishes on the next activation and Escape is **not** stolen globally.
+6. While listening, open a Voxloom modal / cancel path → overlay + partials
+   clear; no zombie hold watch.
+
+| # | Item | Owner | Result |
+|---|------|-------|--------|
+| C10 | Hold-release: modifiers-first and key-first both stop overlay/session | **Human Mac** | Pending re-smoke |
+| C11 | Pending-finish race: quick release after hold threshold still finishes | **Human Mac** | Pending re-smoke |
+
 ## Residual risks
 
 | Residual | Notes |
@@ -91,3 +135,6 @@ Do **not** treat browser unit tests as proof of native global registration.
 | Linux global-shortcut behavior | Compiles; product claim remains macOS-first |
 | Practice path still focused-window | Intentional per ADR §3 |
 | Insert / delivery | BUS-14 |
+| Mac HotKey Released drop | Mitigated: NSEvent + CGEvent hold-release watch while hold active; Clara C10/C11 |
+| Hold-finish vs listening race | Mitigated: pending-finish gate |
+| CGEvent tap may need Accessibility | Session-state poll fallback covers other-app focus without AX; tap is hold-scoped only |

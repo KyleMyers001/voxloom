@@ -7,6 +7,11 @@ export {
   type KeyEdge,
 } from "./gestureMachine";
 export {
+  HOLD_RELEASE_EVENT,
+  createTauriHoldReleaseApi,
+  type HoldReleaseApi,
+} from "./holdReleaseBridge";
+export {
   createNativeShortcutController,
   createTauriShortcutApi,
   type NativeShortcutApi,
@@ -21,6 +26,11 @@ export {
   isOverlayVisible,
   overlayWaveformFromDictation,
 } from "./overlayVisibility";
+export {
+  createPendingFinishGate,
+  type PendingFinishGate,
+  type PendingFinishGateOptions,
+} from "./pendingFinish";
 export {
   registerOrRevert,
   type RegisterOutcome,

@@ -15,8 +15,10 @@ import { createShortcutController } from
 import {
   createNativeShortcutController,
   createOverlayBridge,
+  createPendingFinishGate,
   type NativeShortcutController,
   type OverlayBridge,
+  type PendingFinishGate,
 } from "../services/shortcut";
 
 interface GestureOptions {
@@ -39,15 +41,31 @@ export function useShortcutGestures(options: GestureOptions) {
   const documentControllerRef = useRef<ShortcutController | null>(null);
   const nativeControllerRef = useRef<NativeShortcutController | null>(null);
   const overlayRef = useRef<OverlayBridge | null>(null);
+  const pendingFinishRef = useRef<PendingFinishGate | null>(null);
   const optionsRef = useRef(options);
   optionsRef.current = options;
+
+  // Shared pending-finish gate (hold release can race React listening commit).
+  if (pendingFinishRef.current === null) {
+    pendingFinishRef.current = createPendingFinishGate({
+      finish: (runId) => optionsRef.current.dictation.finish(runId),
+      listeningRunId: () => {
+        const { dictation } = optionsRef.current.state;
+        return dictation.kind === "listening" ? dictation.runId : null;
+      },
+    });
+  }
 
   // Document mock path (Vite / tests) — always available when not Tauri.
   useEffect(() => {
     if (isTauri()) return;
     const controller = createShortcutController({
       clock: options.now,
-      onGesture: (gesture) => handleGesture(optionsRef.current, gesture),
+      onGesture: (gesture) => handleGesture(
+        optionsRef.current,
+        gesture,
+        pendingFinishRef.current,
+      ),
       shortcut: options.state.settings.shortcut,
       target: document,
     });
@@ -69,7 +87,11 @@ export function useShortcutGestures(options: GestureOptions) {
     if (!isTauri()) return;
     const controller = createNativeShortcutController({
       clock: options.now,
-      onGesture: (gesture) => handleGesture(optionsRef.current, gesture),
+      onGesture: (gesture) => handleGesture(
+        optionsRef.current,
+        gesture,
+        pendingFinishRef.current,
+      ),
       onRegisterFailure: (message) => {
         optionsRef.current.onShortcutError?.(message);
       },
@@ -98,6 +120,7 @@ export function useShortcutGestures(options: GestureOptions) {
     const onVisibility = () => {
       if (document.visibilityState === "hidden") {
         controller.resetPartial();
+        pendingFinishRef.current?.clear();
       }
     };
     document.addEventListener("visibilitychange", onVisibility);
@@ -108,6 +131,7 @@ export function useShortcutGestures(options: GestureOptions) {
       overlayRef.current = null;
       unsubscribe();
       document.removeEventListener("visibilitychange", onVisibility);
+      pendingFinishRef.current?.clear();
       void controller.dispose();
       void overlay.dispose();
     };
@@ -144,14 +168,18 @@ export function useShortcutGestures(options: GestureOptions) {
     const overlay = overlayRef.current;
     if (!overlay) return;
     void overlay.sync(options.state.dictation);
-    // Cancel / error / success clear gesture partials so latch cannot resume.
     const kind = options.state.dictation.kind;
+    if (kind === "listening") {
+      pendingFinishRef.current?.onListening();
+    }
+    // Cancel / error / success clear gesture partials so latch cannot resume.
     if (
       kind === "cancelled" ||
       kind === "error" ||
       kind === "success" ||
       kind === "ready"
     ) {
+      pendingFinishRef.current?.clear();
       nativeControllerRef.current?.resetPartial();
       // Document path resets via context; also clear if mid-hold somehow.
     }
@@ -170,7 +198,11 @@ export function useShortcutGestures(options: GestureOptions) {
   }, [options.dictation, options.state.dictation]);
 }
 
-function handleGesture(options: GestureOptions, gesture: ShortcutGesture) {
+function handleGesture(
+  options: GestureOptions,
+  gesture: ShortcutGesture,
+  pending: PendingFinishGate | null,
+) {
   const { dictation, onboardingOpen, shortcutOpen, state } = options;
   if (shortcutOpen) return;
   if (onboardingOpen && state.onboarding.step === 3) {
@@ -178,7 +210,7 @@ function handleGesture(options: GestureOptions, gesture: ShortcutGesture) {
     return;
   }
   if (onboardingOpen) return;
-  // Busy / processing: ignore start; finish only while listening.
+  // Busy / processing: ignore start; finish only while listening (or pending).
   if (gesture === "hold-start" || gesture === "latch-start") {
     if (
       state.dictation.kind === "listening" ||
@@ -186,11 +218,16 @@ function handleGesture(options: GestureOptions, gesture: ShortcutGesture) {
     ) {
       return;
     }
+    pending?.resetForStart();
     dictation.start();
-  } else if ((gesture === "hold-finish" ||
-      gesture === "latch-finish") &&
-      state.dictation.kind === "listening") {
-    dictation.finish(state.dictation.runId);
+  } else if (gesture === "hold-finish" || gesture === "latch-finish") {
+    if (state.dictation.kind === "listening") {
+      const runId = state.dictation.runId;
+      if (pending) pending.requestFinish(true, runId);
+      else dictation.finish(runId);
+    } else if (pending) {
+      pending.requestFinish(false, null);
+    }
   }
 }
 

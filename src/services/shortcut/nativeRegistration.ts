@@ -4,6 +4,10 @@ import { DOUBLE_TAP_MS, HOLD_MS } from "./constants";
 import { toPluginHotkey } from "./formatHotkey";
 import { createGestureMachine, type GestureMachine } from "./gestureMachine";
 import {
+  createTauriHoldReleaseApi,
+  type HoldReleaseApi,
+} from "./holdReleaseBridge";
+import {
   registerOrRevert,
   type RegisterOutcome,
   type ShortcutBinder,
@@ -63,6 +67,7 @@ export interface NativeShortcutControllerOptions {
   clock: () => number;
   doubleTapMs?: number;
   holdMs?: number;
+  holdRelease?: HoldReleaseApi;
   onGesture: (gesture: ShortcutGesture) => void;
   onRegisterFailure?: (message: string) => void;
   scheduler: Scheduler;
@@ -73,22 +78,52 @@ export function createNativeShortcutController({
   clock,
   doubleTapMs = DOUBLE_TAP_MS,
   holdMs = HOLD_MS,
+  holdRelease = createTauriHoldReleaseApi(),
   onGesture,
   onRegisterFailure,
   scheduler,
 }: NativeShortcutControllerOptions): NativeShortcutController {
-  const machine = createGestureMachine({
-    clock,
-    doubleTapMs,
-    holdMs,
-    onGesture,
-    scheduler,
-  });
-
   let active: string | null = null;
   let lastKnownGood: string | null = null;
   let disposed = false;
   let generation = 0;
+  let holdWatchArmed = false;
+  let unlistenHoldRelease: (() => void) | null = null;
+
+  function disarmHoldWatch() {
+    if (!holdWatchArmed) return;
+    holdWatchArmed = false;
+    void holdRelease.disarm().catch(() => undefined);
+  }
+
+  function armHoldWatch() {
+    if (!active || disposed) return;
+    holdWatchArmed = true;
+    void holdRelease.arm(active).catch(() => {
+      holdWatchArmed = false;
+    });
+  }
+
+  const machine = createGestureMachine({
+    clock,
+    doubleTapMs,
+    holdMs,
+    onGesture: (gesture) => {
+      if (gesture === "hold-start") {
+        // Mac: HotKey Released often missing when modifiers lift first.
+        armHoldWatch();
+      } else if (
+        gesture === "hold-finish" ||
+        gesture === "latch-start" ||
+        gesture === "latch-finish"
+      ) {
+        // Latch paths and hold end do not keep the watch.
+        disarmHoldWatch();
+      }
+      onGesture(gesture);
+    },
+    scheduler,
+  });
 
   const binder: ShortcutBinder = {
     async register(hotkey) {
@@ -96,6 +131,8 @@ export function createNativeShortcutController({
       await api.register(hotkey, (edge) => {
         if (disposed || gen !== generation) return;
         machine.handle(edge);
+        // OS Released also tears down the hold watch.
+        if (edge === "released") disarmHoldWatch();
       });
     },
     async unregister(hotkey) {
@@ -103,10 +140,26 @@ export function createNativeShortcutController({
     },
   };
 
+  // Synthetic Released from Mac hold-release watch → same machine path.
+  void holdRelease.listen(() => {
+    if (disposed) return;
+    machine.handle("released");
+    disarmHoldWatch();
+  }).then((unlisten) => {
+    if (disposed) {
+      unlisten();
+      return;
+    }
+    unlistenHoldRelease = unlisten;
+  }).catch(() => undefined);
+
   return {
     activeHotkey: () => active,
     async dispose() {
       disposed = true;
+      disarmHoldWatch();
+      unlistenHoldRelease?.();
+      unlistenHoldRelease = null;
       machine.dispose();
       generation += 1;
       try {
@@ -118,8 +171,14 @@ export function createNativeShortcutController({
       active = null;
     },
     lastKnownGood: () => lastKnownGood,
-    resetPartial: () => machine.resetPartial(),
-    setContext: (ctx) => machine.setContext(ctx),
+    resetPartial: () => {
+      disarmHoldWatch();
+      machine.resetPartial();
+    },
+    setContext: (ctx) => {
+      disarmHoldWatch();
+      machine.setContext(ctx);
+    },
     async setShortcut(settingsShortcut) {
       if (disposed) {
         return {
@@ -130,6 +189,7 @@ export function createNativeShortcutController({
           ok: false,
         };
       }
+      disarmHoldWatch();
       generation += 1;
       const next = toPluginHotkey(settingsShortcut);
       const outcome = await registerOrRevert({
