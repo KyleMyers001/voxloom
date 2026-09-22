@@ -64,8 +64,8 @@ npm run test:unit
 
 ## Residual risks
 
-- Brief flash of empty dictionary before hydrate on cold start (same class as
-  history/settings hydrate race).
+- Cold-start empty-list flash for Dictionary is addressed by
+  `BUS-boot-hydrate-polish.md` (`bootReady` gate).
 - Corrupt `dictionary.json` recovers to empty on next successful save; no
   dedicated recovery UI.
 - Browser / Vite-only shells stay memory-only (documented).

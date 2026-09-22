@@ -23,10 +23,27 @@ const screens: { glyph: string; label: string; value: Screen }[] = [
   { glyph: "⌘", label: "Settings", value: "settings" },
 ];
 
+
+function BootHydratePlaceholder({ title }: { title: string }) {
+  return (
+    <section aria-busy="true" aria-labelledby="boot-hydrate-title">
+      <div className="hero">
+        <div>
+          <h1 id="boot-hydrate-title">{title}</h1>
+          <p>Loading saved data for this device…</p>
+        </div>
+      </div>
+      <div className="card">
+        <p className="empty-note" role="status">Loading…</p>
+      </div>
+    </section>
+  );
+}
+
 export function App() {
   const {
-    dictation, dispatch, dictionaryDurable, historyDurable, now, settings, settingsDurable, setup,
-    state,
+    bootReady, dictation, dispatch, dictionaryDurable, historyDurable, now, settings,
+    settingsDurable, setup, state,
   } = useApp();
   const [onboardingOpen, setOnboardingOpen] = useState(
     !state.onboarding.complete,
@@ -170,9 +187,21 @@ export function App() {
       </aside>
       <main className="main">
         {state.screen === "home" && <Home onToast={announce} />}
-        {state.screen === "history" && <History onToast={announce} />}
-        {state.screen === "dictionary" && <Dictionary />}
-        {state.screen === "settings" && <Settings onSetup={openSetup} />}
+        {state.screen === "history" && (
+          bootReady
+            ? <History onToast={announce} />
+            : <BootHydratePlaceholder title="History" />
+        )}
+        {state.screen === "dictionary" && (
+          bootReady
+            ? <Dictionary />
+            : <BootHydratePlaceholder title="Dictionary" />
+        )}
+        {state.screen === "settings" && (
+          bootReady
+            ? <Settings onSetup={openSetup} />
+            : <BootHydratePlaceholder title="Settings" />
+        )}
       </main>
       <Waveform />
     </div>

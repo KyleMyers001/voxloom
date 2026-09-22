@@ -7,6 +7,7 @@ import {
   useMemo,
   useReducer,
   useRef,
+  useState,
 } from "react";
 import { initialSettings } from "../domain/fixtures";
 import { createClipboardAdapter, type ClipboardAdapter } from
@@ -44,6 +45,13 @@ import { appReducer, createInitialState, type AppAction, type AppState } from
   "./state";
 
 interface AppContextValue {
+  /**
+   * True after settings/history/dictionary initial load attempts settle
+   * (success or fail-safe). False only while durable boot hydrate is in
+   * flight — gates Settings/History/Dictionary so fixture defaults never
+   * flash.
+   */
+  bootReady: boolean;
   clipboard: ClipboardAdapter;
   dictation: DictationLifecycle;
   dictionary: DictionaryCrud;
@@ -144,9 +152,15 @@ export function AppProvider({
   /** Last successfully saved words — roll back UI on save failure. */
   const lastSavedWordsRef = useRef<string[] | null>(null);
 
+  const needsBootHydrate = settingsPers.enabled
+    || historyPers.enabled
+    || dictionaryPers.enabled;
+  const [bootReady, setBootReady] = useState(!needsBootHydrate);
+
   // Boot: load durable settings first, then dictionary + history (retention
   // hydrated settings). Corrupt settings → defaults + toast; never touch
-  // history.json from the settings path.
+  // history.json from the settings path. Mark bootReady after every path
+  // settles so gated screens never flash fixture defaults / empty lists.
   useEffect(() => {
     let cancelled = false;
 
@@ -210,6 +224,7 @@ export function AppProvider({
       if (!historyPers.enabled) {
         historyHydratedRef.current = true;
         allowHistoryPersistRef.current = false;
+        if (!cancelled) setBootReady(true);
         return;
       }
 
@@ -227,6 +242,7 @@ export function AppProvider({
       }
       historyHydratedRef.current = true;
       historyPersistGenRef.current += 1;
+      if (!cancelled) setBootReady(true);
     })();
 
     return () => {
@@ -366,6 +382,7 @@ export function AppProvider({
   ]);
 
   const value = {
+    bootReady,
     clipboard,
     dictation,
     dictionary,
