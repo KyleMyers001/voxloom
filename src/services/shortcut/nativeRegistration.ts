@@ -153,6 +153,10 @@ export function createNativeShortcutController({
     unlistenHoldRelease = unlisten;
   }).catch(() => undefined);
 
+  // Serialize setShortcut so boot (mount + Settings effects) and Strict Mode
+  // cannot race two RegisterEventHotKey calls for the same combo.
+  let setShortcutQueue: Promise<unknown> = Promise.resolve();
+
   return {
     activeHotkey: () => active,
     async dispose() {
@@ -180,32 +184,49 @@ export function createNativeShortcutController({
       machine.setContext(ctx);
     },
     async setShortcut(settingsShortcut) {
-      if (disposed) {
-        return {
-          active: null,
-          attempted: toPluginHotkey(settingsShortcut),
-          lastKnownGood,
-          message: "Shortcut controller disposed.",
-          ok: false,
-        };
-      }
-      disarmHoldWatch();
-      generation += 1;
       const next = toPluginHotkey(settingsShortcut);
-      const outcome = await registerOrRevert({
-        binder,
-        currentlyBound: active,
-        lastKnownGood,
-        next,
-      });
-      if (outcome.ok) {
-        active = outcome.active;
-        lastKnownGood = outcome.lastKnownGood;
-      } else {
-        active = outcome.active;
-        if (outcome.message) onRegisterFailure?.(outcome.message);
-      }
-      return outcome;
+      const run = async (): Promise<RegisterOutcome> => {
+        if (disposed) {
+          return {
+            active: null,
+            attempted: next,
+            lastKnownGood,
+            message: "Shortcut controller disposed.",
+            ok: false,
+          };
+        }
+        // Same combo already ours (or prior queued call just bound it) —
+        // do not unregister/re-register, bump generation, or toast.
+        if (active === next) {
+          return {
+            active: next,
+            lastKnownGood: lastKnownGood ?? next,
+            ok: true,
+          };
+        }
+        disarmHoldWatch();
+        generation += 1;
+        const outcome = await registerOrRevert({
+          binder,
+          currentlyBound: active,
+          lastKnownGood,
+          next,
+        });
+        if (outcome.ok) {
+          active = outcome.active;
+          lastKnownGood = outcome.lastKnownGood;
+        } else {
+          active = outcome.active;
+          if (outcome.message) onRegisterFailure?.(outcome.message);
+        }
+        return outcome;
+      };
+      const pending = setShortcutQueue.then(run, run);
+      setShortcutQueue = pending.then(
+        () => undefined,
+        () => undefined,
+      );
+      return pending;
     },
   };
 }

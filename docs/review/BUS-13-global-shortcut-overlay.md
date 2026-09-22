@@ -126,6 +126,41 @@ Linux `cargo check` stays green. Insertion remains BUS-14.
 | C10 | Hold-release: modifiers-first and key-first both stop overlay/session | **Human Mac** | Pending re-smoke |
 | C11 | Pending-finish race: quick release after hold threshold still finishes | **Human Mac** | Pending re-smoke |
 
+## Boot double-setShortcut race (Clara) — fixed this slice
+
+**Failure:** On Clara Mac boot (`19d00cc`), mount + Settings-shortcut effects both
+called `setShortcut` for the same combo in parallel. The second
+`RegisterEventHotKey` failed (`RegisterEventHotKey failed for KeyF` / already
+registered). That path toasted “Could not bind…”, bumped `generation` (so the
+first callback was ignored), and could null `active` — after which global hold
+did nothing. Seen with `Ctrl+Shift+F` and Space.
+
+**Fix:**
+
+1. `createNativeShortcutController.setShortcut` **serializes** registrations and
+   **no-ops** when `active === next` (same combo already ours / just bound by a
+   queued call) — no unregister/re-register, no generation bump, no false toast.
+2. `useShortcutGestures` mount effect owns the **initial** bind; the Settings
+   effect only rebinds when the shortcut **changes**.
+3. True conflicts on a **different** combo still register-or-revert to
+   last-known-good and toast honestly (unit-covered).
+
+Hold-release / pending-finish from the prior Mac fix are unchanged.
+
+### Clara re-smoke (boot bind) — do this first
+
+1. Cold-start the PR build once on Mac (packaged or `tauri dev`).
+2. Confirm **no** false “Could not bind…” toast on a free Settings combo.
+3. Focus another app; hold the configured shortcut past ~320 ms → overlay /
+   listening starts; release (modifiers-first and key-first) still finishes
+   (C10/C11).
+4. Optionally change Settings to a free combo then back — rebind works; change
+   to an OS-conflicted combo → honest toast + prior combo kept.
+
+| # | Item | Owner | Result |
+|---|------|-------|--------|
+| C12 | Boot: single bind, no false conflict toast; hold still works | **Human Mac** | Pending re-smoke |
+
 ## Residual risks
 
 | Residual | Notes |
@@ -137,4 +172,5 @@ Linux `cargo check` stays green. Insertion remains BUS-14.
 | Insert / delivery | BUS-14 |
 | Mac HotKey Released drop | Mitigated: NSEvent + CGEvent hold-release watch while hold active; Clara C10/C11 |
 | Hold-finish vs listening race | Mitigated: pending-finish gate |
+| Boot double-setShortcut race | Mitigated: serialize + same-combo no-op; Settings effect skips initial bind (C12) |
 | CGEvent tap may need Accessibility | Session-state poll fallback covers other-app focus without AX; tap is hold-scoped only |

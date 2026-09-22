@@ -137,15 +137,24 @@ export function useShortcutGestures(options: GestureOptions) {
     };
   }, [options.now]);
 
-  // Re-register when Settings shortcut changes (native only).
+  // Re-register when Settings shortcut *changes* (native only).
+  // Mount effect owns the initial bind; skipping that first run avoids a
+  // parallel setShortcut for the same combo on boot (Mac RegisterEventHotKey
+  // race). Controller still serializes setShortcut as a safety net.
+  const boundShortcutRef = useRef<string | null>(null);
   useEffect(() => {
     const native = nativeControllerRef.current;
     if (!native || !isTauri()) return;
+    const shortcut = options.state.settings.shortcut;
+    if (boundShortcutRef.current === null) {
+      boundShortcutRef.current = shortcut;
+      return;
+    }
+    if (boundShortcutRef.current === shortcut) return;
+    boundShortcutRef.current = shortcut;
     let cancelled = false;
     void (async () => {
-      const outcome = await native.setShortcut(
-        options.state.settings.shortcut,
-      );
+      const outcome = await native.setShortcut(shortcut);
       if (cancelled) return;
       if (!outcome.ok && outcome.message) {
         options.onShortcutError?.(outcome.message);
