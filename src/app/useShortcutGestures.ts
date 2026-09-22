@@ -33,7 +33,9 @@ import type {
  * (try/finally) so a failed stop/STT/deliver cannot leave the waveform up.
  * Dogfood terminal (Home Stop / success / error / cancel) also forces overlay
  * clear — do not rely only on gesture finish (Clara: Stop clears capture but
- * waveform stayed). New holds clear leftover listening|processing first.
+ * waveform stayed). New holds force-stop leftover busy dogfood + clear
+ * listening|processing before starting (Clara c9e0df5: 2nd hold ignored as
+ * busy → no overlay, Home stuck on Stop).
  */
 export interface GestureDogfoodBridge {
   cancel: () => void;
@@ -284,21 +286,18 @@ function handleGesture(
     return;
   }
   if (onboardingOpen) return;
-  // Busy capture: ignore start. Leftover listening|processing after dogfood
-  // already reached terminal (Home Stop cleared capture but not overlay)
-  // must be torn down so a later hold can re-arm cleanly.
+  // Prior session still live (Home Stop / missing hold-finish): force-stop
+  // leftover dogfood + clear overlay, then start — never silently ignore as
+  // busy (Clara c9e0df5: 2nd hold showed no overlay while Home stayed Stop).
   if (gesture === "hold-start" || gesture === "latch-start") {
-    if (isDogfoodBusy(dogfood.phase)) {
-      return;
-    }
-    if (
-      state.dictation.kind === "listening" ||
-      state.dictation.kind === "processing"
-    ) {
-      if (!isDogfoodTerminal(dogfood.phase)) {
-        return;
-      }
+    const leftoverListening =
+      state.dictation.kind === "listening"
+      || state.dictation.kind === "processing";
+    if (isDogfoodBusy(dogfood.phase) || leftoverListening) {
       tearDownOverlayDictation(options);
+      // cancel is sync-terminal so Home leaves Stop and start can proceed;
+      // abandoned stuck audio must not block the next hold.
+      dogfood.cancel();
     }
     pending?.resetForStart();
     // Overlay first (sync), then real capture. dogfood.start snapshots the

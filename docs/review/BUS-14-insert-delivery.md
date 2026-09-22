@@ -115,10 +115,29 @@ leftover listening|processing when dogfood is already terminal.
 
 | # | Step | Expected |
 |---|------|----------|
-| R1 | Notes focused → **two** global hold→release cycles in a row | Each release: overlay **clears**, Home back to **Start** (no kill) |
-| R1b | Optional third hold→release | Same — overlay clear + Start |
+| R1 | Notes focused → **two** global hold→release cycles in a row | Each **press**: overlay **shows**; each **release**: overlay **clears** + Home **Start** (no kill, no click Stop) |
+| R1b | Optional third hold→release | Same — overlay on press, clear + Start on release |
 | R2 | Then Notes Inserted smoke (hold while Notes focused) | Toast **Inserted** (or truthful Copied/Failed); History row matches |
 | R3 | If overlay ever sticks: in-app Stop | Capture ends **and** overlay clears (not Stop-only) |
+
+**Gate:** Clara must pass **two** clean hold→release (Start + overlay clear) before Notes Inserted (R2).
+
+### Clara failure — c9e0df5 still FAILS R1
+
+On tip `c9e0df5` (generation-serialized arm/disarm alone): **1st** hold→release OK;
+**2nd** hold showed **no overlay at all**, Home stayed on **Stop** (dogfood never
+stopped) ⇒ `hold-finish` / `endGestureCapture` never ran between sessions. Kyle
+clicks in-app Stop to recover. Root: while `holdWatchMonitoring` was true, **all**
+Carbon `Released` edges were ignored; finish depended only on Rust poll/tap. If
+the 2nd-session watch missed release, finish never fired. Next `hold-start` was
+silently ignored as `isDogfoodBusy` → no overlay.
+
+**Fix (this SHA):** (1) suppress Carbon Released only during a short post-arm
+grace (~80ms); after grace Carbon calls `released` + disarm as **backup** finish;
+(2) on new `hold-start`, if prior dogfood is still busy / leftover listening,
+`dogfood.cancel` + overlay clear **before** starting (never ignore as busy);
+(3) keep dogfood terminal + Home Stop force-clearing overlay; (4) arm failure
+clears monitoring immediately.
 
 ### Linux / CI verification
 
@@ -153,5 +172,6 @@ Do **not** treat browser unit tests as proof of native AX insert.
 | Paste-via-⌘V path not used in v1 (AX only) | ADR allows paste without Enter; deferred if AX set fails broadly |
 | Home Start while Voxloom focused | Expected **Copied**; use global hold for Notes Inserted smoke |
 | Stuck overlay after release (pre-fix) | Fixed: unconditional tear-down on finish/cancel/error (try/finally) |
-| 2nd/3rd hold stuck (6f1ada8) | Fixed: serialized hold-watch arm/disarm + terminal overlay force-hide |
+| 2nd/3rd hold stuck (6f1ada8) | Serialized arm/disarm alone insufficient (c9e0df5 still failed R1) |
+| 2nd hold no overlay + Home Stop (c9e0df5) | Fixed: Carbon Released backup after grace + force-stop leftover busy on hold-start |
 | Windows adapter | Stub only; replaceable boundary ready |

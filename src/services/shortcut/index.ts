@@ -1,4 +1,9 @@
-export { DOUBLE_TAP_MS, HOLD_MS, OVERLAY_WINDOW_LABEL } from "./constants";
+export {
+  DOUBLE_TAP_MS,
+  HOLD_MS,
+  HOLD_RELEASE_CARBON_GRACE_MS,
+  OVERLAY_WINDOW_LABEL,
+} from "./constants";
 export {
   shouldResetGesturesOnDocumentHidden,
   type ShortcutInputSource,

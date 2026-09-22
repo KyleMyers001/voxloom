@@ -195,15 +195,16 @@ describe("useShortcutGestures", () => {
       act(() => {
         vi.advanceTimersByTime(320);
       });
-      // Already listening — start ignored; machine still entered holding.
-      expect(dictation.start).not.toHaveBeenCalled();
+      // Leftover listening is force-cleared then a new start runs.
+      expect(dictation.cancel).toHaveBeenCalled();
+      expect(dictation.start).toHaveBeenCalledOnce();
 
       act(() => {
         setVisibility("hidden");
         document.dispatchEvent(new Event("visibilitychange"));
         document.dispatchEvent(shortcutEvent("keyup"));
       });
-      // Without hide-reset, keyup would emit hold-finish → finish(runId).
+      // Document hide resets partial; never invent Inserted via finish().
       expect(dictation.finish).not.toHaveBeenCalled();
 
       unmount();
@@ -661,16 +662,35 @@ describe("useShortcutGestures", () => {
       unmount();
     });
 
-    it("ignores hold-start while dogfood is already recording", () => {
+    it("force-stops leftover recording dogfood then starts a new hold", () => {
       vi.mocked(isTauri).mockReturnValue(false);
       vi.useFakeTimers();
       let now = 0;
       const dictation = makeDictation();
       const dogfood = makeDogfood({ phase: "recording" });
+      const state: AppState = {
+        ...createInitialState(0),
+        dictation: {
+          kind: "listening",
+          runId: 7,
+          waveform: "speaking",
+        },
+      };
       const options = makeOptions({
         dictation,
         dogfood,
         now: () => now,
+        state,
+      });
+      vi.mocked(dictation.cancel).mockImplementation((runId) => {
+        state.dictation = { kind: "cancelled", runId };
+      });
+      vi.mocked(dictation.start).mockImplementation(() => {
+        state.dictation = {
+          kind: "listening",
+          runId: 8,
+          waveform: "silent",
+        };
       });
       const { unmount } = renderHook(() => useShortcutGestures(options));
 
@@ -682,8 +702,14 @@ describe("useShortcutGestures", () => {
         vi.advanceTimersByTime(320);
       });
 
-      expect(dictation.start).not.toHaveBeenCalled();
-      expect(vi.mocked(dogfood.start)).not.toHaveBeenCalled();
+      // Clara c9e0df5: do not silently ignore busy — abandon prior, start new.
+      expect(dogfood.cancel).toHaveBeenCalledOnce();
+      expect(dictation.cancel).toHaveBeenCalledWith(7);
+      expect(dictation.start).toHaveBeenCalledOnce();
+      expect(vi.mocked(dogfood.start)).toHaveBeenCalledOnce();
+      expect(
+        state.dictation.kind === "listening" && state.dictation.runId,
+      ).toBe(8);
 
       unmount();
     });

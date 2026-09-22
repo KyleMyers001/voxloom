@@ -1,6 +1,10 @@
 import { isTauri } from "@tauri-apps/api/core";
 import type { Scheduler, ShortcutContext, ShortcutGesture } from "../contracts";
-import { DOUBLE_TAP_MS, HOLD_MS } from "./constants";
+import {
+  DOUBLE_TAP_MS,
+  HOLD_MS,
+  HOLD_RELEASE_CARBON_GRACE_MS,
+} from "./constants";
 import { toPluginHotkey } from "./formatHotkey";
 import { createGestureMachine, type GestureMachine } from "./gestureMachine";
 import {
@@ -64,6 +68,11 @@ export interface NativeShortcutController {
 
 export interface NativeShortcutControllerOptions {
   api?: NativeShortcutApi;
+  /**
+   * Post-arm ms to ignore Carbon Released (spurious focus race). After this,
+   * Carbon Released finishes even while the Mac poll/tap watch monitors.
+   */
+  carbonReleaseGraceMs?: number;
   clock: () => number;
   doubleTapMs?: number;
   holdMs?: number;
@@ -75,6 +84,7 @@ export interface NativeShortcutControllerOptions {
 
 export function createNativeShortcutController({
   api = createTauriShortcutApi(),
+  carbonReleaseGraceMs = HOLD_RELEASE_CARBON_GRACE_MS,
   clock,
   doubleTapMs = DOUBLE_TAP_MS,
   holdMs = HOLD_MS,
@@ -89,12 +99,15 @@ export function createNativeShortcutController({
   let generation = 0;
   let holdWatchArmed = false;
   /**
-   * True while the Mac hold-release monitor owns finish. Set **synchronously**
-   * on arm so Carbon Released that arrives before the async invoke resolves is
-   * ignored (Clara: Released-after-arm race). Cleared if arm returns false/fails.
+   * True while the Mac hold-release poll/tap watch is the *primary* finish
+   * path. Carbon Released is only suppressed during a short post-arm grace;
+   * after grace it is a backup finish (Clara: dead 2nd-session watch).
    */
   let holdWatchMonitoring = false;
-  /** OS Released seen while monitoring was optimistic; flush if arm declines. */
+  /** Suppress Carbon Released only during post-arm grace (spurious focus). */
+  let carbonReleaseGraceActive = false;
+  let carbonReleaseGraceTimer: number | null = null;
+  /** OS Released seen during grace; flush if arm declines monitoring. */
   let suppressedOsReleased = false;
   let context: ShortcutContext = "product";
   let unlistenHoldRelease: (() => void) | null = null;
@@ -102,14 +115,31 @@ export function createNativeShortcutController({
   let flushSuppressedOsRelease: (() => void) | null = null;
   /**
    * Generation + serial queue so a late disarm from hold N cannot kill the
-   * Rust watch for hold N+1 (Clara: 2nd hold stuck — monitoring true, watch
-   * dead, Carbon Released ignored, endGestureCapture never runs).
+   * Rust watch for hold N+1. Alone this was not enough on device (c9e0df5);
+   * Carbon backup after grace is required.
    */
   let holdWatchGeneration = 0;
   let holdWatchChain: Promise<void> = Promise.resolve();
 
   function enqueueHoldWatch(op: () => Promise<void>): void {
     holdWatchChain = holdWatchChain.then(op, op);
+  }
+
+  function clearCarbonReleaseGrace() {
+    if (carbonReleaseGraceTimer !== null) {
+      scheduler.clear(carbonReleaseGraceTimer);
+      carbonReleaseGraceTimer = null;
+    }
+    carbonReleaseGraceActive = false;
+  }
+
+  function beginCarbonReleaseGrace() {
+    clearCarbonReleaseGrace();
+    carbonReleaseGraceActive = true;
+    carbonReleaseGraceTimer = scheduler.set(() => {
+      carbonReleaseGraceTimer = null;
+      carbonReleaseGraceActive = false;
+    }, carbonReleaseGraceMs);
   }
 
   function disarmHoldWatch() {
@@ -119,6 +149,7 @@ export function createNativeShortcutController({
     holdWatchArmed = false;
     holdWatchMonitoring = false;
     suppressedOsReleased = false;
+    clearCarbonReleaseGrace();
     const gen = ++holdWatchGeneration;
     enqueueHoldWatch(async () => {
       if (gen !== holdWatchGeneration) return;
@@ -131,10 +162,11 @@ export function createNativeShortcutController({
     const hotkey = active;
     const gen = ++holdWatchGeneration;
     holdWatchArmed = true;
-    // Optimistic: Carbon Released can finish the hold before async arm/tap
-    // setup completes. Own finish immediately; reconcile when arm resolves.
+    // Optimistic monitoring for poll/tap primary; grace covers the known
+    // Carbon Released-after-arm spurious edge (~20ms focus race).
     holdWatchMonitoring = true;
     suppressedOsReleased = false;
+    beginCarbonReleaseGrace();
     enqueueHoldWatch(async () => {
       if (gen !== holdWatchGeneration || disposed) return;
       try {
@@ -146,17 +178,22 @@ export function createNativeShortcutController({
         }
         holdWatchArmed = true;
         holdWatchMonitoring = monitoring;
-        if (!monitoring && suppressedOsReleased) {
+        if (!monitoring) {
           // Non-Mac / monitor declined: OS Released remains authoritative.
-          suppressedOsReleased = false;
-          flushSuppressedOsRelease?.();
+          clearCarbonReleaseGrace();
+          if (suppressedOsReleased) {
+            suppressedOsReleased = false;
+            flushSuppressedOsRelease?.();
+          }
         } else {
           suppressedOsReleased = false;
         }
       } catch {
         if (gen !== holdWatchGeneration || disposed) return;
+        // Arm failed — never leave monitoring=true with a dead watch.
         holdWatchArmed = false;
         holdWatchMonitoring = false;
+        clearCarbonReleaseGrace();
         if (suppressedOsReleased) {
           suppressedOsReleased = false;
           flushSuppressedOsRelease?.();
@@ -186,9 +223,16 @@ export function createNativeShortcutController({
     scheduler,
   });
 
-  flushSuppressedOsRelease = () => {
+  function finishFromCarbonReleased() {
+    if (import.meta.env.DEV) {
+      console.debug("[hold-release] emit source=carbon-released");
+    }
     machine.handle("released");
     disarmHoldWatch();
+  }
+
+  flushSuppressedOsRelease = () => {
+    finishFromCarbonReleased();
   };
 
   const binder: ShortcutBinder = {
@@ -196,24 +240,25 @@ export function createNativeShortcutController({
       const gen = generation;
       await api.register(hotkey, (edge) => {
         if (disposed || gen !== generation) return;
-        // While the Mac hold-release monitor owns finish, ignore OS Released.
-        // Carbon often emits a spurious Released on app focus loss / ~20ms after
-        // hold-start; trusting it tears down listening/overlay while held.
-        if (edge === "released" && holdWatchMonitoring) {
+        // Post-arm grace only: ignore spurious Carbon Released (~focus loss).
+        // After grace, Carbon is backup finish even while poll/tap monitors —
+        // a dead 2nd-session Rust watch must not leave Home on Stop forever.
+        if (
+          edge === "released"
+          && holdWatchMonitoring
+          && carbonReleaseGraceActive
+        ) {
           suppressedOsReleased = true;
           if (import.meta.env.DEV) {
             console.debug("[hold-release] ignore source=carbon-released");
           }
           return;
         }
-        machine.handle(edge);
-        // OS Released also tears down the hold watch (non-Mac / pre-monitor).
         if (edge === "released") {
-          if (import.meta.env.DEV) {
-            console.debug("[hold-release] emit source=carbon-released");
-          }
-          disarmHoldWatch();
+          finishFromCarbonReleased();
+          return;
         }
+        machine.handle(edge);
       });
     },
     async unregister(hotkey) {
