@@ -5,6 +5,13 @@ import type {
   ShortcutGesture,
 } from "./contracts";
 
+/**
+ * Focused-window mock gesture controller (document keydown/keyup).
+ * Hold 320ms / double-tap 260ms are provisional native targets — see
+ * docs/decisions/native-shortcut-cancel-focus.md (BUS-12). This is not
+ * OS-wide registration; native wiring is BUS-13.
+ */
+
 interface ShortcutOptions {
   clock: () => number;
   doubleTapMs?: number;
