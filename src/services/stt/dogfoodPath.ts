@@ -1,12 +1,19 @@
-/// Dogfood STT path: capture audio handle → selected model → Copy sink.
-/// No insert / gestures. Model must already be selected (and usually
-/// downloaded); this module never starts a download.
-/// Copy is soft-fail: STT success still returns the transcript if clipboard
-/// write fails (WebKit activation loss after async STT).
+/// Dogfood STT path: capture audio handle → selected model → delivery.
+/// Prefer insert (BUS-14); Copy sink remains the reliable floor.
+/// No gestures. Model must already be selected; never starts a download.
+/// Delivery soft-fails: STT success still returns the transcript when
+/// insert/Copy cannot complete (manual recovery always available).
 
 import type { ClipboardAdapter } from "../clipboard";
+import {
+  createStubDeliveryAdapter,
+  createTauriDeliveryAdapter,
+  deliverTranscript,
+  type DeliveryOutcome,
+  type DeliveryPlatformAdapter,
+  type TargetSnapshot,
+} from "../delivery";
 import type { SttEngine } from "./contracts";
-import { copyTranscript } from "./copySink";
 import { audioHandleFromCapture } from "./fromCapture";
 import { createSttEngine } from "./factory";
 import { resolveTranscriptionModelId } from "./resolveModelId";
@@ -23,27 +30,55 @@ export interface DogfoodTranscribeOptions {
   audio: CaptureAudioMeta;
   clipboard: ClipboardAdapter;
   /**
+   * Settings `clipboardFallback`. Default true (fixtures / ADR).
+   * When false, insert failure surfaces Failed + manual recovery — no Copy.
+   */
+  clipboardFallback?: boolean;
+  /**
+   * Invocation-time intended target snapshot (ADR §4).
+   * When omitted, delivery treats the target as unavailable → Copy/Fail.
+   */
+  intended?: TargetSnapshot | null;
+  /**
    * Explicit selected model id (Settings `transcriptionModel`).
    * Resolved via `resolveTranscriptionModelId` — never auto-downloaded.
    */
   modelId: string;
   /** Optional engine factory (tests); defaults to env whisper/mock. */
   createEngine?: (modelId: string) => SttEngine;
+  /** Injectable delivery platform (tests). */
+  deliveryPlatform?: DeliveryPlatformAdapter;
 }
 
 export interface DogfoodResult {
-  /** True when the Copy sink wrote successfully. */
+  /**
+   * True when Copy (clipboard write) completed successfully.
+   * Kept for older callers; prefer `delivery.status`.
+   */
   copied: boolean;
-  /** Present when STT succeeded but Copy failed (soft-fail). */
+  /** Present when STT succeeded but Copy/delivery soft-failed. */
   copyWarning?: string;
+  /** Evidence-backed delivery outcome (Inserted / Copied / Failed). */
+  delivery: DeliveryOutcome;
   transcript: Transcript;
+}
+
+function resolvePlatform(
+  clipboard: ClipboardAdapter,
+  injected?: DeliveryPlatformAdapter,
+): DeliveryPlatformAdapter {
+  if (injected) return injected;
+  try {
+    return createTauriDeliveryAdapter(clipboard);
+  } catch {
+    return createStubDeliveryAdapter({ clipboard });
+  }
 }
 
 /**
  * Transcribe a deposited capture buffer with the **selected** model and
- * copy the transcript. Copy sink only — no insert.
- * Soft-fails Copy: STT success always returns `transcript` even if clipboard
- * write throws.
+ * deliver via insert-preferring policy (Copy floor). Soft-fails delivery:
+ * STT success always returns `transcript` even if insert/Copy throws.
  */
 export async function dogfoodTranscribeAndCopy(
   options: DogfoodTranscribeOptions,
@@ -52,13 +87,40 @@ export async function dogfoodTranscribeAndCopy(
   const engine = (options.createEngine ?? createSttEngine)(modelId);
   const handle = audioHandleFromCapture(options.audio);
   const transcript = await engine.transcribe(handle);
+
+  const platform = resolvePlatform(
+    options.clipboard,
+    options.deliveryPlatform,
+  );
+  const clipboardFallback = options.clipboardFallback !== false;
+
   try {
-    await copyTranscript(transcript, options.clipboard);
-    return { copied: true, transcript };
+    const delivery = await deliverTranscript({
+      clipboardFallback,
+      intended: options.intended ?? null,
+      platform,
+      text: transcript.text,
+    });
+    return {
+      copied: delivery.status === "copied",
+      copyWarning: delivery.status === "failed"
+        ? (delivery.detail ?? delivery.message)
+        : undefined,
+      delivery,
+      transcript,
+    };
   } catch (error: unknown) {
     const copyWarning = error instanceof Error
       ? error.message
       : String(error);
-    return { copied: false, copyWarning, transcript };
+    const delivery: DeliveryOutcome = {
+      clipboardRestored: false,
+      detail: copyWarning,
+      message: `Failed — ${copyWarning}`,
+      restoreSkippedReason: null,
+      status: "failed",
+      text: transcript.text,
+    };
+    return { copied: false, copyWarning, delivery, transcript };
   }
 }

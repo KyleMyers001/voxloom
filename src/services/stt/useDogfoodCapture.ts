@@ -1,5 +1,6 @@
 /// Wire full capture stop → dogfoodTranscribeAndCopy on the main UI.
-/// Automatic STT + Copy after a clean stop; cancel discards with no STT.
+/// Automatic STT + delivery after a clean stop; cancel discards with no STT.
+/// Snapshots intended target at capture start (ADR §4 invocation policy).
 /// Never silent-downloads missing models — surfaces a clear UI error instead.
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -7,6 +8,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createDogfoodRecord } from "../../domain/records";
 import type { DictationRecord, WritingStyle } from "../../domain/types";
 import type { ClipboardAdapter } from "../clipboard";
+import {
+  createStubDeliveryAdapter,
+  createTauriDeliveryAdapter,
+  type DeliveryPlatformAdapter,
+  type TargetSnapshot,
+} from "../delivery";
 import {
   SYSTEM_DEFAULT_DEVICE_ID,
   type CaptureState,
@@ -34,6 +41,8 @@ export type DogfoodPhase =
 
 export interface UseDogfoodCaptureOptions {
   clipboard: ClipboardAdapter;
+  /** Settings `clipboardFallback` (default true). */
+  clipboardFallback?: boolean;
   /** Settings `transcriptionModel` (resolved before STT). */
   modelId: string;
   /** Clock for history `createdAt` (defaults to Date.now). */
@@ -55,11 +64,15 @@ export interface UseDogfoodCaptureOptions {
   createModelStore?: () => SttModelStore;
   /** Test seam: dogfood path. */
   dogfood?: typeof dogfoodTranscribeAndCopy;
+  /** Test seam: delivery platform (snapshot / insert / clipboard). */
+  deliveryPlatform?: DeliveryPlatformAdapter;
 }
 
 export interface UseDogfoodCaptureResult {
   cancel: () => void;
   captureState: CaptureState;
+  /** Invocation-time intended target (null until start snapshots). */
+  intendedTarget: TargetSnapshot | null;
   message: string | null;
   phase: DogfoodPhase;
   start: () => Promise<void>;
@@ -90,6 +103,18 @@ function missingModelMessage(modelId: string, status: string | null): string {
   );
 }
 
+function resolvePlatform(
+  clipboard: ClipboardAdapter,
+  injected?: DeliveryPlatformAdapter,
+): DeliveryPlatformAdapter {
+  if (injected) return injected;
+  try {
+    return createTauriDeliveryAdapter(clipboard);
+  } catch {
+    return createStubDeliveryAdapter({ clipboard });
+  }
+}
+
 export function useDogfoodCapture(
   options: UseDogfoodCaptureOptions,
 ): UseDogfoodCaptureResult {
@@ -99,6 +124,8 @@ export function useDogfoodCapture(
   const [phase, setPhase] = useState<DogfoodPhase>("idle");
   const [message, setMessage] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<Transcript | null>(null);
+  const [intendedTarget, setIntendedTarget] =
+    useState<TargetSnapshot | null>(null);
 
   const dogfoodRef = useRef(options.dogfood ?? dogfoodTranscribeAndCopy);
   dogfoodRef.current = options.dogfood ?? dogfoodTranscribeAndCopy;
@@ -113,6 +140,8 @@ export function useDogfoodCapture(
   modelIdRef.current = options.modelId;
   const clipboardRef = useRef(options.clipboard);
   clipboardRef.current = options.clipboard;
+  const clipboardFallbackRef = useRef(options.clipboardFallback !== false);
+  clipboardFallbackRef.current = options.clipboardFallback !== false;
   const toastRef = useRef(options.onToast);
   toastRef.current = options.onToast;
   const historyRef = useRef(options.onHistoryRecord);
@@ -121,6 +150,14 @@ export function useDogfoodCapture(
   styleRef.current = options.style ?? "formal";
   const nowRef = useRef(options.now ?? Date.now);
   nowRef.current = options.now ?? Date.now;
+  const platformRef = useRef<DeliveryPlatformAdapter>(
+    resolvePlatform(options.clipboard, options.deliveryPlatform),
+  );
+  platformRef.current = resolvePlatform(
+    options.clipboard,
+    options.deliveryPlatform,
+  );
+  const intendedRef = useRef<TargetSnapshot | null>(null);
 
   const announce = useCallback((text: string) => {
     setMessage(text);
@@ -147,32 +184,26 @@ export function useDogfoodCapture(
       const result = await dogfoodRef.current({
         audio,
         clipboard: clipboardRef.current,
+        clipboardFallback: clipboardFallbackRef.current,
+        deliveryPlatform: platformRef.current,
+        intended: intendedRef.current,
         modelId,
       });
       setTranscript(result.transcript);
       setPhase("success");
       const record = createDogfoodRecord({
-        copied: result.copied,
         durationMs: audio.duration_ms,
         id: `dogfood-${audio.id}`,
         model: modelId,
         now: nowRef.current(),
+        status: result.delivery.status,
         style: styleRef.current,
         text: result.transcript.text,
       });
       if (record) {
         historyRef.current?.(record);
       }
-      if (result.copied) {
-        announce("Transcript copied to clipboard");
-      } else {
-        const detail = result.copyWarning
-          ? `: ${result.copyWarning}`
-          : "";
-        announce(
-          `Transcript ready, but clipboard copy failed${detail}`,
-        );
-      }
+      announce(result.delivery.message);
     } catch (error: unknown) {
       setPhase("error");
       announce(errorText(error));
@@ -216,6 +247,16 @@ export function useDogfoodCapture(
       return;
     }
 
+    // ADR §4: snapshot intended target at invocation (capture start).
+    try {
+      const snap = await platformRef.current.snapshotTarget();
+      intendedRef.current = snap;
+      setIntendedTarget(snap);
+    } catch {
+      intendedRef.current = null;
+      setIntendedTarget(null);
+    }
+
     const deviceId = options.preferredDeviceId
       && options.preferredDeviceId !== SYSTEM_DEFAULT_DEVICE_ID
       ? options.preferredDeviceId
@@ -237,6 +278,8 @@ export function useDogfoodCapture(
 
   const cancel = useCallback(() => {
     handledAudioIdRef.current = null;
+    intendedRef.current = null;
+    setIntendedTarget(null);
     capture.cancelActiveCapture();
     setPhase("cancelled");
     setMessage("Capture cancelled — nothing transcribed.");
@@ -245,6 +288,7 @@ export function useDogfoodCapture(
   return {
     cancel,
     captureState: capture.captureState,
+    intendedTarget,
     message,
     phase,
     start,
@@ -252,3 +296,4 @@ export function useDogfoodCapture(
     transcript,
   };
 }
+

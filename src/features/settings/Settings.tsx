@@ -295,7 +295,7 @@ export function Settings({ onSetup }: SettingsProps) {
               })}
               type="checkbox"
             />
-            Use clipboard if simulated direct insertion fails
+            Use clipboard if direct insertion fails
           </label>
 
           <div className="field">

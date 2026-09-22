@@ -1,0 +1,184 @@
+// @vitest-environment node
+import { describe, expect, it, vi } from "vitest";
+import { deliverTranscript } from "../../../src/services/delivery/deliver";
+import type {
+  DeliveryPlatformAdapter,
+  TargetSnapshot,
+} from "../../../src/services/delivery/types";
+
+function snap(partial: Partial<TargetSnapshot> = {}): TargetSnapshot {
+  return {
+    appName: "TextEdit",
+    appPid: 42,
+    capturedAt: 1,
+    elementId: "42:AXTextArea:",
+    elementRole: "AXTextArea",
+    insertable: true,
+    kind: "insertable",
+    reason: null,
+    ...partial,
+  };
+}
+
+function adapter(
+  overrides: Partial<DeliveryPlatformAdapter> = {},
+): DeliveryPlatformAdapter {
+  const intended = snap();
+  return {
+    clipboardRead: vi.fn().mockResolvedValue({ ok: true, text: "ours" }),
+    clipboardRestore: vi.fn().mockResolvedValue(undefined),
+    clipboardWrite: vi.fn().mockResolvedValue(undefined),
+    insertText: vi.fn().mockResolvedValue(undefined),
+    snapshotTarget: vi.fn().mockResolvedValue(intended),
+    validateTarget: vi.fn().mockResolvedValue(intended),
+    ...overrides,
+  };
+}
+
+describe("deliverTranscript", () => {
+  it("emits Inserted only when insert completes", async () => {
+    const platform = adapter();
+    const outcome = await deliverTranscript({
+      clipboardFallback: true,
+      intended: snap(),
+      platform,
+      text: "hello",
+    });
+    expect(outcome.status).toBe("inserted");
+    expect(outcome.message).toBe("Inserted");
+    expect(platform.insertText).toHaveBeenCalledWith("hello", snap());
+    expect(platform.clipboardWrite).not.toHaveBeenCalled();
+  });
+
+  it("refuses secure target → Copied with truthful reason", async () => {
+    const secure = snap({
+      insertable: false,
+      kind: "secure",
+      reason: "secure field — insert skipped",
+    });
+    const platform = adapter({
+      validateTarget: vi.fn().mockResolvedValue(secure),
+      clipboardRead: vi.fn().mockResolvedValue({
+        ok: true,
+        text: "secret dictation",
+      }),
+    });
+    const outcome = await deliverTranscript({
+      clipboardFallback: true,
+      intended: snap(),
+      platform,
+      text: "secret dictation",
+    });
+    expect(outcome.status).toBe("copied");
+    expect(outcome.message).toMatch(/^Copied —/);
+    expect(outcome.message).toMatch(/secure/);
+    expect(platform.insertText).not.toHaveBeenCalled();
+    expect(platform.clipboardWrite).toHaveBeenCalledWith("secret dictation");
+  });
+
+  it("wrong/changed target never inserts", async () => {
+    const changed = snap({
+      insertable: false,
+      kind: "changed",
+      reason: "target changed",
+    });
+    const platform = adapter({
+      validateTarget: vi.fn().mockResolvedValue(changed),
+      clipboardRead: vi.fn().mockResolvedValue({ ok: true, text: "x" }),
+    });
+    const outcome = await deliverTranscript({
+      clipboardFallback: true,
+      intended: snap(),
+      platform,
+      text: "x",
+    });
+    expect(platform.insertText).not.toHaveBeenCalled();
+    expect(outcome.status).toBe("copied");
+    expect(outcome.message).toMatch(/changed/);
+  });
+
+  it("clipboard fallback off → Failed with manual recovery", async () => {
+    const closed = snap({
+      insertable: false,
+      kind: "closed",
+      reason: "original app closed",
+    });
+    const platform = adapter({
+      validateTarget: vi.fn().mockResolvedValue(closed),
+    });
+    const outcome = await deliverTranscript({
+      clipboardFallback: false,
+      intended: snap(),
+      platform,
+      text: "recover me",
+    });
+    expect(outcome.status).toBe("failed");
+    expect(outcome.message).toMatch(/^Failed —/);
+    expect(outcome.message).toMatch(/manual Copy/i);
+    expect(outcome.text).toBe("recover me");
+    expect(platform.clipboardWrite).not.toHaveBeenCalled();
+  });
+
+  it("insert API failure falls back to Copy when enabled", async () => {
+    const platform = adapter({
+      insertText: vi.fn().mockRejectedValue(new Error("AX set failed")),
+      clipboardRead: vi.fn().mockResolvedValue({
+        ok: true,
+        text: "fallback text",
+      }),
+    });
+    const outcome = await deliverTranscript({
+      clipboardFallback: true,
+      intended: snap(),
+      platform,
+      text: "fallback text",
+    });
+    expect(outcome.status).toBe("copied");
+    expect(outcome.message).toMatch(/insert failed/);
+  });
+
+  it("clipboard write failure → Failed recoverable messaging", async () => {
+    const unavailable = snap({
+      insertable: false,
+      kind: "unavailable",
+      reason: "no AX",
+    });
+    const platform = adapter({
+      validateTarget: vi.fn().mockResolvedValue(unavailable),
+      clipboardWrite: vi.fn().mockRejectedValue(new Error("Clipboard unavailable")),
+    });
+    const outcome = await deliverTranscript({
+      clipboardFallback: true,
+      intended: snap(),
+      platform,
+      text: "keep me",
+    });
+    expect(outcome.status).toBe("failed");
+    expect(outcome.message).toMatch(/clipboard unavailable/i);
+    expect(outcome.text).toBe("keep me");
+  });
+
+  it("clipboard conflict after write → Failed (no false Copied)", async () => {
+    const unavailable = snap({
+      insertable: false,
+      kind: "unavailable",
+      reason: "no AX",
+    });
+    const platform = adapter({
+      validateTarget: vi.fn().mockResolvedValue(unavailable),
+      clipboardRead: vi.fn().mockResolvedValue({
+        ok: true,
+        text: "user intervened",
+      }),
+    });
+    const outcome = await deliverTranscript({
+      clipboardFallback: true,
+      intended: null,
+      platform,
+      text: "ours",
+    });
+    expect(outcome.status).toBe("failed");
+    expect(outcome.message).toMatch(/changed after write/i);
+    expect(outcome.restoreSkippedReason).toMatch(/changed/);
+  });
+});

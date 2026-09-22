@@ -1,4 +1,5 @@
 mod capture;
+mod delivery;
 mod dictionary;
 mod history;
 mod hold_release;
@@ -160,6 +161,9 @@ pub fn run() {
             capture_start,
             capture_status,
             capture_stop,
+            delivery::delivery_insert_text,
+            delivery::delivery_snapshot_target,
+            delivery::delivery_validate_target,
             dictionary::dictionary_load,
             dictionary::dictionary_save,
             history::history_load,

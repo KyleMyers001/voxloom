@@ -18,6 +18,27 @@ function clipboard(): ClipboardAdapter {
   return { copy: vi.fn().mockResolvedValue(undefined) };
 }
 
+function deliveryOutcome(
+  status: "inserted" | "copied" | "failed",
+  text: string,
+  message?: string,
+) {
+  return {
+    clipboardRestored: false,
+    detail: status === "failed" ? "NotAllowedError" : null,
+    message: message
+      ?? (status === "copied"
+        ? "Copied — test"
+        : status === "inserted"
+        ? "Inserted"
+        : "Failed — NotAllowedError"),
+    restoreSkippedReason: null,
+    status,
+    text,
+  };
+}
+
+
 function stubCapture(state: CaptureState): UseCaptureStateResult {
   return {
     cancelActiveCapture: vi.fn(),
@@ -46,7 +67,18 @@ async function mockDogfoodSuccess(
     id: audio.id,
     sampleRateHz: audio.sample_rate_hz,
   });
-  return { copied: true, transcript };
+  return {
+    copied: true,
+    delivery: {
+      clipboardRestored: false,
+      detail: "test",
+      message: "Copied — test",
+      restoreSkippedReason: null,
+      status: "copied" as const,
+      text: transcript.text,
+    },
+    transcript,
+  };
 }
 
 describe("useDogfoodCapture", () => {
@@ -117,7 +149,7 @@ describe("useDogfoodCapture", () => {
     );
     await waitFor(() => expect(result.current.phase).toBe("success"));
     expect(result.current.transcript?.text).toBeTruthy();
-    expect(result.current.message).toMatch(/copied to clipboard/i);
+    expect(result.current.message).toMatch(/^Copied/i);
   });
 
   it("surfaces transcript + warning toast when Copy soft-fails", async () => {
@@ -128,6 +160,7 @@ describe("useDogfoodCapture", () => {
     const dogfood = vi.fn(async (): Promise<DogfoodResult> => ({
       copied: false,
       copyWarning: "NotAllowedError",
+      delivery: deliveryOutcome("failed", "still here", "Failed — NotAllowedError"),
       transcript: { language: "en", text: "still here" },
     }));
 
@@ -151,10 +184,10 @@ describe("useDogfoodCapture", () => {
 
     await waitFor(() => expect(result.current.phase).toBe("success"));
     expect(result.current.transcript?.text).toBe("still here");
-    expect(result.current.message).toMatch(/clipboard copy failed/i);
+    expect(result.current.message).toMatch(/^Failed/i);
     expect(result.current.message).toMatch(/NotAllowedError/);
     expect(toast).toHaveBeenCalledWith(
-      expect.stringMatching(/clipboard copy failed/i),
+      expect.stringMatching(/^Failed/i),
     );
   });
 
@@ -281,6 +314,7 @@ describe("useDogfoodCapture", () => {
     const dogfood = vi.fn(async (): Promise<DogfoodResult> => ({
       copied: false,
       copyWarning: "NotAllowedError",
+      delivery: deliveryOutcome("failed", "soft fail text", "Failed — NotAllowedError"),
       transcript: { language: "en", text: "soft fail text" },
     }));
 
@@ -321,6 +355,7 @@ describe("useDogfoodCapture", () => {
 
     const dogfood = vi.fn(async (): Promise<DogfoodResult> => ({
       copied: true,
+      delivery: deliveryOutcome("copied", "   "),
       transcript: { language: "en", text: "   " },
     }));
 

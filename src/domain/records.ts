@@ -8,8 +8,13 @@ interface RecordInput {
 
 /** Inputs for a session history row from the dogfood Dictate path. */
 export interface DogfoodRecordInput {
-  /** True when the Copy sink wrote successfully. */
-  copied: boolean;
+  /**
+   * Evidence-backed delivery status (BUS-14).
+   * Prefer `status` when present; legacy `copied` boolean still accepted.
+   */
+  status?: HistoryStatus;
+  /** @deprecated Prefer `status`. True when Copy sink wrote successfully. */
+  copied?: boolean;
   /** Capture duration in milliseconds (converted to whole seconds). */
   durationMs: number;
   id: string;
@@ -60,13 +65,14 @@ export function createSuccessfulRecord({
 }
 
 /**
- * Build a History row after dogfood STT (+ optional Copy).
+ * Build a History row after dogfood STT + delivery.
  * Returns null for blank/whitespace transcripts so we never pollute
  * Recent / History with fake success rows (blank-audio flakes).
  *
- * Status is honest about delivery:
- * - `copied` when clipboard write succeeded
- * - `failed` when STT produced text but Copy soft-failed (text retained)
+ * Status is honest about delivery evidence (BUS-14):
+ * - `inserted` when AX/platform insert completed
+ * - `copied` when clipboard write succeeded as fallback
+ * - `failed` when STT produced text but delivery soft-failed (text retained)
  */
 export function createDogfoodRecord(
   input: DogfoodRecordInput,
@@ -74,7 +80,15 @@ export function createDogfoodRecord(
   const text = input.text.trim();
   if (!text) return null;
 
-  const status: HistoryStatus = input.copied ? "copied" : "failed";
+  let status: HistoryStatus;
+  if (input.status) {
+    status = input.status;
+  } else if (input.copied === true) {
+    status = "copied";
+  } else {
+    status = "failed";
+  }
+
   const durationSeconds = Math.max(0, Math.round(input.durationMs / 1_000));
 
   return {
