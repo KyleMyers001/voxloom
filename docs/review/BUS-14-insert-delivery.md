@@ -78,6 +78,27 @@ Gesture path runs the same dogfood STT → `deliverTranscript` delivery as Home
 Stop (invocation-time snapshot inside `dogfood.start()`). Overlay remains
 non-focus-stealing (BUS-13).
 
+### Clara failure — stuck waveform after hold release (a161e1f)
+
+On tip `a161e1f`, after global hold **release** the desktop waveform overlay
+stayed visible until the app was killed. Hold-finish promoted dictation to
+`processing` and awaited dogfood terminal phase to clear; if `dogfood.stop` /
+STT / deliver failed or raced (stop before capture session owned), listening|
+processing never cleared → overlay stuck.
+
+**Fix:** finish/cancel/error always tear down overlay + listening|processing
+(`dictation.cancel`) via try/finally — clear **immediately on release**, and
+again in `finally` after `dogfood.stop`, so stop/STT/deliver failures cannot
+leave the waveform up. Snapshot-at-start → deliver-on-finish unchanged.
+
+### Clara re-smoke (after fix)
+
+| # | Step | Expected |
+|---|------|----------|
+| R1 | Notes focused → global hold → speak → **release** | Waveform overlay **clears immediately** on release (do not need to kill app) |
+| R2 | Same utterance continues STT/delivery | Toast **Inserted** (or truthful Copied/Failed); History row matches |
+| R3 | Force a stop failure / cancel mid-hold if practical | Overlay still clears; no stuck listening\|processing |
+
 ### Linux / CI verification
 
 ```sh
@@ -110,4 +131,5 @@ Do **not** treat browser unit tests as proof of native AX insert.
 | Browser / Electron / game overlays | Unsupported → Copy; may need later heuristics |
 | Paste-via-⌘V path not used in v1 (AX only) | ADR allows paste without Enter; deferred if AX set fails broadly |
 | Home Start while Voxloom focused | Expected **Copied**; use global hold for Notes Inserted smoke |
+| Stuck overlay after release (pre-fix) | Fixed: unconditional tear-down on finish/cancel/error (try/finally) |
 | Windows adapter | Stub only; replaceable boundary ready |

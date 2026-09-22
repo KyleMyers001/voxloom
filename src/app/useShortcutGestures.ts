@@ -29,8 +29,8 @@ import type {
  * Product gestures drive real dogfood capture → STT → deliverTranscript.
  * Snapshot runs inside dogfood.start() at gesture invocation (while the
  * other app is still frontmost — global shortcut must not activate Voxloom).
- * Overlay still uses the mock dictation lifecycle; terminal dogfood phases
- * clear it without synthetic Inserted history rows.
+ * Overlay visibility is torn down on finish/cancel/error unconditionally
+ * (try/finally) so a failed stop/STT/deliver cannot leave the waveform up.
  */
 export interface GestureDogfoodBridge {
   cancel: () => void;
@@ -67,6 +67,33 @@ function isDogfoodTerminal(phase: DogfoodPhase): boolean {
     || phase === "cancelled";
 }
 
+/** Hide waveform: cancel listening|processing so overlay sync goes invisible. */
+function tearDownOverlayDictation(options: GestureOptions): void {
+  const d = options.state.dictation;
+  if (d.kind === "listening" || d.kind === "processing") {
+    options.dictation.cancel(d.runId);
+  }
+}
+
+/**
+ * Finish hold/latch: stop capture for STT/delivery, but always clear overlay
+ * even when stop throws or races ahead of React listening commit.
+ * Never dictation.finish/complete — that invents synthetic Inserted rows.
+ */
+function endGestureCapture(optionsRef: { current: GestureOptions }): void {
+  // Immediate clear on release (Clara: overlay must not wait for STT).
+  tearDownOverlayDictation(optionsRef.current);
+  void (async () => {
+    try {
+      await optionsRef.current.dogfood.stop();
+    } catch {
+      // stop / STT / deliver failure must not leave overlay up
+    } finally {
+      tearDownOverlayDictation(optionsRef.current);
+    }
+  })();
+}
+
 export function useShortcutGestures(options: GestureOptions) {
   const documentControllerRef = useRef<ShortcutController | null>(null);
   const nativeControllerRef = useRef<NativeShortcutController | null>(null);
@@ -76,13 +103,12 @@ export function useShortcutGestures(options: GestureOptions) {
   optionsRef.current = options;
 
   // Shared pending-finish gate (hold release can race React listening commit).
-  // Finish → holdProcessing (overlay) + dogfood.stop (real STT/delivery).
+  // Finish → dogfood.stop (real STT/delivery) + unconditional overlay teardown.
   // Never dictation.finish/complete — that path invents synthetic Inserted.
   if (pendingFinishRef.current === null) {
     pendingFinishRef.current = createPendingFinishGate({
-      finish: (runId) => {
-        optionsRef.current.dictation.holdProcessing(runId);
-        void optionsRef.current.dogfood.stop();
+      finish: () => {
+        endGestureCapture(optionsRef);
       },
       listeningRunId: () => {
         const { dictation } = optionsRef.current.state;
@@ -100,6 +126,7 @@ export function useShortcutGestures(options: GestureOptions) {
         optionsRef.current,
         gesture,
         pendingFinishRef.current,
+        optionsRef,
       ),
       shortcut: options.state.settings.shortcut,
       target: document,
@@ -126,6 +153,7 @@ export function useShortcutGestures(options: GestureOptions) {
         optionsRef.current,
         gesture,
         pendingFinishRef.current,
+        optionsRef,
       ),
       onRegisterFailure: (message) => {
         optionsRef.current.onShortcutError?.(message);
@@ -225,25 +253,11 @@ export function useShortcutGestures(options: GestureOptions) {
     }
   }, [options.state.dictation]);
 
-  // When dogfood leaves recording/transcribing, clear overlay dictation
-  // without inventing a synthetic Inserted history row.
+  // When dogfood leaves recording/transcribing (success/error/cancel),
+  // guarantee overlay dictation is cleared without synthetic Inserted rows.
   useEffect(() => {
-    const { dictation, dogfood, state } = options;
-    if (!isDogfoodTerminal(dogfood.phase)) return;
-    const d = state.dictation;
-    if (d.kind === "listening" || d.kind === "processing") {
-      dictation.cancel(d.runId);
-    }
-  }, [options.dogfood.phase, options.dictation, options.state.dictation]);
-
-  // If stop raced ahead of holdProcessing, promote listening → processing
-  // once dogfood is transcribing so overlay stays up during STT.
-  useEffect(() => {
-    const { dictation, dogfood, state } = options;
-    if (dogfood.phase !== "transcribing") return;
-    if (state.dictation.kind === "listening") {
-      dictation.holdProcessing(state.dictation.runId);
-    }
+    if (!isDogfoodTerminal(options.dogfood.phase)) return;
+    tearDownOverlayDictation(options);
   }, [options.dogfood.phase, options.dictation, options.state.dictation]);
 }
 
@@ -251,6 +265,7 @@ function handleGesture(
   options: GestureOptions,
   gesture: ShortcutGesture,
   pending: PendingFinishGate | null,
+  optionsRef: { current: GestureOptions },
 ) {
   const { dictation, dogfood, onboardingOpen, shortcutOpen, state } = options;
   if (shortcutOpen) return;
@@ -273,20 +288,20 @@ function handleGesture(
     // frontmost app *before* mic work — global shortcut must not activate
     // Voxloom (ADR §4). Home Start may still Copy when Voxloom is focused.
     dictation.start();
-    void dogfood.start();
+    void dogfood.start().catch(() => {
+      // start failure → tear down overlay (phase effect also covers terminal)
+      tearDownOverlayDictation(optionsRef.current);
+    });
   } else if (gesture === "hold-finish" || gesture === "latch-finish") {
     if (state.dictation.kind === "listening") {
       const runId = state.dictation.runId;
       if (pending) pending.requestFinish(true, runId);
-      else {
-        dictation.holdProcessing(runId);
-        void dogfood.stop();
-      }
+      else endGestureCapture(optionsRef);
     } else if (pending) {
       pending.requestFinish(false, null);
     } else if (isDogfoodBusy(dogfood.phase)) {
       // Dictation overlay not listening yet, but capture may have started.
-      void dogfood.stop();
+      endGestureCapture(optionsRef);
     }
   }
 }

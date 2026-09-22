@@ -337,7 +337,7 @@ describe("useShortcutGestures", () => {
       unmount();
     });
 
-    it("hold-finish calls dogfood.stop + holdProcessing, not synthetic complete", () => {
+    it("hold-finish calls dogfood.stop and clears overlay, not synthetic complete", async () => {
       vi.mocked(isTauri).mockReturnValue(false);
       vi.useFakeTimers();
       let now = 0;
@@ -363,6 +363,9 @@ describe("useShortcutGestures", () => {
           waveform: "silent",
         };
       });
+      vi.mocked(dictation.cancel).mockImplementation((runId) => {
+        state.dictation = { kind: "cancelled", runId };
+      });
 
       const { unmount } = renderHook(() => useShortcutGestures(options));
 
@@ -379,10 +382,126 @@ describe("useShortcutGestures", () => {
         document.dispatchEvent(shortcutEvent("keyup"));
       });
 
-      expect(dictation.holdProcessing).toHaveBeenCalledWith(7);
+      // Overlay torn down immediately on release (not holdProcessing).
+      expect(dictation.cancel).toHaveBeenCalledWith(7);
+      expect(dictation.holdProcessing).not.toHaveBeenCalled();
+      await act(async () => {
+        await Promise.resolve();
+      });
       expect(vi.mocked(dogfood.stop)).toHaveBeenCalledOnce();
       expect(dictation.finish).not.toHaveBeenCalled();
       expect(dictation.complete).not.toHaveBeenCalled();
+      expect(state.dictation.kind).toBe("cancelled");
+
+      unmount();
+    });
+
+    it("hold-finish clears overlay even when dogfood.stop throws", async () => {
+      vi.mocked(isTauri).mockReturnValue(false);
+      vi.useFakeTimers();
+      let now = 0;
+      const dictation = makeDictation();
+      const dogfood = makeDogfood({
+        stop: vi.fn().mockRejectedValue(new Error("stop failed")),
+      });
+      const state: AppState = {
+        ...createInitialState(0),
+        dictation: { kind: "ready" },
+      };
+      const options = makeOptions({
+        dictation,
+        dogfood,
+        now: () => now,
+        state,
+      });
+      vi.mocked(dictation.start).mockImplementation(() => {
+        state.dictation = {
+          kind: "listening",
+          runId: 3,
+          waveform: "speaking",
+        };
+      });
+      vi.mocked(dictation.cancel).mockImplementation((runId) => {
+        state.dictation = { kind: "cancelled", runId };
+      });
+
+      const { unmount } = renderHook(() => useShortcutGestures(options));
+
+      act(() => {
+        document.dispatchEvent(shortcutEvent("keydown"));
+      });
+      now = 320;
+      act(() => {
+        vi.advanceTimersByTime(320);
+      });
+      act(() => {
+        document.dispatchEvent(shortcutEvent("keyup"));
+      });
+
+      expect(dictation.cancel).toHaveBeenCalledWith(3);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(vi.mocked(dogfood.stop)).toHaveBeenCalledOnce();
+      // finally path may cancel again; listening|processing must be gone
+      expect(state.dictation.kind).toBe("cancelled");
+      expect(dictation.holdProcessing).not.toHaveBeenCalled();
+
+      unmount();
+    });
+
+    it("dogfood cancel/error phase clears listening overlay", async () => {
+      vi.mocked(isTauri).mockReturnValue(false);
+      const dictation = makeDictation();
+      const dogfood = makeDogfood({ phase: "recording" });
+      const state: AppState = {
+        ...createInitialState(0),
+        dictation: {
+          kind: "listening",
+          runId: 9,
+          waveform: "speaking",
+        },
+      };
+      const options = makeOptions({
+        dictation,
+        dogfood,
+        state,
+      });
+      vi.mocked(dictation.cancel).mockImplementation((runId) => {
+        state.dictation = { kind: "cancelled", runId };
+      });
+
+      const { rerender, unmount } = renderHook(
+        (props) => useShortcutGestures(props),
+        { initialProps: options },
+      );
+
+      rerender({
+        ...options,
+        dogfood: { ...dogfood, phase: "cancelled" },
+        state,
+      });
+      await waitFor(() => {
+        expect(dictation.cancel).toHaveBeenCalledWith(9);
+      });
+      expect(state.dictation.kind).toBe("cancelled");
+
+      // error terminal likewise
+      state.dictation = {
+        kind: "processing",
+        completion: "held",
+        runId: 10,
+      };
+      vi.mocked(dictation.cancel).mockClear();
+      rerender({
+        ...options,
+        dogfood: { ...dogfood, phase: "error" },
+        state,
+      });
+      await waitFor(() => {
+        expect(dictation.cancel).toHaveBeenCalledWith(10);
+      });
 
       unmount();
     });

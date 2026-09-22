@@ -160,6 +160,8 @@ export function useDogfoodCapture(
     options.deliveryPlatform,
   );
   const intendedRef = useRef<TargetSnapshot | null>(null);
+  /** Set by stop/cancel so a finish that races start still terminates. */
+  const stopRequestedRef = useRef(false);
 
   const announce = useCallback((text: string) => {
     setMessage(text);
@@ -241,6 +243,7 @@ export function useDogfoodCapture(
     setTranscript(null);
     setMessage(null);
     handledAudioIdRef.current = null;
+    stopRequestedRef.current = false;
     try {
       await ensureModelAvailable(modelIdRef.current);
     } catch (error: unknown) {
@@ -259,6 +262,13 @@ export function useDogfoodCapture(
       setIntendedTarget(null);
     }
 
+    // Hold release may have already requested stop while we were snapshotting.
+    if (stopRequestedRef.current) {
+      setPhase("cancelled");
+      setMessage("Capture cancelled — nothing transcribed.");
+      return;
+    }
+
     const deviceId = options.preferredDeviceId
       && options.preferredDeviceId !== SYSTEM_DEFAULT_DEVICE_ID
       ? options.preferredDeviceId
@@ -266,7 +276,21 @@ export function useDogfoodCapture(
 
     setPhase("recording");
     announce("Listening…");
-    await capture.startFullCaptureSession(deviceId);
+    try {
+      await capture.startFullCaptureSession(deviceId);
+    } catch (error: unknown) {
+      setPhase("error");
+      announce(errorText(error));
+      return;
+    }
+    if (stopRequestedRef.current) {
+      try {
+        await capture.stopFullCapture();
+      } catch (error: unknown) {
+        setPhase("error");
+        announce(errorText(error));
+      }
+    }
   }, [
     announce,
     capture,
@@ -275,16 +299,26 @@ export function useDogfoodCapture(
   ]);
 
   const stop = useCallback(async () => {
-    await capture.stopFullCapture();
-  }, [capture]);
+    stopRequestedRef.current = true;
+    try {
+      await capture.stopFullCapture();
+    } catch (error: unknown) {
+      setPhase("error");
+      announce(errorText(error));
+    }
+  }, [announce, capture]);
 
   const cancel = useCallback(() => {
+    stopRequestedRef.current = true;
     handledAudioIdRef.current = null;
     intendedRef.current = null;
     setIntendedTarget(null);
-    capture.cancelActiveCapture();
-    setPhase("cancelled");
-    setMessage("Capture cancelled — nothing transcribed.");
+    try {
+      capture.cancelActiveCapture();
+    } finally {
+      setPhase("cancelled");
+      setMessage("Capture cancelled — nothing transcribed.");
+    }
   }, [capture]);
 
   return {
