@@ -4,6 +4,8 @@ import type { Transcript } from "./types";
 /**
  * Copy-before-insert sink (ADR / BUS-10).
  * Writes transcript text via ClipboardAdapter only; no insert / gesture.
+ * Delivery policy when insert is unavailable (target closed/secure, etc.):
+ * docs/decisions/native-shortcut-cancel-focus.md (BUS-12) §§4–5.
  */
 export async function copyTranscriptToClipboard(
   text: string,
