@@ -506,6 +506,161 @@ describe("useShortcutGestures", () => {
       unmount();
     });
 
+
+    it("two sequential hold→finish cycles clear overlay and stop both times", async () => {
+      vi.mocked(isTauri).mockReturnValue(false);
+      vi.useFakeTimers();
+      let now = 0;
+      let runSeq = 0;
+      const dictation = makeDictation();
+      const dogfood = makeDogfood();
+      const state: AppState = {
+        ...createInitialState(0),
+        dictation: { kind: "ready" },
+      };
+      const options = makeOptions({
+        dictation,
+        dogfood,
+        now: () => now,
+        state,
+      });
+      vi.mocked(dictation.start).mockImplementation(() => {
+        runSeq += 1;
+        state.dictation = {
+          kind: "listening",
+          runId: runSeq,
+          waveform: "speaking",
+        };
+      });
+      vi.mocked(dictation.cancel).mockImplementation((runId) => {
+        state.dictation = { kind: "cancelled", runId };
+      });
+
+      const { unmount } = renderHook(() => useShortcutGestures(options));
+
+      for (let cycle = 1; cycle <= 3; cycle += 1) {
+        vi.mocked(dogfood.start).mockClear();
+        vi.mocked(dogfood.stop).mockClear();
+        vi.mocked(dictation.cancel).mockClear();
+
+        act(() => {
+          document.dispatchEvent(shortcutEvent("keydown"));
+        });
+        now += 320;
+        act(() => {
+          vi.advanceTimersByTime(320);
+        });
+        expect(vi.mocked(dogfood.start)).toHaveBeenCalledOnce();
+        expect(state.dictation.kind).toBe("listening");
+
+        act(() => {
+          document.dispatchEvent(shortcutEvent("keyup"));
+        });
+        expect(dictation.cancel).toHaveBeenCalled();
+        await act(async () => {
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+        expect(vi.mocked(dogfood.stop)).toHaveBeenCalledOnce();
+        expect(state.dictation.kind).toBe("cancelled");
+        expect(dictation.complete).not.toHaveBeenCalled();
+      }
+
+      unmount();
+    });
+
+    it("dogfood terminal via Home Stop clears leftover listening overlay", async () => {
+      vi.mocked(isTauri).mockReturnValue(false);
+      const dictation = makeDictation();
+      const dogfood = makeDogfood({ phase: "recording" });
+      const state: AppState = {
+        ...createInitialState(0),
+        dictation: {
+          kind: "listening",
+          runId: 42,
+          waveform: "speaking",
+        },
+      };
+      const options = makeOptions({
+        dictation,
+        dogfood,
+        state,
+      });
+      vi.mocked(dictation.cancel).mockImplementation((runId) => {
+        state.dictation = { kind: "cancelled", runId };
+      });
+
+      const { rerender, unmount } = renderHook(
+        (props) => useShortcutGestures(props),
+        { initialProps: options },
+      );
+
+      // Simulate Home Stop completing delivery without gesture finish.
+      rerender({
+        ...options,
+        dogfood: { ...dogfood, phase: "success" },
+        state,
+      });
+      await waitFor(() => {
+        expect(dictation.cancel).toHaveBeenCalledWith(42);
+      });
+      expect(state.dictation.kind).toBe("cancelled");
+
+      unmount();
+    });
+
+    it("new hold clears leftover listening when dogfood is idle", async () => {
+      vi.mocked(isTauri).mockReturnValue(false);
+      vi.useFakeTimers();
+      let now = 0;
+      const dictation = makeDictation();
+      const dogfood = makeDogfood({ phase: "success" });
+      const state: AppState = {
+        ...createInitialState(0),
+        dictation: {
+          kind: "listening",
+          runId: 11,
+          waveform: "speaking",
+        },
+      };
+      const options = makeOptions({
+        dictation,
+        dogfood,
+        now: () => now,
+        state,
+      });
+      vi.mocked(dictation.cancel).mockImplementation((runId) => {
+        state.dictation = { kind: "cancelled", runId };
+      });
+      vi.mocked(dictation.start).mockImplementation(() => {
+        state.dictation = {
+          kind: "listening",
+          runId: 12,
+          waveform: "silent",
+        };
+      });
+
+      const { unmount } = renderHook(() => useShortcutGestures(options));
+
+      act(() => {
+        document.dispatchEvent(shortcutEvent("keydown"));
+      });
+      now = 320;
+      act(() => {
+        vi.advanceTimersByTime(320);
+      });
+
+      expect(dictation.cancel).toHaveBeenCalledWith(11);
+      expect(dictation.start).toHaveBeenCalledOnce();
+      expect(vi.mocked(dogfood.start)).toHaveBeenCalledOnce();
+      expect(state.dictation.kind).toBe("listening");
+      expect(
+        state.dictation.kind === "listening" && state.dictation.runId,
+      ).toBe(12);
+
+      unmount();
+    });
+
     it("ignores hold-start while dogfood is already recording", () => {
       vi.mocked(isTauri).mockReturnValue(false);
       vi.useFakeTimers();

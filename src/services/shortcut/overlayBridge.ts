@@ -48,10 +48,14 @@ export function createOverlayBridge(
   let lastVisible: boolean | null = null;
   let lastWaveform: OverlayWaveform | null = null;
   let disposed = false;
+  /** Serialize show/hide so a late show cannot outrun a newer hide. */
+  let syncGeneration = 0;
+  let syncChain: Promise<void> = Promise.resolve();
 
   return {
     async dispose() {
       disposed = true;
+      syncGeneration += 1;
       try {
         await windowApi.hide();
       } catch {
@@ -61,25 +65,36 @@ export function createOverlayBridge(
     async sync(dictation) {
       if (disposed || !windowApi.isAvailable()) return;
       const plan = overlaySyncPlan(dictation);
-      try {
-        await windowApi.ensureCreated();
-        if (plan.visible) {
-          if (plan.waveform && plan.waveform !== lastWaveform) {
-            await windowApi.setWaveform(plan.waveform);
-            lastWaveform = plan.waveform;
+      const gen = ++syncGeneration;
+      const run = async () => {
+        if (disposed || gen !== syncGeneration) return;
+        try {
+          await windowApi.ensureCreated();
+          if (disposed || gen !== syncGeneration) return;
+          if (plan.visible) {
+            if (plan.waveform && plan.waveform !== lastWaveform) {
+              await windowApi.setWaveform(plan.waveform);
+              if (gen !== syncGeneration) return;
+              lastWaveform = plan.waveform;
+            }
+            if (lastVisible !== true) {
+              await windowApi.showBottomCenter();
+              if (gen !== syncGeneration) return;
+              lastVisible = true;
+            }
+          } else {
+            // Always hide when not visible so a raced late show cannot stick.
+            await windowApi.hide();
+            if (gen !== syncGeneration) return;
+            lastVisible = false;
+            lastWaveform = null;
           }
-          if (lastVisible !== true) {
-            await windowApi.showBottomCenter();
-            lastVisible = true;
-          }
-        } else if (lastVisible !== false) {
-          await windowApi.hide();
-          lastVisible = false;
-          lastWaveform = null;
+        } catch {
+          // Overlay must never break dictation; failures are non-fatal.
         }
-      } catch {
-        // Overlay must never break dictation; failures are non-fatal.
-      }
+      };
+      syncChain = syncChain.then(run, run);
+      await syncChain;
     },
   };
 }

@@ -31,6 +31,9 @@ import type {
  * other app is still frontmost — global shortcut must not activate Voxloom).
  * Overlay visibility is torn down on finish/cancel/error unconditionally
  * (try/finally) so a failed stop/STT/deliver cannot leave the waveform up.
+ * Dogfood terminal (Home Stop / success / error / cancel) also forces overlay
+ * clear — do not rely only on gesture finish (Clara: Stop clears capture but
+ * waveform stayed). New holds clear leftover listening|processing first.
  */
 export interface GestureDogfoodBridge {
   cancel: () => void;
@@ -255,9 +258,16 @@ export function useShortcutGestures(options: GestureOptions) {
 
   // When dogfood leaves recording/transcribing (success/error/cancel),
   // guarantee overlay dictation is cleared without synthetic Inserted rows.
+  // Covers Home Stop / cancel / error when gesture finish never ran.
   useEffect(() => {
     if (!isDogfoodTerminal(options.dogfood.phase)) return;
     tearDownOverlayDictation(options);
+    // Force hide even if cancel no-ops (runId race) or React dictation
+    // commit lags — overlay sync to a non-visible kind.
+    const overlay = overlayRef.current;
+    if (overlay) {
+      void overlay.sync({ kind: "ready" });
+    }
   }, [options.dogfood.phase, options.dictation, options.state.dictation]);
 }
 
@@ -274,14 +284,21 @@ function handleGesture(
     return;
   }
   if (onboardingOpen) return;
-  // Busy / processing: ignore start; finish only while listening (or pending).
+  // Busy capture: ignore start. Leftover listening|processing after dogfood
+  // already reached terminal (Home Stop cleared capture but not overlay)
+  // must be torn down so a later hold can re-arm cleanly.
   if (gesture === "hold-start" || gesture === "latch-start") {
+    if (isDogfoodBusy(dogfood.phase)) {
+      return;
+    }
     if (
       state.dictation.kind === "listening" ||
-      state.dictation.kind === "processing" ||
-      isDogfoodBusy(dogfood.phase)
+      state.dictation.kind === "processing"
     ) {
-      return;
+      if (!isDogfoodTerminal(dogfood.phase)) {
+        return;
+      }
+      tearDownOverlayDictation(options);
     }
     pending?.resetForStart();
     // Overlay first (sync), then real capture. dogfood.start snapshots the

@@ -100,26 +100,51 @@ export function createNativeShortcutController({
   let unlistenHoldRelease: (() => void) | null = null;
   /** Flush suppressed Carbon Released if arm declines monitoring (non-Mac). */
   let flushSuppressedOsRelease: (() => void) | null = null;
+  /**
+   * Generation + serial queue so a late disarm from hold N cannot kill the
+   * Rust watch for hold N+1 (Clara: 2nd hold stuck — monitoring true, watch
+   * dead, Carbon Released ignored, endGestureCapture never runs).
+   */
+  let holdWatchGeneration = 0;
+  let holdWatchChain: Promise<void> = Promise.resolve();
+
+  function enqueueHoldWatch(op: () => Promise<void>): void {
+    holdWatchChain = holdWatchChain.then(op, op);
+  }
 
   function disarmHoldWatch() {
-    if (!holdWatchArmed) return;
+    // Idempotent: hold-finish + listen both call disarm; a second call must
+    // not bump generation or the queued Rust disarm becomes a no-op skip.
+    if (!holdWatchArmed && !holdWatchMonitoring) return;
     holdWatchArmed = false;
     holdWatchMonitoring = false;
     suppressedOsReleased = false;
-    void holdRelease.disarm().catch(() => undefined);
+    const gen = ++holdWatchGeneration;
+    enqueueHoldWatch(async () => {
+      if (gen !== holdWatchGeneration) return;
+      await holdRelease.disarm().catch(() => undefined);
+    });
   }
 
   function armHoldWatch() {
     if (!active || disposed) return;
+    const hotkey = active;
+    const gen = ++holdWatchGeneration;
     holdWatchArmed = true;
     // Optimistic: Carbon Released can finish the hold before async arm/tap
     // setup completes. Own finish immediately; reconcile when arm resolves.
     holdWatchMonitoring = true;
     suppressedOsReleased = false;
-    void holdRelease
-      .arm(active)
-      .then((monitoring) => {
-        if (!holdWatchArmed || disposed) return;
+    enqueueHoldWatch(async () => {
+      if (gen !== holdWatchGeneration || disposed) return;
+      try {
+        const monitoring = await holdRelease.arm(hotkey);
+        if (gen !== holdWatchGeneration || disposed) {
+          // Superseded (e.g. finish then re-arm) — do not leave a stray watch.
+          await holdRelease.disarm().catch(() => undefined);
+          return;
+        }
+        holdWatchArmed = true;
         holdWatchMonitoring = monitoring;
         if (!monitoring && suppressedOsReleased) {
           // Non-Mac / monitor declined: OS Released remains authoritative.
@@ -128,15 +153,16 @@ export function createNativeShortcutController({
         } else {
           suppressedOsReleased = false;
         }
-      })
-      .catch(() => {
+      } catch {
+        if (gen !== holdWatchGeneration || disposed) return;
         holdWatchArmed = false;
         holdWatchMonitoring = false;
         if (suppressedOsReleased) {
           suppressedOsReleased = false;
           flushSuppressedOsRelease?.();
         }
-      });
+      }
+    });
   }
 
   const machine = createGestureMachine({

@@ -287,6 +287,8 @@ describe("createNativeShortcutController focus-safe hold", () => {
 
     // Context null (modal) still resets.
     controller.setContext(null);
+    await Promise.resolve();
+    await Promise.resolve();
     expect(disarmCalls).toBeGreaterThan(disarmsAfterArm);
     gestures.length = 0;
     onEdge!("released");
@@ -330,6 +332,9 @@ describe("createNativeShortcutController focus-safe hold", () => {
     onEdge!("pressed");
     flush(1); // hold-start → arms with sync monitoring=true
     expect(gestures).toEqual(["hold-start"]);
+    // Hold-watch arm is queued; flush microtasks so arm() starts.
+    await Promise.resolve();
+    await Promise.resolve();
     expect(resolveArm).not.toBeNull();
 
     // Carbon Released-after-arm before invoke resolves must not finish.
@@ -378,6 +383,9 @@ describe("createNativeShortcutController focus-safe hold", () => {
     await controller.setShortcut("Ctrl + Shift + F");
     onEdge!("pressed");
     flush(1);
+    // Optimistic monitoring is sync; arm() itself is queued.
+    await Promise.resolve();
+    await Promise.resolve();
     onEdge!("released"); // suppressed while optimistic monitoring
     expect(gestures).toEqual(["hold-start"]);
 
@@ -385,6 +393,157 @@ describe("createNativeShortcutController focus-safe hold", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(gestures).toEqual(["hold-start", "hold-finish"]);
+
+    await controller.dispose();
+  });
+
+
+  it("two sequential holds both finish; late disarm cannot kill next watch", async () => {
+    let onEdge: ((edge: "pressed" | "released") => void) | null = null;
+    let onHoldRelease: (() => void) | null = null;
+    let armCount = 0;
+    let pendingDisarm: Promise<void> | null = null;
+    let resolveHold1Disarm: (() => void) | null = null;
+    let slowDisarmArmed = false;
+    const api: NativeShortcutApi = {
+      isAvailable: () => true,
+      async register(_hotkey, edge) {
+        onEdge = edge;
+      },
+      async unregister() {},
+      async unregisterAll() {},
+    };
+    const holdRelease: HoldReleaseApi = {
+      isAvailable: () => true,
+      arm: async () => {
+        armCount += 1;
+        return true;
+      },
+      disarm: async () => {
+        if (!slowDisarmArmed) return;
+        slowDisarmArmed = false;
+        pendingDisarm = new Promise<void>((resolve) => {
+          resolveHold1Disarm = resolve;
+        });
+        await pendingDisarm;
+      },
+      listen: async (cb) => {
+        onHoldRelease = cb;
+        return () => undefined;
+      },
+    };
+    const gestures: string[] = [];
+    const { flush, scheduler } = makeTrackingScheduler();
+    const controller = createNativeShortcutController({
+      api,
+      clock: () => 0,
+      holdMs: 10,
+      holdRelease,
+      onGesture: (g) => gestures.push(g),
+      scheduler,
+    });
+
+    const drain = async () => {
+      for (let i = 0; i < 8; i += 1) await Promise.resolve();
+    };
+
+    await controller.setShortcut("Ctrl + Shift + F");
+    await drain();
+
+    // Hold 1
+    onEdge!("pressed");
+    flush(1);
+    await drain();
+    expect(gestures).toEqual(["hold-start"]);
+    expect(armCount).toBe(1);
+
+    // Next finish disarm should hang until we resolve.
+    slowDisarmArmed = true;
+    onHoldRelease!();
+    expect(gestures).toEqual(["hold-start", "hold-finish"]);
+    await drain();
+    expect(resolveHold1Disarm).not.toBeNull();
+
+    // Hold 2 starts while hold-1 disarm IPC is still pending.
+    gestures.length = 0;
+    onEdge!("pressed");
+    flush(2);
+    expect(gestures).toEqual(["hold-start"]);
+    // Arm queued behind slow disarm — not finished yet.
+    expect(armCount).toBe(1);
+
+    resolveHold1Disarm!();
+    await drain();
+    expect(armCount).toBe(2);
+
+    // Spurious Carbon Released still ignored while hold-2 monitor owns finish.
+    onEdge!("released");
+    expect(gestures).toEqual(["hold-start"]);
+
+    onHoldRelease!();
+    expect(gestures).toEqual(["hold-start", "hold-finish"]);
+
+    await controller.dispose();
+  });
+
+  it("fully disarms monitoring so a second hold re-arms cleanly", async () => {
+    let onEdge: ((edge: "pressed" | "released") => void) | null = null;
+    let onHoldRelease: (() => void) | null = null;
+    let armed = false;
+    const api: NativeShortcutApi = {
+      isAvailable: () => true,
+      async register(_hotkey, edge) {
+        onEdge = edge;
+      },
+      async unregister() {},
+      async unregisterAll() {},
+    };
+    const holdRelease: HoldReleaseApi = {
+      isAvailable: () => true,
+      arm: async () => {
+        armed = true;
+        return true;
+      },
+      disarm: async () => {
+        armed = false;
+      },
+      listen: async (cb) => {
+        onHoldRelease = cb;
+        return () => undefined;
+      },
+    };
+    const gestures: string[] = [];
+    const { flush, scheduler } = makeTrackingScheduler();
+    let now = 0;
+    const controller = createNativeShortcutController({
+      api,
+      clock: () => now,
+      holdMs: 10,
+      holdRelease,
+      onGesture: (g) => gestures.push(g),
+      scheduler,
+    });
+
+    const drain = async () => {
+      for (let i = 0; i < 8; i += 1) await Promise.resolve();
+    };
+
+    await controller.setShortcut("Ctrl + Shift + F");
+    await drain();
+
+    for (let cycle = 1; cycle <= 3; cycle += 1) {
+      gestures.length = 0;
+      now += 1000;
+      onEdge!("pressed");
+      flush(cycle);
+      await drain();
+      expect(gestures).toEqual(["hold-start"]);
+      expect(armed).toBe(true);
+      onHoldRelease!();
+      expect(gestures).toEqual(["hold-start", "hold-finish"]);
+      await drain();
+      expect(armed).toBe(false);
+    }
 
     await controller.dispose();
   });

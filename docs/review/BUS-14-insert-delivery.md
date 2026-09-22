@@ -86,18 +86,39 @@ stayed visible until the app was killed. Hold-finish promoted dictation to
 STT / deliver failed or raced (stop before capture session owned), listening|
 processing never cleared → overlay stuck.
 
-**Fix:** finish/cancel/error always tear down overlay + listening|processing
-(`dictation.cancel`) via try/finally — clear **immediately on release**, and
-again in `finally` after `dogfood.stop`, so stop/STT/deliver failures cannot
-leave the waveform up. Snapshot-at-start → deliver-on-finish unchanged.
+**Fix (6f1ada8):** finish/cancel/error always tear down overlay + listening|
+processing (`dictation.cancel`) via try/finally — clear **immediately on
+release**, and again in `finally` after `dogfood.stop`.
 
-### Clara re-smoke (after fix)
+### Clara failure — 2nd/3rd hold stuck (6f1ada8)
+
+On tip `6f1ada8`, **1st** hold→release cleared overlay OK; **2nd or 3rd** hold
+left waveform stuck until process kill. Home still showed **Stop** (dogfood
+capture never stopped) ⇒ `hold-finish` / `endGestureCapture` never ran.
+Clicking in-app **Stop** returned Home to Start (capture ended) but **overlay
+stayed** (dictation listening|processing not torn down on dogfood terminal).
+
+**Root cause:** Mac hold-release watch uses optimistic `holdWatchMonitoring`
+(Carbon `Released` ignored while armed). A fire-and-forget `disarm()` from
+hold N could complete **after** hold N+1 `arm()`, killing the new Rust watch
+while TS still ignored Carbon Released → no poll/tap finish → no
+`endGestureCapture` / `dogfood.stop`. Separately, dogfood terminal via Home
+Stop did not force overlay hide when gesture finish never ran.
+
+**Fix:** serialize hold-watch arm/disarm with a generation queue so a late
+disarm cannot kill the next session’s watch; fully disarm monitoring on
+finish so the next press re-arms cleanly; on dogfood terminal (success/error/
+cancel) always `dictation.cancel` + force overlay sync hide; new hold clears
+leftover listening|processing when dogfood is already terminal.
+
+### Clara re-smoke (after multi-session fix)
 
 | # | Step | Expected |
 |---|------|----------|
-| R1 | Notes focused → global hold → speak → **release** | Waveform overlay **clears immediately** on release (do not need to kill app) |
-| R2 | Same utterance continues STT/delivery | Toast **Inserted** (or truthful Copied/Failed); History row matches |
-| R3 | Force a stop failure / cancel mid-hold if practical | Overlay still clears; no stuck listening\|processing |
+| R1 | Notes focused → **two** global hold→release cycles in a row | Each release: overlay **clears**, Home back to **Start** (no kill) |
+| R1b | Optional third hold→release | Same — overlay clear + Start |
+| R2 | Then Notes Inserted smoke (hold while Notes focused) | Toast **Inserted** (or truthful Copied/Failed); History row matches |
+| R3 | If overlay ever sticks: in-app Stop | Capture ends **and** overlay clears (not Stop-only) |
 
 ### Linux / CI verification
 
@@ -132,4 +153,5 @@ Do **not** treat browser unit tests as proof of native AX insert.
 | Paste-via-⌘V path not used in v1 (AX only) | ADR allows paste without Enter; deferred if AX set fails broadly |
 | Home Start while Voxloom focused | Expected **Copied**; use global hold for Notes Inserted smoke |
 | Stuck overlay after release (pre-fix) | Fixed: unconditional tear-down on finish/cancel/error (try/finally) |
+| 2nd/3rd hold stuck (6f1ada8) | Fixed: serialized hold-watch arm/disarm + terminal overlay force-hide |
 | Windows adapter | Stub only; replaceable boundary ready |
