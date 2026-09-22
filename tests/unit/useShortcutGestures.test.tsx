@@ -1,0 +1,293 @@
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { isTauri } from "@tauri-apps/api/core";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createInitialState } from "../../src/app/initialState";
+import { useShortcutGestures } from "../../src/app/useShortcutGestures";
+import type {
+  DictationLifecycle,
+  SetupLifecycle,
+} from "../../src/services/contracts";
+import type { AppState } from "../../src/app/state";
+import type { RegisterOutcome } from
+  "../../src/services/shortcut/registerOrRevert";
+import type { OverlayBridge } from
+  "../../src/services/shortcut/overlayBridge";
+
+const mocks = vi.hoisted(() => ({
+  createNativeShortcutController: vi.fn(),
+  createOverlayBridge: vi.fn(),
+}));
+
+vi.mock("../../src/services/shortcut", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../src/services/shortcut")
+  >();
+  return {
+    ...actual,
+    createNativeShortcutController: (
+      ...args: Parameters<typeof actual.createNativeShortcutController>
+    ) => mocks.createNativeShortcutController(...args),
+    createOverlayBridge: (
+      ...args: Parameters<typeof actual.createOverlayBridge>
+    ) => mocks.createOverlayBridge(...args),
+  };
+});
+
+function shortcutEvent(type: "keydown" | "keyup") {
+  return new KeyboardEvent(type, {
+    bubbles: true,
+    code: "Space",
+    ctrlKey: true,
+    key: " ",
+    shiftKey: true,
+  });
+}
+
+function setVisibility(state: DocumentVisibilityState) {
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    get: () => state,
+  });
+}
+
+function makeDictation(): DictationLifecycle {
+  return {
+    cancel: vi.fn(),
+    complete: vi.fn(),
+    fail: vi.fn(),
+    finish: vi.fn(),
+    holdProcessing: vi.fn(),
+    retry: vi.fn(),
+    speech: vi.fn(),
+    start: vi.fn(),
+  };
+}
+
+function makeSetup(): SetupLifecycle {
+  return {
+    replace: vi.fn(),
+    reopen: vi.fn(),
+    update: vi.fn(),
+  };
+}
+
+function makeOptions(overrides: {
+  dictation?: DictationLifecycle;
+  now?: () => number;
+  onShortcutError?: (message: string) => void;
+  state?: AppState;
+} = {}) {
+  return {
+    dictation: overrides.dictation ?? makeDictation(),
+    now: overrides.now ?? (() => 0),
+    onboardingOpen: false,
+    onShortcutError: overrides.onShortcutError ?? vi.fn(),
+    setup: makeSetup(),
+    shortcutOpen: false,
+    state: overrides.state ?? createInitialState(0),
+  };
+}
+
+function makeNativeController() {
+  return {
+    activeHotkey: vi.fn().mockReturnValue("Control+Shift+Space"),
+    dispose: vi.fn().mockResolvedValue(undefined),
+    lastKnownGood: vi.fn().mockReturnValue("Control+Shift+Space"),
+    resetPartial: vi.fn(),
+    setContext: vi.fn(),
+    setShortcut: vi.fn<(settingsShortcut: string) => Promise<RegisterOutcome>>()
+      .mockResolvedValue({
+        active: "Control+Shift+Space",
+        lastKnownGood: "Control+Shift+Space",
+        ok: true as const,
+      }),
+  };
+}
+
+function makeOverlay(): OverlayBridge {
+  return {
+    dispose: vi.fn().mockResolvedValue(undefined),
+    sync: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+describe("useShortcutGestures", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setVisibility("visible");
+    vi.mocked(isTauri).mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    setVisibility("visible");
+    vi.useRealTimers();
+    vi.mocked(isTauri).mockReturnValue(false);
+  });
+
+  describe("native mode focus survival", () => {
+    it("does not resetPartial on visibilitychange or pagehide", async () => {
+      vi.mocked(isTauri).mockReturnValue(true);
+      const native = makeNativeController();
+      const overlay = makeOverlay();
+      mocks.createNativeShortcutController.mockReturnValue(native);
+      mocks.createOverlayBridge.mockReturnValue(overlay);
+
+      const { unmount } = renderHook(() => useShortcutGestures(makeOptions()));
+
+      await waitFor(() => {
+        expect(native.setShortcut).toHaveBeenCalled();
+      });
+      native.resetPartial.mockClear();
+
+      act(() => {
+        setVisibility("hidden");
+        document.dispatchEvent(new Event("visibilitychange"));
+        window.dispatchEvent(new Event("pagehide"));
+      });
+
+      expect(native.resetPartial).not.toHaveBeenCalled();
+      unmount();
+    });
+  });
+
+  describe("document / mock mode", () => {
+    it("resets partial hold on document hide (missed-keyup safety)", () => {
+      vi.mocked(isTauri).mockReturnValue(false);
+      vi.useFakeTimers();
+      let now = 0;
+      const dictation = makeDictation();
+      const state: AppState = {
+        ...createInitialState(0),
+        dictation: {
+          kind: "listening",
+          runId: 1,
+          waveform: "speaking",
+        },
+      };
+      // Stable options so the document controller is not recreated mid-hold.
+      const options = makeOptions({
+        dictation,
+        now: () => now,
+        state,
+      });
+      const { unmount } = renderHook(() => useShortcutGestures(options));
+
+      act(() => {
+        document.dispatchEvent(shortcutEvent("keydown"));
+      });
+      now = 320;
+      act(() => {
+        vi.advanceTimersByTime(320);
+      });
+      // Already listening — start ignored; machine still entered holding.
+      expect(dictation.start).not.toHaveBeenCalled();
+
+      act(() => {
+        setVisibility("hidden");
+        document.dispatchEvent(new Event("visibilitychange"));
+        document.dispatchEvent(shortcutEvent("keyup"));
+      });
+      // Without hide-reset, keyup would emit hold-finish → finish(runId).
+      expect(dictation.finish).not.toHaveBeenCalled();
+
+      unmount();
+    });
+  });
+
+  describe("boot / Settings setShortcut", () => {
+    it("does not double-setShortcut the same combo on mount", async () => {
+      vi.mocked(isTauri).mockReturnValue(true);
+      const native = makeNativeController();
+      const overlay = makeOverlay();
+      mocks.createNativeShortcutController.mockReturnValue(native);
+      mocks.createOverlayBridge.mockReturnValue(overlay);
+
+      const combo = "Ctrl + Shift + Space";
+      const options = makeOptions({
+        state: {
+          ...createInitialState(0),
+          settings: {
+            ...createInitialState(0).settings,
+            shortcut: combo,
+          },
+        },
+      });
+
+      const { rerender, unmount } = renderHook(
+        (props) => useShortcutGestures(props),
+        { initialProps: options },
+      );
+
+      await waitFor(() => {
+        expect(native.setShortcut).toHaveBeenCalledTimes(1);
+      });
+      expect(native.setShortcut).toHaveBeenCalledWith(combo);
+
+      // Same shortcut re-render must not rebind.
+      rerender({ ...options });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(native.setShortcut).toHaveBeenCalledTimes(1);
+
+      unmount();
+    });
+
+    it("rebinds when Settings shortcut changes to a different combo", async () => {
+      vi.mocked(isTauri).mockReturnValue(true);
+      const native = makeNativeController();
+      const overlay = makeOverlay();
+      mocks.createNativeShortcutController.mockReturnValue(native);
+      mocks.createOverlayBridge.mockReturnValue(overlay);
+
+      // Keep now / onShortcutError identity stable so only the Settings
+      // effect rebinds (mount effect owns the initial bind).
+      const now = () => 0;
+      const onShortcutError = vi.fn();
+      const baseState = createInitialState(0);
+      const first = makeOptions({
+        now,
+        onShortcutError,
+        state: {
+          ...baseState,
+          settings: {
+            ...baseState.settings,
+            shortcut: "Ctrl + Shift + Space",
+          },
+        },
+      });
+
+      const { rerender, unmount } = renderHook(
+        (props) => useShortcutGestures(props),
+        { initialProps: first },
+      );
+
+      await waitFor(() => {
+        expect(native.setShortcut).toHaveBeenCalledTimes(1);
+      });
+
+      native.setShortcut.mockResolvedValue({
+        active: "Control+Shift+F",
+        lastKnownGood: "Control+Shift+F",
+        ok: true as const,
+      });
+
+      rerender({
+        ...first,
+        state: {
+          ...baseState,
+          settings: {
+            ...baseState.settings,
+            shortcut: "Ctrl + Shift + F",
+          },
+        },
+      });
+      await waitFor(() => {
+        expect(native.setShortcut).toHaveBeenCalledTimes(2);
+      });
+      expect(native.setShortcut).toHaveBeenLastCalledWith("Ctrl + Shift + F");
+
+      unmount();
+    });
+  });
+});

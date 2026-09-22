@@ -42,7 +42,17 @@ does **not** prove native OS-wide registration.
 - [ ] Overlay never focuses; visible only listening/processing; reduced-motion CSS
 - [ ] No delivery/insert claims; no global Escape
 - [ ] Unit tests cover machine + register-or-revert + overlay visibility (not native proof)
+- [x] **TS control-plane coverage** (`useShortcutGestures` + `documentAdapter`): native must **not** reset on document hide; document/mock **must**; boot/Settings must not double-`setShortcut` the same combo; visibility/pagehide reset on document adapter — see tests below (Emma request-changes @ `e21872d`)
 - [ ] Linux `cargo check` / typecheck / lint / unit green
+
+### Emma TS coverage (CI) — added after focus-survival
+
+| File | Cases |
+|------|--------|
+| `tests/unit/useShortcutGestures.test.tsx` | Native: no `resetPartial` on `visibilitychange`/`pagehide`; document: hide clears mid-hold so keyup does not finish; boot: single `setShortcut` for same combo; Settings change rebinds |
+| `tests/unit/documentAdapter.test.ts` | `visibilitychange` hidden + `pagehide` reset partial hold; visible visibilitychange does not |
+
+Rust / CGEvent / Carbon / TCC unit tests remain **out of bar** (Clara Mac C10–C14).
 
 ## Clara Mac checklist (maps BUS-12 C1–C5)
 
