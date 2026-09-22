@@ -2,7 +2,10 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { isTauri } from "@tauri-apps/api/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createInitialState } from "../../src/app/initialState";
-import { useShortcutGestures } from "../../src/app/useShortcutGestures";
+import {
+  useShortcutGestures,
+  type GestureDogfoodBridge,
+} from "../../src/app/useShortcutGestures";
 import type {
   DictationLifecycle,
   SetupLifecycle,
@@ -71,14 +74,27 @@ function makeSetup(): SetupLifecycle {
   };
 }
 
+function makeDogfood(
+  overrides: Partial<GestureDogfoodBridge> = {},
+): GestureDogfoodBridge {
+  return {
+    cancel: overrides.cancel ?? vi.fn(),
+    phase: overrides.phase ?? "idle",
+    start: overrides.start ?? vi.fn().mockResolvedValue(undefined),
+    stop: overrides.stop ?? vi.fn().mockResolvedValue(undefined),
+  };
+}
+
 function makeOptions(overrides: {
   dictation?: DictationLifecycle;
+  dogfood?: ReturnType<typeof makeDogfood>;
   now?: () => number;
   onShortcutError?: (message: string) => void;
   state?: AppState;
 } = {}) {
   return {
     dictation: overrides.dictation ?? makeDictation(),
+    dogfood: overrides.dogfood ?? makeDogfood(),
     now: overrides.now ?? (() => 0),
     onboardingOpen: false,
     onShortcutError: overrides.onShortcutError ?? vi.fn(),
@@ -290,4 +306,113 @@ describe("useShortcutGestures", () => {
       unmount();
     });
   });
+
+  describe("product gesture → dogfood delivery", () => {
+    it("hold-start calls dogfood.start and dictation.start (snapshot at start)", () => {
+      vi.mocked(isTauri).mockReturnValue(false);
+      vi.useFakeTimers();
+      let now = 0;
+      const dictation = makeDictation();
+      const dogfood = makeDogfood();
+      const options = makeOptions({
+        dictation,
+        dogfood,
+        now: () => now,
+      });
+      const { unmount } = renderHook(() => useShortcutGestures(options));
+
+      act(() => {
+        document.dispatchEvent(shortcutEvent("keydown"));
+      });
+      now = 320;
+      act(() => {
+        vi.advanceTimersByTime(320);
+      });
+
+      expect(dictation.start).toHaveBeenCalledOnce();
+      expect(vi.mocked(dogfood.start)).toHaveBeenCalledOnce();
+      expect(vi.mocked(dogfood.stop)).not.toHaveBeenCalled();
+      expect(dictation.complete).not.toHaveBeenCalled();
+
+      unmount();
+    });
+
+    it("hold-finish calls dogfood.stop + holdProcessing, not synthetic complete", () => {
+      vi.mocked(isTauri).mockReturnValue(false);
+      vi.useFakeTimers();
+      let now = 0;
+      const dictation = makeDictation();
+      const dogfood = makeDogfood();
+      // Mutable state so finish sees listening after start.
+      const state: AppState = {
+        ...createInitialState(0),
+        dictation: { kind: "ready" },
+      };
+      const options = makeOptions({
+        dictation,
+        dogfood,
+        now: () => now,
+        state,
+      });
+
+      // Simulate dictation.start mutating app state (mock service would).
+      vi.mocked(dictation.start).mockImplementation(() => {
+        state.dictation = {
+          kind: "listening",
+          runId: 7,
+          waveform: "silent",
+        };
+      });
+
+      const { unmount } = renderHook(() => useShortcutGestures(options));
+
+      act(() => {
+        document.dispatchEvent(shortcutEvent("keydown"));
+      });
+      now = 320;
+      act(() => {
+        vi.advanceTimersByTime(320);
+      });
+      expect(vi.mocked(dogfood.start)).toHaveBeenCalledOnce();
+
+      act(() => {
+        document.dispatchEvent(shortcutEvent("keyup"));
+      });
+
+      expect(dictation.holdProcessing).toHaveBeenCalledWith(7);
+      expect(vi.mocked(dogfood.stop)).toHaveBeenCalledOnce();
+      expect(dictation.finish).not.toHaveBeenCalled();
+      expect(dictation.complete).not.toHaveBeenCalled();
+
+      unmount();
+    });
+
+    it("ignores hold-start while dogfood is already recording", () => {
+      vi.mocked(isTauri).mockReturnValue(false);
+      vi.useFakeTimers();
+      let now = 0;
+      const dictation = makeDictation();
+      const dogfood = makeDogfood({ phase: "recording" });
+      const options = makeOptions({
+        dictation,
+        dogfood,
+        now: () => now,
+      });
+      const { unmount } = renderHook(() => useShortcutGestures(options));
+
+      act(() => {
+        document.dispatchEvent(shortcutEvent("keydown"));
+      });
+      now = 320;
+      act(() => {
+        vi.advanceTimersByTime(320);
+      });
+
+      expect(dictation.start).not.toHaveBeenCalled();
+      expect(vi.mocked(dogfood.start)).not.toHaveBeenCalled();
+
+      unmount();
+    });
+  });
+
 });

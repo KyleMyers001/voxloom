@@ -52,7 +52,7 @@ Documented expectations for Clara Mac dogfood (not CI-provable on Linux):
 
 | # | Step | Expected |
 |---|------|----------|
-| C1 | Notes or TextEdit focused → Start capture → speak → Stop | **Inserted** (or Copied if AX denied) |
+| C1 | Notes focused → **global hold/latch** (do not click Home Start) → speak → release/finish | **Inserted** (or Copied if AX denied). Home Start focuses Voxloom first → often honest **Copy** |
 | C2 | Password / secure field focused at start | No insert; **Copied** (fallback on) or **Failed** (off) naming secure field |
 | C3 | Start in Notes, close Notes before Stop completes | **Copied — original app closed** (or Failed if fallback off); never insert elsewhere |
 | C4 | Start in Notes, focus Safari mid-capture | Still targets Notes identity; if changed at completion → Copy, not Safari insert |
@@ -60,6 +60,23 @@ Documented expectations for Clara Mac dogfood (not CI-provable on Linux):
 | C6 | Confirm no trailing Enter / accidental send in chat | Text only appears; message not submitted |
 | C7 | Accessibility denied | Snapshot/validate unavailable → Copy/Failed honest; no crash |
 | C8 | After paste-path restore skip (if exercised) | Toast admits clipboard not restored |
+
+
+### Clara note — C1 Inserted via global gesture
+
+Home **Start capture** activates/focuses Voxloom, so `snapshotTarget()` at Start
+often sees Voxloom → insert refused → **Copied** (honest). True Notes
+**Inserted** requires snapshot while Notes (or another insertable app) remains
+frontmost:
+
+1. Focus Notes (or TextEdit).
+2. Use the configured **global hold** (or latch) — do **not** click Home Start.
+3. Speak, then release (hold) / activate again (latch).
+4. Expect **Inserted** when AX succeeds; otherwise truthful **Copied** / **Failed**.
+
+Gesture path runs the same dogfood STT → `deliverTranscript` delivery as Home
+Stop (invocation-time snapshot inside `dogfood.start()`). Overlay remains
+non-focus-stealing (BUS-13).
 
 ### Linux / CI verification
 
@@ -80,6 +97,8 @@ Do **not** treat browser unit tests as proof of native AX insert.
 | `src-tauri/src/delivery/*` | macOS AX snapshot/validate/insert; non-macOS stubs |
 | `src/services/stt/dogfoodPath.ts` | STT → `deliverTranscript` |
 | `src/services/stt/useDogfoodCapture.ts` | Snapshot at start; toast from delivery evidence |
+| `src/app/useShortcutGestures.ts` | Product hold/latch → dogfood start/stop (shared with Home) |
+| `src/app/App.tsx` | Lifts shared `useDogfoodCapture` for Home + gesture |
 | `src/domain/records.ts` | History status from delivery evidence |
 | `docs/review/BUS-14-insert-delivery.md` | This review / smoke doc |
 
@@ -90,5 +109,5 @@ Do **not** treat browser unit tests as proof of native AX insert.
 | AX setValue may overwrite full field vs caret insert | Prefer AXSelectedText; Clara to confirm Notes/TextEdit |
 | Browser / Electron / game overlays | Unsupported → Copy; may need later heuristics |
 | Paste-via-⌘V path not used in v1 (AX only) | ADR allows paste without Enter; deferred if AX set fails broadly |
-| Gesture mock dictation still synthetic “inserted” | Product gesture→capture wire remains separate; dogfood path is real delivery |
+| Home Start while Voxloom focused | Expected **Copied**; use global hold for Notes Inserted smoke |
 | Windows adapter | Stub only; replaceable boundary ready |

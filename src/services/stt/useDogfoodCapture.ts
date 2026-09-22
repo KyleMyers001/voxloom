@@ -1,6 +1,8 @@
 /// Wire full capture stop → dogfoodTranscribeAndCopy on the main UI.
 /// Automatic STT + delivery after a clean stop; cancel discards with no STT.
 /// Snapshots intended target at capture start (ADR §4 invocation policy).
+/// Shared by Home Start and global hold/latch — start() must not activate
+/// Voxloom; gesture callers rely on the other app still being frontmost.
 /// Never silent-downloads missing models — surfaces a clear UI error instead.
 
 import { useCallback, useEffect, useRef, useState } from "react";

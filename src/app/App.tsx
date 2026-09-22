@@ -11,9 +11,13 @@ import { History } from "../features/history/History";
 import { Home } from "../features/home/Home";
 import { Onboarding } from "../features/onboarding/Onboarding";
 import { Settings } from "../features/settings/Settings";
+import { useDogfoodCapture } from "../services/stt/useDogfoodCapture";
 import { useApp } from "./AppContext";
 import { hasOpenModal } from "./modalState";
-import { useShortcutGestures } from "./useShortcutGestures";
+import {
+  toGestureDogfoodBridge,
+  useShortcutGestures,
+} from "./useShortcutGestures";
 import { useTheme } from "./useTheme";
 
 const screens: { glyph: string; label: string; value: Screen }[] = [
@@ -42,7 +46,7 @@ function BootHydratePlaceholder({ title }: { title: string }) {
 
 export function App() {
   const {
-    bootReady, dictation, dispatch, dictionaryDurable, historyDurable, now, settings,
+    bootReady, clipboard, dictation, dispatch, dictionaryDurable, historyDurable, now, settings,
     settingsDurable, setup, state,
   } = useApp();
   const [onboardingOpen, setOnboardingOpen] = useState(
@@ -53,6 +57,26 @@ export function App() {
   const [resetPromptOpen, setResetPromptOpen] = useState(false);
   const modalOpener = useRef<HTMLElement | null>(null);
   useTheme(state.settings.appearance);
+
+  function announce(message: string) {
+    setToast(message);
+    window.setTimeout(() => setToast(""), 1_800);
+  }
+
+  // Shared dogfood path: Home Start + global gesture (BUS-14).
+  // Gesture start snapshots while the other app is still frontmost.
+  const dogfood = useDogfoodCapture({
+    clipboard,
+    clipboardFallback: state.settings.clipboardFallback,
+    modelId: state.settings.transcriptionModel,
+    now,
+    onHistoryRecord: (record) => {
+      dispatch({ record, type: "append-record" });
+    },
+    onToast: announce,
+    preferredDeviceId: state.settings.microphone,
+    style: state.settings.style,
+  });
 
   // Close onboarding when durable settings hydrate with complete=true.
   useEffect(() => {
@@ -80,13 +104,9 @@ export function App() {
     return () => window.clearTimeout(timer);
   }, [state.dictionaryError]);
 
-  function announce(message: string) {
-    setToast(message);
-    window.setTimeout(() => setToast(""), 1_800);
-  }
-
   useShortcutGestures({
     dictation,
+    dogfood: toGestureDogfoodBridge(dogfood),
     now,
     onboardingOpen,
     onShortcutError: (message) => {
@@ -186,11 +206,14 @@ export function App() {
           onReset={requestResetSession}
         />}
         <p className="review-note">
-          Global shortcut binds in the desktop shell (hold / double-tap). Dictate on Home uses Settings STT model → Copy.
+          Global hold/latch snapshots the frontmost app then runs Dictate
+          (insert or Copy). Home Start may Copy when Voxloom is focused.
         </p>
       </aside>
       <main className="main">
-        {state.screen === "home" && <Home onToast={announce} />}
+        {state.screen === "home" && (
+          <Home dogfood={dogfood} onToast={announce} />
+        )}
         {state.screen === "history" && (
           bootReady
             ? <History onToast={announce} />
@@ -214,7 +237,7 @@ export function App() {
     {shortcutOpen && <Dialog label="Keyboard shortcuts"
       onClose={() => setShortcutOpen(false)} opener={modalOpener.current}>
       <h2>Keyboard shortcuts</h2>
-      <p>Hold or double-tap the configured shortcut (global in the desktop shell; app-focused in browser preview).</p>
+      <p>Hold or double-tap the configured shortcut (global in the desktop shell; app-focused in browser preview). Hold while Notes is focused to smoke Inserted; Home Start may Copy if Voxloom is focused.</p>
       <div className="overlay__row"><span>Configured gesture</span>
         <kbd>{state.settings.shortcut}</kbd></div>
       <div className="overlay__row"><span>Navigate screens</span>

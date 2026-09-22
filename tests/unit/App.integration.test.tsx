@@ -54,7 +54,7 @@ describe("App integration", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("gates first run, completes dictation, and shares mutations",
+  it("gates first run, gesture overlay without synthetic Inserted, shares mutations",
     async () => {
       const user = userEvent.setup();
       renderWithApp(<App />);
@@ -69,9 +69,11 @@ describe("App integration", () => {
       fireEvent.keyUp(document, shortcutKey);
       act(() => vi.advanceTimersByTime(500));
       vi.useRealTimers();
-      expect(screen.getByText(
+      // Product hold no longer invents Inserted via mock complete (BUS-14).
+      // Real delivery is dogfood STT → deliverTranscript (Clara Mac / Home).
+      expect(screen.queryByText(
         "Keep the TypeScript boundary small and explicit.",
-      )).toBeInTheDocument();
+      )).not.toBeInTheDocument();
       await user.click(screen.getByRole("button", { name: "Settings" }));
       await user.selectOptions(
         screen.getByLabelText("Current style"),

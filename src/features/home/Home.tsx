@@ -1,9 +1,12 @@
 import { useApp } from "../../app/AppContext";
 import type { WritingStyle } from "../../domain/types";
 import { isTauriEnv } from "../../services/capture/captureService";
-import { useDogfoodCapture } from "../../services/stt/useDogfoodCapture";
+import type { UseDogfoodCaptureResult } from
+  "../../services/stt/useDogfoodCapture";
 
 interface HomeProps {
+  /** Shared App-level dogfood capture (also driven by global gesture). */
+  dogfood: UseDogfoodCaptureResult;
   onToast: (message: string) => void;
 }
 
@@ -14,25 +17,12 @@ function formatTime(timestamp: number): string {
   }).format(timestamp);
 }
 
-export function Home({ onToast }: HomeProps) {
-  const { clipboard, dispatch, now, settings, state } = useApp();
+export function Home({ dogfood, onToast }: HomeProps) {
+  const { clipboard, dispatch, settings, state } = useApp();
   const recent = [...state.records]
     .filter(({ status }) => status !== "failed")
     .sort((a, b) => b.createdAt - a.createdAt)
     .slice(0, 5);
-
-  const dogfood = useDogfoodCapture({
-    clipboard,
-    clipboardFallback: state.settings.clipboardFallback,
-    modelId: state.settings.transcriptionModel,
-    now,
-    onHistoryRecord: (record) => {
-      dispatch({ record, type: "append-record" });
-    },
-    onToast,
-    preferredDeviceId: state.settings.microphone,
-    style: state.settings.style,
-  });
 
   const isNative = isTauriEnv();
   const recording = dogfood.phase === "recording"
@@ -81,6 +71,9 @@ export function Home({ onToast }: HomeProps) {
           intended app when possible, otherwise Copy (clipboard fallback
           toggle in Settings). Stop deposits audio and runs STT
           automatically; Cancel discards with no transcription.
+          For Notes <strong>Inserted</strong>, use the global hold/latch
+          while Notes is focused — Home Start focuses Voxloom first and
+          may honestly <strong>Copy</strong>.
         </p>
         {!isNative && (
           <p className="form-error" role="status">
