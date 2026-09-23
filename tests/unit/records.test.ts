@@ -98,3 +98,17 @@ describe("createDogfoodRecord", () => {
     expect(record?.model).toBe("whisper-tiny.en");
   });
 });
+
+  it("uses inserted status when delivery evidence says inserted", () => {
+    const record = createDogfoodRecord({
+      durationMs: 800,
+      id: "dogfood-insert",
+      now: 2_000,
+      status: "inserted",
+      style: "formal",
+      text: "into Notes",
+    });
+    expect(record?.status).toBe("inserted");
+    expect(record?.recoveryExpiresAt).toBeNull();
+  });
+

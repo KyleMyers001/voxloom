@@ -20,9 +20,38 @@ import {
   type OverlayBridge,
   type PendingFinishGate,
 } from "../services/shortcut";
+import type {
+  DogfoodPhase,
+  UseDogfoodCaptureResult,
+} from "../services/stt/useDogfoodCapture";
+
+/**
+ * Product gestures drive real dogfood capture → STT → deliverTranscript.
+ * Snapshot runs inside dogfood.start() at gesture invocation (while the
+ * other app is still frontmost — global shortcut must not activate Voxloom).
+ * Overlay visibility is torn down on finish/cancel/error unconditionally
+ * (try/finally) so a failed stop/STT/deliver cannot leave the waveform up.
+ * Dogfood terminal (Home Stop / success / error / cancel) also forces overlay
+ * clear — do not rely only on gesture finish (Clara: Stop clears capture but
+ * waveform stayed). That teardown is **edge-triggered** on the phase
+ * transition only: the phase stays "success"/"cancelled" until the next
+ * start, so re-running it on every dictation change cancelled the *next*
+ * hold's listening run in the same commit (no overlay, machine reset, release
+ * lost, Home stuck on Stop — the 2nd/3rd-hold failures on a161e1f…dbe5748).
+ * New holds abandon leftover *recording* dogfood before starting; an
+ * in-flight transcription is left to finish in the background.
+ */
+export interface GestureDogfoodBridge {
+  cancel: () => void;
+  phase: DogfoodPhase;
+  start: () => Promise<void>;
+  stop: () => Promise<void>;
+}
 
 interface GestureOptions {
   dictation: DictationLifecycle;
+  /** Shared Home/gesture dogfood path (BUS-14 follow-up). */
+  dogfood: GestureDogfoodBridge;
   now: () => number;
   onboardingOpen: boolean;
   onShortcutError?: (message: string) => void;
@@ -37,6 +66,67 @@ const browserScheduler = {
     window.setTimeout(callback, delay),
 };
 
+function isDogfoodBusy(phase: DogfoodPhase): boolean {
+  return phase === "recording" || phase === "transcribing";
+}
+
+function isDogfoodTerminal(phase: DogfoodPhase): boolean {
+  return phase === "success"
+    || phase === "error"
+    || phase === "cancelled";
+}
+
+/**
+ * Hide waveform: cancel listening|processing so overlay sync goes invisible.
+ * With `runId`, only that run is cancelled — a later run (new hold) is kept.
+ */
+function tearDownOverlayDictation(
+  options: GestureOptions,
+  runId?: number,
+): void {
+  const d = options.state.dictation;
+  if (d.kind !== "listening" && d.kind !== "processing") return;
+  if (runId !== undefined && d.runId !== runId) return;
+  options.dictation.cancel(d.runId);
+}
+
+/** Dictation run the overlay currently shows, if any. */
+function visibleRunId(options: GestureOptions): number | null {
+  const d = options.state.dictation;
+  return d.kind === "listening" || d.kind === "processing" ? d.runId : null;
+}
+
+/**
+ * Finish hold/latch: stop capture for STT/delivery, but always clear overlay
+ * even when stop throws or races ahead of React listening commit.
+ * Never dictation.finish/complete — that invents synthetic Inserted rows.
+ */
+function endGestureCapture(optionsRef: { current: GestureOptions }): void {
+  // Immediate clear on release (Clara: overlay must not wait for STT).
+  const runId = visibleRunId(optionsRef.current);
+  tearDownOverlayDictation(optionsRef.current);
+  void (async () => {
+    try {
+      await optionsRef.current.dogfood.stop();
+    } catch {
+      // stop / STT / deliver failure must not leave overlay up
+    } finally {
+      // Only this run — a new hold may already be listening by now.
+      if (runId !== null) tearDownOverlayDictation(optionsRef.current, runId);
+    }
+  })();
+}
+
+/**
+ * Last dogfood phase the terminal-teardown effect has acted on. Shared with
+ * handleGesture so a hold-start that itself cancels leftover dogfood can mark
+ * the resulting "cancelled" as handled before React commits it together with
+ * the new listening run.
+ */
+interface PhaseGuard {
+  seen: DogfoodPhase;
+}
+
 export function useShortcutGestures(options: GestureOptions) {
   const documentControllerRef = useRef<ShortcutController | null>(null);
   const nativeControllerRef = useRef<NativeShortcutController | null>(null);
@@ -44,11 +134,16 @@ export function useShortcutGestures(options: GestureOptions) {
   const pendingFinishRef = useRef<PendingFinishGate | null>(null);
   const optionsRef = useRef(options);
   optionsRef.current = options;
+  const phaseGuardRef = useRef<PhaseGuard>({ seen: options.dogfood.phase });
 
   // Shared pending-finish gate (hold release can race React listening commit).
+  // Finish → dogfood.stop (real STT/delivery) + unconditional overlay teardown.
+  // Never dictation.finish/complete — that path invents synthetic Inserted.
   if (pendingFinishRef.current === null) {
     pendingFinishRef.current = createPendingFinishGate({
-      finish: (runId) => optionsRef.current.dictation.finish(runId),
+      finish: () => {
+        endGestureCapture(optionsRef);
+      },
       listeningRunId: () => {
         const { dictation } = optionsRef.current.state;
         return dictation.kind === "listening" ? dictation.runId : null;
@@ -65,6 +160,8 @@ export function useShortcutGestures(options: GestureOptions) {
         optionsRef.current,
         gesture,
         pendingFinishRef.current,
+        optionsRef,
+        phaseGuardRef.current,
       ),
       shortcut: options.state.settings.shortcut,
       target: document,
@@ -91,6 +188,8 @@ export function useShortcutGestures(options: GestureOptions) {
         optionsRef.current,
         gesture,
         pendingFinishRef.current,
+        optionsRef,
+        phaseGuardRef.current,
       ),
       onRegisterFailure: (message) => {
         optionsRef.current.onShortcutError?.(message);
@@ -190,48 +289,73 @@ export function useShortcutGestures(options: GestureOptions) {
     }
   }, [options.state.dictation]);
 
+  // When dogfood *enters* success/error/cancelled, guarantee overlay
+  // dictation is cleared without synthetic Inserted rows (Home Stop / cancel
+  // / error when gesture finish never ran). Edge-triggered on the phase
+  // transition only: the phase stays terminal until the next start, and the
+  // next hold's listening run commits while it is still terminal.
   useEffect(() => {
-    const { dictation, state } = options;
-    if (state.dictation.kind !== "processing" ||
-        state.dictation.completion !== "automatic") return;
-    const { runId } = state.dictation;
-    const timer = window.setTimeout(
-      () => dictation.complete(runId),
-      500,
-    );
-    return () => window.clearTimeout(timer);
-  }, [options.dictation, options.state.dictation]);
+    const guard = phaseGuardRef.current;
+    const phase = options.dogfood.phase;
+    if (phase === guard.seen) return;
+    guard.seen = phase;
+    if (!isDogfoodTerminal(phase)) return;
+    tearDownOverlayDictation(optionsRef.current);
+    // Force hide even if cancel no-ops (runId race) or React dictation
+    // commit lags — overlay sync to a non-visible kind.
+    const overlay = overlayRef.current;
+    if (overlay) {
+      void overlay.sync({ kind: "ready" });
+    }
+  }, [options.dogfood.phase]);
 }
 
 function handleGesture(
   options: GestureOptions,
   gesture: ShortcutGesture,
   pending: PendingFinishGate | null,
+  optionsRef: { current: GestureOptions },
+  phaseGuard: PhaseGuard,
 ) {
-  const { dictation, onboardingOpen, shortcutOpen, state } = options;
+  const { dictation, dogfood, onboardingOpen, shortcutOpen, state } = options;
   if (shortcutOpen) return;
   if (onboardingOpen && state.onboarding.step === 3) {
     handlePractice(options, gesture);
     return;
   }
   if (onboardingOpen) return;
-  // Busy / processing: ignore start; finish only while listening (or pending).
   if (gesture === "hold-start" || gesture === "latch-start") {
-    if (
-      state.dictation.kind === "listening" ||
-      state.dictation.kind === "processing"
-    ) {
-      return;
+    // Leftover overlay run (missed finish): clear it before the new run.
+    tearDownOverlayDictation(options);
+    if (dogfood.phase === "recording") {
+      // Prior capture never stopped (Home Start / missed hold-finish):
+      // abandon it so the new hold can start — never silently ignore as busy.
+      // Mark the resulting "cancelled" as handled: it commits in the same
+      // React batch as the new listening run, which must survive.
+      dogfood.cancel();
+      phaseGuard.seen = "cancelled";
     }
+    // "transcribing": prior utterance's STT/delivery keeps running in the
+    // background; dogfood.start() supersedes its phase (session-guarded).
     pending?.resetForStart();
+    // Overlay first (sync), then real capture. dogfood.start snapshots the
+    // frontmost app *before* mic work — global shortcut must not activate
+    // Voxloom (ADR §4). Home Start may still Copy when Voxloom is focused.
     dictation.start();
+    void dogfood.start().catch(() => {
+      // start failure → tear down overlay (phase effect also covers terminal)
+      tearDownOverlayDictation(optionsRef.current);
+    });
   } else if (gesture === "hold-finish" || gesture === "latch-finish") {
     if (state.dictation.kind === "listening") {
       const runId = state.dictation.runId;
       if (pending) pending.requestFinish(true, runId);
-      else dictation.finish(runId);
+      else endGestureCapture(optionsRef);
     } else if (pending) {
       pending.requestFinish(false, null);
+    } else if (isDogfoodBusy(dogfood.phase)) {
+      // Dictation overlay not listening yet, but capture may have started.
+      endGestureCapture(optionsRef);
     }
   }
 }
@@ -259,4 +383,16 @@ function handlePractice(options: GestureOptions, gesture: ShortcutGesture) {
     changes.tapTested = true;
   }
   options.setup.update(changes);
+}
+
+/** Test/helper: narrow UseDogfoodCaptureResult to the gesture bridge. */
+export function toGestureDogfoodBridge(
+  dogfood: UseDogfoodCaptureResult,
+): GestureDogfoodBridge {
+  return {
+    cancel: dogfood.cancel,
+    phase: dogfood.phase,
+    start: dogfood.start,
+    stop: dogfood.stop,
+  };
 }

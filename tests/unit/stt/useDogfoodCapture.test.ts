@@ -3,6 +3,8 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ClipboardAdapter } from "../../../src/services/clipboard";
+import type { DeliveryPlatformAdapter, TargetSnapshot } from
+  "../../../src/services/delivery";
 import type { CaptureState } from "../../../src/services/capture/types";
 import type { UseCaptureStateResult } from
   "../../../src/services/capture/useCaptureState";
@@ -17,6 +19,27 @@ import { useDogfoodCapture } from
 function clipboard(): ClipboardAdapter {
   return { copy: vi.fn().mockResolvedValue(undefined) };
 }
+
+function deliveryOutcome(
+  status: "inserted" | "copied" | "failed",
+  text: string,
+  message?: string,
+) {
+  return {
+    clipboardRestored: false,
+    detail: status === "failed" ? "NotAllowedError" : null,
+    message: message
+      ?? (status === "copied"
+        ? "Copied — test"
+        : status === "inserted"
+        ? "Inserted"
+        : "Failed — NotAllowedError"),
+    restoreSkippedReason: null,
+    status,
+    text,
+  };
+}
+
 
 function stubCapture(state: CaptureState): UseCaptureStateResult {
   return {
@@ -46,7 +69,18 @@ async function mockDogfoodSuccess(
     id: audio.id,
     sampleRateHz: audio.sample_rate_hz,
   });
-  return { copied: true, transcript };
+  return {
+    copied: true,
+    delivery: {
+      clipboardRestored: false,
+      detail: "test",
+      message: "Copied — test",
+      restoreSkippedReason: null,
+      status: "copied" as const,
+      text: transcript.text,
+    },
+    transcript,
+  };
 }
 
 describe("useDogfoodCapture", () => {
@@ -117,7 +151,7 @@ describe("useDogfoodCapture", () => {
     );
     await waitFor(() => expect(result.current.phase).toBe("success"));
     expect(result.current.transcript?.text).toBeTruthy();
-    expect(result.current.message).toMatch(/copied to clipboard/i);
+    expect(result.current.message).toMatch(/^Copied/i);
   });
 
   it("surfaces transcript + warning toast when Copy soft-fails", async () => {
@@ -128,6 +162,7 @@ describe("useDogfoodCapture", () => {
     const dogfood = vi.fn(async (): Promise<DogfoodResult> => ({
       copied: false,
       copyWarning: "NotAllowedError",
+      delivery: deliveryOutcome("failed", "still here", "Failed — NotAllowedError"),
       transcript: { language: "en", text: "still here" },
     }));
 
@@ -151,10 +186,10 @@ describe("useDogfoodCapture", () => {
 
     await waitFor(() => expect(result.current.phase).toBe("success"));
     expect(result.current.transcript?.text).toBe("still here");
-    expect(result.current.message).toMatch(/clipboard copy failed/i);
+    expect(result.current.message).toMatch(/^Failed/i);
     expect(result.current.message).toMatch(/NotAllowedError/);
     expect(toast).toHaveBeenCalledWith(
-      expect.stringMatching(/clipboard copy failed/i),
+      expect.stringMatching(/^Failed/i),
     );
   });
 
@@ -232,6 +267,95 @@ describe("useDogfoodCapture", () => {
     expect(result.current.phase).toBe("cancelled");
   });
 
+  it("a stale session's STT completion does not clobber a newer session's phase", async () => {
+    // Hold 1 stops → transcribing (slow). User starts hold 2 before STT
+    // resolves. Session 1's completion must still deliver + record history
+    // but must not flip phase "recording" → "success" mid-session-2.
+    const clip = clipboard();
+    const store = createMockSttModelStore();
+    await store.download("whisper-tiny.en");
+    let resolveDogfood: ((r: DogfoodResult) => void) | null = null;
+    const dogfood = vi.fn(() => new Promise<DogfoodResult>((resolve) => {
+      resolveDogfood = resolve;
+    }));
+    const onHistoryRecord = vi.fn();
+    const onToast = vi.fn();
+
+    let captureState: CaptureState = { kind: "idle" };
+    let generation = 0;
+    const startFullCaptureSession = vi.fn(async () => {
+      generation += 1;
+      captureState = {
+        device: "Mic",
+        generation,
+        kind: "active",
+        request_id: `full-${generation}`,
+      };
+    });
+    const stopFullCapture = vi.fn(async () => {
+      captureState = {
+        audio: {
+          duration_ms: 900,
+          id: `pcm-${generation}`,
+          sample_rate_hz: 16_000,
+        },
+        kind: "stopped",
+      };
+    });
+
+    const { result, rerender } = renderHook(
+      ({ state }: { state: CaptureState }) => useDogfoodCapture({
+        captureApi: {
+          ...stubCapture(state),
+          startFullCaptureSession,
+          stopFullCapture,
+        },
+        clipboard: clip,
+        createModelStore: () => store,
+        dogfood: dogfood as never,
+        modelId: "whisper-tiny.en",
+        onHistoryRecord,
+        onToast,
+      }),
+      { initialProps: { state: captureState } },
+    );
+
+    // Session 1: start → stop → transcribing (dogfood pending).
+    await act(async () => {
+      await result.current.start();
+    });
+    rerender({ state: captureState });
+    await act(async () => {
+      await result.current.stop();
+    });
+    rerender({ state: captureState });
+    await waitFor(() => expect(dogfood).toHaveBeenCalledOnce());
+    expect(result.current.phase).toBe("transcribing");
+
+    // Session 2 starts while session 1 STT is still in flight.
+    await act(async () => {
+      await result.current.start();
+    });
+    rerender({ state: captureState });
+    expect(result.current.phase).toBe("recording");
+
+    // Session 1 completes late.
+    const late = await mockDogfoodSuccess({
+      audio: { duration_ms: 900, id: "pcm-1", sample_rate_hz: 16_000 },
+      modelId: "whisper-tiny.en",
+    });
+    await act(async () => {
+      resolveDogfood?.(late);
+      await Promise.resolve();
+    });
+    rerender({ state: captureState });
+
+    // Still recording session 2; delivery evidence still surfaced.
+    expect(result.current.phase).toBe("recording");
+    expect(onHistoryRecord).toHaveBeenCalledOnce();
+    expect(onToast).toHaveBeenCalledWith(late.delivery.message);
+  });
+
   it("appends a copied history record after successful dogfood", async () => {
     const store = createMockSttModelStore();
     await store.download("whisper-tiny.en");
@@ -281,6 +405,7 @@ describe("useDogfoodCapture", () => {
     const dogfood = vi.fn(async (): Promise<DogfoodResult> => ({
       copied: false,
       copyWarning: "NotAllowedError",
+      delivery: deliveryOutcome("failed", "soft fail text", "Failed — NotAllowedError"),
       transcript: { language: "en", text: "soft fail text" },
     }));
 
@@ -321,6 +446,7 @@ describe("useDogfoodCapture", () => {
 
     const dogfood = vi.fn(async (): Promise<DogfoodResult> => ({
       copied: true,
+      delivery: deliveryOutcome("copied", "   "),
       transcript: { language: "en", text: "   " },
     }));
 
@@ -393,6 +519,97 @@ describe("useDogfoodCapture", () => {
     expect(result.current.phase).toBe("cancelled");
     expect(onHistoryRecord).not.toHaveBeenCalled();
     expect(dogfood).not.toHaveBeenCalled();
+  });
+
+
+  it("snapshots intended target at start and passes it to dogfood (no Voxloom focus required)", async () => {
+    const store = createMockSttModelStore();
+    await store.download("whisper-tiny.en");
+
+    const intended: TargetSnapshot = {
+      appName: "Notes",
+      appPid: 4242,
+      capturedAt: 1_000,
+      elementId: "ax-notes-1",
+      elementRole: "AXTextArea",
+      insertable: true,
+      kind: "insertable",
+      reason: null,
+    };
+    const snapshotTarget = vi.fn().mockResolvedValue(intended);
+    const platform: DeliveryPlatformAdapter = {
+      clipboardRead: vi.fn().mockResolvedValue({ ok: true, text: "" }),
+      clipboardRestore: vi.fn(),
+      clipboardWrite: vi.fn(),
+      insertText: vi.fn(),
+      snapshotTarget,
+      validateTarget: vi.fn().mockResolvedValue(intended),
+    };
+
+    const dogfood = vi.fn(async (): Promise<DogfoodResult> => ({
+      copied: false,
+      delivery: deliveryOutcome("inserted", "hello notes", "Inserted"),
+      transcript: { language: "en", text: "hello notes" },
+    }));
+
+    let captureState: CaptureState = { kind: "idle" };
+    const startFullCaptureSession = vi.fn(async () => {
+      // Capture starts *after* snapshot — proves order for gesture smoke.
+      expect(snapshotTarget).toHaveBeenCalledOnce();
+      captureState = {
+        device: "Mic",
+        generation: 1,
+        kind: "active",
+        request_id: "full-snap",
+      };
+    });
+    const stopFullCapture = vi.fn(async () => {
+      captureState = {
+        audio: {
+          duration_ms: 700,
+          id: "pcm-snap-1",
+          sample_rate_hz: 16_000,
+        },
+        kind: "stopped",
+      };
+    });
+
+    const { result, rerender } = renderHook(
+      ({ state }: { state: CaptureState }) => useDogfoodCapture({
+        captureApi: {
+          ...stubCapture(state),
+          startFullCaptureSession,
+          stopFullCapture,
+        },
+        clipboard: clipboard(),
+        createModelStore: () => store,
+        deliveryPlatform: platform,
+        dogfood: dogfood as never,
+        modelId: "whisper-tiny.en",
+      }),
+      { initialProps: { state: captureState } },
+    );
+
+    await act(async () => {
+      await result.current.start();
+    });
+    expect(snapshotTarget).toHaveBeenCalledOnce();
+    expect(result.current.intendedTarget).toEqual(intended);
+    // start() does not activate any app — snapshot uses whatever was frontmost.
+    expect(startFullCaptureSession).toHaveBeenCalledOnce();
+
+    rerender({ state: captureState });
+    await act(async () => {
+      await result.current.stop();
+    });
+    rerender({ state: captureState });
+
+    await waitFor(() => expect(dogfood).toHaveBeenCalledOnce());
+    expect(dogfood).toHaveBeenCalledWith(
+      expect.objectContaining({ intended }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("success"));
+    expect(result.current.message).toMatch(/^Inserted/i);
   });
 
 });

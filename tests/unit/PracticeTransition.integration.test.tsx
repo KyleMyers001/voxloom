@@ -53,6 +53,7 @@ describe("practice interaction transitions", () => {
       screen.getByRole("img", { name: "silent mock waveform" }),
     ).toBeInTheDocument();
     fireEvent.keyUp(document, shortcut);
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
     act(() => vi.advanceTimersByTime(500));
     vi.useRealTimers();
   });
@@ -83,12 +84,8 @@ describe("practice interaction transitions", () => {
       ).toBeInTheDocument();
       now = 250;
       tap();
-      expect(
-        screen.queryByRole("img", { name: "silent mock waveform" }),
-      ).not.toBeInTheDocument();
-      expect(
-        screen.getByRole("img", { name: "speaking mock waveform" }),
-      ).toBeInTheDocument();
+      // Finish tears down overlay immediately (no stuck processing waveform).
+      expect(screen.queryByRole("img")).not.toBeInTheDocument();
       act(() => vi.advanceTimersByTime(500));
       vi.useRealTimers();
     },

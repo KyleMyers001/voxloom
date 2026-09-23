@@ -1,5 +1,8 @@
 /// Wire full capture stop → dogfoodTranscribeAndCopy on the main UI.
-/// Automatic STT + Copy after a clean stop; cancel discards with no STT.
+/// Automatic STT + delivery after a clean stop; cancel discards with no STT.
+/// Snapshots intended target at capture start (ADR §4 invocation policy).
+/// Shared by Home Start and global hold/latch — start() must not activate
+/// Voxloom; gesture callers rely on the other app still being frontmost.
 /// Never silent-downloads missing models — surfaces a clear UI error instead.
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -7,6 +10,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createDogfoodRecord } from "../../domain/records";
 import type { DictationRecord, WritingStyle } from "../../domain/types";
 import type { ClipboardAdapter } from "../clipboard";
+import {
+  createStubDeliveryAdapter,
+  createTauriDeliveryAdapter,
+  type DeliveryPlatformAdapter,
+  type TargetSnapshot,
+} from "../delivery";
 import {
   SYSTEM_DEFAULT_DEVICE_ID,
   type CaptureState,
@@ -34,6 +43,8 @@ export type DogfoodPhase =
 
 export interface UseDogfoodCaptureOptions {
   clipboard: ClipboardAdapter;
+  /** Settings `clipboardFallback` (default true). */
+  clipboardFallback?: boolean;
   /** Settings `transcriptionModel` (resolved before STT). */
   modelId: string;
   /** Clock for history `createdAt` (defaults to Date.now). */
@@ -55,11 +66,15 @@ export interface UseDogfoodCaptureOptions {
   createModelStore?: () => SttModelStore;
   /** Test seam: dogfood path. */
   dogfood?: typeof dogfoodTranscribeAndCopy;
+  /** Test seam: delivery platform (snapshot / insert / clipboard). */
+  deliveryPlatform?: DeliveryPlatformAdapter;
 }
 
 export interface UseDogfoodCaptureResult {
   cancel: () => void;
   captureState: CaptureState;
+  /** Invocation-time intended target (null until start snapshots). */
+  intendedTarget: TargetSnapshot | null;
   message: string | null;
   phase: DogfoodPhase;
   start: () => Promise<void>;
@@ -90,6 +105,18 @@ function missingModelMessage(modelId: string, status: string | null): string {
   );
 }
 
+function resolvePlatform(
+  clipboard: ClipboardAdapter,
+  injected?: DeliveryPlatformAdapter,
+): DeliveryPlatformAdapter {
+  if (injected) return injected;
+  try {
+    return createTauriDeliveryAdapter(clipboard);
+  } catch {
+    return createStubDeliveryAdapter({ clipboard });
+  }
+}
+
 export function useDogfoodCapture(
   options: UseDogfoodCaptureOptions,
 ): UseDogfoodCaptureResult {
@@ -99,6 +126,8 @@ export function useDogfoodCapture(
   const [phase, setPhase] = useState<DogfoodPhase>("idle");
   const [message, setMessage] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<Transcript | null>(null);
+  const [intendedTarget, setIntendedTarget] =
+    useState<TargetSnapshot | null>(null);
 
   const dogfoodRef = useRef(options.dogfood ?? dogfoodTranscribeAndCopy);
   dogfoodRef.current = options.dogfood ?? dogfoodTranscribeAndCopy;
@@ -113,6 +142,8 @@ export function useDogfoodCapture(
   modelIdRef.current = options.modelId;
   const clipboardRef = useRef(options.clipboard);
   clipboardRef.current = options.clipboard;
+  const clipboardFallbackRef = useRef(options.clipboardFallback !== false);
+  clipboardFallbackRef.current = options.clipboardFallback !== false;
   const toastRef = useRef(options.onToast);
   toastRef.current = options.onToast;
   const historyRef = useRef(options.onHistoryRecord);
@@ -121,6 +152,22 @@ export function useDogfoodCapture(
   styleRef.current = options.style ?? "formal";
   const nowRef = useRef(options.now ?? Date.now);
   nowRef.current = options.now ?? Date.now;
+  const platformRef = useRef<DeliveryPlatformAdapter>(
+    resolvePlatform(options.clipboard, options.deliveryPlatform),
+  );
+  platformRef.current = resolvePlatform(
+    options.clipboard,
+    options.deliveryPlatform,
+  );
+  const intendedRef = useRef<TargetSnapshot | null>(null);
+  /** Set by stop/cancel so a finish that races start still terminates. */
+  const stopRequestedRef = useRef(false);
+  /**
+   * Bumped by start/cancel. A prior session's STT/delivery may still be in
+   * flight when the next hold starts; its completion must still deliver and
+   * record history, but must not overwrite the newer session's phase.
+   */
+  const sessionRef = useRef(0);
 
   const announce = useCallback((text: string) => {
     setMessage(text);
@@ -140,6 +187,10 @@ export function useDogfoodCapture(
   }, []);
 
   const runDogfood = useCallback(async (audio: CaptureAudioMeta) => {
+    const session = sessionRef.current;
+    const current = () => session === sessionRef.current;
+    // Bind this session's target now: a newer start() may re-snapshot.
+    const intended = intendedRef.current;
     setPhase("transcribing");
     announce("Transcribing…");
     try {
@@ -147,35 +198,37 @@ export function useDogfoodCapture(
       const result = await dogfoodRef.current({
         audio,
         clipboard: clipboardRef.current,
+        clipboardFallback: clipboardFallbackRef.current,
+        deliveryPlatform: platformRef.current,
+        intended,
         modelId,
       });
-      setTranscript(result.transcript);
-      setPhase("success");
+      if (current()) {
+        setTranscript(result.transcript);
+        setPhase("success");
+      }
       const record = createDogfoodRecord({
-        copied: result.copied,
         durationMs: audio.duration_ms,
         id: `dogfood-${audio.id}`,
         model: modelId,
         now: nowRef.current(),
+        status: result.delivery.status,
         style: styleRef.current,
         text: result.transcript.text,
       });
       if (record) {
         historyRef.current?.(record);
       }
-      if (result.copied) {
-        announce("Transcript copied to clipboard");
-      } else {
-        const detail = result.copyWarning
-          ? `: ${result.copyWarning}`
-          : "";
-        announce(
-          `Transcript ready, but clipboard copy failed${detail}`,
-        );
-      }
+      // Stale session: evidence still surfaces as a toast, phase untouched.
+      if (current()) announce(result.delivery.message);
+      else toastRef.current?.(result.delivery.message);
     } catch (error: unknown) {
-      setPhase("error");
-      announce(errorText(error));
+      if (current()) {
+        setPhase("error");
+        announce(errorText(error));
+      } else {
+        toastRef.current?.(errorText(error));
+      }
     }
   }, [announce, ensureModelAvailable]);
 
@@ -205,14 +258,38 @@ export function useDogfoodCapture(
   }, [announce, capture.captureState, runDogfood]);
 
   const start = useCallback(async () => {
+    const session = ++sessionRef.current;
+    const superseded = () => session !== sessionRef.current;
     setTranscript(null);
     setMessage(null);
     handledAudioIdRef.current = null;
+    stopRequestedRef.current = false;
     try {
       await ensureModelAvailable(modelIdRef.current);
     } catch (error: unknown) {
+      if (superseded()) return;
       setPhase("error");
       announce(errorText(error));
+      return;
+    }
+    if (superseded()) return;
+
+    // ADR §4: snapshot intended target at invocation (capture start).
+    try {
+      const snap = await platformRef.current.snapshotTarget();
+      if (superseded()) return;
+      intendedRef.current = snap;
+      setIntendedTarget(snap);
+    } catch {
+      if (superseded()) return;
+      intendedRef.current = null;
+      setIntendedTarget(null);
+    }
+
+    // Hold release may have already requested stop while we were snapshotting.
+    if (stopRequestedRef.current) {
+      setPhase("cancelled");
+      setMessage("Capture cancelled — nothing transcribed.");
       return;
     }
 
@@ -223,7 +300,21 @@ export function useDogfoodCapture(
 
     setPhase("recording");
     announce("Listening…");
-    await capture.startFullCaptureSession(deviceId);
+    try {
+      await capture.startFullCaptureSession(deviceId);
+    } catch (error: unknown) {
+      setPhase("error");
+      announce(errorText(error));
+      return;
+    }
+    if (stopRequestedRef.current) {
+      try {
+        await capture.stopFullCapture();
+      } catch (error: unknown) {
+        setPhase("error");
+        announce(errorText(error));
+      }
+    }
   }, [
     announce,
     capture,
@@ -232,19 +323,33 @@ export function useDogfoodCapture(
   ]);
 
   const stop = useCallback(async () => {
-    await capture.stopFullCapture();
-  }, [capture]);
+    stopRequestedRef.current = true;
+    try {
+      await capture.stopFullCapture();
+    } catch (error: unknown) {
+      setPhase("error");
+      announce(errorText(error));
+    }
+  }, [announce, capture]);
 
   const cancel = useCallback(() => {
+    sessionRef.current += 1;
+    stopRequestedRef.current = true;
     handledAudioIdRef.current = null;
-    capture.cancelActiveCapture();
-    setPhase("cancelled");
-    setMessage("Capture cancelled — nothing transcribed.");
+    intendedRef.current = null;
+    setIntendedTarget(null);
+    try {
+      capture.cancelActiveCapture();
+    } finally {
+      setPhase("cancelled");
+      setMessage("Capture cancelled — nothing transcribed.");
+    }
   }, [capture]);
 
   return {
     cancel,
     captureState: capture.captureState,
+    intendedTarget,
     message,
     phase,
     start,
@@ -252,3 +357,4 @@ export function useDogfoodCapture(
     transcript,
   };
 }
+
