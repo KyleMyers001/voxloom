@@ -139,6 +139,46 @@ grace (~80ms); after grace Carbon calls `released` + disarm as **backup** finish
 (3) keep dogfood terminal + Home Stop force-clearing overlay; (4) arm failure
 clears monitoring immediately.
 
+### Kyle failure — dbe5748 still FAILS R1 (root cause found)
+
+On tip `dbe5748`: **1st** hold shows overlay and clears on release; **2nd** hold
+shows **no overlay**, Home stays on **Stop**. Same symptom as c9e0df5, so the
+hold-release watch was never the cause.
+
+**Root cause (TS, deterministic — not a Mac race):** the "dogfood terminal ⇒
+clear overlay" effect in `useShortcutGestures` depended on
+`[dogfood.phase, dictation, state.dictation]` and ran whenever it was
+*currently* terminal. After hold 1 delivers, `dogfood.phase` stays
+`"success"` until the next `start()`. Hold 2's `dictation.start()` commits a
+new `listening` run while the phase is still `"success"`, so the effect
+re-ran and immediately `dictation.cancel`led the new run: overlay never
+showed, the `cancelled` transition then `resetPartial()`ed the gesture
+machine, the physical release found no hold in progress (`hold-finish` never
+fired), `dogfood.stop` never ran ⇒ Home stuck on Stop. Hold 1 only worked
+because the phase started at `"idle"`. The multi-hold unit tests missed it
+because they never re-rendered the hook and kept `phase: "idle"`.
+
+Secondary: `useDogfoodCapture` was not session-safe. A hold started while the
+previous utterance was still `"transcribing"` was `cancel()`ed by hold-start,
+yet the in-flight STT still resolved and set `phase = "success"` mid-session —
+the same terminal edge would then kill the new hold.
+
+**Fix (this SHA):**
+1. Terminal teardown is **edge-triggered** on the phase *transition* (tracked
+   in a ref) with `[dogfood.phase]` as the only dependency.
+2. `endGestureCapture`'s post-stop teardown cancels only the run it finished
+   (`runId`-scoped), never a newer run.
+3. hold-start abandons leftover `"recording"` dogfood only; an in-flight
+   `"transcribing"` session is left to finish. Its completion still delivers,
+   records history and toasts, but a session counter stops it from touching
+   the newer session's phase/transcript.
+4. Regression tests re-render the hook like the real app across 3 hold cycles
+   with the phase parked at `"success"`, plus the transcribing-overlap case.
+
+The c9e0df5 / dbe5748 hold-watch changes (serialized arm/disarm, Carbon
+Released backup after grace) are kept as defence in depth; they are no longer
+required for R1 and could be simplified once R1 passes on device.
+
 ### Linux / CI verification
 
 ```sh
@@ -174,4 +214,5 @@ Do **not** treat browser unit tests as proof of native AX insert.
 | Stuck overlay after release (pre-fix) | Fixed: unconditional tear-down on finish/cancel/error (try/finally) |
 | 2nd/3rd hold stuck (6f1ada8) | Serialized arm/disarm alone insufficient (c9e0df5 still failed R1) |
 | 2nd hold no overlay + Home Stop (c9e0df5) | Fixed: Carbon Released backup after grace + force-stop leftover busy on hold-start |
+| 2nd hold no overlay + Home Stop (dbe5748) | Fixed: terminal-teardown effect was level-triggered on stale phase; now edge-triggered + session-guarded dogfood |
 | Windows adapter | Stub only; replaceable boundary ready |

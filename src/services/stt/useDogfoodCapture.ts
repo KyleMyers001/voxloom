@@ -162,6 +162,12 @@ export function useDogfoodCapture(
   const intendedRef = useRef<TargetSnapshot | null>(null);
   /** Set by stop/cancel so a finish that races start still terminates. */
   const stopRequestedRef = useRef(false);
+  /**
+   * Bumped by start/cancel. A prior session's STT/delivery may still be in
+   * flight when the next hold starts; its completion must still deliver and
+   * record history, but must not overwrite the newer session's phase.
+   */
+  const sessionRef = useRef(0);
 
   const announce = useCallback((text: string) => {
     setMessage(text);
@@ -181,6 +187,10 @@ export function useDogfoodCapture(
   }, []);
 
   const runDogfood = useCallback(async (audio: CaptureAudioMeta) => {
+    const session = sessionRef.current;
+    const current = () => session === sessionRef.current;
+    // Bind this session's target now: a newer start() may re-snapshot.
+    const intended = intendedRef.current;
     setPhase("transcribing");
     announce("Transcribing…");
     try {
@@ -190,11 +200,13 @@ export function useDogfoodCapture(
         clipboard: clipboardRef.current,
         clipboardFallback: clipboardFallbackRef.current,
         deliveryPlatform: platformRef.current,
-        intended: intendedRef.current,
+        intended,
         modelId,
       });
-      setTranscript(result.transcript);
-      setPhase("success");
+      if (current()) {
+        setTranscript(result.transcript);
+        setPhase("success");
+      }
       const record = createDogfoodRecord({
         durationMs: audio.duration_ms,
         id: `dogfood-${audio.id}`,
@@ -207,10 +219,16 @@ export function useDogfoodCapture(
       if (record) {
         historyRef.current?.(record);
       }
-      announce(result.delivery.message);
+      // Stale session: evidence still surfaces as a toast, phase untouched.
+      if (current()) announce(result.delivery.message);
+      else toastRef.current?.(result.delivery.message);
     } catch (error: unknown) {
-      setPhase("error");
-      announce(errorText(error));
+      if (current()) {
+        setPhase("error");
+        announce(errorText(error));
+      } else {
+        toastRef.current?.(errorText(error));
+      }
     }
   }, [announce, ensureModelAvailable]);
 
@@ -240,6 +258,8 @@ export function useDogfoodCapture(
   }, [announce, capture.captureState, runDogfood]);
 
   const start = useCallback(async () => {
+    const session = ++sessionRef.current;
+    const superseded = () => session !== sessionRef.current;
     setTranscript(null);
     setMessage(null);
     handledAudioIdRef.current = null;
@@ -247,17 +267,21 @@ export function useDogfoodCapture(
     try {
       await ensureModelAvailable(modelIdRef.current);
     } catch (error: unknown) {
+      if (superseded()) return;
       setPhase("error");
       announce(errorText(error));
       return;
     }
+    if (superseded()) return;
 
     // ADR §4: snapshot intended target at invocation (capture start).
     try {
       const snap = await platformRef.current.snapshotTarget();
+      if (superseded()) return;
       intendedRef.current = snap;
       setIntendedTarget(snap);
     } catch {
+      if (superseded()) return;
       intendedRef.current = null;
       setIntendedTarget(null);
     }
@@ -309,6 +333,7 @@ export function useDogfoodCapture(
   }, [announce, capture]);
 
   const cancel = useCallback(() => {
+    sessionRef.current += 1;
     stopRequestedRef.current = true;
     handledAudioIdRef.current = null;
     intendedRef.current = null;

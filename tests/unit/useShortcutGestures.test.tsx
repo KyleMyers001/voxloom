@@ -6,6 +6,8 @@ import {
   useShortcutGestures,
   type GestureDogfoodBridge,
 } from "../../src/app/useShortcutGestures";
+import type { DogfoodPhase } from
+  "../../src/services/stt/useDogfoodCapture";
 import type {
   DictationLifecycle,
   SetupLifecycle,
@@ -710,6 +712,164 @@ describe("useShortcutGestures", () => {
       expect(
         state.dictation.kind === "listening" && state.dictation.runId,
       ).toBe(8);
+
+      unmount();
+    });
+    it("second hold after a delivered session listens and finishes (terminal phase is not re-applied)", async () => {
+      // Real app re-renders on every dispatch / phase change. After hold 1
+      // delivers, dogfood.phase stays "success". Hold 2's listening commit
+      // must NOT re-run the terminal teardown (dbe5748 regression: 2nd hold
+      // showed no overlay, machine reset, release lost, Home stuck on Stop).
+      vi.mocked(isTauri).mockReturnValue(false);
+      vi.useFakeTimers();
+      let now = 0;
+      const clock = () => now;
+      let runSeq = 0;
+      let phase: DogfoodPhase = "idle";
+      const dictation = makeDictation();
+      const dogfood = makeDogfood();
+      const state: AppState = {
+        ...createInitialState(0),
+        dictation: { kind: "ready" },
+      };
+      vi.mocked(dictation.start).mockImplementation(() => {
+        runSeq += 1;
+        state.dictation = {
+          kind: "listening",
+          runId: runSeq,
+          waveform: "silent",
+        };
+      });
+      vi.mocked(dictation.cancel).mockImplementation((runId) => {
+        const d = state.dictation;
+        if (
+          (d.kind === "listening" || d.kind === "processing")
+          && d.runId === runId
+        ) {
+          state.dictation = { kind: "cancelled", runId };
+        }
+      });
+      const props = () => makeOptions({
+        dictation,
+        dogfood: { ...dogfood, phase },
+        now: clock,
+        state: { ...state },
+      });
+      const { rerender, unmount } = renderHook(
+        (p) => useShortcutGestures(p),
+        { initialProps: props() },
+      );
+      const render = () => rerender(props());
+
+      const holdAndRelease = async (expectedRun: number) => {
+        act(() => {
+          document.dispatchEvent(shortcutEvent("keydown"));
+        });
+        now += 320;
+        act(() => {
+          vi.advanceTimersByTime(320);
+        });
+        expect(state.dictation.kind).toBe("listening");
+        // Commit the listening run (phase may still be a stale terminal).
+        render();
+        expect(dictation.cancel).not.toHaveBeenCalledWith(expectedRun);
+        expect(state.dictation.kind).toBe("listening");
+        phase = "recording";
+        render();
+
+        act(() => {
+          document.dispatchEvent(shortcutEvent("keyup"));
+        });
+        await act(async () => {
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+        expect(vi.mocked(dogfood.stop)).toHaveBeenCalledOnce();
+        expect(state.dictation.kind).toBe("cancelled");
+        render();
+        phase = "transcribing";
+        render();
+        phase = "success";
+        render();
+      };
+
+      await holdAndRelease(1);
+
+      vi.mocked(dogfood.stop).mockClear();
+      vi.mocked(dictation.cancel).mockClear();
+      await holdAndRelease(2);
+
+      vi.mocked(dogfood.stop).mockClear();
+      vi.mocked(dictation.cancel).mockClear();
+      await holdAndRelease(3);
+
+      unmount();
+    });
+
+    it("new hold while prior STT is transcribing does not cancel it and still finishes", async () => {
+      vi.mocked(isTauri).mockReturnValue(false);
+      vi.useFakeTimers();
+      let now = 0;
+      const clock = () => now;
+      let runSeq = 0;
+      let phase: DogfoodPhase = "transcribing";
+      const dictation = makeDictation();
+      const dogfood = makeDogfood();
+      const state: AppState = {
+        ...createInitialState(0),
+        dictation: { kind: "cancelled", runId: 1 },
+      };
+      runSeq = 1;
+      vi.mocked(dictation.start).mockImplementation(() => {
+        runSeq += 1;
+        state.dictation = {
+          kind: "listening",
+          runId: runSeq,
+          waveform: "silent",
+        };
+      });
+      vi.mocked(dictation.cancel).mockImplementation((runId) => {
+        const d = state.dictation;
+        if (d.kind === "listening" && d.runId === runId) {
+          state.dictation = { kind: "cancelled", runId };
+        }
+      });
+      const props = () => makeOptions({
+        dictation,
+        dogfood: { ...dogfood, phase },
+        now: clock,
+        state: { ...state },
+      });
+      const { rerender, unmount } = renderHook(
+        (p) => useShortcutGestures(p),
+        { initialProps: props() },
+      );
+      const render = () => rerender(props());
+
+      act(() => {
+        document.dispatchEvent(shortcutEvent("keydown"));
+      });
+      now += 320;
+      act(() => {
+        vi.advanceTimersByTime(320);
+      });
+      // Prior utterance's STT/delivery keeps running in the background.
+      expect(dogfood.cancel).not.toHaveBeenCalled();
+      expect(vi.mocked(dogfood.start)).toHaveBeenCalledOnce();
+      expect(state.dictation.kind).toBe("listening");
+      render();
+      phase = "recording";
+      render();
+
+      act(() => {
+        document.dispatchEvent(shortcutEvent("keyup"));
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(vi.mocked(dogfood.stop)).toHaveBeenCalledOnce();
+      expect(state.dictation.kind).toBe("cancelled");
 
       unmount();
     });

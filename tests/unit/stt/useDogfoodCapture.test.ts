@@ -267,6 +267,95 @@ describe("useDogfoodCapture", () => {
     expect(result.current.phase).toBe("cancelled");
   });
 
+  it("a stale session's STT completion does not clobber a newer session's phase", async () => {
+    // Hold 1 stops → transcribing (slow). User starts hold 2 before STT
+    // resolves. Session 1's completion must still deliver + record history
+    // but must not flip phase "recording" → "success" mid-session-2.
+    const clip = clipboard();
+    const store = createMockSttModelStore();
+    await store.download("whisper-tiny.en");
+    let resolveDogfood: ((r: DogfoodResult) => void) | null = null;
+    const dogfood = vi.fn(() => new Promise<DogfoodResult>((resolve) => {
+      resolveDogfood = resolve;
+    }));
+    const onHistoryRecord = vi.fn();
+    const onToast = vi.fn();
+
+    let captureState: CaptureState = { kind: "idle" };
+    let generation = 0;
+    const startFullCaptureSession = vi.fn(async () => {
+      generation += 1;
+      captureState = {
+        device: "Mic",
+        generation,
+        kind: "active",
+        request_id: `full-${generation}`,
+      };
+    });
+    const stopFullCapture = vi.fn(async () => {
+      captureState = {
+        audio: {
+          duration_ms: 900,
+          id: `pcm-${generation}`,
+          sample_rate_hz: 16_000,
+        },
+        kind: "stopped",
+      };
+    });
+
+    const { result, rerender } = renderHook(
+      ({ state }: { state: CaptureState }) => useDogfoodCapture({
+        captureApi: {
+          ...stubCapture(state),
+          startFullCaptureSession,
+          stopFullCapture,
+        },
+        clipboard: clip,
+        createModelStore: () => store,
+        dogfood: dogfood as never,
+        modelId: "whisper-tiny.en",
+        onHistoryRecord,
+        onToast,
+      }),
+      { initialProps: { state: captureState } },
+    );
+
+    // Session 1: start → stop → transcribing (dogfood pending).
+    await act(async () => {
+      await result.current.start();
+    });
+    rerender({ state: captureState });
+    await act(async () => {
+      await result.current.stop();
+    });
+    rerender({ state: captureState });
+    await waitFor(() => expect(dogfood).toHaveBeenCalledOnce());
+    expect(result.current.phase).toBe("transcribing");
+
+    // Session 2 starts while session 1 STT is still in flight.
+    await act(async () => {
+      await result.current.start();
+    });
+    rerender({ state: captureState });
+    expect(result.current.phase).toBe("recording");
+
+    // Session 1 completes late.
+    const late = await mockDogfoodSuccess({
+      audio: { duration_ms: 900, id: "pcm-1", sample_rate_hz: 16_000 },
+      modelId: "whisper-tiny.en",
+    });
+    await act(async () => {
+      resolveDogfood?.(late);
+      await Promise.resolve();
+    });
+    rerender({ state: captureState });
+
+    // Still recording session 2; delivery evidence still surfaced.
+    expect(result.current.phase).toBe("recording");
+    expect(onHistoryRecord).toHaveBeenCalledOnce();
+    expect(onToast).toHaveBeenCalledWith(late.delivery.message);
+  });
+
   it("appends a copied history record after successful dogfood", async () => {
     const store = createMockSttModelStore();
     await store.download("whisper-tiny.en");
