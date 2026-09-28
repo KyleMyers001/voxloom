@@ -1,5 +1,5 @@
 //! macOS Accessibility (AX) target snapshot + text insert.
-//! Prefer AXValue / AXSelectedText set — never trailing Enter / Tab chords.
+//! Use only caret-aware AXSelectedText; failures fall back to Copy in TS.
 //! Secure fields and identity mismatches refuse insert (Copy is TS-side).
 
 use std::ffi::c_void;
@@ -235,6 +235,13 @@ fn focused_ui_element() -> Result<(AXUIElementRef, Option<String>), String> {
 }
 
 pub fn snapshot_target() -> Result<TargetSnapshotDto, String> {
+    if unsafe { AXIsProcessTrusted() } == 0 {
+        return Ok(TargetSnapshotDto::unavailable(
+            "Accessibility permission denied — insert skipped",
+            now_ms(),
+        ));
+    }
+
     match focused_ui_element() {
         Ok((element, app_name)) => {
             let snap = build_snapshot(element, app_name);
@@ -248,53 +255,55 @@ pub fn snapshot_target() -> Result<TargetSnapshotDto, String> {
 pub fn validate_target(
     intended: TargetSnapshotDto,
 ) -> Result<TargetSnapshotDto, String> {
-    let current = snapshot_target()?;
+    Ok(validate_snapshots(&intended, snapshot_target()?))
+}
 
-    // Closed / gone: current unavailable with no pid match.
-    if current.kind == "unavailable" && current.app_pid.is_none() {
-        return Ok(TargetSnapshotDto {
-            app_name: intended.app_name.clone(),
-            app_pid: intended.app_pid,
-            captured_at: now_ms(),
-            element_id: intended.element_id.clone(),
-            element_role: intended.element_role.clone(),
-            insertable: false,
-            kind: "closed".into(),
-            reason: Some("original app closed or focus lost".into()),
-        });
+fn validate_snapshots(
+    intended: &TargetSnapshotDto,
+    current: TargetSnapshotDto,
+) -> TargetSnapshotDto {
+    // Missing AX focus is not evidence that the original application closed.
+    if current.kind == "unavailable" || current.kind == "secure" || !current.insertable {
+        return current;
+    }
+    if intended.kind != "insertable" || !intended.insertable {
+        return intended.clone();
     }
 
-    // Identity: same pid + element id when both known.
-    if let (Some(want_pid), Some(have_pid)) = (intended.app_pid, current.app_pid) {
-        if want_pid != have_pid {
-            return Ok(TargetSnapshotDto {
+    match (intended.app_pid, current.app_pid) {
+        (Some(want), Some(have)) if want != have => {
+            return TargetSnapshotDto {
                 insertable: false,
                 kind: "changed".into(),
                 reason: Some("target changed (different app)".into()),
                 ..current
-            });
+            };
         }
-    }
-    if let (Some(want_el), Some(have_el)) =
-        (intended.element_id.as_ref(), current.element_id.as_ref())
-    {
-        if want_el != have_el {
-            // Same app, different element — still refuse retarget mid-flight.
-            return Ok(TargetSnapshotDto {
+        (Some(_), Some(_)) => {}
+        _ => {
+            return TargetSnapshotDto {
                 insertable: false,
-                kind: "changed".into(),
-                reason: Some("target changed (different field)".into()),
+                kind: "unavailable".into(),
+                reason: Some("target identity unavailable — insert skipped".into()),
                 ..current
-            });
+            };
         }
     }
-
-    // Secure / unsupported on current wins.
-    if current.kind == "secure" || !current.insertable {
-        return Ok(current);
+    match (intended.element_id.as_ref(), current.element_id.as_ref()) {
+        (Some(want), Some(have)) if want != have => TargetSnapshotDto {
+            insertable: false,
+            kind: "changed".into(),
+            reason: Some("target changed (different field)".into()),
+            ..current
+        },
+        (Some(_), Some(_)) => current,
+        _ => TargetSnapshotDto {
+            insertable: false,
+            kind: "unavailable".into(),
+            reason: Some("target identity unavailable — insert skipped".into()),
+            ..current
+        },
     }
-
-    Ok(current)
 }
 
 fn set_ax_string(
@@ -313,6 +322,15 @@ fn set_ax_string(
     Ok(())
 }
 
+fn insert_selected_text_with(
+    text: &str,
+    set: impl FnOnce(&str, &str) -> Result<(), String>,
+) -> Result<(), String> {
+    // AXValue replaces the entire field; a failed selected-text set must not
+    // try another AX mutation. The caller will use the Copy/Failed policy.
+    set("AXSelectedText", text)
+}
+
 pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<(), String> {
     if !intended.insertable || intended.kind != "insertable" {
         return Err(format!(
@@ -321,27 +339,80 @@ pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<(), Strin
         ));
     }
 
-    let validated = validate_target(intended.clone())?;
-    if !validated.insertable || validated.kind != "insertable" {
-        return Err(format!(
-            "refusing insert: {}",
-            validated
-                .reason
-                .unwrap_or_else(|| validated.kind.clone())
-        ));
-    }
-
-    let (element, _) = focused_ui_element()
+    // Validate the same element handle we will mutate, not a prior focus read.
+    let (element, app_name) = focused_ui_element()
         .map_err(|e| format!("insert aborted — {e}"))?;
-
-    // Prefer selected-text replace (caret-aware); fall back to AXValue set.
-    // Never send Enter / Tab / ⌘V as product submit from this path.
-    let selected = set_ax_string(element, "AXSelectedText", text);
-    let result = match selected {
-        Ok(()) => Ok(()),
-        Err(_) => set_ax_string(element, "AXValue", text),
+    let validated = validate_snapshots(intended, build_snapshot(element, app_name));
+    let result = if !validated.insertable || validated.kind != "insertable" {
+        Err(format!(
+            "refusing insert: {}",
+            validated.reason.unwrap_or(validated.kind)
+        ))
+    } else {
+        insert_selected_text_with(text, |attr, text| set_ax_string(element, attr, text))
     };
 
     release(element as CFTypeRef);
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn target(kind: &str, pid: Option<i32>, id: Option<&str>) -> TargetSnapshotDto {
+        TargetSnapshotDto {
+            app_name: Some("Notes".into()),
+            app_pid: pid,
+            captured_at: 1,
+            element_id: id.map(str::to_string),
+            element_role: Some("AXTextArea".into()),
+            insertable: kind == "insertable",
+            kind: kind.into(),
+            reason: if kind == "unavailable" {
+                Some("Accessibility permission denied — insert skipped".into())
+            } else {
+                None
+            },
+        }
+    }
+
+    #[test]
+    fn unavailable_focus_is_not_evidence_of_app_closure() {
+        let checked = validate_snapshots(
+            &target("insertable", Some(42), Some("42:AXTextArea:")),
+            target("unavailable", None, None),
+        );
+        assert_eq!(checked.kind, "unavailable");
+        assert_eq!(
+            checked.reason.as_deref(),
+            Some("Accessibility permission denied — insert skipped")
+        );
+    }
+
+    #[test]
+    fn changed_or_unidentifiable_target_is_not_insertable() {
+        let intended = target("insertable", Some(42), Some("42:AXTextArea:"));
+        for (current, expected) in [
+            (target("insertable", Some(43), Some("43:AXTextArea:")), "changed"),
+            (target("insertable", Some(42), Some("42:AXTextArea:other")), "changed"),
+            (target("insertable", None, Some("-1:AXTextArea:")), "unavailable"),
+        ] {
+            let checked = validate_snapshots(&intended, current);
+            assert!(!checked.insertable);
+            assert_eq!(checked.kind, expected);
+        }
+        assert!(validate_snapshots(&intended, intended.clone()).insertable);
+    }
+
+    #[test]
+    fn selected_text_failure_never_attempts_value_write() {
+        let mut attrs = Vec::new();
+        let result = insert_selected_text_with("dictation", |attr, text| {
+            attrs.push((attr.to_string(), text.to_string()));
+            Err("AX set failed".into())
+        });
+        assert!(result.is_err());
+        assert_eq!(attrs, [("AXSelectedText".into(), "dictation".into())]);
+    }
 }
