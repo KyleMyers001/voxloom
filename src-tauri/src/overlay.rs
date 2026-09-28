@@ -3,11 +3,44 @@
 //! Delivery/insert is out of scope — this window must never steal focus.
 
 use tauri::{
-    AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl,
+    AppHandle, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewUrl,
     WebviewWindow, WebviewWindowBuilder,
 };
 
 const OVERLAY_URL: &str = "overlay.html";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retina_overlay_position_uses_physical_window_size() {
+        let physical = LogicalSize::new(164.0, 48.0).to_physical::<u32>(2.0);
+        assert_eq!(physical, PhysicalSize::new(328, 96));
+        let position = bottom_center_position(
+            PhysicalSize::new(2880, 1800),
+            PhysicalPosition::new(0, 0),
+            physical,
+            2.0,
+            28,
+        );
+        assert_eq!(position.x, 1276);
+        assert_eq!(position.y, 1648);
+    }
+}
+
+fn bottom_center_position(
+    screen: PhysicalSize<u32>,
+    origin: PhysicalPosition<i32>,
+    window_size: PhysicalSize<u32>,
+    scale_factor: f64,
+    margin_bottom: i32,
+) -> PhysicalPosition<i32> {
+    let x = origin.x + ((screen.width as i32 - window_size.width as i32) / 2);
+    let margin = (margin_bottom as f64 * scale_factor).round() as i32;
+    let y = origin.y + screen.height as i32 - window_size.height as i32 - margin;
+    PhysicalPosition::new(x, y)
+}
 
 fn position_bottom_center(
     window: &WebviewWindow,
@@ -21,16 +54,20 @@ fn position_bottom_center(
         .or_else(|| window.primary_monitor().ok().flatten())
         .ok_or_else(|| "No monitor available for overlay".to_string())?;
 
-    let screen = monitor.size();
-    let origin = monitor.position();
-    let x = origin.x + ((screen.width as i32 - width as i32) / 2);
-    let y = origin.y + (screen.height as i32 - height as i32 - margin_bottom);
+    // The builder and CSS dimensions are logical points. PhysicalSize here
+    // clipped the pill on Retina displays, exposing a square window edge.
     window
-        .set_size(PhysicalSize::new(width, height))
+        .set_size(LogicalSize::new(width as f64, height as f64))
         .map_err(|e| e.to_string())?;
-    window
-        .set_position(PhysicalPosition::new(x, y))
-        .map_err(|e| e.to_string())?;
+    let actual_size = window.outer_size().map_err(|e| e.to_string())?;
+    let position = bottom_center_position(
+        *monitor.size(),
+        *monitor.position(),
+        actual_size,
+        monitor.scale_factor(),
+        margin_bottom,
+    );
+    window.set_position(position).map_err(|e| e.to_string())?;
     Ok(())
 }
 
