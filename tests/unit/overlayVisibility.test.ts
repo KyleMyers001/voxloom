@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   isOverlayVisible,
   overlayWaveformFromDictation,
 } from "../../src/services/shortcut/overlayVisibility";
-import { overlaySyncPlan } from
+import { createOverlayBridge, overlaySyncPlan } from
   "../../src/services/shortcut/overlayBridge";
 
 describe("overlay visibility", () => {
@@ -33,6 +33,29 @@ describe("overlay visibility", () => {
       runId: 1,
     })).toBe("processing");
     expect(overlayWaveformFromDictation({ kind: "ready" })).toBeNull();
+  });
+
+  it("uses the same floating overlay for Home capture", () => {
+    expect(overlaySyncPlan({ kind: "ready" }, true))
+      .toEqual({ visible: true, waveform: "silent" });
+    expect(overlaySyncPlan({ kind: "ready" }, false))
+      .toEqual({ visible: false, waveform: null });
+  });
+
+  it("shows Home capture in the overlay and hides it on stop", async () => {
+    const api = {
+      ensureCreated: vi.fn().mockResolvedValue(undefined),
+      hide: vi.fn().mockResolvedValue(undefined),
+      isAvailable: () => true,
+      setWaveform: vi.fn().mockResolvedValue(undefined),
+      showBottomCenter: vi.fn().mockResolvedValue(undefined),
+    };
+    const bridge = createOverlayBridge(api);
+    await bridge.sync({ kind: "ready" }, true);
+    expect(api.setWaveform).toHaveBeenCalledWith("silent");
+    expect(api.showBottomCenter).toHaveBeenCalledOnce();
+    await bridge.sync({ kind: "ready" });
+    expect(api.hide).toHaveBeenCalledOnce();
   });
 
   it("overlaySyncPlan hides after cancel/error", () => {

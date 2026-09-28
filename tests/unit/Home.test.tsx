@@ -14,6 +14,7 @@ function stubDogfood(
     captureState: { kind: "idle" },
     intendedTarget: null,
     message: null,
+    origin: null,
     phase: "idle",
     start: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn().mockResolvedValue(undefined),

@@ -43,6 +43,7 @@ import type {
  */
 export interface GestureDogfoodBridge {
   cancel: () => void;
+  origin?: "home" | "gesture" | null;
   phase: DogfoodPhase;
   start: () => Promise<void>;
   stop: () => Promise<void>;
@@ -267,11 +268,13 @@ export function useShortcutGestures(options: GestureOptions) {
   }, [options.onboardingOpen, options.shortcutOpen,
     options.state.onboarding.step]);
 
-  // Overlay visibility follows dictation lifecycle (listening/processing).
+  // Gesture runs and Home capture share the single native overlay.
   useEffect(() => {
     const overlay = overlayRef.current;
     if (!overlay) return;
-    void overlay.sync(options.state.dictation);
+    const homeRecording = options.dogfood.origin === "home"
+      && options.dogfood.phase === "recording";
+    void overlay.sync(options.state.dictation, homeRecording);
     const kind = options.state.dictation.kind;
     if (kind === "listening") {
       pendingFinishRef.current?.onListening();
@@ -287,7 +290,8 @@ export function useShortcutGestures(options: GestureOptions) {
       nativeControllerRef.current?.resetPartial();
       // Document path resets via context; also clear if mid-hold somehow.
     }
-  }, [options.state.dictation]);
+  }, [options.state.dictation, options.dogfood.origin,
+    options.dogfood.phase]);
 
   // When dogfood *enters* success/error/cancelled, guarantee overlay
   // dictation is cleared without synthetic Inserted rows (Home Stop / cancel
@@ -390,8 +394,9 @@ export function toGestureDogfoodBridge(
 ): GestureDogfoodBridge {
   return {
     cancel: dogfood.cancel,
+    origin: dogfood.origin,
     phase: dogfood.phase,
-    start: dogfood.start,
+    start: () => dogfood.start("gesture"),
     stop: dogfood.stop,
   };
 }

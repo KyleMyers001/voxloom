@@ -7,7 +7,13 @@ import { act, fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { App } from "../../src/app/App";
+import { useApp } from "../../src/app/AppContext";
 import { renderWithApp } from "./testUtils";
+
+function DictationStatus() {
+  const { state } = useApp();
+  return <output data-testid="dictation-status">{state.dictation.kind}</output>;
+}
 
 const shortcut = {
   code: "Space",
@@ -34,7 +40,7 @@ describe("practice interaction transitions", () => {
   it("resets a partial tap between practice and product", async () => {
     let now = 0;
     const user = userEvent.setup();
-    renderWithApp(<App />, () => now);
+    renderWithApp(<><App /><DictationStatus /></>, () => now);
     await reachPractice(user);
     tap();
     await user.click(screen.getByRole("button", { name: "Skip" }));
@@ -49,11 +55,9 @@ describe("practice interaction transitions", () => {
     act(() => vi.advanceTimersByTime(319));
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
     act(() => vi.advanceTimersByTime(1));
-    expect(
-      screen.getByRole("img", { name: "silent mock waveform" }),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId("dictation-status")).toHaveTextContent("listening");
     fireEvent.keyUp(document, shortcut);
-    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(screen.getByTestId("dictation-status")).toHaveTextContent("cancelled");
     act(() => vi.advanceTimersByTime(500));
     vi.useRealTimers();
   });
@@ -63,7 +67,7 @@ describe("practice interaction transitions", () => {
     async () => {
       let now = 0;
       const user = userEvent.setup();
-      renderWithApp(<App />, () => now);
+      renderWithApp(<><App /><DictationStatus /></>, () => now);
       await reachPractice(user);
       tap();
       now = 100;
@@ -79,13 +83,11 @@ describe("practice interaction transitions", () => {
       expect(screen.queryByRole("img")).not.toBeInTheDocument();
       now = 200;
       tap();
-      expect(
-        screen.getByRole("img", { name: "silent mock waveform" }),
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("dictation-status")).toHaveTextContent("listening");
       now = 250;
       tap();
-      // Finish tears down overlay immediately (no stuck processing waveform).
-      expect(screen.queryByRole("img")).not.toBeInTheDocument();
+      // Finish clears the run immediately (no stuck waveform).
+      expect(screen.getByTestId("dictation-status")).toHaveTextContent("cancelled");
       act(() => vi.advanceTimersByTime(500));
       vi.useRealTimers();
     },
