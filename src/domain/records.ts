@@ -96,7 +96,8 @@ export function createDogfoodRecord(
     durationSeconds,
     id: input.id,
     model: input.model ?? null,
-    recoveryExpiresAt: status === "failed" ? input.now + 10 * 60_000 : null,
+    // STT/delivery failures retain text, never a replayable audio buffer.
+    recoveryExpiresAt: null,
     status,
     style: input.style,
     text,

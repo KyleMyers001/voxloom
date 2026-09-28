@@ -62,8 +62,8 @@ describe("createDogfoodRecord", () => {
     expect(record?.status).toBe("failed");
     expect(record?.text).toBe("still here");
     expect(record?.durationSeconds).toBe(1);
-    expect(record?.recoveryExpiresAt).toBe(5_000 + 10 * 60_000);
-    expect(canRetry(record!, 5_001)).toBe(true);
+    expect(record?.recoveryExpiresAt).toBeNull();
+    expect(canRetry(record!, 5_001)).toBe(false);
   });
 
   it("returns null for blank or whitespace-only transcripts", () => {

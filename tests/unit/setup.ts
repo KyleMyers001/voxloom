@@ -28,7 +28,7 @@ vi.mock("../../src/services/capture/useCaptureState", () => ({
     refreshDevices: vi.fn().mockResolvedValue(undefined),
     requestMicPermission: vi.fn(),
     runMicTest: vi.fn().mockResolvedValue(undefined),
-    startFullCaptureSession: vi.fn().mockResolvedValue(undefined),
+    startFullCaptureSession: vi.fn().mockResolvedValue("started"),
     stopFullCapture: vi.fn().mockResolvedValue(undefined),
     stopMicTest: vi.fn(),
   }),

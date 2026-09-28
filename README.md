@@ -1,18 +1,22 @@
-# Voxloom mock-backed UI
+# Voxloom — macOS-first local dictation (work in progress)
 
-An interactive React and TypeScript prototype of the approved Quiet Signal
-desktop design. Every transcript, device, permission, shortcut, model, and
-recovery state is synthetic. No audio is captured, no native permission is
-requested, and no product network service is used.
+The Tauri desktop shell captures real microphone audio, can transcribe it
+locally using an explicitly downloaded Whisper model (`--features whisper`),
+and attempts to insert text into the invocation-time macOS target. When
+insertion is unsafe or unavailable it can Copy instead, if clipboard fallback
+is enabled; results report Inserted, Copied or Failed. The configured global
+shortcut supports hold/release and double-tap latch. macOS permission and
+Accessibility behavior require on-device verification; Windows is not verified.
 
-Browser / Vite-only shells keep UI state in memory (reload clears it). The
-Tauri desktop shell durably persists **Settings**, **History**, and the
-**Word dictionary** under the app data directory (`settings.json`,
-`history.json`, `dictionary.json`). Clipboard writes occur only after an
-explicit Copy activation and report failures truthfully. Development scenario controls are excluded from a
-normal production build; the mock dictation and onboarding flows remain usable.
-The default `Ctrl + Shift + Space` gesture works only while Voxloom is focused:
-hold and release, or rapidly double-tap to latch and activate once more to stop.
+The browser / Vite-only prototype uses synthetic capture, transcription and
+focused-window shortcuts; state clears on reload. The Tauri shell persists
+**Settings**, **History** and the **Word dictionary** in app data
+(`settings.json`, `history.json`, `dictionary.json`). Native audio retry and
+saved audio retention are not implemented. Onboarding practice recognizes
+shortcut gestures but does not transcribe speech. Cleanup styles, the cleanup
+model and start-at-login are not functional desktop features yet. Development
+scenario controls are excluded from production builds. See
+`docs/review/BUS-14-insert-delivery.md` for native smoke checks and limitations.
 
 ## Browser
 

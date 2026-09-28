@@ -42,7 +42,9 @@ export function Home({ dogfood, onToast }: HomeProps) {
     <section aria-labelledby="home-title">
       <div className="hero">
         <div>
-          <h2 id="home-title">Writing style</h2>
+          <h2 id="home-title">
+            {isNative ? "Style preference · cleanup not available" : "Writing style"}
+          </h2>
           <div aria-label="Current writing style" className="style-switch">
             {(["formal", "casual", "very-casual"] as WritingStyle[])
               .map((style) => (

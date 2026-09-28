@@ -216,3 +216,41 @@ Do **not** treat browser unit tests as proof of native AX insert.
 | 2nd hold no overlay + Home Stop (c9e0df5) | Fixed: Carbon Released backup after grace + force-stop leftover busy on hold-start |
 | 2nd hold no overlay + Home Stop (dbe5748) | Fixed: terminal-teardown effect was level-triggered on stale phase; now edge-triggered + session-guarded dogfood |
 | Windows adapter | Stub only; replaceable boundary ready |
+
+## Daily dictation restart (PLAN-20260928-163552; Mac QA pending)
+
+A fast re-hold could reach `useDogfoodCapture.start()` while
+`useCaptureState` still owned the previous request. `startFullCaptureSession`
+returned silently; the UI then claimed “recording” without a new microphone
+session. It now acknowledges started/ended/busy/error, and dogfood only
+announces recording after a confirmed start. A stop requested while start is
+pending is still honored; terminal-before-start-reply never resurrects a run.
+Native History does not offer a retry without retained audio; failed rows with
+text can be copied. Existing older rows with a fictional retry expiry are not
+presented as retryable in the desktop shell.
+
+Local checks: typecheck, lint, build, 293 TS unit tests, Rust `cargo check`
+(4 pre-existing warnings) and 129 Rust library tests passed. Browser release
+onboarding and two mock retry E2Es passed using the installed external
+Playwright browser cache. Default E2E scripts need a browser at the configured
+repo-local `.playwright-browsers` path; the remaining screenshot-writing tests
+were not run because they overwrite tracked baseline images.
+
+**Kyle's Mac report (dev shell, 2026-09-28; no captures):** About three
+consecutive holds looked good. With Notes focused, delivery initially reported
+“Copied — original app closed or focus lost” while WezTerm lacked macOS
+Accessibility permission. After Kyle enabled Accessibility for WezTerm (the
+dev host running Voxloom), Notes insertion worked. This confirms one
+permission-dependent Notes path by user report; it does **not** establish that
+Notes closed or lost focus in the initial test. The native AX validator also
+uses that broad message when macOS supplies no focused Accessibility element,
+so the copy is not a reliable diagnosis of a closed app.
+
+**Still pending:** measured immediate re-hold, latch/Home Stop, browser and
+terminal/chat targets, secure/changed targets, denied permissions, clipboard
+failure, and a separately launched packaged `.app` with its own permission
+identity. Re-run R1–R3 and record actual application, gesture, overlay,
+capture and delivery outcomes before treating the slice as fully
+native-validated. WezTerm-wide Accessibility is not a desired permanent
+requirement; macOS permits turning it off after the dev smoke. The Carbon
+monitor defenses remain unchanged.

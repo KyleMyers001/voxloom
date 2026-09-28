@@ -186,10 +186,10 @@ describe("App integration", () => {
         screen.getByRole("button", { name: "Next" }),
       );
       await user.click(
-        screen.getByRole("button", { name: "Test hold" }),
+        screen.getByRole("button", { name: "Simulate hold" }),
       );
       await user.click(
-        screen.getByRole("button", { name: "Test double-tap" }),
+        screen.getByRole("button", { name: "Simulate double-tap" }),
       );
       await user.click(screen.getByRole("button", { name: "Finish" }));
 

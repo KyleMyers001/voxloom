@@ -370,16 +370,15 @@ function interactionContext(options: GestureOptions): ShortcutContext {
 function handlePractice(options: GestureOptions, gesture: ShortcutGesture) {
   const changes: Partial<OnboardingState> = {};
   if (gesture === "hold-start") {
-    changes.recognizedText =
-      "Hold: preserve the TypeScript identifier.";
+    changes.recognizedText = "Hold gesture started (no speech captured).";
   }
   if (gesture === "hold-finish") changes.holdTested = true;
   if (gesture === "latch-start") {
     changes.recognizedText =
-      "Double-tap latched. Activate once more to finish.";
+      "Double-tap latched. Activate once more to finish (no speech captured).";
   }
   if (gesture === "latch-finish") {
-    changes.recognizedText = "Double-tap: keep --dry-run enabled.";
+    changes.recognizedText = "Double-tap gesture finished (no speech captured).";
     changes.tapTested = true;
   }
   options.setup.update(changes);

@@ -1,6 +1,7 @@
-import { act, fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { History } from "../../src/features/history/History";
+import { isTauriEnv } from "../../src/services/capture/captureService";
 import { renderWithApp } from "./testUtils";
 
 describe("History", () => {
@@ -25,6 +26,25 @@ describe("History", () => {
     expect(screen.getByText("Temporary recovery buffer expired"))
       .toBeInTheDocument();
     vi.useRealTimers();
+  });
+
+  it("offers native failed text for Copy without promising an audio retry", async () => {
+    vi.mocked(isTauriEnv).mockReturnValue(true);
+    try {
+      const toast = vi.fn();
+      renderWithApp(<History onToast={toast} />);
+      expect(screen.queryByRole("button", { name: "Retry transcription" }))
+        .not.toBeInTheDocument();
+      expect(screen.queryByText(/Temporary recovery buffer/))
+        .not.toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText("History status"), {
+        target: { value: "failed" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Copy transcript" }));
+      await waitFor(() => expect(toast).toHaveBeenCalledWith("Copied to clipboard"));
+    } finally {
+      vi.mocked(isTauriEnv).mockReturnValue(false);
+    }
   });
 
   it("reports expiry when time changes immediately before Retry", async () => {

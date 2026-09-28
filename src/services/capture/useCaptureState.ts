@@ -51,8 +51,10 @@ export interface UseCaptureStateResult {
   refreshDevices: () => Promise<void>;
   requestMicPermission: () => void;
   runMicTest: (deviceId?: string) => Promise<void>;
-  /** Start full-mode capture for STT dogfood (not mic test). */
-  startFullCaptureSession: (deviceId?: string) => Promise<void>;
+  /** Start full-mode capture; never treat a silent busy return as success. */
+  startFullCaptureSession: (deviceId?: string) => Promise<
+    "started" | "ended" | "busy" | "error"
+  >;
   /**
    * Clean-stop full capture: deposits PCM and emits `capture-stopped.audio`.
    * Prefer over cancel when the utterance should reach STT.
@@ -478,7 +480,7 @@ export function useCaptureState(): UseCaptureStateResult {
   }, [captureReady]);
 
   const startFullCaptureSession = useCallback(async (deviceId?: string) => {
-    if (ownerRef.current !== null) return;
+    if (ownerRef.current !== null) return "busy" as const;
 
     const requestId = createCaptureRequestId();
     ownerRef.current = {
@@ -507,13 +509,15 @@ export function useCaptureState(): UseCaptureStateResult {
             : errorMessages["capture-unavailable"],
         });
       }
-      return;
+      return "error" as const;
     }
 
     try {
       const status = await startFullCapture(requestId, deviceId);
+      // A terminal event can arrive before the start command resolves.
+      // Never resurrect its old owner or report a fresh recording.
       if (!mountedRef.current
-          || ownerRef.current?.requestId !== requestId) return;
+          || ownerRef.current?.requestId !== requestId) return "ended" as const;
       if (status.request_id !== requestId) {
         ownerRef.current = null;
         setCaptureState({
@@ -521,18 +525,20 @@ export function useCaptureState(): UseCaptureStateResult {
           kind: "error",
           message: errorMessages["capture-unavailable"],
         });
-        return;
+        return "error" as const;
       }
       ownerRef.current.generation = status.generation;
       setCaptureState((previous) => previous.kind === "active"
         && previous.request_id === requestId
         ? { ...previous, generation: status.generation }
         : previous);
+      return "started" as const;
     } catch (error: unknown) {
       if (!mountedRef.current
-          || ownerRef.current?.requestId !== requestId) return;
+          || ownerRef.current?.requestId !== requestId) return "ended" as const;
       ownerRef.current = null;
       setCaptureState({ kind: "error", ...normalizeError(error) });
+      return "error" as const;
     }
   }, []);
 
