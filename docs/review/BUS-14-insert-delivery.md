@@ -236,10 +236,21 @@ Playwright browser cache. Default E2E scripts need a browser at the configured
 repo-local `.playwright-browsers` path; the remaining screenshot-writing tests
 were not run because they overwrite tracked baseline images.
 
-**Not yet verified on device:** real fast re-hold and three-cycle Mac gesture
-smoke, latch/Home Stop, Notes Inserted vs Copy, browser/terminal/chat targets,
-secure field, changed target, denied permissions and clipboard failure.
-Re-run R1–R3 above with the Whisper-featured Tauri shell; record actual
-application, gesture, overlay, capture and delivery outcomes. Do not mark this
-slice native-validated until those checks pass. The Carbon monitor defenses
-remain unchanged.
+**Kyle's Mac report (dev shell, 2026-09-28; no captures):** About three
+consecutive holds looked good. With Notes focused, delivery initially reported
+“Copied — original app closed or focus lost” while WezTerm lacked macOS
+Accessibility permission. After Kyle enabled Accessibility for WezTerm (the
+dev host running Voxloom), Notes insertion worked. This confirms one
+permission-dependent Notes path by user report; it does **not** establish that
+Notes closed or lost focus in the initial test. The native AX validator also
+uses that broad message when macOS supplies no focused Accessibility element,
+so the copy is not a reliable diagnosis of a closed app.
+
+**Still pending:** measured immediate re-hold, latch/Home Stop, browser and
+terminal/chat targets, secure/changed targets, denied permissions, clipboard
+failure, and a separately launched packaged `.app` with its own permission
+identity. Re-run R1–R3 and record actual application, gesture, overlay,
+capture and delivery outcomes before treating the slice as fully
+native-validated. WezTerm-wide Accessibility is not a desired permanent
+requirement; macOS permits turning it off after the dev smoke. The Carbon
+monitor defenses remain unchanged.
