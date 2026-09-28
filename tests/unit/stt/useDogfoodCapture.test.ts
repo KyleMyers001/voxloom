@@ -54,7 +54,7 @@ function stubCapture(state: CaptureState): UseCaptureStateResult {
     refreshDevices: vi.fn().mockResolvedValue(undefined),
     requestMicPermission: vi.fn(),
     runMicTest: vi.fn(),
-    startFullCaptureSession: vi.fn(),
+    startFullCaptureSession: vi.fn().mockResolvedValue("started"),
     stopFullCapture: vi.fn(),
     stopMicTest: vi.fn(),
   };
@@ -84,6 +84,60 @@ async function mockDogfoodSuccess(
 }
 
 describe("useDogfoodCapture", () => {
+  it("does not claim recording when capture is still owned by a previous hold", async () => {
+    const store = createMockSttModelStore();
+    await store.download("whisper-tiny.en");
+    const toast = vi.fn();
+    const startFullCaptureSession = vi.fn().mockResolvedValue("busy");
+    const stopFullCapture = vi.fn();
+    const { result } = renderHook(() => useDogfoodCapture({
+      captureApi: {
+        ...stubCapture({ kind: "idle" }),
+        startFullCaptureSession,
+        stopFullCapture,
+      },
+      clipboard: clipboard(),
+      createModelStore: () => store,
+      modelId: "whisper-tiny.en",
+      onToast: toast,
+    }));
+
+    await act(async () => { await result.current.start(); });
+    expect(result.current.phase).toBe("error");
+    expect(result.current.message).toMatch(/already active/i);
+    expect(stopFullCapture).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(expect.stringMatching(/already active/i));
+  });
+
+  it("waits for acquisition and honors a stop requested during start", async () => {
+    const store = createMockSttModelStore();
+    await store.download("whisper-tiny.en");
+    let acquired!: (status: "started") => void;
+    const startFullCaptureSession = vi.fn(() => new Promise<"started">((resolve) => {
+      acquired = resolve;
+    }));
+    const stopFullCapture = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderHook(() => useDogfoodCapture({
+      captureApi: {
+        ...stubCapture({ kind: "idle" }),
+        startFullCaptureSession,
+        stopFullCapture,
+      },
+      clipboard: clipboard(),
+      createModelStore: () => store,
+      modelId: "whisper-tiny.en",
+    }));
+
+    let start!: Promise<void>;
+    act(() => { start = result.current.start(); });
+    await waitFor(() => expect(startFullCaptureSession).toHaveBeenCalledOnce());
+    expect(result.current.phase).not.toBe("recording");
+    await act(async () => { await result.current.stop(); });
+    acquired("started");
+    await act(async () => { await start; });
+    expect(stopFullCapture).toHaveBeenCalledTimes(2);
+  });
+
   it("auto-runs dogfoodTranscribeAndCopy after clean stop with audio", async () => {
     const clip = clipboard();
     const store = createMockSttModelStore();
@@ -117,6 +171,7 @@ describe("useDogfoodCapture", () => {
           ...stubCapture(state),
           startFullCaptureSession: async () => {
             await startFullCaptureSession();
+            return "started";
           },
           stopFullCapture: async () => {
             await stopFullCapture();
@@ -235,6 +290,7 @@ describe("useDogfoodCapture", () => {
         kind: "active",
         request_id: "full-2",
       };
+      return "started" as const;
     });
 
     const { result, rerender } = renderHook(
@@ -291,6 +347,7 @@ describe("useDogfoodCapture", () => {
         kind: "active",
         request_id: `full-${generation}`,
       };
+      return "started" as const;
     });
     const stopFullCapture = vi.fn(async () => {
       captureState = {
@@ -488,6 +545,7 @@ describe("useDogfoodCapture", () => {
         kind: "active",
         request_id: "full-hist-cancel",
       };
+      return "started" as const;
     });
 
     const { result, rerender } = renderHook(
@@ -562,6 +620,7 @@ describe("useDogfoodCapture", () => {
         kind: "active",
         request_id: "full-snap",
       };
+      return "started" as const;
     });
     const stopFullCapture = vi.fn(async () => {
       captureState = {

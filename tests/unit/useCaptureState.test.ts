@@ -603,6 +603,66 @@ describe("useCaptureState full capture dogfood wiring", () => {
     });
   });
 
+  it("rejects a second start while the previous owner is still active", async () => {
+    const pending = deferred<{ generation: number; mode: "full"; request_id: string }>();
+    mocks.startFullCapture.mockReturnValue(pending.promise);
+    const { result } = renderHook(() => useCaptureState());
+    await waitFor(() => expect(handler).not.toBeNull());
+
+    let first!: Promise<unknown>;
+    act(() => { first = result.current.startFullCaptureSession(); });
+    await waitFor(() => expect(mocks.startFullCapture).toHaveBeenCalledOnce());
+    await expect(result.current.startFullCaptureSession()).resolves.toBe("busy");
+    expect(mocks.startFullCapture).toHaveBeenCalledOnce();
+
+    pending.resolve({
+      generation: 3,
+      mode: "full",
+      request_id: mocks.startFullCapture.mock.calls[0][0] as string,
+    });
+    await act(async () => { expect(await first).toBe("started"); });
+  });
+
+  it("reports listener failure instead of claiming a recording", async () => {
+    mocks.onCaptureEvent.mockRejectedValue(new Error("listener unavailable"));
+    const { result } = renderHook(() => useCaptureState());
+    await waitFor(() => expect(result.current.captureState.kind).toBe("error"));
+    await act(async () => {
+      expect(await result.current.startFullCaptureSession()).toBe("error");
+    });
+    expect(mocks.startFullCapture).not.toHaveBeenCalled();
+  });
+
+  it("reports native start failure instead of claiming capture", async () => {
+    mocks.startFullCapture.mockRejectedValue(new Error("permission-denied"));
+    const { result } = renderHook(() => useCaptureState());
+    await waitFor(() => expect(handler).not.toBeNull());
+    await act(async () => {
+      expect(await result.current.startFullCaptureSession()).toBe("error");
+    });
+    expect(result.current.captureState).toMatchObject({ kind: "error" });
+  });
+
+  it("does not resurrect capture after a terminal beats the start reply", async () => {
+    const pending = deferred<{ generation: number; mode: "full"; request_id: string }>();
+    mocks.startFullCapture.mockReturnValue(pending.promise);
+    const { result } = renderHook(() => useCaptureState());
+    await waitFor(() => expect(handler).not.toBeNull());
+
+    let start!: Promise<unknown>;
+    act(() => { start = result.current.startFullCaptureSession(); });
+    await waitFor(() => expect(mocks.startFullCapture).toHaveBeenCalledOnce());
+    const requestId = mocks.startFullCapture.mock.calls[0][0] as string;
+    act(() => handler?.({
+      generation: 3,
+      kind: "capture-cancelled",
+      request_id: requestId,
+    }));
+    pending.resolve({ generation: 3, mode: "full", request_id: requestId });
+    await act(async () => { expect(await start).toBe("ended"); });
+    expect(result.current.captureState).toEqual({ kind: "cancelled" });
+  });
+
   it("cancel does not deposit audio", async () => {
     const { result } = renderHook(() => useCaptureState());
     await waitFor(() => expect(handler).not.toBeNull());

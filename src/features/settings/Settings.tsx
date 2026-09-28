@@ -233,20 +233,23 @@ export function Settings({ onSetup }: SettingsProps) {
             )}
           </div>
 
-          <label className="field">Language
+          <label className="field">
+            {isNative ? "Language · English-first (other choices unavailable)" : "Language"}
             <select
+              disabled={isNative}
               onChange={(event) => settings.update({
                 key: "language",
                 value: event.target.value,
               })}
-              value={state.settings.language}
+              value={isNative ? "English (US)" : state.settings.language}
             >
               <option>English (US)</option>
-              <option>English (UK)</option>
+              {!isNative && <option>English (UK)</option>}
             </select>
           </label>
 
-          <label className="field">Current style
+          <label className="field">
+            {isNative ? "Style preference · cleanup unavailable" : "Current style"}
             <select
               onChange={(event) => settings.update({
                 key: "style",
@@ -261,29 +264,37 @@ export function Settings({ onSetup }: SettingsProps) {
           </label>
 
           <label className="field">
-            Language-processing model · simulated
+            {isNative
+              ? "Language-processing model · unavailable in desktop"
+              : "Language-processing model · simulated"}
             <select
+              disabled={isNative}
               onChange={(event) => settings.update({
                 key: "languageModel",
                 value: event.target.value,
               })}
-              value={state.settings.languageModel}
+              value={isNative ? "" : state.settings.languageModel}
             >
-              <option>Alder Text Small · local</option>
-              <option>Alder Text Medium · unavailable</option>
+              {isNative ? <option value="">No cleanup model installed</option> : <>
+                <option>Alder Text Small · local</option>
+                <option>Alder Text Medium · unavailable</option>
+              </>}
             </select>
           </label>
 
           <label className="check">
             <input
-              checked={state.settings.startAtLogin}
+              checked={isNative ? false : state.settings.startAtLogin}
+              disabled={isNative}
               onChange={(event) => settings.update({
                 key: "startAtLogin",
                 value: event.target.checked,
               })}
               type="checkbox"
             />
-            Start at login · simulated
+            {isNative
+              ? "Start at login · unavailable in desktop"
+              : "Start at login · simulated"}
           </label>
 
           <label className="check">
@@ -440,8 +451,10 @@ export function Settings({ onSetup }: SettingsProps) {
               <option value="off">Off</option>
             </select>
           </label>
-          <label className="field">Audio retention
+          <label className="field">
+            {isNative ? "Audio retention · unavailable (no saved audio)" : "Audio retention"}
             <select
+              disabled={isNative}
               onChange={(event) => settings.update({
                 key: "audioRetention",
                 value: parseChoice(
@@ -449,7 +462,7 @@ export function Settings({ onSetup }: SettingsProps) {
                   audioRetentions,
                 ),
               })}
-              value={state.settings.audioRetention}
+              value={isNative ? "off" : state.settings.audioRetention}
             >
               <option value="off">Off · recommended</option>
               <option value="24-hours">24 hours</option>
@@ -475,8 +488,10 @@ export function Settings({ onSetup }: SettingsProps) {
             "No audio activity detected \u00b7 No transcript is created.",
             "Insertion failed \u00b7 Clipboard result is reported " +
               "truthfully.",
-            "Transcription failed \u00b7 Temporary recovery buffers " +
-              "expire.",
+            isNative
+              ? "Transcription failed · No audio retry is available; " +
+                "copy any surviving transcript."
+              : "Transcription failed · Temporary recovery buffers expire.",
           ].map((message) => (
             <p className="recovery-item" key={message}>{message}</p>
           ))}

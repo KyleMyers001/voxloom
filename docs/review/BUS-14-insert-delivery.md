@@ -216,3 +216,30 @@ Do **not** treat browser unit tests as proof of native AX insert.
 | 2nd hold no overlay + Home Stop (c9e0df5) | Fixed: Carbon Released backup after grace + force-stop leftover busy on hold-start |
 | 2nd hold no overlay + Home Stop (dbe5748) | Fixed: terminal-teardown effect was level-triggered on stale phase; now edge-triggered + session-guarded dogfood |
 | Windows adapter | Stub only; replaceable boundary ready |
+
+## Daily dictation restart (PLAN-20260928-163552; Mac QA pending)
+
+A fast re-hold could reach `useDogfoodCapture.start()` while
+`useCaptureState` still owned the previous request. `startFullCaptureSession`
+returned silently; the UI then claimed “recording” without a new microphone
+session. It now acknowledges started/ended/busy/error, and dogfood only
+announces recording after a confirmed start. A stop requested while start is
+pending is still honored; terminal-before-start-reply never resurrects a run.
+Native History does not offer a retry without retained audio; failed rows with
+text can be copied. Existing older rows with a fictional retry expiry are not
+presented as retryable in the desktop shell.
+
+Local checks: typecheck, lint, build, 293 TS unit tests, Rust `cargo check`
+(4 pre-existing warnings) and 129 Rust library tests passed. Browser release
+onboarding and two mock retry E2Es passed using the installed external
+Playwright browser cache. Default E2E scripts need a browser at the configured
+repo-local `.playwright-browsers` path; the remaining screenshot-writing tests
+were not run because they overwrite tracked baseline images.
+
+**Not yet verified on device:** real fast re-hold and three-cycle Mac gesture
+smoke, latch/Home Stop, Notes Inserted vs Copy, browser/terminal/chat targets,
+secure field, changed target, denied permissions and clipboard failure.
+Re-run R1–R3 above with the Whisper-featured Tauri shell; record actual
+application, gesture, overlay, capture and delivery outcomes. Do not mark this
+slice native-validated until those checks pass. The Carbon monitor defenses
+remain unchanged.

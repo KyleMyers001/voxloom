@@ -298,22 +298,23 @@ export function useDogfoodCapture(
       ? options.preferredDeviceId
       : undefined;
 
-    setPhase("recording");
-    announce("Listening…");
     try {
-      await capture.startFullCaptureSession(deviceId);
+      const started = await capture.startFullCaptureSession(deviceId);
+      if (superseded() || started === "ended") return;
+      if (started !== "started") {
+        setPhase("error");
+        announce(started === "busy"
+          ? "A capture session is already active. Wait for it to finish."
+          : "Microphone capture could not start. Check permission and retry.");
+        return;
+      }
+      setPhase("recording");
+      announce("Listening…");
+      if (stopRequestedRef.current) await capture.stopFullCapture();
     } catch (error: unknown) {
+      if (superseded()) return;
       setPhase("error");
       announce(errorText(error));
-      return;
-    }
-    if (stopRequestedRef.current) {
-      try {
-        await capture.stopFullCapture();
-      } catch (error: unknown) {
-        setPhase("error");
-        announce(errorText(error));
-      }
     }
   }, [
     announce,

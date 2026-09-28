@@ -57,10 +57,10 @@ describe("Settings", () => {
     const user = userEvent.setup();
     renderWithApp(<Settings onSetup={vi.fn()} />);
     await user.selectOptions(
-      screen.getByLabelText("Current style"),
+      screen.getByLabelText(/Style preference/),
       "casual",
     );
-    expect(screen.getByLabelText("Current style")).toHaveValue("casual");
+    expect(screen.getByLabelText(/Style preference/)).toHaveValue("casual");
     await user.click(screen.getByLabelText("Sodium Rain"));
     expect(screen.getByLabelText("Sodium Rain")).toBeChecked();
   });
@@ -78,10 +78,18 @@ describe("Settings", () => {
   it("labels remaining mock settings without calling shortcut simulated", () => {
     renderWithApp(<Settings onSetup={vi.fn()} />);
     expect(screen.getByLabelText(/shortcut/i)).toBeInTheDocument();
-    expect(
-      screen.getAllByText(/simulated/i).length,
-    ).toBeGreaterThan(0);
+    expect(screen.getByLabelText(/Start at login/)).toBeDisabled();
+    expect(screen.getByLabelText(/Language-processing model/)).toBeDisabled();
     expect(screen.getByText(/register-or-revert/i)).toBeInTheDocument();
+  });
+
+  it("does not let native users select unsupported cleanup, login or audio retention", () => {
+    renderWithApp(<Settings onSetup={vi.fn()} />);
+    expect(screen.getByLabelText(/Language-processing model/)).toBeDisabled();
+    expect(screen.getByLabelText(/Start at login/)).toBeDisabled();
+    expect(screen.getByLabelText(/Audio retention/)).toBeDisabled();
+    expect(screen.queryByText(/Temporary recovery buffers expire/))
+      .not.toBeInTheDocument();
   });
 
   it("does not claim audio resets on reload", () => {
@@ -146,7 +154,7 @@ describe("Settings", () => {
     captureMocks.devices = [
       { available: true, id: "input-1", label: "Built-in Microphone" },
     ];
-    await user.selectOptions(screen.getByLabelText("Current style"), "casual");
+    await user.selectOptions(screen.getByLabelText(/Style preference/), "casual");
 
     expect(screen.getByLabelText(/Microphone/)).toHaveValue("input-2");
     expect(screen.getByRole("option", {

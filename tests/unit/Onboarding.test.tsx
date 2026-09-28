@@ -6,13 +6,14 @@
 /// documented in docs/review/BUS-9-implementation.md.
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Onboarding } from "../../src/features/onboarding/Onboarding";
 import { renderWithApp } from "./testUtils";
 
 // Controlled permission state and Tauri env flag for Onboarding tests.
 let mockPermissionStatus = "authorized";
-const mockIsTauri = true; // Tests run in native mode by default.
+let mockIsTauri = true; // Tests run in native mode by default.
+afterEach(() => { mockIsTauri = true; });
 
 vi.mock("../../src/services/capture/useCaptureState", () => ({
   useCaptureState: () => ({
@@ -115,7 +116,7 @@ describe("Onboarding (step 1 — real permission, simulated steps 2–3)", () =>
     expect(screen.getByText("Choose your shortcut")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Next" }));
     // Step 3: quick test
-    await user.click(screen.getByRole("button", { name: "Test hold" }));
+    await user.click(screen.getByRole("button", { name: "Simulate hold" }));
     await user.click(screen.getByRole("button", { name: "Back" }));
     await user.click(screen.getByRole("button", { name: "Next" }));
     expect(
@@ -126,13 +127,14 @@ describe("Onboarding (step 1 — real permission, simulated steps 2–3)", () =>
       /both practice/,
     );
     await user.click(
-      screen.getByRole("button", { name: "Test double-tap" }),
+      screen.getByRole("button", { name: "Simulate double-tap" }),
     );
     await user.click(screen.getByRole("button", { name: "Finish" }));
     expect(close).toHaveBeenCalledOnce();
   });
 
-  it("rejects the simulated shortcut collision on step 2", async () => {
+  it("rejects the simulated shortcut collision only in the browser", async () => {
+    mockIsTauri = false;
     mockPermissionStatus = "authorized";
     const user = userEvent.setup();
     renderWithApp(<Onboarding onClose={vi.fn()} />);
@@ -144,6 +146,20 @@ describe("Onboarding (step 1 — real permission, simulated steps 2–3)", () =>
     await user.type(shortcut, "Ctrl + Space");
     await user.click(screen.getByRole("button", { name: "Next" }));
     expect(screen.getByRole("alert")).toHaveTextContent("collision");
+  });
+
+  it("does not claim native gestures are app-local or practice is STT", async () => {
+    mockPermissionStatus = "authorized";
+    const user = userEvent.setup();
+    renderWithApp(<Onboarding onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByLabelText("Preferred global shortcut"))
+      .toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByLabelText(/Gesture feedback \(not a speech transcript\)/))
+      .toBeInTheDocument();
+    expect(screen.getByText(/not microphone transcription/))
+      .toBeInTheDocument();
   });
 
   it("shows denied copy when permission denied on step 1", async () => {

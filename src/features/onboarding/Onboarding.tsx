@@ -47,7 +47,7 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
         setError("Enter a shortcut.");
         return;
       }
-      if (state.settings.shortcut.toLowerCase() === "ctrl + space") {
+      if (!isNative && state.settings.shortcut.toLowerCase() === "ctrl + space") {
         update({ shortcutCollision: true });
         setError("Ctrl + Space has a simulated collision.");
         return;
@@ -149,8 +149,11 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
       {onboarding.step === 2 && (
         <section className="onboarding-step">
           <h3>Choose your shortcut</h3>
-          <p>Gestures work only while this app is focused.</p>
-          <label className="field">Preferred app-local shortcut
+          <p>{isNative
+            ? "Desktop gestures use a global shortcut; registration failures are shown in Settings."
+            : "Browser prototype gestures work only while this tab is focused."}</p>
+          <label className="field">
+            {isNative ? "Preferred global shortcut" : "Preferred app-local shortcut"}
             <input
               onChange={(event) => settings.update({
                 key: "shortcut",
@@ -168,10 +171,11 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
           <p>
             Hold and release the configured shortcut, then rapidly
             double-tap to latch and activate it once more to finish.
+            This tests gesture recognition, not microphone transcription.
           </p>
-          <label className="field">Recognized fixture text
+          <label className="field">Gesture feedback (not a speech transcript)
             <textarea
-              placeholder="Practice output appears here."
+              placeholder="Gesture feedback appears here."
               readOnly
               value={onboarding.recognizedText}
             />
@@ -186,11 +190,10 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
                 className="btn"
                 onClick={() => update({
                   holdTested: true,
-                  recognizedText:
-                    "Hold: preserve the TypeScript identifier.",
+                  recognizedText: "Simulated hold gesture detected.",
                 })}
               >
-                Test hold
+                Simulate hold
               </button>
             )}
           </div>
@@ -203,12 +206,11 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
               <button
                 className="btn"
                 onClick={() => update({
-                  recognizedText:
-                    "Double-tap: keep --dry-run enabled.",
+                  recognizedText: "Simulated double-tap gesture detected.",
                   tapTested: true,
                 })}
               >
-                Test double-tap
+                Simulate double-tap
               </button>
             )}
           </div>
