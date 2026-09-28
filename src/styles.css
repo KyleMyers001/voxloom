@@ -501,15 +501,14 @@ textarea {
   background: color-mix(in srgb, var(--panel) 94%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--border));
   border-radius: 999px;
-  box-shadow: 0 10px 28px rgb(0 0 0 / 30%);
   display: flex;
-  height: 44px;
+  height: 22px;
   justify-content: center;
   left: 50%;
   position: absolute;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 154px;
+  width: 78px;
 }
 
 
@@ -704,16 +703,16 @@ textarea {
 .wave {
   align-items: center;
   display: flex;
-  gap: 2px;
-  height: 28px;
+  gap: 1px;
+  height: 14px;
   justify-content: center;
-  width: 118px;
+  width: 60px;
 }
 
 .wave i {
   background: var(--accent);
-  border-radius: 3px;
-  flex: 0 0 3px;
+  border-radius: 2px;
+  flex: 0 0 1.5px;
   height: var(--h);
   opacity: .9;
   transition: height 85ms ease-out;

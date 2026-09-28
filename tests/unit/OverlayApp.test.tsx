@@ -30,7 +30,7 @@ describe("OverlayApp", () => {
       render(<OverlayApp />);
       await waitFor(() => expect(handlers.has("capture:event")).toBe(true));
       send("overlay:waveform", { waveform: "silent" });
-      expect(lastBarHeight()).toBe("2px");
+      expect(lastBarHeight()).toBe("1px");
 
       send("capture:event", {
         generation: 1, kind: "capture-started", request_id: "first",
@@ -39,20 +39,20 @@ describe("OverlayApp", () => {
         generation: 1, kind: "capture-level", level: 0.1,
         request_id: "first",
       });
-      expect(lastBarHeight()).not.toBe("2px");
+      expect(lastBarHeight()).not.toBe("1px");
 
       send("capture:event", {
         generation: 0, kind: "capture-level", level: 1,
         request_id: "stale",
       });
-      expect(lastBarHeight()).not.toBe("26px");
+      expect(lastBarHeight()).not.toBe("13px");
 
       send("overlay:waveform", { waveform: "silent" });
-      expect(lastBarHeight()).toBe("2px");
+      expect(lastBarHeight()).toBe("1px");
       send("capture:event", {
         generation: 2, kind: "capture-level", level: 1,
         request_id: "second",
       });
-      expect(lastBarHeight()).toBe("26px");
+      expect(lastBarHeight()).toBe("13px");
     });
 });

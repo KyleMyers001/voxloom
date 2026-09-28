@@ -13,8 +13,8 @@ describe("Waveform", () => {
     expect(screen.getByRole("img")).toHaveAccessibleName("Microphone level");
     const bars = container.querySelectorAll<HTMLElement>(".wave i");
     expect(bars).toHaveLength(24);
-    expect(bars[23].style.getPropertyValue("--h"))
-      .not.toBe(bars[0].style.getPropertyValue("--h"));
+    expect(bars[0].style.getPropertyValue("--h")).toBe("1px");
+    expect(bars[23].style.getPropertyValue("--h")).toBe("8px");
 
     rerender(<Waveform levels={quiet} waveform="silent" />);
     expect(container.querySelectorAll<HTMLElement>(".wave i")[23]

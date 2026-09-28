@@ -94,7 +94,8 @@ fn build_overlay(
     .focused(false)
     .focusable(false)
     .visible(false)
-    .transparent(true);
+    .transparent(true)
+    .shadow(false);
 
     // macOS: transparent requires private API (enabled in tauri.conf).
     // Linux builds still compile; transparency works without private API.

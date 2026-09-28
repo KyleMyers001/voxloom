@@ -25,7 +25,7 @@ export function Waveform({ levels, waveform }: Props) {
         const level = levels[index] ?? 0;
         return <i
           key={index}
-          style={{ "--h": `${2 + Math.round(level * 24)}px` } as CSSProperties}
+          style={{ "--h": `${1 + Math.round(level * 12)}px` } as CSSProperties}
         />;
       })}
     </div>
