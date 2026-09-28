@@ -76,8 +76,9 @@ export interface UseDogfoodCaptureResult {
   /** Invocation-time intended target (null until start snapshots). */
   intendedTarget: TargetSnapshot | null;
   message: string | null;
+  origin: "home" | "gesture" | null;
   phase: DogfoodPhase;
-  start: () => Promise<void>;
+  start: (origin?: "home" | "gesture") => Promise<void>;
   stop: () => Promise<void>;
   transcript: Transcript | null;
 }
@@ -124,6 +125,7 @@ export function useDogfoodCapture(
   const capture = options.captureApi ?? liveCapture;
 
   const [phase, setPhase] = useState<DogfoodPhase>("idle");
+  const [origin, setOrigin] = useState<"home" | "gesture" | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<Transcript | null>(null);
   const [intendedTarget, setIntendedTarget] =
@@ -257,8 +259,9 @@ export function useDogfoodCapture(
     void runDogfood(audio);
   }, [announce, capture.captureState, runDogfood]);
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (source: "home" | "gesture" = "home") => {
     const session = ++sessionRef.current;
+    setOrigin(source);
     const superseded = () => session !== sessionRef.current;
     setTranscript(null);
     setMessage(null);
@@ -352,6 +355,7 @@ export function useDogfoodCapture(
     captureState: capture.captureState,
     intendedTarget,
     message,
+    origin,
     phase,
     start,
     stop,

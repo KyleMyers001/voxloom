@@ -228,7 +228,7 @@ export function useCaptureState(): UseCaptureStateResult {
         }
         return;
       }
-      if (event.kind === "activity-detected") return;
+      if (event.kind === "activity-detected" || event.kind === "capture-level") return;
 
       ownerRef.current = null;
       const waiter = terminalWaiterRef.current;

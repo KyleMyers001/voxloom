@@ -35,7 +35,7 @@ async function skipOnboarding(page: Page) {
   await page.getByRole("button", { name: "Skip" }).click();
 }
 
-test("first run practices gestures and dictates", async ({ page }) => {
+test("first run practices gestures without native capture", async ({ page }) => {
   await page.goto("/");
   const onboarding = page.getByRole("dialog", { name: "Set up Voxloom" });
   await expect(onboarding).toBeVisible();
@@ -56,17 +56,19 @@ test("first run practices gestures and dictates", async ({ page }) => {
   await page.keyboard.down("Shift");
   await page.keyboard.down("Space");
   await page.waitForTimeout(350);
-  await expect(page.getByRole("img", { name: "silent mock waveform" }))
-    .toBeVisible();
+  // Native waveform lives in a separate window, never inside the main app.
+  await expect(page.getByRole("img", { name: "Microphone level" }))
+    .toHaveCount(0);
   await page.screenshot({
     path: "artifacts/screenshots/listening-system.png",
   });
   await page.keyboard.up("Space");
   await page.keyboard.up("Shift");
   await page.keyboard.up("Control");
+  // Browser mock gestures do not claim real STT or insertion.
   await expect(page.getByText(
     "Keep the TypeScript boundary small and explicit.",
-  )).toBeVisible();
+  )).toHaveCount(0);
 });
 
 test("screens, settings, themes, and baselines stay synchronized", async (
@@ -139,12 +141,13 @@ test("dialogs, reduced motion, narrow and coarse layouts work", async (
   await expect(dialog).toBeVisible();
   await expectAccessible(page);
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Listening · speaking" }).click();
-  await expect(page.locator(".wave i").first()).toHaveCSS(
-    "animation-name",
-    "none",
+  const overlayPage = await page.context().newPage();
+  await overlayPage.emulateMedia({ reducedMotion: "reduce" });
+  await overlayPage.goto("/overlay.html");
+  await expect(overlayPage.locator(".wave i").first()).toHaveCSS(
+    "transition-duration", "0s",
   );
-  await page.getByRole("button", { name: "Cancel" }).click();
+  await overlayPage.close();
   await page.screenshot({
     fullPage: true,
     path: "artifacts/screenshots/home-narrow.png",
@@ -216,10 +219,8 @@ test("History retry cannot interrupt an active listening run", async (
   await failed.hover();
   await expect(page.getByRole("button", { name: "Retry transcription" }))
     .toBeDisabled();
-  await expect(page.getByRole("img", { name: "silent mock waveform" }))
-    .toBeVisible();
   await expect(page.getByRole("button", { name: "Cancel" })).toBeEnabled();
+  await expect(page.getByRole("img", { name: "Microphone level" }))
+    .toHaveCount(0);
   await page.getByRole("button", { name: "Cancel" }).click();
-  await expect(page.getByRole("img", { name: "silent mock waveform" }))
-    .not.toBeVisible();
 });

@@ -5,8 +5,11 @@ locally using an explicitly downloaded Whisper model (`--features whisper`),
 and attempts to insert text into the invocation-time macOS target. When
 insertion is unsafe or unavailable it can Copy instead, if clipboard fallback
 is enabled; results report Inserted, Copied or Failed. The configured global
-shortcut supports hold/release and double-tap latch. macOS permission and
-Accessibility behavior require on-device verification; Windows is not verified.
+shortcut supports hold/release and double-tap latch. Native recording shows
+one bottom floating waveform driven by rate-limited microphone levels (no PCM
+sent to the webview); the main app no longer duplicates it. macOS permission
+and Accessibility behavior require on-device verification; Windows is not
+verified.
 
 The browser / Vite-only prototype uses synthetic capture, transcription and
 focused-window shortcuts; state clears on reload. The Tauri shell persists

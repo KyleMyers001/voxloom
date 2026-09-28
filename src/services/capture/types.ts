@@ -47,6 +47,11 @@ export type CaptureEvent =
     })
   | (SessionCorrelation & { kind: "activity-detected" })
   | (SessionCorrelation & {
+      /** Rate-limited RMS metadata, never PCM or audio samples. */
+      kind: "capture-level";
+      level: number;
+    })
+  | (SessionCorrelation & {
       kind: "test-complete";
       metadata: TestCaptureMetadata;
     })

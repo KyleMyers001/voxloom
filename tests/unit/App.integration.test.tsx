@@ -65,7 +65,8 @@ describe("App integration", () => {
       vi.useFakeTimers();
       fireEvent.keyDown(document, shortcutKey);
       act(() => vi.advanceTimersByTime(320));
-      expect(screen.getByRole("img")).toBeInTheDocument();
+      // The waveform now lives only in the separate desktop overlay.
+      expect(screen.queryByRole("img")).not.toBeInTheDocument();
       fireEvent.keyUp(document, shortcutKey);
       act(() => vi.advanceTimersByTime(500));
       vi.useRealTimers();
@@ -142,7 +143,7 @@ describe("App integration", () => {
       act(() => vi.advanceTimersByTime(319));
       expect(screen.queryByRole("img")).not.toBeInTheDocument();
       act(() => vi.advanceTimersByTime(1));
-      expect(screen.getByRole("img")).toBeInTheDocument();
+      expect(screen.queryByRole("img")).not.toBeInTheDocument();
       fireEvent.keyUp(document, shortcutKey);
       act(() => vi.advanceTimersByTime(500));
       vi.useRealTimers();

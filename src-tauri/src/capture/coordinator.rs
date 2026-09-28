@@ -56,6 +56,50 @@ const FULL_SAFETY_SECS: u64 = 120;
 const TEST_SAFETY_SECS: u64 = 10;
 const WATCHDOG_IDLE_SECS: u64 = 5;
 const ACTIVITY_THRESHOLD: f32 = 0.001; // −60 dBFS
+const LEVEL_INTERVAL: Duration = Duration::from_millis(50); // 20 Hz max
+
+/// Emit bounded, content-free microphone energy to drive the overlay.
+struct LevelMeter {
+    last_emit: Duration,
+    power_sum: f64,
+    sample_count: usize,
+}
+
+impl LevelMeter {
+    fn new(start: Duration) -> Self {
+        Self {
+            last_emit: start,
+            power_sum: 0.0,
+            sample_count: 0,
+        }
+    }
+
+    fn observe(&mut self, samples: &[f32]) {
+        for &sample in samples {
+            if sample.is_finite() {
+                self.power_sum += f64::from(sample) * f64::from(sample);
+                self.sample_count += 1;
+            }
+        }
+    }
+
+    fn take_if_due(&mut self, now: Duration) -> Option<f32> {
+        if now.saturating_sub(self.last_emit) < LEVEL_INTERVAL {
+            return None;
+        }
+        let level = if self.sample_count == 0 {
+            0.0
+        } else {
+            (self.power_sum / self.sample_count as f64)
+                .sqrt()
+                .min(1.0) as f32
+        };
+        self.last_emit = now;
+        self.power_sum = 0.0;
+        self.sample_count = 0;
+        Some(level)
+    }
+}
 
 #[derive(Clone, Copy)]
 struct CaptureLimits {
@@ -125,6 +169,11 @@ pub enum SessionEvent {
     ActivityDetected {
         generation: u64,
         request_id: String,
+    },
+    CaptureLevel {
+        generation: u64,
+        request_id: String,
+        level: f32,
     },
     TestComplete {
         generation: u64,
@@ -981,6 +1030,7 @@ fn capture_loop<E: Fn(SessionEvent)>(
     runtime: &dyn LoopRuntime,
 ) -> LoopTerminal {
     let mut drain_buf = vec![0.0f32; RING_CAPACITY];
+    let mut meter = LevelMeter::new(start);
 
     loop {
         if is_cancelled(cancel) {
@@ -1028,10 +1078,23 @@ fn capture_loop<E: Fn(SessionEvent)>(
                 });
             }
 
+            meter.observe(&mono);
+
             // Capacity / 120 s sample bound: keep captured PCM and treat as
             // a successful end-of-utterance (deposit via Clean), not an error.
             if buffer.push(&mono).is_err() {
                 return LoopTerminal::Clean;
+            }
+        }
+
+        // Silence emits zero; the rate limit also bounds renderer work.
+        if !ending {
+            if let Some(level) = meter.take_if_due(now) {
+                emit(SessionEvent::CaptureLevel {
+                    generation: gen,
+                    request_id: request_id.to_owned(),
+                    level,
+                });
             }
         }
 
@@ -1558,6 +1621,9 @@ mod tests {
             }
             SessionEvent::ActivityDetected { .. } => {
                 String::from("activity")
+            }
+            SessionEvent::CaptureLevel { .. } => {
+                String::from("level")
             }
             SessionEvent::TestComplete { .. } => {
                 String::from("test-complete")
@@ -2533,6 +2599,11 @@ mod tests {
                     generation,
                     request_id,
                 }
+                | SessionEvent::CaptureLevel {
+                    generation,
+                    request_id,
+                    ..
+                }
                 | SessionEvent::TestComplete {
                     generation,
                     request_id,
@@ -2561,6 +2632,18 @@ mod tests {
         }
     }
 
+    #[test]
+    fn level_meter_is_rate_limited_and_returns_silence_without_samples() {
+        let mut meter = LevelMeter::new(Duration::ZERO);
+        meter.observe(&[0.5, -0.5]);
+        assert_eq!(meter.take_if_due(Duration::from_millis(40)), None);
+        assert_eq!(meter.take_if_due(Duration::from_millis(50)), Some(0.5));
+        assert_eq!(meter.take_if_due(Duration::from_millis(60)), None);
+        assert_eq!(meter.take_if_due(Duration::from_millis(100)), Some(0.0));
+        meter.observe(&[2.0, 2.0]);
+        assert_eq!(meter.take_if_due(Duration::from_millis(150)), Some(1.0));
+    }
+
     // capture_loop unit
 
     #[test]
@@ -2586,6 +2669,7 @@ mod tests {
         let start = runtime.now();
         let mut last_sample = start;
         let mut activity = false;
+        let events = Mutex::new(Vec::new());
 
         let terminal = capture_loop(
             &mut consumer,
@@ -2604,13 +2688,21 @@ mod tests {
             start,
             1,
             "request",
-            &|_| {},
+            &|event| events.lock().unwrap().push(event),
             &runtime,
         );
 
         assert!(matches!(terminal, LoopTerminal::Cancelled));
         assert!(activity);
         assert_eq!(buffer.len(), 480);
+        assert!(events.lock().unwrap().iter().any(|event| matches!(
+            event,
+            SessionEvent::CaptureLevel {
+                generation: 1,
+                request_id,
+                level,
+            } if request_id == "request" && (*level - 0.5).abs() < 1e-6
+        )));
     }
 
     #[test]

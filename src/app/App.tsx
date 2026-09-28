@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Dialog } from "../components/Dialog";
 import { Toast } from "../components/Toast";
-import { Waveform } from "../components/Waveform";
 import { ScenarioPanel, type OnboardingScenario } from
   "../dev/ScenarioPanel";
 import { initialOnboarding } from "../domain/fixtures";
@@ -230,7 +229,6 @@ export function App() {
             : <BootHydratePlaceholder title="Settings" />
         )}
       </main>
-      <Waveform />
     </div>
     {onboardingOpen && <Onboarding onClose={() => setOnboardingOpen(false)}
       opener={modalOpener.current} />}
