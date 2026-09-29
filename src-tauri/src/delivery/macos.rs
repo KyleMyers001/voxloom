@@ -134,11 +134,12 @@ fn classify_role(role: &str) -> (&'static str, bool, Option<&'static str>) {
         "AXTextField" | "AXTextArea" | "AXComboBox" | "AXSearchField" => {
             ("insertable", true, None)
         }
-        // Browser / chat / editor surfaces — attempt insert; limitations documented.
+        // Containers do not establish an editable caret. AXSelectedText may
+        // return success here without changing the actual editor.
         "AXWebArea" | "AXScrollArea" | "AXGroup" => (
-            "insertable",
-            true,
-            Some("browser/chat surface — insert best-effort via AX"),
+            "unsupported",
+            false,
+            Some("generic web/container role — insert unverified"),
         ),
         // Terminals often expose AXTextArea already; unknown custom roles refuse.
         "AXStaticText" | "AXButton" | "AXImage" | "AXToolbar" | "AXMenu" => (
@@ -194,10 +195,25 @@ fn build_snapshot(element: AXUIElementRef, app_name: Option<String>) -> TargetSn
     }
 }
 
-fn focused_ui_element() -> Result<(AXUIElementRef, Option<String>), String> {
+fn focus_unavailable_reason(
+    stage: &str,
+    app_err: AXError,
+    focus_err: AXError,
+    focus_null: bool,
+) -> String {
+    let null_suffix = if focus_null { " (null)" } else { "" };
+    format!(
+        "Accessibility focus unavailable at {stage} (AX trusted=yes; \
+         AXFocusedApplication={app_err}; AXFocusedUIElement={focus_err}{null_suffix})"
+    )
+}
+
+fn focused_ui_element(stage: &str) -> Result<(AXUIElementRef, Option<String>), String> {
     let system = unsafe { AXUIElementCreateSystemWide() };
     if system.is_null() {
-        return Err("AXUIElementCreateSystemWide returned null".into());
+        return Err(format!(
+            "Accessibility focus unavailable at {stage} (AX trusted=yes; system element null)"
+        ));
     }
 
     let focused_app_attr = cfstr("AXFocusedApplication");
@@ -226,23 +242,29 @@ fn focused_ui_element() -> Result<(AXUIElementRef, Option<String>), String> {
     }
 
     if focus_err != AX_OK || focused.is_null() {
-        return Err(format!(
-            "no focused UI element (AX error {focus_err}) — unsupported or empty AX tree"
-        ));
+        let reason = focus_unavailable_reason(stage, app_err, focus_err, focused.is_null());
+        if !focused.is_null() {
+            release(focused);
+        }
+        return Err(reason);
     }
 
     Ok((focused as AXUIElementRef, app_name))
 }
 
 pub fn snapshot_target() -> Result<TargetSnapshotDto, String> {
+    snapshot_target_at("capture start")
+}
+
+fn snapshot_target_at(stage: &str) -> Result<TargetSnapshotDto, String> {
     if unsafe { AXIsProcessTrusted() } == 0 {
         return Ok(TargetSnapshotDto::unavailable(
-            "Accessibility permission denied — insert skipped",
+            &format!("Accessibility permission denied at {stage} — insert skipped"),
             now_ms(),
         ));
     }
 
-    match focused_ui_element() {
+    match focused_ui_element(stage) {
         Ok((element, app_name)) => {
             let snap = build_snapshot(element, app_name);
             release(element as CFTypeRef);
@@ -255,7 +277,7 @@ pub fn snapshot_target() -> Result<TargetSnapshotDto, String> {
 pub fn validate_target(
     intended: TargetSnapshotDto,
 ) -> Result<TargetSnapshotDto, String> {
-    Ok(validate_snapshots(&intended, snapshot_target()?))
+    Ok(validate_snapshots(&intended, snapshot_target_at("delivery validation")?))
 }
 
 fn validate_snapshots(
@@ -322,6 +344,10 @@ fn set_ax_string(
     Ok(())
 }
 
+fn value_confirms_insert(before: &str, after: &str, text: &str) -> bool {
+    !text.is_empty() && before != after && after.contains(text)
+}
+
 fn insert_selected_text_with(
     text: &str,
     set: impl FnOnce(&str, &str) -> Result<(), String>,
@@ -340,7 +366,10 @@ pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<(), Strin
     }
 
     // Validate the same element handle we will mutate, not a prior focus read.
-    let (element, app_name) = focused_ui_element()
+    if unsafe { AXIsProcessTrusted() } == 0 {
+        return Err("Accessibility permission denied at insert — insert skipped".into());
+    }
+    let (element, app_name) = focused_ui_element("insert")
         .map_err(|e| format!("insert aborted — {e}"))?;
     let validated = validate_snapshots(intended, build_snapshot(element, app_name));
     let result = if !validated.insertable || validated.kind != "insertable" {
@@ -348,8 +377,16 @@ pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<(), Strin
             "refusing insert: {}",
             validated.reason.unwrap_or(validated.kind)
         ))
+    } else if let Some(before) = copy_string_attr(element, "AXValue") {
+        match insert_selected_text_with(text, |attr, text| set_ax_string(element, attr, text)) {
+            Ok(()) => match copy_string_attr(element, "AXValue") {
+                Some(after) if value_confirms_insert(&before, &after, text) => Ok(()),
+                _ => Err("AXSelectedText returned success but insertion could not be verified via AXValue".into()),
+            },
+            Err(err) => Err(err),
+        }
     } else {
-        insert_selected_text_with(text, |attr, text| set_ax_string(element, attr, text))
+        Err("AXValue unreadable before insert — insert skipped".into())
     };
 
     release(element as CFTypeRef);
@@ -403,6 +440,42 @@ mod tests {
             assert_eq!(checked.kind, expected);
         }
         assert!(validate_snapshots(&intended, intended.clone()).insertable);
+    }
+
+    #[test]
+    fn generic_web_containers_never_claim_insertability() {
+        for role in ["AXWebArea", "AXScrollArea", "AXGroup"] {
+            let (kind, insertable, _) = classify_role(role);
+            assert_eq!(kind, "unsupported");
+            assert!(!insertable);
+        }
+        assert!(classify_role("AXTextArea").1);
+    }
+
+    #[test]
+    fn insertion_requires_readback_change_containing_transcript() {
+        assert!(value_confirms_insert("hello", "hello world", " world"));
+        assert!(value_confirms_insert("old line", "new line", "new line"));
+        assert!(!value_confirms_insert("hello", "hello", " world"));
+        assert!(!value_confirms_insert("hello", "hello!", " world"));
+        assert!(!value_confirms_insert("hello", "hello!", ""));
+    }
+
+    #[test]
+    fn ax_focus_failure_reports_stage_trust_and_codes_without_target_data() {
+        let reason = focus_unavailable_reason("delivery validation", -25205, -25204, true);
+        assert!(reason.contains("delivery validation"));
+        assert!(reason.contains("AX trusted=yes"));
+        assert!(reason.contains("AXFocusedApplication=-25205"));
+        assert!(reason.contains("AXFocusedUIElement=-25204"));
+        assert!(!reason.contains("Notes"));
+    }
+
+    #[test]
+    fn missing_focused_element_with_success_code_is_diagnostic() {
+        let reason = focus_unavailable_reason("capture start", 0, 0, true);
+        assert!(reason.contains("capture start"));
+        assert!(reason.contains("AXFocusedUIElement=0 (null)"));
     }
 
     #[test]

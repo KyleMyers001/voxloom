@@ -214,6 +214,36 @@ describe("deliverTranscript", () => {
     expect(platform.clipboardWrite).not.toHaveBeenCalled();
   });
 
+  it.each([true, false])(
+    "completion AX diagnostic with fallback %s reports the actual stage/code",
+    async (clipboardFallback) => {
+      const platform = adapter({
+        validateTarget: vi.fn().mockResolvedValue(snap({
+          appPid: null,
+          elementId: null,
+          insertable: false,
+          kind: "unavailable",
+          reason: "Accessibility focus unavailable at delivery validation "
+            + "(AX trusted=yes; AXFocusedApplication=0; "
+            + "AXFocusedUIElement=-25204)",
+        })),
+        clipboardRead: vi.fn().mockResolvedValue({ ok: true, text: "dictation" }),
+      });
+      const outcome = await deliverTranscript({
+        clipboardFallback,
+        intended: snap(),
+        platform,
+        text: "dictation",
+      });
+      expect(outcome.status).toBe(clipboardFallback ? "copied" : "failed");
+      expect(outcome.message).toContain("delivery validation");
+      expect(outcome.message).toContain("AXFocusedUIElement=-25204");
+      expect(outcome.message).not.toContain("closed");
+      expect(platform.insertText).not.toHaveBeenCalled();
+      expect(platform.clipboardWrite).toHaveBeenCalledTimes(clipboardFallback ? 1 : 0);
+    },
+  );
+
   it("clipboard write failure → Failed recoverable messaging", async () => {
     const unavailable = snap({
       insertable: false,
