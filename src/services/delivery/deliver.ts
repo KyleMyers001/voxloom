@@ -19,6 +19,7 @@ import type {
   DeliveryOutcome,
   TargetSnapshot,
 } from './types';
+import { DeliveryCancelledError } from './types';
 
 
 async function readClipboardText(
@@ -29,6 +30,12 @@ async function readClipboardText(
     return snap.ok ? snap.text : null;
   } catch {
     return null;
+  }
+}
+
+function assertCanWrite(options: DeliverOptions): void {
+  if (options.canWrite?.() === false) {
+    throw new DeliveryCancelledError();
   }
 }
 
@@ -76,6 +83,7 @@ export async function deliverTranscript(
   }
 
   const plan = planDelivery(validated, options.clipboardFallback);
+  assertCanWrite(options);
 
   if (plan.action === 'insert') {
     try {
@@ -96,12 +104,17 @@ export async function deliverTranscript(
       if (!options.clipboardFallback) {
         return failOutcome(text, `insert failed: ${insertFail}`);
       }
-      return copyFallback(platform, text, `insert failed: ${insertFail}`);
+      return copyFallback(
+        platform,
+        text,
+        `insert failed: ${insertFail}`,
+        options,
+      );
     }
   }
 
   if (plan.action === 'copy') {
-    return copyFallback(platform, text, plan.reason);
+    return copyFallback(platform, text, plan.reason, options);
   }
 
   return failOutcome(text, plan.reason);
@@ -117,7 +130,9 @@ async function copyFallback(
   platform: DeliverOptions['platform'],
   text: string,
   reason: string,
+  options: DeliverOptions,
 ): Promise<DeliveryOutcome> {
+  assertCanWrite(options);
   try {
     await platform.clipboardWrite(text);
   } catch (error: unknown) {

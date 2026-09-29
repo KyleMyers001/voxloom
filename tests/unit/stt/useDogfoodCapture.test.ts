@@ -209,6 +209,68 @@ describe('useDogfoodCapture', () => {
     expect(result.current.message).toMatch(/^Copied/i);
   });
 
+  it('uses admission-time settings after later settings change', async () => {
+    const store = createMockSttModelStore();
+    await store.download('whisper-tiny.en');
+    const dogfood = vi.fn(mockDogfoodSuccess);
+    let state: CaptureState = { kind: 'idle' };
+    const captureApi = () => ({
+      ...stubCapture(state),
+      startFullCaptureSession: vi.fn().mockResolvedValue('started' as const),
+      stopFullCapture: vi.fn(async () => {
+        state = {
+          audio: {
+            duration_ms: 100,
+            id: 'snapshot',
+            sample_rate_hz: 16_000,
+          },
+          kind: 'stopped' as const,
+        };
+      }),
+    });
+    const initialProps: {
+      current: CaptureState;
+      style: 'casual' | 'formal';
+    } = { current: state, style: 'formal' };
+    const { rerender, result } = renderHook(
+      ({ current, style }: {
+        current: CaptureState;
+        style: 'casual' | 'formal';
+      }) => useDogfoodCapture({
+        captureApi: { ...captureApi(), captureState: current },
+        clipboard: clipboard(),
+        clipboardFallback: style === 'formal',
+        cleanupEnabled: true,
+        cleanupModelId: 'qwen3-0.6b-q4-k-m',
+        createModelStore: () => store,
+        dictionary: [style === 'formal' ? 'Voxloom' : 'Changed'],
+        dogfood: dogfood as never,
+        modelId: style === 'formal'
+          ? 'whisper-tiny.en'
+          : 'whisper-base.en',
+        style,
+      }),
+      { initialProps },
+    );
+
+    await act(async () => { await result.current.start(); });
+    rerender({ current: state, style: 'casual' });
+    await act(async () => { await result.current.stop(); });
+    rerender({ current: state, style: 'casual' });
+
+    await waitFor(() => expect(dogfood).toHaveBeenCalledOnce());
+    expect(dogfood).toHaveBeenCalledWith(expect.objectContaining({
+      cleanup: expect.objectContaining({
+        snapshot: expect.objectContaining({
+          dictionary: ['Voxloom'],
+          style: 'formal',
+        }),
+      }),
+      clipboardFallback: true,
+      modelId: 'whisper-tiny.en',
+    }));
+  });
+
   it('surfaces transcript + warning toast when Copy soft-fails', async () => {
     const store = createMockSttModelStore();
     await store.download('whisper-tiny.en');
@@ -221,7 +283,7 @@ describe('useDogfoodCapture', () => {
       transcript: { language: 'en', text: 'still here' },
     }));
 
-    const captureState: CaptureState = {
+    const stoppedState: CaptureState = {
       audio: {
         duration_ms: 500,
         id: 'pcm-copy-fail',
@@ -230,14 +292,20 @@ describe('useDogfoodCapture', () => {
       kind: 'stopped',
     };
 
-    const { result } = renderHook(() => useDogfoodCapture({
-      captureApi: stubCapture(captureState),
-      clipboard: clipboard(),
-      createModelStore: () => store,
-      dogfood: dogfood as never,
-      modelId: 'whisper-tiny.en',
-      onToast: toast,
-    }));
+    const { rerender, result } = renderHook(
+      ({ state }: { state: CaptureState }) => useDogfoodCapture({
+        captureApi: stubCapture(state),
+        clipboard: clipboard(),
+        createModelStore: () => store,
+        dogfood: dogfood as never,
+        modelId: 'whisper-tiny.en',
+        onToast: toast,
+      }),
+      { initialProps: { state: { kind: 'idle' } as CaptureState } },
+    );
+
+    await act(async () => { await result.current.start(); });
+    rerender({ state: stoppedState });
 
     await waitFor(() => expect(result.current.phase).toBe('success'));
     expect(result.current.transcript?.text).toBe('still here');
@@ -409,7 +477,7 @@ describe('useDogfoodCapture', () => {
 
     // Still recording session 2; delivery evidence still surfaced.
     expect(result.current.phase).toBe('recording');
-    expect(onHistoryRecord).toHaveBeenCalledOnce();
+    await waitFor(() => expect(onHistoryRecord).toHaveBeenCalledOnce());
     expect(onToast).toHaveBeenCalledWith(late.delivery.message);
   });
 
@@ -419,7 +487,7 @@ describe('useDogfoodCapture', () => {
     const onHistoryRecord = vi.fn();
     const dogfood = vi.fn(mockDogfoodSuccess);
 
-    const captureState: CaptureState = {
+    const stoppedState: CaptureState = {
       audio: {
         duration_ms: 2_400,
         id: 'pcm-hist-ok',
@@ -428,16 +496,22 @@ describe('useDogfoodCapture', () => {
       kind: 'stopped',
     };
 
-    const { result } = renderHook(() => useDogfoodCapture({
-      captureApi: stubCapture(captureState),
-      clipboard: clipboard(),
-      createModelStore: () => store,
-      dogfood: dogfood as never,
-      modelId: 'whisper-tiny.en',
-      now: () => 42_000,
-      onHistoryRecord,
-      style: 'casual',
-    }));
+    const { rerender, result } = renderHook(
+      ({ state }: { state: CaptureState }) => useDogfoodCapture({
+        captureApi: stubCapture(state),
+        clipboard: clipboard(),
+        createModelStore: () => store,
+        dogfood: dogfood as never,
+        modelId: 'whisper-tiny.en',
+        now: () => 42_000,
+        onHistoryRecord,
+        style: 'casual',
+      }),
+      { initialProps: { state: { kind: 'idle' } as CaptureState } },
+    );
+
+    await act(async () => { await result.current.start(); });
+    rerender({ state: stoppedState });
 
     await waitFor(() => expect(result.current.phase).toBe('success'));
     expect(onHistoryRecord).toHaveBeenCalledOnce();
@@ -466,7 +540,7 @@ describe('useDogfoodCapture', () => {
       transcript: { language: 'en', text: 'soft fail text' },
     }));
 
-    const captureState: CaptureState = {
+    const stoppedState: CaptureState = {
       audio: {
         duration_ms: 800,
         id: 'pcm-hist-soft',
@@ -475,16 +549,22 @@ describe('useDogfoodCapture', () => {
       kind: 'stopped',
     };
 
-    const { result } = renderHook(() => useDogfoodCapture({
-      captureApi: stubCapture(captureState),
-      clipboard: clipboard(),
-      createModelStore: () => store,
-      dogfood: dogfood as never,
-      modelId: 'whisper-tiny.en',
-      now: () => 99_000,
-      onHistoryRecord,
-      style: 'formal',
-    }));
+    const { rerender, result } = renderHook(
+      ({ state }: { state: CaptureState }) => useDogfoodCapture({
+        captureApi: stubCapture(state),
+        clipboard: clipboard(),
+        createModelStore: () => store,
+        dogfood: dogfood as never,
+        modelId: 'whisper-tiny.en',
+        now: () => 99_000,
+        onHistoryRecord,
+        style: 'formal',
+      }),
+      { initialProps: { state: { kind: 'idle' } as CaptureState } },
+    );
+
+    await act(async () => { await result.current.start(); });
+    rerender({ state: stoppedState });
 
     await waitFor(() => expect(result.current.phase).toBe('success'));
     expect(onHistoryRecord).toHaveBeenCalledWith(
@@ -507,7 +587,7 @@ describe('useDogfoodCapture', () => {
       transcript: { language: 'en', text: '   ' },
     }));
 
-    const captureState: CaptureState = {
+    const stoppedState: CaptureState = {
       audio: {
         duration_ms: 100,
         id: 'pcm-hist-blank',
@@ -516,14 +596,20 @@ describe('useDogfoodCapture', () => {
       kind: 'stopped',
     };
 
-    const { result } = renderHook(() => useDogfoodCapture({
-      captureApi: stubCapture(captureState),
-      clipboard: clipboard(),
-      createModelStore: () => store,
-      dogfood: dogfood as never,
-      modelId: 'whisper-tiny.en',
-      onHistoryRecord,
-    }));
+    const { rerender, result } = renderHook(
+      ({ state }: { state: CaptureState }) => useDogfoodCapture({
+        captureApi: stubCapture(state),
+        clipboard: clipboard(),
+        createModelStore: () => store,
+        dogfood: dogfood as never,
+        modelId: 'whisper-tiny.en',
+        onHistoryRecord,
+      }),
+      { initialProps: { state: { kind: 'idle' } as CaptureState } },
+    );
+
+    await act(async () => { await result.current.start(); });
+    rerender({ state: stoppedState });
 
     await waitFor(() => expect(result.current.phase).toBe('success'));
     expect(onHistoryRecord).not.toHaveBeenCalled();

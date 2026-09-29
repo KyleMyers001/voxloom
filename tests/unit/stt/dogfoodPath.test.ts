@@ -3,9 +3,15 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ClipboardAdapter } from '../../../src/services/clipboard';
 import { dogfoodTranscribeAndCopy } from '../../../src/services/stt/dogfoodPath';
 import { createMockSttEngine } from '../../../src/services/stt/mockStt';
+import type { ProcessingSignal } from
+  '../../../src/services/dictation/coordinator';
 
 function clipboard(): ClipboardAdapter {
   return { copy: vi.fn().mockResolvedValue(undefined) };
+}
+
+function processingSignal(aborted = false): ProcessingSignal {
+  return { aborted, onAbort: vi.fn() };
 }
 
 describe('dogfoodTranscribeAndCopy', () => {
@@ -173,5 +179,125 @@ describe('dogfoodTranscribeAndCopy delivery (BUS-14)', () => {
     expect(result.delivery.message).toMatch(/secure/i);
     expect(clip.copy).not.toHaveBeenCalled();
     expect(result.delivery.text).toBe('password');
+  });
+});
+
+describe('dogfoodTranscribeAndCopy cleanup integration', () => {
+  const cleanupSnapshot = {
+    dictionary: ['Voxloom'],
+    enabled: true,
+    modelId: 'qwen3-0.6b-q4-k-m',
+    style: 'formal' as const,
+  };
+
+  it('delivers exactly one cleaned transcript after STT', async () => {
+    const clip = clipboard();
+    const cleanupRun = vi.fn().mockResolvedValue('Cleaned transcript.');
+    const result = await dogfoodTranscribeAndCopy({
+      audio: { duration_ms: 100, id: 'cleaned', sample_rate_hz: 16_000 },
+      cleanup: {
+        engine: { cancel: vi.fn(), run: cleanupRun },
+        requestId: 'cleanup-1',
+        signal: processingSignal(),
+        snapshot: cleanupSnapshot,
+      },
+      clipboard: clip,
+      createEngine: (modelId) => createMockSttEngine({
+        modelId,
+        transcriptText: 'cleaned transcript',
+      }),
+      modelId: 'whisper-tiny.en',
+    });
+
+    expect(result.rawTranscript?.text).toBe('cleaned transcript');
+    expect(result.transcript.text).toBe('Cleaned transcript.');
+    expect(clip.copy).toHaveBeenCalledOnce();
+    expect(clip.copy).toHaveBeenCalledWith('Cleaned transcript.');
+  });
+
+  it('falls back once to raw text when cleanup output is invalid', async () => {
+    const clip = clipboard();
+    const result = await dogfoodTranscribeAndCopy({
+      audio: { duration_ms: 100, id: 'fallback', sample_rate_hz: 16_000 },
+      cleanup: {
+        engine: {
+          cancel: vi.fn(),
+          run: vi.fn().mockResolvedValue('<think>reasoning</think>'),
+        },
+        requestId: 'cleanup-2',
+        signal: processingSignal(),
+        snapshot: cleanupSnapshot,
+      },
+      clipboard: clip,
+      createEngine: (modelId) => createMockSttEngine({
+        modelId,
+        transcriptText: 'raw transcript',
+      }),
+      modelId: 'whisper-tiny.en',
+    });
+
+    expect(result.cleanup).toMatchObject({
+      reason: 'invalid-output',
+      status: 'fallback',
+    });
+    expect(clip.copy).toHaveBeenCalledWith('raw transcript');
+  });
+
+  it('does not write when cancellation is already requested', async () => {
+    const clip = clipboard();
+    await expect(dogfoodTranscribeAndCopy({
+      audio: { duration_ms: 100, id: 'cancelled', sample_rate_hz: 16_000 },
+      cleanup: {
+        engine: { cancel: vi.fn(), run: vi.fn() },
+        requestId: 'cleanup-3',
+        signal: processingSignal(true),
+        snapshot: cleanupSnapshot,
+      },
+      clipboard: clip,
+      createEngine: (modelId) => createMockSttEngine({ modelId }),
+      modelId: 'whisper-tiny.en',
+    })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(clip.copy).not.toHaveBeenCalled();
+  });
+
+  it('reports an insert that had already begun when cancellation arrives', async () => {
+    let aborted = false;
+    const intended = {
+      appName: 'Notes',
+      appPid: 7,
+      capturedAt: 1,
+      elementId: '7:AXTextArea:',
+      elementRole: 'AXTextArea',
+      insertable: true,
+      kind: 'insertable' as const,
+      reason: null,
+    };
+    const result = await dogfoodTranscribeAndCopy({
+      audio: { duration_ms: 100, id: 'write-begun', sample_rate_hz: 16_000 },
+      cleanup: {
+        engine: { cancel: vi.fn(), run: vi.fn() },
+        requestId: 'cleanup-4',
+        signal: {
+          get aborted() { return aborted; },
+          onAbort: vi.fn(),
+        },
+        snapshot: { ...cleanupSnapshot, enabled: false },
+      },
+      clipboard: clipboard(),
+      createEngine: (modelId) => createMockSttEngine({ modelId }),
+      deliveryPlatform: {
+        clipboardRead: vi.fn(),
+        clipboardRestore: vi.fn(),
+        clipboardWrite: vi.fn(),
+        insertText: vi.fn(async () => { aborted = true; }),
+        snapshotTarget: vi.fn().mockResolvedValue(intended),
+        validateTarget: vi.fn().mockResolvedValue(intended),
+      },
+      intended,
+      modelId: 'whisper-tiny.en',
+    });
+
+    expect(result.delivery.status).toBe('inserted');
+    expect(result.delivery.message).toBe('Inserted');
   });
 });

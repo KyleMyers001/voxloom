@@ -67,6 +67,9 @@ export function App() {
   const dogfood = useDogfoodCapture({
     clipboard,
     clipboardFallback: state.settings.clipboardFallback,
+    cleanupEnabled: state.settings.cleanupEnabled,
+    cleanupModelId: state.settings.cleanupModelId,
+    dictionary: state.words,
     modelId: state.settings.transcriptionModel,
     now,
     onHistoryRecord: (record) => {

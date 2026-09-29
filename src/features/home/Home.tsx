@@ -27,7 +27,9 @@ export function Home({ dogfood, onToast }: HomeProps) {
   const isNative = isTauriEnv();
   const recording = dogfood.phase === 'recording'
     || dogfood.captureState.kind === 'active';
-  const busy = dogfood.phase === 'transcribing';
+  const busy = dogfood.phase === 'cleaning'
+    || dogfood.phase === 'queued'
+    || dogfood.phase === 'transcribing';
 
   async function copy(text: string) {
     try {
@@ -43,7 +45,7 @@ export function Home({ dogfood, onToast }: HomeProps) {
       <div className="hero">
         <div>
           <h2 id="home-title">
-            {isNative ? 'Style preference · cleanup not available' : 'Writing style'}
+            Writing style
           </h2>
           <div aria-label="Current writing style" className="style-switch">
             {(['formal', 'casual', 'very-casual'] as WritingStyle[])
@@ -114,7 +116,13 @@ export function Home({ dogfood, onToast }: HomeProps) {
             </>
           )}
           {busy && (
-            <span className="empty-note" role="status">Transcribing…</span>
+            <span className="empty-note" role="status">
+              {dogfood.phase === 'cleaning'
+                ? 'Cleaning up locally…'
+                : dogfood.phase === 'queued'
+                  ? 'Queued for processing…'
+                  : 'Transcribing…'}
+            </span>
           )}
         </div>
         {dogfood.message && (

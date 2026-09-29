@@ -7,13 +7,16 @@ import {
   writingStyles,
 } from '../../domain/settings';
 import { isTauriEnv } from '../../services/capture/captureService';
+import type { CleanupModelStore } from '../../services/cleanup';
 import { SYSTEM_DEFAULT_DEVICE_ID } from
   '../../services/capture/types';
 import { useCaptureState } from '../../services/capture/useCaptureState';
 import { useSttModels } from '../../services/stt/useSttModels';
 import type { Appearance } from '../../domain/types';
+import { CleanupSettings } from './CleanupSettings';
 
 interface SettingsProps {
+  cleanupModelStore?: CleanupModelStore;
   onSetup: (opener: HTMLElement) => void;
 }
 
@@ -24,7 +27,7 @@ const appearances: { label: string; value: Appearance }[] = [
   { label: 'Sodium Rain', value: 'sodium-rain' },
 ];
 
-export function Settings({ onSetup }: SettingsProps) {
+export function Settings({ cleanupModelStore, onSetup }: SettingsProps) {
   const { settings, state } = useApp();
   const selectedLabelRef = useRef<{
     id: string;
@@ -263,24 +266,20 @@ export function Settings({ onSetup }: SettingsProps) {
             </select>
           </label>
 
-          <label className="field">
-            {isNative
-              ? 'Language-processing model · unavailable in desktop'
-              : 'Language-processing model · simulated'}
-            <select
-              disabled={isNative}
-              onChange={(event) => settings.update({
-                key: 'languageModel',
-                value: event.target.value,
-              })}
-              value={isNative ? '' : state.settings.languageModel}
-            >
-              {isNative ? <option value="">No cleanup model installed</option> : <>
-                <option>Alder Text Small · local</option>
-                <option>Alder Text Medium · unavailable</option>
-              </>}
-            </select>
-          </label>
+          <CleanupSettings
+            enabled={state.settings.cleanupEnabled}
+            isNative={isNative}
+            modelId={state.settings.cleanupModelId}
+            modelStore={cleanupModelStore}
+            onEnabledChange={(value) => settings.update({
+              key: 'cleanupEnabled',
+              value,
+            })}
+            onModelChange={(value) => settings.update({
+              key: 'cleanupModelId',
+              value,
+            })}
+          />
 
           <label className="check">
             <input

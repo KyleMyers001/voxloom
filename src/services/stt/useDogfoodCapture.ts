@@ -11,6 +11,17 @@ import { createDogfoodRecord } from '../../domain/records';
 import type { DictationRecord, WritingStyle } from '../../domain/types';
 import type { ClipboardAdapter } from '../clipboard';
 import {
+  createCleanupProvenance,
+  createTauriCleanupEngine,
+  snapshotDictionary,
+  type CleanupEngine,
+  type CleanupSnapshot,
+} from '../cleanup';
+import {
+  DictationCoordinator,
+  type ProcessingReservation,
+} from '../dictation/coordinator';
+import {
   createStubDeliveryAdapter,
   createTauriDeliveryAdapter,
   type DeliveryPlatformAdapter,
@@ -28,6 +39,7 @@ import type { SttModelStore } from './contracts';
 import {
   dogfoodTranscribeAndCopy,
   type CaptureAudioMeta,
+  type DogfoodResult,
 } from './dogfoodPath';
 import { createSttModelStore } from './factory';
 import { resolveTranscriptionModelId } from './resolveModelId';
@@ -36,7 +48,9 @@ import { SttError, type Transcript } from './types';
 export type DogfoodPhase =
   | 'idle'
   | 'recording'
+  | 'queued'
   | 'transcribing'
+  | 'cleaning'
   | 'success'
   | 'error'
   | 'cancelled';
@@ -45,6 +59,9 @@ export interface UseDogfoodCaptureOptions {
   clipboard: ClipboardAdapter;
   /** Settings `clipboardFallback` (default true). */
   clipboardFallback?: boolean;
+  cleanupEnabled?: boolean;
+  cleanupModelId?: string | null;
+  dictionary?: readonly string[];
   /** Settings `transcriptionModel` (resolved before STT). */
   modelId: string;
   /** Clock for history `createdAt` (defaults to Date.now). */
@@ -64,6 +81,7 @@ export interface UseDogfoodCaptureOptions {
   captureApi?: UseCaptureStateResult;
   /** Test seam: model store (status checks; never download). */
   createModelStore?: () => SttModelStore;
+  cleanupEngine?: CleanupEngine;
   /** Test seam: dogfood path. */
   dogfood?: typeof dogfoodTranscribeAndCopy;
   /** Test seam: delivery platform (snapshot / insert / clipboard). */
@@ -81,6 +99,19 @@ export interface UseDogfoodCaptureResult {
   start: (origin?: 'home' | 'gesture') => Promise<void>;
   stop: () => Promise<void>;
   transcript: Transcript | null;
+}
+
+interface Admission {
+  clipboardFallback: boolean;
+  cleanup: CleanupSnapshot;
+  intended: TargetSnapshot | null;
+  modelId: string;
+  reservation: ProcessingReservation<DogfoodResult>;
+}
+
+interface ProcessingAdmission {
+  admission: Admission;
+  session: number;
 }
 
 function errorText(error: unknown): string {
@@ -130,6 +161,17 @@ export function useDogfoodCapture(
   const [transcript, setTranscript] = useState<Transcript | null>(null);
   const [intendedTarget, setIntendedTarget] =
     useState<TargetSnapshot | null>(null);
+  const coordinatorRef = useRef(
+    new DictationCoordinator<DogfoodResult>(2),
+  );
+  const admissionRef = useRef<Admission | null>(null);
+  const processingRef = useRef<ProcessingAdmission | null>(null);
+  const cleanupEngineRef = useRef(
+    options.cleanupEngine ?? createTauriCleanupEngine(),
+  );
+  if (options.cleanupEngine) {
+    cleanupEngineRef.current = options.cleanupEngine;
+  }
 
   const dogfoodRef = useRef(options.dogfood ?? dogfoodTranscribeAndCopy);
   dogfoodRef.current = options.dogfood ?? dogfoodTranscribeAndCopy;
@@ -140,18 +182,12 @@ export function useDogfoodCapture(
     storeRef.current = options.createModelStore();
   }
 
-  const modelIdRef = useRef(options.modelId);
-  modelIdRef.current = options.modelId;
   const clipboardRef = useRef(options.clipboard);
   clipboardRef.current = options.clipboard;
-  const clipboardFallbackRef = useRef(options.clipboardFallback !== false);
-  clipboardFallbackRef.current = options.clipboardFallback !== false;
   const toastRef = useRef(options.onToast);
   toastRef.current = options.onToast;
   const historyRef = useRef(options.onHistoryRecord);
   historyRef.current = options.onHistoryRecord;
-  const styleRef = useRef(options.style ?? 'formal');
-  styleRef.current = options.style ?? 'formal';
   const nowRef = useRef(options.now ?? Date.now);
   nowRef.current = options.now ?? Date.now;
   const platformRef = useRef<DeliveryPlatformAdapter>(
@@ -191,31 +227,62 @@ export function useDogfoodCapture(
   const runDogfood = useCallback(async (audio: CaptureAudioMeta) => {
     const session = sessionRef.current;
     const current = () => session === sessionRef.current;
-    // Bind this session's target now: a newer start() may re-snapshot.
-    const intended = intendedRef.current;
-    setPhase('transcribing');
-    announce('Transcribing…');
+    const admission = admissionRef.current;
+    admissionRef.current = null;
+    if (!admission) {
+      setPhase('error');
+      announce('Processing reservation was lost — audio was not accepted.');
+      return;
+    }
+    const processing = { admission, session };
+    processingRef.current = processing;
+    setPhase('queued');
+    announce('Queued for processing…');
     try {
-      const modelId = await ensureModelAvailable(modelIdRef.current);
-      const result = await dogfoodRef.current({
-        audio,
-        clipboard: clipboardRef.current,
-        clipboardFallback: clipboardFallbackRef.current,
-        deliveryPlatform: platformRef.current,
-        intended,
-        modelId,
+      const modelId = resolveTranscriptionModelId(admission.modelId);
+      const result = await admission.reservation.submit(async (signal) => {
+        await ensureModelAvailable(admission.modelId);
+        if (current()) {
+          setPhase('transcribing');
+          announce('Transcribing…');
+        }
+        return dogfoodRef.current({
+          audio,
+          cleanup: {
+            engine: cleanupEngineRef.current,
+            requestId: admission.reservation.id,
+            signal,
+            snapshot: admission.cleanup,
+          },
+          clipboard: clipboardRef.current,
+          clipboardFallback: admission.clipboardFallback,
+          deliveryPlatform: platformRef.current,
+          intended: admission.intended,
+          modelId,
+          onCleanupStart: () => {
+            if (current() && admission.cleanup.enabled) {
+              setPhase('cleaning');
+              announce('Cleaning up locally…');
+            }
+          },
+        });
       });
       if (current()) {
         setTranscript(result.transcript);
         setPhase('success');
       }
       const record = createDogfoodRecord({
+        cleanup: await createCleanupProvenance(
+          admission.cleanup,
+          result.cleanup,
+        ),
         durationMs: audio.duration_ms,
         id: `dogfood-${audio.id}`,
         model: modelId,
         now: nowRef.current(),
+        rawText: result.rawTranscript?.text ?? result.transcript.text,
         status: result.delivery.status,
-        style: styleRef.current,
+        style: admission.cleanup.style,
         text: result.transcript.text,
       });
       if (record) {
@@ -225,11 +292,22 @@ export function useDogfoodCapture(
       if (current()) announce(result.delivery.message);
       else toastRef.current?.(result.delivery.message);
     } catch (error: unknown) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        if (current()) {
+          setPhase('cancelled');
+          setMessage('Dictation cancelled — nothing delivered.');
+        }
+        return;
+      }
       if (current()) {
         setPhase('error');
         announce(errorText(error));
       } else {
         toastRef.current?.(errorText(error));
+      }
+    } finally {
+      if (processingRef.current === processing) {
+        processingRef.current = null;
       }
     }
   }, [announce, ensureModelAvailable]);
@@ -238,11 +316,15 @@ export function useDogfoodCapture(
   const handledAudioIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (capture.captureState.kind === 'cancelled') {
+      admissionRef.current?.reservation.cancel();
+      admissionRef.current = null;
       setPhase('cancelled');
       setMessage('Capture cancelled — nothing transcribed.');
       return;
     }
     if (capture.captureState.kind === 'error') {
+      admissionRef.current?.reservation.cancel();
+      admissionRef.current = null;
       setPhase('error');
       setMessage(capture.captureState.message);
       return;
@@ -250,6 +332,8 @@ export function useDogfoodCapture(
     if (capture.captureState.kind !== 'stopped') return;
     const audio = capture.captureState.audio;
     if (!audio) {
+      admissionRef.current?.reservation.cancel();
+      admissionRef.current = null;
       setPhase('error');
       announce('Capture stopped without audio — nothing to transcribe.');
       return;
@@ -260,6 +344,31 @@ export function useDogfoodCapture(
   }, [announce, capture.captureState, runDogfood]);
 
   const start = useCallback(async (source: 'home' | 'gesture' = 'home') => {
+    const reservation = coordinatorRef.current.reserve();
+    if (!reservation) {
+      setPhase('error');
+      announce(
+        'Processing queue is full — wait before starting another capture.',
+      );
+      return;
+    }
+    const admission: Admission = {
+      clipboardFallback: options.clipboardFallback !== false,
+      cleanup: {
+        dictionary: snapshotDictionary(options.dictionary ?? []),
+        enabled: options.cleanupEnabled === true,
+        modelId: options.cleanupModelId ?? null,
+        style: options.style ?? 'formal',
+      },
+      intended: null,
+      modelId: options.modelId,
+      reservation,
+    };
+    admissionRef.current = admission;
+    const abandon = () => {
+      reservation.cancel();
+      if (admissionRef.current === admission) admissionRef.current = null;
+    };
     const session = ++sessionRef.current;
     setOrigin(source);
     const superseded = () => session !== sessionRef.current;
@@ -268,29 +377,42 @@ export function useDogfoodCapture(
     handledAudioIdRef.current = null;
     stopRequestedRef.current = false;
     try {
-      await ensureModelAvailable(modelIdRef.current);
+      await ensureModelAvailable(admission.modelId);
     } catch (error: unknown) {
+      abandon();
       if (superseded()) return;
       setPhase('error');
       announce(errorText(error));
       return;
     }
-    if (superseded()) return;
+    if (superseded()) {
+      abandon();
+      return;
+    }
 
     // ADR §4: snapshot intended target at invocation (capture start).
     try {
       const snap = await platformRef.current.snapshotTarget();
-      if (superseded()) return;
+      if (superseded()) {
+        abandon();
+        return;
+      }
       intendedRef.current = snap;
+      admission.intended = snap;
       setIntendedTarget(snap);
     } catch {
-      if (superseded()) return;
+      if (superseded()) {
+        abandon();
+        return;
+      }
       intendedRef.current = null;
+      admission.intended = null;
       setIntendedTarget(null);
     }
 
     // Hold release may have already requested stop while we were snapshotting.
     if (stopRequestedRef.current) {
+      abandon();
       setPhase('cancelled');
       setMessage('Capture cancelled — nothing transcribed.');
       return;
@@ -303,8 +425,12 @@ export function useDogfoodCapture(
 
     try {
       const started = await capture.startFullCaptureSession(deviceId);
-      if (superseded() || started === 'ended') return;
+      if (superseded() || started === 'ended') {
+        abandon();
+        return;
+      }
       if (started !== 'started') {
+        abandon();
         setPhase('error');
         announce(started === 'busy'
           ? 'A capture session is already active. Wait for it to finish.'
@@ -315,7 +441,11 @@ export function useDogfoodCapture(
       announce('Listening…');
       if (stopRequestedRef.current) await capture.stopFullCapture();
     } catch (error: unknown) {
-      if (superseded()) return;
+      if (superseded()) {
+        abandon();
+        return;
+      }
+      abandon();
       setPhase('error');
       announce(errorText(error));
     }
@@ -323,7 +453,13 @@ export function useDogfoodCapture(
     announce,
     capture,
     ensureModelAvailable,
+    options.cleanupEnabled,
+    options.cleanupModelId,
+    options.clipboardFallback,
+    options.dictionary,
+    options.modelId,
     options.preferredDeviceId,
+    options.style,
   ]);
 
   const stop = useCallback(async () => {
@@ -337,10 +473,18 @@ export function useDogfoodCapture(
   }, [announce, capture]);
 
   const cancel = useCallback(() => {
+    const session = sessionRef.current;
+    const processing = processingRef.current;
+    if (admissionRef.current) {
+      admissionRef.current.reservation.cancel();
+    } else if (processing?.session === session) {
+      processing.admission.reservation.cancel();
+    }
     sessionRef.current += 1;
     stopRequestedRef.current = true;
     handledAudioIdRef.current = null;
     intendedRef.current = null;
+    admissionRef.current = null;
     setIntendedTarget(null);
     try {
       capture.cancelActiveCapture();

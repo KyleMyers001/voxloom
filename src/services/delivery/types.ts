@@ -86,6 +86,8 @@ export interface DeliveryPlatformAdapter {
 }
 
 export interface DeliverOptions {
+  /** False immediately before a write means the request was cancelled. */
+  canWrite?: () => boolean;
   /** Settings `clipboardFallback` — default-on per fixtures / ADR. */
   clipboardFallback: boolean;
   /** Injectable clock (tests). */
@@ -96,4 +98,11 @@ export interface DeliverOptions {
   intended: TargetSnapshot | null;
   /** Transcript text to deliver. */
   text: string;
+}
+
+export class DeliveryCancelledError extends Error {
+  constructor() {
+    super('Delivery cancelled before write');
+    this.name = 'DeliveryCancelledError';
+  }
 }

@@ -79,17 +79,50 @@ describe('Settings', () => {
     renderWithApp(<Settings onSetup={vi.fn()} />);
     expect(screen.getByLabelText(/shortcut/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/Start at login/)).toBeDisabled();
-    expect(screen.getByLabelText(/Language-processing model/)).toBeDisabled();
+    expect(screen.getByLabelText(/Language-processing model import/))
+      .toBeEnabled();
     expect(screen.getByText(/register-or-revert/i)).toBeInTheDocument();
   });
 
-  it('does not let native users select unsupported cleanup, login or audio retention', () => {
+  it('keeps cleanup disabled until model and runtime are available', () => {
     renderWithApp(<Settings onSetup={vi.fn()} />);
-    expect(screen.getByLabelText(/Language-processing model/)).toBeDisabled();
+    expect(screen.getByLabelText(
+      /Clean transcripts with the imported local model/,
+    )).toBeDisabled();
     expect(screen.getByLabelText(/Start at login/)).toBeDisabled();
     expect(screen.getByLabelText(/Audio retention/)).toBeDisabled();
     expect(screen.queryByText(/Temporary recovery buffers expire/))
       .not.toBeInTheDocument();
+  });
+
+  it('imports the allowlisted model before cleanup can be enabled', async () => {
+    const user = userEvent.setup();
+    const status = {
+      available: true,
+      id: 'qwen3-0.6b-q4-k-m',
+      runtimeAvailable: true,
+      sha256: 'digest',
+    };
+    const cleanupModelStore = {
+      importModel: vi.fn().mockResolvedValue(status),
+      status: vi.fn().mockResolvedValue({ ...status, available: false }),
+    };
+    renderWithApp(
+      <Settings
+        cleanupModelStore={cleanupModelStore}
+        onSetup={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByLabelText(
+      /Language-processing model import/,
+    ));
+    expect(cleanupModelStore.importModel).toHaveBeenCalledOnce();
+    expect(await screen.findByText(/is installed locally/))
+      .toBeInTheDocument();
+    expect(screen.getByLabelText(
+      /Clean transcripts with the imported local model/,
+    )).toBeEnabled();
   });
 
   it('does not claim audio resets on reload', () => {

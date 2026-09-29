@@ -1,5 +1,6 @@
 dist/
 node_modules/
+src-tauri/resources/cleanup/voxloom-cleanup-worker
 .playwright-browsers/
 playwright-report/
 playwright-report-release/

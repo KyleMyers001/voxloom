@@ -288,4 +288,24 @@ describe('deliverTranscript', () => {
     expect(outcome.message).toMatch(/changed after write/i);
     expect(outcome.restoreSkippedReason).toMatch(/changed/);
   });
+
+  it('rechecks cancellation at the write boundary', async () => {
+    let canWrite = true;
+    const platform = adapter({
+      validateTarget: vi.fn().mockImplementation(async () => {
+        canWrite = false;
+        return snap();
+      }),
+    });
+
+    await expect(deliverTranscript({
+      canWrite: () => canWrite,
+      clipboardFallback: true,
+      intended: snap(),
+      platform,
+      text: 'must not write',
+    })).rejects.toMatchObject({ name: 'DeliveryCancelledError' });
+    expect(platform.clipboardWrite).not.toHaveBeenCalled();
+    expect(platform.insertText).not.toHaveBeenCalled();
+  });
 });

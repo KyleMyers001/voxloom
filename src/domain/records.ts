@@ -1,4 +1,9 @@
-import type { DictationRecord, HistoryStatus, WritingStyle } from './types';
+import type {
+  CleanupProvenance,
+  DictationRecord,
+  HistoryStatus,
+  WritingStyle,
+} from './types';
 
 interface RecordInput {
   id: string;
@@ -8,6 +13,7 @@ interface RecordInput {
 
 /** Inputs for a session history row from the dogfood Dictate path. */
 export interface DogfoodRecordInput {
+  cleanup?: CleanupProvenance;
   /**
    * Evidence-backed delivery status (BUS-14).
    * Prefer `status` when present; legacy `copied` boolean still accepted.
@@ -21,6 +27,7 @@ export interface DogfoodRecordInput {
   /** STT model id used for this transcript, when known. */
   model?: string | null;
   now: number;
+  rawText?: string;
   style: WritingStyle;
   text: string;
 }
@@ -92,12 +99,22 @@ export function createDogfoodRecord(
   const durationSeconds = Math.max(0, Math.round(input.durationMs / 1_000));
 
   return {
+    cleanup: input.cleanup ?? {
+      dictionaryDigest: null,
+      dictionaryVersion: 1,
+      modelDigest: null,
+      modelId: null,
+      promptVersion: 'cleanup-v1',
+      reason: null,
+      status: 'skipped',
+    },
     createdAt: input.now,
     durationSeconds,
     id: input.id,
     model: input.model ?? null,
     // STT/delivery failures retain text, never a replayable audio buffer.
     recoveryExpiresAt: null,
+    rawText: (input.rawText ?? text).trim(),
     status,
     style: input.style,
     text,

@@ -99,6 +99,20 @@ export function History({ onToast }: HistoryProps) {
                       `${record.style[0].toUpperCase()}${record.style.slice(1)}`
                   }
                 </p>
+                {record.cleanup && (
+                  <p className="empty-note">
+                    Cleanup: {record.cleanup.status}
+                    {record.cleanup.reason
+                      ? ` (${record.cleanup.reason})`
+                      : ''}
+                  </p>
+                )}
+                {record.rawText && record.rawText !== record.text && (
+                  <details>
+                    <summary>Show raw transcript</summary>
+                    <p>{record.rawText}</p>
+                  </details>
+                )}
                 {record.status === 'failed' && (
                   <p className="recovery-state">
                     {isNative
