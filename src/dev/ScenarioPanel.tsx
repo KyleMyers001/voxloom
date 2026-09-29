@@ -1,6 +1,6 @@
-import { useApp } from "../app/AppContext";
+import { useApp } from '../app/AppContext';
 
-export type OnboardingScenario = "collision" | "permission-denied";
+export type OnboardingScenario = 'collision' | 'permission-denied';
 
 interface ScenarioPanelProps {
   onOnboarding: (scenario: OnboardingScenario) => void;
@@ -12,7 +12,7 @@ export function ScenarioPanel({
   onReset,
 }: ScenarioPanelProps) {
   const { dictation, dispatch, now, state } = useApp();
-  const runId = "runId" in state.dictation ? state.dictation.runId : null;
+  const runId = 'runId' in state.dictation ? state.dictation.runId : null;
 
   return (
     <section aria-label="Development scenarios" className="state-lab">
@@ -21,10 +21,10 @@ export function ScenarioPanel({
         Reset session
       </button>
       <button onClick={onReset}>First-run setup</button>
-      <button onClick={() => onOnboarding("collision")}>
+      <button onClick={() => onOnboarding('collision')}>
         Shortcut collision
       </button>
-      <button onClick={() => dispatch({ type: "scenario-empty" })}>
+      <button onClick={() => dispatch({ type: 'scenario-empty' })}>
         Empty lists
       </button>
       <button onClick={dictation.start}>
@@ -32,7 +32,7 @@ export function ScenarioPanel({
       </button>
       <button onClick={() => {
         dictation.start();
-        dictation.speech("speaking");
+        dictation.speech('speaking');
       }}>Listening · speaking</button>
       <button disabled={runId === null} onClick={() => runId !== null &&
         dictation.holdProcessing(runId)}>Processing</button>
@@ -48,22 +48,22 @@ export function ScenarioPanel({
         dictation.cancel(runId)}>
         Cancel
       </button>
-      <button onClick={() => dispatch({ now: now(), type: "expire-recovery" })}>
+      <button onClick={() => dispatch({ now: now(), type: 'expire-recovery' })}>
         Expire recovery buffers
       </button>
       <label className="check">
         <input checked={state.clipboardFailure} onChange={(event) => dispatch({
-          type: "set-clipboard-failure",
+          type: 'set-clipboard-failure',
           value: event.target.checked,
         })} type="checkbox" />
         Copy failure
       </label>
-      <button onClick={() => onOnboarding("permission-denied")}>
+      <button onClick={() => onOnboarding('permission-denied')}>
         Permission denied
       </button>
       <p>
         Controls are synthetic. No audio or OS capability is used.
-        With durable history on, Reset asks before wiping{" "}
+        With durable history on, Reset asks before wiping{' '}
         <code>history.json</code>.
       </p>
     </section>

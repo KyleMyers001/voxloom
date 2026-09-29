@@ -11,7 +11,7 @@ export type ParseDictionaryResult =
   | { ok: false; error: string };
 
 function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**
@@ -23,7 +23,7 @@ export function normalizeWords(raw: unknown): string[] {
   const seen = new Set<string>();
   const words: string[] = [];
   for (const entry of raw) {
-    if (typeof entry !== "string") continue;
+    if (typeof entry !== 'string') continue;
     const word = entry.trim();
     if (!word) continue;
     const key = word.toLowerCase();
@@ -32,7 +32,7 @@ export function normalizeWords(raw: unknown): string[] {
     words.push(word);
   }
   return words.sort((a, b) => a.localeCompare(b, undefined, {
-    sensitivity: "base",
+    sensitivity: 'base',
   }));
 }
 
@@ -48,10 +48,10 @@ export function parseDictionaryJson(raw: string): ParseDictionaryResult {
   try {
     parsed = JSON.parse(raw) as unknown;
   } catch {
-    return { error: "Dictionary file is not valid JSON", ok: false };
+    return { error: 'Dictionary file is not valid JSON', ok: false };
   }
   if (!isObject(parsed)) {
-    return { error: "Dictionary file root must be an object", ok: false };
+    return { error: 'Dictionary file root must be an object', ok: false };
   }
   if (parsed.version !== DICTIONARY_FILE_VERSION) {
     return {
@@ -60,7 +60,7 @@ export function parseDictionaryJson(raw: string): ParseDictionaryResult {
     };
   }
   if (!Array.isArray(parsed.words)) {
-    return { error: "Dictionary file words must be an array", ok: false };
+    return { error: 'Dictionary file words must be an array', ok: false };
   }
   return {
     file: {

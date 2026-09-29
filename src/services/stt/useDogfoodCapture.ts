@@ -5,41 +5,41 @@
 /// Voxloom; gesture callers rely on the other app still being frontmost.
 /// Never silent-downloads missing models — surfaces a clear UI error instead.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { createDogfoodRecord } from "../../domain/records";
-import type { DictationRecord, WritingStyle } from "../../domain/types";
-import type { ClipboardAdapter } from "../clipboard";
+import { createDogfoodRecord } from '../../domain/records';
+import type { DictationRecord, WritingStyle } from '../../domain/types';
+import type { ClipboardAdapter } from '../clipboard';
 import {
   createStubDeliveryAdapter,
   createTauriDeliveryAdapter,
   type DeliveryPlatformAdapter,
   type TargetSnapshot,
-} from "../delivery";
+} from '../delivery';
 import {
   SYSTEM_DEFAULT_DEVICE_ID,
   type CaptureState,
-} from "../capture/types";
+} from '../capture/types';
 import {
   useCaptureState,
   type UseCaptureStateResult,
-} from "../capture/useCaptureState";
-import type { SttModelStore } from "./contracts";
+} from '../capture/useCaptureState';
+import type { SttModelStore } from './contracts';
 import {
   dogfoodTranscribeAndCopy,
   type CaptureAudioMeta,
-} from "./dogfoodPath";
-import { createSttModelStore } from "./factory";
-import { resolveTranscriptionModelId } from "./resolveModelId";
-import { SttError, type Transcript } from "./types";
+} from './dogfoodPath';
+import { createSttModelStore } from './factory';
+import { resolveTranscriptionModelId } from './resolveModelId';
+import { SttError, type Transcript } from './types';
 
 export type DogfoodPhase =
-  | "idle"
-  | "recording"
-  | "transcribing"
-  | "success"
-  | "error"
-  | "cancelled";
+  | 'idle'
+  | 'recording'
+  | 'transcribing'
+  | 'success'
+  | 'error'
+  | 'cancelled';
 
 export interface UseDogfoodCaptureOptions {
   clipboard: ClipboardAdapter;
@@ -76,19 +76,19 @@ export interface UseDogfoodCaptureResult {
   /** Invocation-time intended target (null until start snapshots). */
   intendedTarget: TargetSnapshot | null;
   message: string | null;
-  origin: "home" | "gesture" | null;
+  origin: 'home' | 'gesture' | null;
   phase: DogfoodPhase;
-  start: (origin?: "home" | "gesture") => Promise<void>;
+  start: (origin?: 'home' | 'gesture') => Promise<void>;
   stop: () => Promise<void>;
   transcript: Transcript | null;
 }
 
 function errorText(error: unknown): string {
   if (error instanceof SttError) {
-    if (error.code === "model-missing") {
+    if (error.code === 'model-missing') {
       return (
         `${error.message} Open Settings → Speech-to-text models and `
-        + "Download the selected model first."
+        + 'Download the selected model first.'
       );
     }
     return error.message;
@@ -98,11 +98,11 @@ function errorText(error: unknown): string {
 }
 
 function missingModelMessage(modelId: string, status: string | null): string {
-  const detail = status ? ` (status: ${status})` : "";
+  const detail = status ? ` (status: ${status})` : '';
   return (
     `Model “${modelId}” is not downloaded${detail}. `
-    + "Open Settings → Speech-to-text models and Download it first "
-    + "(no silent download)."
+    + 'Open Settings → Speech-to-text models and Download it first '
+    + '(no silent download).'
   );
 }
 
@@ -124,8 +124,8 @@ export function useDogfoodCapture(
   const liveCapture = useCaptureState();
   const capture = options.captureApi ?? liveCapture;
 
-  const [phase, setPhase] = useState<DogfoodPhase>("idle");
-  const [origin, setOrigin] = useState<"home" | "gesture" | null>(null);
+  const [phase, setPhase] = useState<DogfoodPhase>('idle');
+  const [origin, setOrigin] = useState<'home' | 'gesture' | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<Transcript | null>(null);
   const [intendedTarget, setIntendedTarget] =
@@ -150,8 +150,8 @@ export function useDogfoodCapture(
   toastRef.current = options.onToast;
   const historyRef = useRef(options.onHistoryRecord);
   historyRef.current = options.onHistoryRecord;
-  const styleRef = useRef(options.style ?? "formal");
-  styleRef.current = options.style ?? "formal";
+  const styleRef = useRef(options.style ?? 'formal');
+  styleRef.current = options.style ?? 'formal';
   const nowRef = useRef(options.now ?? Date.now);
   nowRef.current = options.now ?? Date.now;
   const platformRef = useRef<DeliveryPlatformAdapter>(
@@ -179,9 +179,9 @@ export function useDogfoodCapture(
   const ensureModelAvailable = useCallback(async (rawModelId: string) => {
     const modelId = resolveTranscriptionModelId(rawModelId);
     const info = await storeRef.current.status(modelId);
-    if (!info || info.status !== "available") {
+    if (!info || info.status !== 'available') {
       throw new SttError(
-        "model-missing",
+        'model-missing',
         missingModelMessage(modelId, info?.status ?? null),
       );
     }
@@ -193,8 +193,8 @@ export function useDogfoodCapture(
     const current = () => session === sessionRef.current;
     // Bind this session's target now: a newer start() may re-snapshot.
     const intended = intendedRef.current;
-    setPhase("transcribing");
-    announce("Transcribing…");
+    setPhase('transcribing');
+    announce('Transcribing…');
     try {
       const modelId = await ensureModelAvailable(modelIdRef.current);
       const result = await dogfoodRef.current({
@@ -207,7 +207,7 @@ export function useDogfoodCapture(
       });
       if (current()) {
         setTranscript(result.transcript);
-        setPhase("success");
+        setPhase('success');
       }
       const record = createDogfoodRecord({
         durationMs: audio.duration_ms,
@@ -226,7 +226,7 @@ export function useDogfoodCapture(
       else toastRef.current?.(result.delivery.message);
     } catch (error: unknown) {
       if (current()) {
-        setPhase("error");
+        setPhase('error');
         announce(errorText(error));
       } else {
         toastRef.current?.(errorText(error));
@@ -237,21 +237,21 @@ export function useDogfoodCapture(
   // Auto dogfood on clean stop (user stop or 120s/capacity bound).
   const handledAudioIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (capture.captureState.kind === "cancelled") {
-      setPhase("cancelled");
-      setMessage("Capture cancelled — nothing transcribed.");
+    if (capture.captureState.kind === 'cancelled') {
+      setPhase('cancelled');
+      setMessage('Capture cancelled — nothing transcribed.');
       return;
     }
-    if (capture.captureState.kind === "error") {
-      setPhase("error");
+    if (capture.captureState.kind === 'error') {
+      setPhase('error');
       setMessage(capture.captureState.message);
       return;
     }
-    if (capture.captureState.kind !== "stopped") return;
+    if (capture.captureState.kind !== 'stopped') return;
     const audio = capture.captureState.audio;
     if (!audio) {
-      setPhase("error");
-      announce("Capture stopped without audio — nothing to transcribe.");
+      setPhase('error');
+      announce('Capture stopped without audio — nothing to transcribe.');
       return;
     }
     if (handledAudioIdRef.current === audio.id) return;
@@ -259,7 +259,7 @@ export function useDogfoodCapture(
     void runDogfood(audio);
   }, [announce, capture.captureState, runDogfood]);
 
-  const start = useCallback(async (source: "home" | "gesture" = "home") => {
+  const start = useCallback(async (source: 'home' | 'gesture' = 'home') => {
     const session = ++sessionRef.current;
     setOrigin(source);
     const superseded = () => session !== sessionRef.current;
@@ -271,7 +271,7 @@ export function useDogfoodCapture(
       await ensureModelAvailable(modelIdRef.current);
     } catch (error: unknown) {
       if (superseded()) return;
-      setPhase("error");
+      setPhase('error');
       announce(errorText(error));
       return;
     }
@@ -291,8 +291,8 @@ export function useDogfoodCapture(
 
     // Hold release may have already requested stop while we were snapshotting.
     if (stopRequestedRef.current) {
-      setPhase("cancelled");
-      setMessage("Capture cancelled — nothing transcribed.");
+      setPhase('cancelled');
+      setMessage('Capture cancelled — nothing transcribed.');
       return;
     }
 
@@ -303,20 +303,20 @@ export function useDogfoodCapture(
 
     try {
       const started = await capture.startFullCaptureSession(deviceId);
-      if (superseded() || started === "ended") return;
-      if (started !== "started") {
-        setPhase("error");
-        announce(started === "busy"
-          ? "A capture session is already active. Wait for it to finish."
-          : "Microphone capture could not start. Check permission and retry.");
+      if (superseded() || started === 'ended') return;
+      if (started !== 'started') {
+        setPhase('error');
+        announce(started === 'busy'
+          ? 'A capture session is already active. Wait for it to finish.'
+          : 'Microphone capture could not start. Check permission and retry.');
         return;
       }
-      setPhase("recording");
-      announce("Listening…");
+      setPhase('recording');
+      announce('Listening…');
       if (stopRequestedRef.current) await capture.stopFullCapture();
     } catch (error: unknown) {
       if (superseded()) return;
-      setPhase("error");
+      setPhase('error');
       announce(errorText(error));
     }
   }, [
@@ -331,7 +331,7 @@ export function useDogfoodCapture(
     try {
       await capture.stopFullCapture();
     } catch (error: unknown) {
-      setPhase("error");
+      setPhase('error');
       announce(errorText(error));
     }
   }, [announce, capture]);
@@ -345,8 +345,8 @@ export function useDogfoodCapture(
     try {
       capture.cancelActiveCapture();
     } finally {
-      setPhase("cancelled");
-      setMessage("Capture cancelled — nothing transcribed.");
+      setPhase('cancelled');
+      setMessage('Capture cancelled — nothing transcribed.');
     }
   }, [capture]);
 

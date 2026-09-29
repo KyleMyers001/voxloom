@@ -1,5 +1,5 @@
-import type { ClipboardAdapter } from "../clipboard";
-import type { Transcript } from "./types";
+import type { ClipboardAdapter } from '../clipboard';
+import type { Transcript } from './types';
 
 /**
  * Copy-before-insert sink (ADR / BUS-10).

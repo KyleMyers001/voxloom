@@ -1,5 +1,5 @@
-import type { CSSProperties } from "react";
-import type { OverlayWaveform } from "../services/shortcut/overlayVisibility";
+import type { CSSProperties } from 'react';
+import type { OverlayWaveform } from '../services/shortcut/overlayVisibility';
 
 export const WAVEFORM_BARS = 24;
 
@@ -17,7 +17,7 @@ interface Props {
 export function Waveform({ levels, waveform }: Props) {
   return (
     <div
-      aria-label={waveform === "processing" ? "Transcribing" : "Microphone level"}
+      aria-label={waveform === 'processing' ? 'Transcribing' : 'Microphone level'}
       className="wave"
       role="img"
     >
@@ -25,7 +25,7 @@ export function Waveform({ levels, waveform }: Props) {
         const level = levels[index] ?? 0;
         return <i
           key={index}
-          style={{ "--h": `${1 + Math.round(level * 12)}px` } as CSSProperties}
+          style={{ '--h': `${1 + Math.round(level * 12)}px` } as CSSProperties}
         />;
       })}
     </div>

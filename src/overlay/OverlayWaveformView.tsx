@@ -1,5 +1,5 @@
-import { Waveform } from "../components/Waveform";
-import type { OverlayWaveform } from "../services/shortcut/overlayVisibility";
+import { Waveform } from '../components/Waveform';
+import type { OverlayWaveform } from '../services/shortcut/overlayVisibility';
 
 interface Props {
   levels: readonly number[];

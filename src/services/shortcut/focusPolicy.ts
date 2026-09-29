@@ -8,10 +8,10 @@
  * hold-release watch stay process-lifetime / hold-scoped and keep working
  * while another app is frontmost.
  */
-export type ShortcutInputSource = "document-focused" | "native-global";
+export type ShortcutInputSource = 'document-focused' | 'native-global';
 
 export function shouldResetGesturesOnDocumentHidden(
   source: ShortcutInputSource,
 ): boolean {
-  return source === "document-focused";
+  return source === 'document-focused';
 }

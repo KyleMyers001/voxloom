@@ -1,5 +1,5 @@
-import react from "@vitejs/plugin-react";
-import { defineConfig } from "vitest/config";
+import react from '@vitejs/plugin-react';
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   clearScreen: false,
@@ -7,8 +7,8 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
-        main: "index.html",
-        overlay: "overlay.html",
+        main: 'index.html',
+        overlay: 'overlay.html',
       },
     },
   },
@@ -17,8 +17,8 @@ export default defineConfig({
     strictPort: true,
   },
   test: {
-    environment: "jsdom",
-    include: ["tests/unit/**/*.test.{ts,tsx}"],
-    setupFiles: ["./tests/unit/setup.ts"],
+    environment: 'jsdom',
+    include: ['tests/unit/**/*.test.{ts,tsx}'],
+    setupFiles: ['./tests/unit/setup.ts'],
   },
 });

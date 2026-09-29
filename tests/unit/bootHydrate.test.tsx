@@ -1,27 +1,27 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
-import { App } from "../../src/app/App";
-import { AppProvider } from "../../src/app/AppContext";
-import { initialSettings } from "../../src/domain/fixtures";
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it } from 'vitest';
+import { App } from '../../src/app/App';
+import { AppProvider } from '../../src/app/AppContext';
+import { initialSettings } from '../../src/domain/fixtures';
 import {
   createDictionaryStore,
   createMemoryDictionaryIo,
   serializeDictionaryFile,
   type DurableDictionaryStore,
-} from "../../src/services/dictionary";
+} from '../../src/services/dictionary';
 import {
   createHistoryStore,
   createMemoryHistoryIo,
   serializeHistoryFile,
   type HistoryStore,
-} from "../../src/services/history";
+} from '../../src/services/history';
 import {
   createMemorySettingsIo,
   createSettingsStore,
   serializeSettingsFile,
   type DurableSettingsStore,
-} from "../../src/services/settings";
+} from '../../src/services/settings';
 
 function deferredGate() {
   let release!: () => void;
@@ -71,14 +71,14 @@ function delayDictionaryLoad(
   };
 }
 
-describe("boot hydrate polish", () => {
-  it("does not flash fixture settings before async hydrate settles", async () => {
+describe('boot hydrate polish', () => {
+  it('does not flash fixture settings before async hydrate settles', async () => {
     const { gate, release } = deferredGate();
     const settingsStore = delaySettingsLoad(
       createSettingsStore(
         createMemorySettingsIo(
           serializeSettingsFile(
-            { ...initialSettings, transcriptRetention: "forever" },
+            { ...initialSettings, transcriptRetention: 'forever' },
             true,
           ),
         ),
@@ -92,7 +92,7 @@ describe("boot hydrate polish", () => {
         dictionaryPersistence={{
           enabled: true,
           store: createDictionaryStore(createMemoryDictionaryIo(
-            serializeDictionaryFile(["PersistedWord"]),
+            serializeDictionaryFile(['PersistedWord']),
           )),
         }}
         historyPersistence={{
@@ -101,12 +101,12 @@ describe("boot hydrate polish", () => {
             serializeHistoryFile([{
               createdAt: 1_800_000_000_000,
               durationSeconds: 1,
-              id: "durable-1",
+              id: 'durable-1',
               model: null,
               recoveryExpiresAt: null,
-              status: "copied",
-              style: "formal",
-              text: "durable history row",
+              status: 'copied',
+              style: 'formal',
+              text: 'durable history row',
             }]),
           )),
         }}
@@ -117,51 +117,51 @@ describe("boot hydrate polish", () => {
     );
 
     // Dismiss fixture onboarding so nav is usable while durable hydrate waits.
-    await user.click(screen.getByRole("button", { name: "Skip" }));
+    await user.click(screen.getByRole('button', { name: 'Skip' }));
 
-    await user.click(screen.getByRole("button", { name: "Settings" }));
-    expect(screen.getByRole("status")).toHaveTextContent("Loading…");
+    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(screen.getByRole('status')).toHaveTextContent('Loading…');
     expect(
       screen.queryByLabelText(/Transcript retention/i),
     ).not.toBeInTheDocument();
     // Fixture default retention must not appear while hydrate is pending.
-    expect(screen.queryByDisplayValue("30-days")).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue('30-days')).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Dictionary" }));
-    expect(screen.getByRole("status")).toHaveTextContent("Loading…");
-    expect(screen.queryByText("JSON")).not.toBeInTheDocument();
-    expect(screen.queryByText("PersistedWord")).not.toBeInTheDocument();
-    expect(screen.queryByText("No words found.")).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Dictionary' }));
+    expect(screen.getByRole('status')).toHaveTextContent('Loading…');
+    expect(screen.queryByText('JSON')).not.toBeInTheDocument();
+    expect(screen.queryByText('PersistedWord')).not.toBeInTheDocument();
+    expect(screen.queryByText('No words found.')).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "History" }));
-    expect(screen.getByRole("status")).toHaveTextContent("Loading…");
+    await user.click(screen.getByRole('button', { name: 'History' }));
+    expect(screen.getByRole('status')).toHaveTextContent('Loading…');
     expect(
       screen.queryByText(/Make retry explicit/i),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByText("durable history row"),
+      screen.queryByText('durable history row'),
     ).not.toBeInTheDocument();
 
     release();
 
     await waitFor(() => {
-      expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
+      expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
     });
-    expect(await screen.findByText("durable history row")).toBeInTheDocument();
+    expect(await screen.findByText('durable history row')).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole('button', { name: 'Settings' }));
     const retention = await screen.findByLabelText(/Transcript retention/i);
-    expect(retention).toHaveValue("forever");
+    expect(retention).toHaveValue('forever');
 
-    await user.click(screen.getByRole("button", { name: "Dictionary" }));
-    expect(await screen.findByText("PersistedWord")).toBeInTheDocument();
-    expect(screen.queryByText("JSON")).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Dictionary' }));
+    expect(await screen.findByText('PersistedWord')).toBeInTheDocument();
+    expect(screen.queryByText('JSON')).not.toBeInTheDocument();
   });
 
-  it("marks boot ready after fail-safe corrupt load (toast + defaults)", async () => {
+  it('marks boot ready after fail-safe corrupt load (toast + defaults)', async () => {
     const { gate, release } = deferredGate();
     const settingsStore = delaySettingsLoad(
-      createSettingsStore(createMemorySettingsIo("{corrupt")),
+      createSettingsStore(createMemorySettingsIo('{corrupt')),
       gate,
     );
     const historyStore = delayHistoryLoad(
@@ -169,7 +169,7 @@ describe("boot hydrate polish", () => {
       gate,
     );
     const dictionaryStore = delayDictionaryLoad(
-      createDictionaryStore(createMemoryDictionaryIo("{corrupt")),
+      createDictionaryStore(createMemoryDictionaryIo('{corrupt')),
       gate,
     );
     const user = userEvent.setup();
@@ -184,35 +184,35 @@ describe("boot hydrate polish", () => {
       </AppProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Skip" }));
-    await user.click(screen.getByRole("button", { name: "Settings" }));
-    expect(screen.getByRole("status")).toHaveTextContent("Loading…");
+    await user.click(screen.getByRole('button', { name: 'Skip' }));
+    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(screen.getByRole('status')).toHaveTextContent('Loading…');
 
     release();
 
     await waitFor(() => {
-      expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
+      expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
     });
     await waitFor(() => {
       expect(screen.getByText(/not valid JSON|Settings file|Dictionary file/i))
         .toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole('button', { name: 'Settings' }));
     const retention = await screen.findByLabelText(/Transcript retention/i);
-    expect(retention).toHaveValue("30-days");
+    expect(retention).toHaveValue('30-days');
   });
 
-  it("is boot-ready immediately when durable persistence is off", async () => {
+  it('is boot-ready immediately when durable persistence is off', async () => {
     const user = userEvent.setup();
     render(
       <AppProvider clock={() => 1_800_000_000_000}>
         <App />
       </AppProvider>,
     );
-    await user.click(screen.getByRole("button", { name: "Skip" }));
-    await user.click(screen.getByRole("button", { name: "Settings" }));
-    expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Skip' }));
+    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
     expect(
       await screen.findByLabelText(/Transcript retention/i),
     ).toBeInTheDocument();

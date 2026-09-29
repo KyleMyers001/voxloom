@@ -2,12 +2,12 @@ import type {
   Scheduler,
   ShortcutController,
   ShortcutGesture,
-} from "./contracts";
+} from './contracts';
 import {
   createDocumentShortcutController,
   DOUBLE_TAP_MS,
   HOLD_MS,
-} from "./shortcut";
+} from './shortcut';
 
 /**
  * Focused-window mock gesture controller (document keydown/keyup).
@@ -31,7 +31,7 @@ interface ShortcutOptions {
   onGesture: (gesture: ShortcutGesture) => void;
   scheduler?: Scheduler;
   shortcut: string;
-  target: Pick<Document, "addEventListener" | "removeEventListener">;
+  target: Pick<Document, 'addEventListener' | 'removeEventListener'>;
 }
 
 /**

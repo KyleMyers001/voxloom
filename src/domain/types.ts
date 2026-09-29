@@ -1,7 +1,7 @@
-export type Appearance = "system" | "light" | "dark" | "sodium-rain";
-export type HistoryStatus = "copied" | "failed" | "inserted";
-export type Screen = "dictionary" | "history" | "home" | "settings";
-export type WritingStyle = "casual" | "formal" | "very-casual";
+export type Appearance = 'system' | 'light' | 'dark' | 'sodium-rain';
+export type HistoryStatus = 'copied' | 'failed' | 'inserted';
+export type Screen = 'dictionary' | 'history' | 'home' | 'settings';
+export type WritingStyle = 'casual' | 'formal' | 'very-casual';
 
 export interface DictationRecord {
   createdAt: number;
@@ -16,21 +16,21 @@ export interface DictationRecord {
 }
 
 export type DictationState =
-  | { kind: "ready" }
-  | { kind: "listening"; runId: number; waveform: "silent" | "speaking" }
+  | { kind: 'ready' }
+  | { kind: 'listening'; runId: number; waveform: 'silent' | 'speaking' }
   | {
-      completion: "automatic" | "held";
-      kind: "processing";
+      completion: 'automatic' | 'held';
+      kind: 'processing';
       retrySourceId?: string;
       runId: number;
     }
-  | { kind: "success"; recordId: string; runId: number }
-  | { kind: "cancelled"; runId: number }
-  | { kind: "error"; recordId: string; runId: number };
+  | { kind: 'success'; recordId: string; runId: number }
+  | { kind: 'cancelled'; runId: number }
+  | { kind: 'error'; recordId: string; runId: number };
 
 export interface Settings {
   appearance: Appearance;
-  audioRetention: "off" | "24-hours" | "7-days";
+  audioRetention: 'off' | '24-hours' | '7-days';
   clipboardFallback: boolean;
   language: string;
   languageModel: string;
@@ -38,7 +38,7 @@ export interface Settings {
   shortcut: string;
   startAtLogin: boolean;
   style: WritingStyle;
-  transcriptRetention: "30-days" | "forever" | "off";
+  transcriptRetention: '30-days' | 'forever' | 'off';
   transcriptionModel: string;
 }
 

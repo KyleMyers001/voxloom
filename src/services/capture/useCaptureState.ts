@@ -3,7 +3,7 @@ import {
   useEffect,
   useRef,
   useState,
-} from "react";
+} from 'react';
 
 import {
   cancelCapture,
@@ -17,7 +17,7 @@ import {
   startFullCapture,
   startMicTest,
   stopCapture,
-} from "./captureService";
+} from './captureService';
 import type {
   CaptureErrorCategory,
   CaptureEvent,
@@ -26,7 +26,7 @@ import type {
   CaptureStatus,
   InputDeviceDescriptor,
   PermissionStatus,
-} from "./types";
+} from './types';
 
 interface CaptureOwner {
   generation: number | null;
@@ -53,7 +53,7 @@ export interface UseCaptureStateResult {
   runMicTest: (deviceId?: string) => Promise<void>;
   /** Start full-mode capture; never treat a silent busy return as success. */
   startFullCaptureSession: (deviceId?: string) => Promise<
-    "started" | "ended" | "busy" | "error"
+    'started' | 'ended' | 'busy' | 'error'
   >;
   /**
    * Clean-stop full capture: deposits PCM and emits `capture-stopped.audio`.
@@ -78,10 +78,10 @@ interface TerminalCorrelation {
 const MAX_TERMINAL_CORRELATIONS = 32;
 
 const errorMessages: Record<CaptureErrorCategory, string> = {
-  busy: "A capture session is already active.",
-  "capture-unavailable": "Microphone capture is not available.",
-  "input-limit-exceeded": "Capture limit reached.",
-  "permission-denied": "Microphone permission denied.",
+  busy: 'A capture session is already active.',
+  'capture-unavailable': 'Microphone capture is not available.',
+  'input-limit-exceeded': 'Capture limit reached.',
+  'permission-denied': 'Microphone permission denied.',
 };
 
 function normalizeError(error: unknown): {
@@ -91,7 +91,7 @@ function normalizeError(error: unknown): {
   const detail = error instanceof Error ? error.message : String(error);
   const category = (Object.keys(errorMessages) as CaptureErrorCategory[])
     .find((candidate) => detail.includes(candidate))
-    ?? "capture-unavailable";
+    ?? 'capture-unavailable';
   return {
     category,
     message: errorMessages[category],
@@ -99,27 +99,27 @@ function normalizeError(error: unknown): {
 }
 
 function stateFromStatus(status: CaptureStatus): CaptureState {
-  if (status.mode === "test") {
+  if (status.mode === 'test') {
     return {
       generation: status.generation,
-      kind: "test-running",
+      kind: 'test-running',
       request_id: status.request_id,
       started_at: Date.now(),
     };
   }
   return {
-    device: "Active microphone",
+    device: 'Active microphone',
     generation: status.generation,
-    kind: "active",
+    kind: 'active',
     request_id: status.request_id,
   };
 }
 
 function isTerminalEvent(event: CaptureEvent): boolean {
-  return event.kind === "capture-cancelled"
-    || event.kind === "capture-error"
-    || event.kind === "capture-stopped"
-    || event.kind === "test-complete";
+  return event.kind === 'capture-cancelled'
+    || event.kind === 'capture-error'
+    || event.kind === 'capture-stopped'
+    || event.kind === 'test-complete';
 }
 
 function rememberTerminal(
@@ -153,7 +153,7 @@ function consumeTerminal(
 export function useCaptureState(): UseCaptureStateResult {
   const [captureReady, setCaptureReady] = useState(false);
   const [captureState, setCaptureState] =
-    useState<CaptureState>({ kind: "idle" });
+    useState<CaptureState>({ kind: 'idle' });
   const [deviceListError, setDeviceListError] =
     useState<string | null>(null);
   const [devices, setDevices] = useState<InputDeviceDescriptor[]>([]);
@@ -197,7 +197,7 @@ export function useCaptureState(): UseCaptureStateResult {
 
     const handleEvent = (event: CaptureEvent) => {
       if (disposed || !mountedRef.current) return;
-      if (event.kind === "permission-status") {
+      if (event.kind === 'permission-status') {
         setPermissionStatus(event.status);
         return;
       }
@@ -212,23 +212,23 @@ export function useCaptureState(): UseCaptureStateResult {
       if (owner.generation !== null
           && event.generation !== owner.generation) return;
 
-      if (event.kind === "capture-started") {
+      if (event.kind === 'capture-started') {
         owner.generation = event.generation;
-        if (owner.mode === "test") {
-          setCaptureState((previous) => previous.kind === "test-running"
+        if (owner.mode === 'test') {
+          setCaptureState((previous) => previous.kind === 'test-running'
             ? { ...previous, generation: event.generation }
             : previous);
         } else {
           setCaptureState({
             device: event.device_name,
             generation: event.generation,
-            kind: "active",
+            kind: 'active',
             request_id: event.request_id,
           });
         }
         return;
       }
-      if (event.kind === "activity-detected" || event.kind === "capture-level") return;
+      if (event.kind === 'activity-detected' || event.kind === 'capture-level') return;
 
       ownerRef.current = null;
       const waiter = terminalWaiterRef.current;
@@ -236,26 +236,26 @@ export function useCaptureState(): UseCaptureStateResult {
         terminalWaiterRef.current = null;
         waiter.resolve(true);
       }
-      if (event.kind === "test-complete") {
+      if (event.kind === 'test-complete') {
         setCaptureState({
-          kind: "test-complete",
+          kind: 'test-complete',
           metadata: event.metadata,
         });
-      } else if (event.kind === "capture-cancelled") {
-        setCaptureState({ kind: "cancelled" });
-      } else if (event.kind === "capture-error") {
+      } else if (event.kind === 'capture-cancelled') {
+        setCaptureState({ kind: 'cancelled' });
+      } else if (event.kind === 'capture-error') {
         setCaptureState({
           category: event.category,
-          kind: "error",
+          kind: 'error',
           message: event.message,
         });
-      } else if (event.kind === "capture-stopped") {
+      } else if (event.kind === 'capture-stopped') {
         setCaptureState({
           audio: event.audio,
-          kind: "stopped",
+          kind: 'stopped',
         });
       } else {
-        setCaptureState({ kind: "idle" });
+        setCaptureState({ kind: 'idle' });
       }
     };
 
@@ -264,7 +264,7 @@ export function useCaptureState(): UseCaptureStateResult {
       .catch((error: unknown): ListenerResult => {
         const normalized = normalizeError(error);
         if (!disposed && mountedRef.current) {
-          setCaptureState({ kind: "error", ...normalized });
+          setCaptureState({ kind: 'error', ...normalized });
         }
         return { error: normalized.message, ok: false };
       });
@@ -282,12 +282,12 @@ export function useCaptureState(): UseCaptureStateResult {
       if (disposed || !mountedRef.current) return;
 
       const [statusResult] = operations;
-      if (statusResult.status === "fulfilled") {
+      if (statusResult.status === 'fulfilled') {
         if (terminalCacheOverflowRef.current) {
           setCaptureState({
-            category: "capture-unavailable",
-            kind: "error",
-            message: errorMessages["capture-unavailable"],
+            category: 'capture-unavailable',
+            kind: 'error',
+            message: errorMessages['capture-unavailable'],
           });
         } else if (statusResult.value && ownerRef.current === null) {
           const status = statusResult.value;
@@ -301,10 +301,10 @@ export function useCaptureState(): UseCaptureStateResult {
           }
         }
         setCaptureReady(!terminalCacheOverflowRef.current);
-      } else if (statusResult.status === "rejected"
+      } else if (statusResult.status === 'rejected'
           && ownerRef.current === null) {
         setCaptureState({
-          kind: "error",
+          kind: 'error',
           ...normalizeError(statusResult.reason),
         });
       }
@@ -342,13 +342,13 @@ export function useCaptureState(): UseCaptureStateResult {
   const requestMicPermission = useCallback(() => {
     if (!isTauriEnv()) {
       setCaptureState({
-        category: "capture-unavailable",
-        kind: "error",
-        message: errorMessages["capture-unavailable"],
+        category: 'capture-unavailable',
+        kind: 'error',
+        message: errorMessages['capture-unavailable'],
       });
       return;
     }
-    setCaptureState({ kind: "requesting-permission" });
+    setCaptureState({ kind: 'requesting-permission' });
     const requestId = createCaptureRequestId();
     void (async () => {
       const listener = await listenerRef.current;
@@ -357,7 +357,7 @@ export function useCaptureState(): UseCaptureStateResult {
         await requestPermission(requestId);
       } catch (error: unknown) {
         if (mountedRef.current) {
-          setCaptureState({ kind: "error", ...normalizeError(error) });
+          setCaptureState({ kind: 'error', ...normalizeError(error) });
         }
       }
     })();
@@ -369,12 +369,12 @@ export function useCaptureState(): UseCaptureStateResult {
     const requestId = createCaptureRequestId();
     ownerRef.current = {
       generation: null,
-      mode: "test",
+      mode: 'test',
       requestId,
     };
     setCaptureState({
       generation: null,
-      kind: "test-running",
+      kind: 'test-running',
       request_id: requestId,
       started_at: Date.now(),
     });
@@ -386,11 +386,11 @@ export function useCaptureState(): UseCaptureStateResult {
       }
       if (mountedRef.current) {
         setCaptureState({
-          category: "capture-unavailable",
-          kind: "error",
+          category: 'capture-unavailable',
+          kind: 'error',
           message: listener?.ok === false
             ? listener.error
-            : errorMessages["capture-unavailable"],
+            : errorMessages['capture-unavailable'],
         });
       }
       return;
@@ -403,14 +403,14 @@ export function useCaptureState(): UseCaptureStateResult {
       if (status.request_id !== requestId) {
         ownerRef.current = null;
         setCaptureState({
-          category: "capture-unavailable",
-          kind: "error",
-          message: errorMessages["capture-unavailable"],
+          category: 'capture-unavailable',
+          kind: 'error',
+          message: errorMessages['capture-unavailable'],
         });
         return;
       }
       ownerRef.current.generation = status.generation;
-      setCaptureState((previous) => previous.kind === "test-running"
+      setCaptureState((previous) => previous.kind === 'test-running'
         && previous.request_id === requestId
         ? { ...previous, generation: status.generation }
         : previous);
@@ -418,7 +418,7 @@ export function useCaptureState(): UseCaptureStateResult {
       if (!mountedRef.current
           || ownerRef.current?.requestId !== requestId) return;
       ownerRef.current = null;
-      setCaptureState({ kind: "error", ...normalizeError(error) });
+      setCaptureState({ kind: 'error', ...normalizeError(error) });
     }
   }, []);
 
@@ -428,11 +428,11 @@ export function useCaptureState(): UseCaptureStateResult {
     const owner = ownerRef.current;
     if (!owner) return true;
 
-    setCaptureState({ kind: "switching-device" });
+    setCaptureState({ kind: 'switching-device' });
     let waiter = terminalWaiterRef.current;
     if (!waiter || waiter.requestId !== owner.requestId) {
       let resolve: (completed: boolean) => void = () => {
-        throw new Error("terminal waiter was not initialized");
+        throw new Error('terminal waiter was not initialized');
       };
       const promise = new Promise<boolean>((complete) => {
         resolve = complete;
@@ -453,7 +453,7 @@ export function useCaptureState(): UseCaptureStateResult {
       } catch (error: unknown) {
         if (mountedRef.current
             && sequence === switchSequenceRef.current) {
-          setCaptureState({ kind: "error", ...normalizeError(error) });
+          setCaptureState({ kind: 'error', ...normalizeError(error) });
         }
         return false;
       }
@@ -469,29 +469,29 @@ export function useCaptureState(): UseCaptureStateResult {
         || sequence !== switchSequenceRef.current) return false;
     if (!completed) {
       setCaptureState({
-        category: "capture-unavailable",
-        kind: "error",
-        message: "Microphone did not stop; selection was not changed.",
+        category: 'capture-unavailable',
+        kind: 'error',
+        message: 'Microphone did not stop; selection was not changed.',
       });
       return false;
     }
-    setCaptureState({ kind: "idle" });
+    setCaptureState({ kind: 'idle' });
     return true;
   }, [captureReady]);
 
   const startFullCaptureSession = useCallback(async (deviceId?: string) => {
-    if (ownerRef.current !== null) return "busy" as const;
+    if (ownerRef.current !== null) return 'busy' as const;
 
     const requestId = createCaptureRequestId();
     ownerRef.current = {
       generation: null,
-      mode: "full",
+      mode: 'full',
       requestId,
     };
     setCaptureState({
-      device: "Starting…",
+      device: 'Starting…',
       generation: 0,
-      kind: "active",
+      kind: 'active',
       request_id: requestId,
     });
 
@@ -502,14 +502,14 @@ export function useCaptureState(): UseCaptureStateResult {
       }
       if (mountedRef.current) {
         setCaptureState({
-          category: "capture-unavailable",
-          kind: "error",
+          category: 'capture-unavailable',
+          kind: 'error',
           message: listener?.ok === false
             ? listener.error
-            : errorMessages["capture-unavailable"],
+            : errorMessages['capture-unavailable'],
         });
       }
-      return "error" as const;
+      return 'error' as const;
     }
 
     try {
@@ -517,39 +517,39 @@ export function useCaptureState(): UseCaptureStateResult {
       // A terminal event can arrive before the start command resolves.
       // Never resurrect its old owner or report a fresh recording.
       if (!mountedRef.current
-          || ownerRef.current?.requestId !== requestId) return "ended" as const;
+          || ownerRef.current?.requestId !== requestId) return 'ended' as const;
       if (status.request_id !== requestId) {
         ownerRef.current = null;
         setCaptureState({
-          category: "capture-unavailable",
-          kind: "error",
-          message: errorMessages["capture-unavailable"],
+          category: 'capture-unavailable',
+          kind: 'error',
+          message: errorMessages['capture-unavailable'],
         });
-        return "error" as const;
+        return 'error' as const;
       }
       ownerRef.current.generation = status.generation;
-      setCaptureState((previous) => previous.kind === "active"
+      setCaptureState((previous) => previous.kind === 'active'
         && previous.request_id === requestId
         ? { ...previous, generation: status.generation }
         : previous);
-      return "started" as const;
+      return 'started' as const;
     } catch (error: unknown) {
       if (!mountedRef.current
-          || ownerRef.current?.requestId !== requestId) return "ended" as const;
+          || ownerRef.current?.requestId !== requestId) return 'ended' as const;
       ownerRef.current = null;
-      setCaptureState({ kind: "error", ...normalizeError(error) });
-      return "error" as const;
+      setCaptureState({ kind: 'error', ...normalizeError(error) });
+      return 'error' as const;
     }
   }, []);
 
   const stopFullCapture = useCallback(async () => {
     const owner = ownerRef.current;
-    if (!owner || owner.mode !== "full") return;
+    if (!owner || owner.mode !== 'full') return;
     try {
       await stopCapture();
     } catch (error: unknown) {
       if (mountedRef.current) {
-        setCaptureState({ kind: "error", ...normalizeError(error) });
+        setCaptureState({ kind: 'error', ...normalizeError(error) });
       }
     }
   }, []);
@@ -560,7 +560,7 @@ export function useCaptureState(): UseCaptureStateResult {
       void cancelCapture(owner.requestId).catch(() => {});
     }
     // Optimistic UX; terminal event still updates to cancelled/idle.
-    setCaptureState({ kind: "cancelled" });
+    setCaptureState({ kind: 'cancelled' });
   }, []);
 
   const stopMicTest = useCallback(() => {
@@ -568,7 +568,7 @@ export function useCaptureState(): UseCaptureStateResult {
     if (owner) {
       void cancelCapture(owner.requestId).catch(() => {});
     }
-    setCaptureState({ kind: "idle" });
+    setCaptureState({ kind: 'idle' });
   }, []);
 
   return {

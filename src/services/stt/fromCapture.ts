@@ -1,4 +1,4 @@
-import type { AudioBufferHandle } from "./types";
+import type { AudioBufferHandle } from './types';
 
 /** Capture IPC audio metadata (snake_case) → STT AudioBufferHandle. */
 export function audioHandleFromCapture(audio: {

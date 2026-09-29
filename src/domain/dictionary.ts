@@ -8,7 +8,7 @@ export function validateWord(
   editing?: string,
 ): WordResult {
   const word = value.trim();
-  if (!word) return { error: "Enter a word.", ok: false };
+  if (!word) return { error: 'Enter a word.', ok: false };
   const duplicate = words.some((candidate) =>
     candidate !== editing && candidate.toLowerCase() === word.toLowerCase()
   );

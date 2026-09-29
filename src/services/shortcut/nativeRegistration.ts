@@ -1,27 +1,27 @@
-import { isTauri } from "@tauri-apps/api/core";
-import type { Scheduler, ShortcutContext, ShortcutGesture } from "../contracts";
+import { isTauri } from '@tauri-apps/api/core';
+import type { Scheduler, ShortcutContext, ShortcutGesture } from '../contracts';
 import {
   DOUBLE_TAP_MS,
   HOLD_MS,
   HOLD_RELEASE_CARBON_GRACE_MS,
-} from "./constants";
-import { toPluginHotkey } from "./formatHotkey";
-import { createGestureMachine, type GestureMachine } from "./gestureMachine";
+} from './constants';
+import { toPluginHotkey } from './formatHotkey';
+import { createGestureMachine, type GestureMachine } from './gestureMachine';
 import {
   createTauriHoldReleaseApi,
   type HoldReleaseApi,
-} from "./holdReleaseBridge";
+} from './holdReleaseBridge';
 import {
   registerOrRevert,
   type RegisterOutcome,
   type ShortcutBinder,
-} from "./registerOrRevert";
+} from './registerOrRevert';
 
 export interface NativeShortcutApi {
   isAvailable(): boolean;
   register(
     hotkey: string,
-    onEdge: (edge: "pressed" | "released") => void,
+    onEdge: (edge: 'pressed' | 'released') => void,
   ): Promise<void>;
   unregister(hotkey: string): Promise<void>;
   unregisterAll(): Promise<void>;
@@ -32,21 +32,21 @@ export function createTauriShortcutApi(): NativeShortcutApi {
   return {
     isAvailable: () => isTauri(),
     async register(hotkey, onEdge) {
-      const { register } = await import("@tauri-apps/plugin-global-shortcut");
+      const { register } = await import('@tauri-apps/plugin-global-shortcut');
       await register(hotkey, (event) => {
-        if (event.state === "Pressed") onEdge("pressed");
-        else if (event.state === "Released") onEdge("released");
+        if (event.state === 'Pressed') onEdge('pressed');
+        else if (event.state === 'Released') onEdge('released');
       });
     },
     async unregister(hotkey) {
       const { unregister } = await import(
-        "@tauri-apps/plugin-global-shortcut"
+        '@tauri-apps/plugin-global-shortcut'
       );
       await unregister(hotkey);
     },
     async unregisterAll() {
       const { unregisterAll } = await import(
-        "@tauri-apps/plugin-global-shortcut"
+        '@tauri-apps/plugin-global-shortcut'
       );
       await unregisterAll();
     },
@@ -62,8 +62,8 @@ export interface NativeShortcutController {
    * and returns an honest outcome for Settings/toast.
    */
   setShortcut(settingsShortcut: string): Promise<RegisterOutcome>;
-  setContext: GestureMachine["setContext"];
-  resetPartial: GestureMachine["resetPartial"];
+  setContext: GestureMachine['setContext'];
+  resetPartial: GestureMachine['resetPartial'];
 }
 
 export interface NativeShortcutControllerOptions {
@@ -109,7 +109,7 @@ export function createNativeShortcutController({
   let carbonReleaseGraceTimer: number | null = null;
   /** OS Released seen during grace; flush if arm declines monitoring. */
   let suppressedOsReleased = false;
-  let context: ShortcutContext = "product";
+  let context: ShortcutContext = 'product';
   let unlistenHoldRelease: (() => void) | null = null;
   /** Flush suppressed Carbon Released if arm declines monitoring (non-Mac). */
   let flushSuppressedOsRelease: (() => void) | null = null;
@@ -207,13 +207,13 @@ export function createNativeShortcutController({
     doubleTapMs,
     holdMs,
     onGesture: (gesture) => {
-      if (gesture === "hold-start") {
+      if (gesture === 'hold-start') {
         // Mac: HotKey Released often missing when modifiers lift first.
         armHoldWatch();
       } else if (
-        gesture === "hold-finish" ||
-        gesture === "latch-start" ||
-        gesture === "latch-finish"
+        gesture === 'hold-finish' ||
+        gesture === 'latch-start' ||
+        gesture === 'latch-finish'
       ) {
         // Latch paths and hold end do not keep the watch.
         disarmHoldWatch();
@@ -225,9 +225,9 @@ export function createNativeShortcutController({
 
   function finishFromCarbonReleased() {
     if (import.meta.env.DEV) {
-      console.debug("[hold-release] emit source=carbon-released");
+      console.debug('[hold-release] emit source=carbon-released');
     }
-    machine.handle("released");
+    machine.handle('released');
     disarmHoldWatch();
   }
 
@@ -244,17 +244,17 @@ export function createNativeShortcutController({
         // After grace, Carbon is backup finish even while poll/tap monitors —
         // a dead 2nd-session Rust watch must not leave Home on Stop forever.
         if (
-          edge === "released"
+          edge === 'released'
           && holdWatchMonitoring
           && carbonReleaseGraceActive
         ) {
           suppressedOsReleased = true;
           if (import.meta.env.DEV) {
-            console.debug("[hold-release] ignore source=carbon-released");
+            console.debug('[hold-release] ignore source=carbon-released');
           }
           return;
         }
-        if (edge === "released") {
+        if (edge === 'released') {
           finishFromCarbonReleased();
           return;
         }
@@ -269,7 +269,7 @@ export function createNativeShortcutController({
   // Synthetic Released from Mac hold-release watch → same machine path.
   void holdRelease.listen(() => {
     if (disposed) return;
-    machine.handle("released");
+    machine.handle('released');
     disarmHoldWatch();
   }).then((unlisten) => {
     if (disposed) {
@@ -321,7 +321,7 @@ export function createNativeShortcutController({
             active: null,
             attempted: next,
             lastKnownGood,
-            message: "Shortcut controller disposed.",
+            message: 'Shortcut controller disposed.',
             ok: false,
           };
         }

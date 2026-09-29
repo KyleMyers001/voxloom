@@ -1,9 +1,9 @@
-import { useState } from "react";
-import { useApp } from "../../app/AppContext";
-import { Dialog } from "../../components/Dialog";
-import { isTauriEnv } from "../../services/capture/captureService";
+import { useState } from 'react';
+import { useApp } from '../../app/AppContext';
+import { Dialog } from '../../components/Dialog';
+import { isTauriEnv } from '../../services/capture/captureService';
 import { useCaptureState } from
-  "../../services/capture/useCaptureState";
+  '../../services/capture/useCaptureState';
 
 interface OnboardingProps {
   onClose: () => void;
@@ -12,7 +12,7 @@ interface OnboardingProps {
 
 export function Onboarding({ onClose, opener }: OnboardingProps) {
   const { settings, setup, state } = useApp();
-  const [error, setError] = useState("");
+  const [error, setError] = useState('');
   const onboarding = state.onboarding;
   const update = setup.update;
 
@@ -28,28 +28,28 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
   // In a browser context native capture is unavailable;
   // allow Next without blocking on permission.
   const micAuthorized =
-    !isNative || permissionStatus === "authorized";
-  const micTesting = captureState.kind === "test-running";
-  const micTestDone = captureState.kind === "test-complete";
+    !isNative || permissionStatus === 'authorized';
+  const micTesting = captureState.kind === 'test-running';
+  const micTestDone = captureState.kind === 'test-complete';
   const micError =
-    captureState.kind === "error" ? captureState.message : null;
+    captureState.kind === 'error' ? captureState.message : null;
 
   function next() {
-    setError("");
+    setError('');
     if (onboarding.step === 1 && !micAuthorized) {
       setError(
-        "Enable microphone access to continue, or choose Skip.",
+        'Enable microphone access to continue, or choose Skip.',
       );
       return;
     }
     if (onboarding.step === 2) {
       if (!state.settings.shortcut.trim()) {
-        setError("Enter a shortcut.");
+        setError('Enter a shortcut.');
         return;
       }
-      if (!isNative && state.settings.shortcut.toLowerCase() === "ctrl + space") {
+      if (!isNative && state.settings.shortcut.toLowerCase() === 'ctrl + space') {
         update({ shortcutCollision: true });
-        setError("Ctrl + Space has a simulated collision.");
+        setError('Ctrl + Space has a simulated collision.');
         return;
       }
     }
@@ -61,7 +61,7 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
 
   function finish() {
     if (!onboarding.holdTested || !onboarding.tapTested) {
-      setError("Complete both practice tests, or choose Skip.");
+      setError('Complete both practice tests, or choose Skip.');
       return;
     }
     update({ complete: true });
@@ -78,19 +78,19 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
 
   function permissionLabel(): string {
     if (!isNative) {
-      return "Native capture unavailable in this environment";
+      return 'Native capture unavailable in this environment';
     }
     switch (permissionStatus) {
-      case "authorized":
-        return "Microphone access granted";
-      case "denied":
-        return "Microphone access denied \u2014 enable in System Settings";
-      case "restricted":
-        return "Microphone access restricted by system policy";
-      case "not-determined":
-        return "Microphone access not yet granted";
+      case 'authorized':
+        return 'Microphone access granted';
+      case 'denied':
+        return 'Microphone access denied \u2014 enable in System Settings';
+      case 'restricted':
+        return 'Microphone access restricted by system policy';
+      case 'not-determined':
+        return 'Microphone access not yet granted';
       default:
-        return "Checking microphone permission\u2026";
+        return 'Checking microphone permission\u2026';
     }
   }
 
@@ -111,35 +111,35 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
           </p>
           <div className="onboarding-status">
             <span>{permissionLabel()}</span>
-            {isNative && permissionStatus !== "authorized" && (
+            {isNative && permissionStatus !== 'authorized' && (
               <button className="btn" onClick={requestMicPermission}>
                 Enable Microphone
               </button>
             )}
           </div>
-          {isNative && permissionStatus === "authorized" && (
+          {isNative && permissionStatus === 'authorized' && (
             <div className="onboarding-test">
               <span>
                 {micTestDone
-                  && captureState.kind === "test-complete"
+                  && captureState.kind === 'test-complete'
                   ? captureState.metadata.detected_activity
-                    ? "Audio activity detected \u2014 mic is working"
-                    : "No audio activity detected \u2014 check your mic"
+                    ? 'Audio activity detected \u2014 mic is working'
+                    : 'No audio activity detected \u2014 check your mic'
                   : micTesting
-                    ? "Listening\u2026 (10\u202fs auto-stop)"
-                    : "Test your microphone"}
+                    ? 'Listening\u2026 (10\u202fs auto-stop)'
+                    : 'Test your microphone'}
               </span>
               <button className="btn" onClick={handleTestMic}>
-                {micTesting ? "Stop test" : "Test Microphone"}
+                {micTesting ? 'Stop test' : 'Test Microphone'}
               </button>
             </div>
           )}
           {micError && (
             <p className="form-error" role="alert">{micError}</p>
           )}
-          {isNative && permissionStatus === "denied" && (
+          {isNative && permissionStatus === 'denied' && (
             <p className="empty-note">
-              Open System Settings &rsaquo;{" "}
+              Open System Settings &rsaquo;{' '}
               Privacy &amp; Security &rsaquo; Microphone and enable Voxloom.
             </p>
           )}
@@ -150,13 +150,13 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
         <section className="onboarding-step">
           <h3>Choose your shortcut</h3>
           <p>{isNative
-            ? "Desktop gestures use a global shortcut; registration failures are shown in Settings."
-            : "Browser prototype gestures work only while this tab is focused."}</p>
+            ? 'Desktop gestures use a global shortcut; registration failures are shown in Settings.'
+            : 'Browser prototype gestures work only while this tab is focused.'}</p>
           <label className="field">
-            {isNative ? "Preferred global shortcut" : "Preferred app-local shortcut"}
+            {isNative ? 'Preferred global shortcut' : 'Preferred app-local shortcut'}
             <input
               onChange={(event) => settings.update({
-                key: "shortcut",
+                key: 'shortcut',
                 value: event.target.value,
               })}
               value={state.settings.shortcut}
@@ -182,15 +182,15 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
           </label>
           <div className="onboarding-test">
             <span>
-              Press-and-hold &middot;{" "}
-              {onboarding.holdTested ? "recognized" : "not tested"}
+              Press-and-hold &middot;{' '}
+              {onboarding.holdTested ? 'recognized' : 'not tested'}
             </span>
             {import.meta.env.DEV && (
               <button
                 className="btn"
                 onClick={() => update({
                   holdTested: true,
-                  recognizedText: "Simulated hold gesture detected.",
+                  recognizedText: 'Simulated hold gesture detected.',
                 })}
               >
                 Simulate hold
@@ -199,14 +199,14 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
           </div>
           <div className="onboarding-test">
             <span>
-              Rapid double-tap &middot;{" "}
-              {onboarding.tapTested ? "recognized" : "not tested"}
+              Rapid double-tap &middot;{' '}
+              {onboarding.tapTested ? 'recognized' : 'not tested'}
             </span>
             {import.meta.env.DEV && (
               <button
                 className="btn"
                 onClick={() => update({
-                  recognizedText: "Simulated double-tap gesture detected.",
+                  recognizedText: 'Simulated double-tap gesture detected.',
                   tapTested: true,
                 })}
               >

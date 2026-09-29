@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { initialSettings } from "../../src/domain/fixtures";
+import { describe, expect, it, vi } from 'vitest';
+import { initialSettings } from '../../src/domain/fixtures';
 import {
   coerceSettings,
   createMemorySettingsIo,
@@ -7,30 +7,30 @@ import {
   defaultSettingsFile,
   parseSettingsJson,
   serializeSettingsFile,
-} from "../../src/services/settings";
+} from '../../src/services/settings';
 
-describe("parseSettingsJson", () => {
-  it("accepts a valid v1 document", () => {
+describe('parseSettingsJson', () => {
+  it('accepts a valid v1 document', () => {
     const raw = serializeSettingsFile(
-      { ...initialSettings, transcriptRetention: "forever", style: "casual" },
+      { ...initialSettings, transcriptRetention: 'forever', style: 'casual' },
       true,
     );
     const parsed = parseSettingsJson(raw);
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     expect(parsed.file.onboardingComplete).toBe(true);
-    expect(parsed.file.settings.transcriptRetention).toBe("forever");
-    expect(parsed.file.settings.style).toBe("casual");
+    expect(parsed.file.settings.transcriptRetention).toBe('forever');
+    expect(parsed.file.settings.style).toBe('casual');
   });
 
-  it("rejects corrupt JSON without inventing a silent wipe path", () => {
-    const parsed = parseSettingsJson("{not-json");
+  it('rejects corrupt JSON without inventing a silent wipe path', () => {
+    const parsed = parseSettingsJson('{not-json');
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
     expect(parsed.error).toMatch(/not valid JSON/i);
   });
 
-  it("rejects unknown versions", () => {
+  it('rejects unknown versions', () => {
     const parsed = parseSettingsJson(JSON.stringify({
       onboardingComplete: false,
       settings: initialSettings,
@@ -39,32 +39,32 @@ describe("parseSettingsJson", () => {
     expect(parsed.ok).toBe(false);
   });
 
-  it("coerces invalid individual fields to defaults inside a valid envelope", () => {
+  it('coerces invalid individual fields to defaults inside a valid envelope', () => {
     const parsed = parseSettingsJson(JSON.stringify({
       onboardingComplete: true,
       settings: {
         ...initialSettings,
-        appearance: "neon",
-        transcriptRetention: "forever",
+        appearance: 'neon',
+        transcriptRetention: 'forever',
       },
       version: 1,
     }));
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     expect(parsed.file.settings.appearance).toBe(initialSettings.appearance);
-    expect(parsed.file.settings.transcriptRetention).toBe("forever");
+    expect(parsed.file.settings.transcriptRetention).toBe('forever');
     expect(parsed.file.onboardingComplete).toBe(true);
   });
 });
 
-describe("coerceSettings", () => {
-  it("returns defaults for non-objects", () => {
+describe('coerceSettings', () => {
+  it('returns defaults for non-objects', () => {
     expect(coerceSettings(null)).toEqual(initialSettings);
   });
 });
 
-describe("createSettingsStore", () => {
-  it("loads missing file as defaults", async () => {
+describe('createSettingsStore', () => {
+  it('loads missing file as defaults', async () => {
     const store = createSettingsStore(createMemorySettingsIo(null));
     const result = await store.load();
     expect(result.ok).toBe(true);
@@ -72,16 +72,16 @@ describe("createSettingsStore", () => {
     expect(result.file).toEqual(defaultSettingsFile());
   });
 
-  it("round-trips save then load", async () => {
+  it('round-trips save then load', async () => {
     const io = createMemorySettingsIo(null);
     const store = createSettingsStore(io);
     const next = {
       ...initialSettings,
-      appearance: "dark" as const,
-      microphone: "Built-in Mic",
-      style: "very-casual" as const,
-      transcriptRetention: "off" as const,
-      transcriptionModel: "whisper-base.en",
+      appearance: 'dark' as const,
+      microphone: 'Built-in Mic',
+      style: 'very-casual' as const,
+      transcriptRetention: 'off' as const,
+      transcriptionModel: 'whisper-base.en',
     };
     await store.save(next, true);
     const loaded = await store.load();
@@ -93,20 +93,20 @@ describe("createSettingsStore", () => {
     expect(io.snapshot()).toContain('"transcriptRetention": "off"');
   });
 
-  it("returns defaults + error on corrupt bytes without writing", async () => {
-    const io = createMemorySettingsIo("{corrupt");
+  it('returns defaults + error on corrupt bytes without writing', async () => {
+    const io = createMemorySettingsIo('{corrupt');
     const store = createSettingsStore(io);
     const loaded = await store.load();
     expect(loaded.ok).toBe(false);
     if (loaded.ok) return;
     expect(loaded.file).toEqual(defaultSettingsFile());
-    expect(io.snapshot()).toBe("{corrupt");
+    expect(io.snapshot()).toBe('{corrupt');
   });
 
-  it("surfaces read IO failures with defaults", async () => {
+  it('surfaces read IO failures with defaults', async () => {
     const store = createSettingsStore({
       read: async () => {
-        throw new Error("disk gone");
+        throw new Error('disk gone');
       },
       write: async () => undefined,
     });
@@ -114,14 +114,14 @@ describe("createSettingsStore", () => {
     expect(loaded.ok).toBe(false);
     if (loaded.ok) return;
     expect(loaded.error).toMatch(/disk gone/);
-    expect(loaded.file.settings.transcriptRetention).toBe("30-days");
+    expect(loaded.file.settings.transcriptRetention).toBe('30-days');
   });
 
-  it("propagates save failures to the caller", async () => {
+  it('propagates save failures to the caller', async () => {
     const store = createSettingsStore({
       read: async () => null,
       write: async () => {
-        throw new Error("write denied");
+        throw new Error('write denied');
       },
     });
     await expect(store.save(initialSettings, false)).rejects.toThrow(
@@ -130,8 +130,8 @@ describe("createSettingsStore", () => {
   });
 });
 
-describe("settings store does not touch history IO", () => {
-  it("only reads/writes through the injected settings IO", async () => {
+describe('settings store does not touch history IO', () => {
+  it('only reads/writes through the injected settings IO', async () => {
     const historyWrite = vi.fn();
     const io = createMemorySettingsIo(null);
     const store = createSettingsStore({
@@ -143,10 +143,10 @@ describe("settings store does not touch history IO", () => {
       },
     });
     await store.save(
-      { ...initialSettings, transcriptRetention: "forever" },
+      { ...initialSettings, transcriptRetention: 'forever' },
       false,
     );
-    expect(io.snapshot()).toContain("forever");
+    expect(io.snapshot()).toContain('forever');
     expect(historyWrite).not.toHaveBeenCalled();
   });
 });

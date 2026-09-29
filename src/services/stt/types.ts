@@ -15,10 +15,10 @@ export interface Transcript {
 }
 
 export type SttModelStatus =
-  | "available"
-  | "missing"
-  | "downloading"
-  | "failed";
+  | 'available'
+  | 'missing'
+  | 'downloading'
+  | 'failed';
 
 export interface SttModelInfo {
   readonly id: string;
@@ -35,35 +35,35 @@ export interface SttDownloadProgress {
 }
 
 export type SttErrorCode =
-  | "cancelled"
-  | "download-failed"
-  | "model-missing"
-  | "transcribe-failed"
-  | "unsupported-audio"
-  | "engine-unavailable";
+  | 'cancelled'
+  | 'download-failed'
+  | 'model-missing'
+  | 'transcribe-failed'
+  | 'unsupported-audio'
+  | 'engine-unavailable';
 
 export class SttError extends Error {
   readonly code: SttErrorCode;
 
   constructor(code: SttErrorCode, message: string) {
     super(message);
-    this.name = "SttError";
+    this.name = 'SttError';
     this.code = code;
   }
 }
 
 /** English-first default catalog (ADR). Tiny is the suggested first download. */
-export const DEFAULT_STT_MODEL_ID = "whisper-tiny.en" as const;
+export const DEFAULT_STT_MODEL_ID = 'whisper-tiny.en' as const;
 
-export const STT_MODEL_CATALOG: readonly Omit<SttModelInfo, "status">[] = [
+export const STT_MODEL_CATALOG: readonly Omit<SttModelInfo, 'status'>[] = [
   {
-    id: "whisper-tiny.en",
-    label: "Whisper Tiny (English)",
+    id: 'whisper-tiny.en',
+    label: 'Whisper Tiny (English)',
     sizeBytes: 77_700_000,
   },
   {
-    id: "whisper-base.en",
-    label: "Whisper Base (English)",
+    id: 'whisper-base.en',
+    label: 'Whisper Base (English)',
     sizeBytes: 148_000_000,
   },
 ] as const;

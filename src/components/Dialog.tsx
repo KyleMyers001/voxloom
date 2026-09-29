@@ -3,9 +3,9 @@ import {
   type ReactNode,
   useEffect,
   useRef,
-} from "react";
-import { createPortal } from "react-dom";
-import { beginModal } from "../app/modalState";
+} from 'react';
+import { createPortal } from 'react-dom';
+import { beginModal } from '../app/modalState';
 
 interface DialogProps {
   children: ReactNode;
@@ -15,11 +15,11 @@ interface DialogProps {
 }
 
 const selector = [
-  "button:not([disabled])",
-  "input:not([disabled])",
-  "select:not([disabled])",
-  "textarea:not([disabled])",
-].join(",");
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+].join(',');
 
 export function Dialog({ children, label, onClose, opener }: DialogProps) {
   const panel = useRef<HTMLDivElement>(null);
@@ -27,19 +27,19 @@ export function Dialog({ children, label, onClose, opener }: DialogProps) {
   useEffect(() => beginModal(), []);
 
   useEffect(() => {
-    const root = document.querySelector<HTMLElement>("#root");
-    const wasHidden = root?.getAttribute("aria-hidden");
+    const root = document.querySelector<HTMLElement>('#root');
+    const wasHidden = root?.getAttribute('aria-hidden');
     const wasInert = root?.inert ?? false;
     if (root) {
       root.inert = true;
-      root.setAttribute("aria-hidden", "true");
+      root.setAttribute('aria-hidden', 'true');
     }
     panel.current?.querySelector<HTMLElement>(selector)?.focus();
     return () => {
       if (root) {
         root.inert = wasInert;
-        if (wasHidden === null) root.removeAttribute("aria-hidden");
-        else root.setAttribute("aria-hidden", wasHidden ?? "true");
+        if (wasHidden === null) root.removeAttribute('aria-hidden');
+        else root.setAttribute('aria-hidden', wasHidden ?? 'true');
       }
       opener?.focus();
     };
@@ -47,16 +47,16 @@ export function Dialog({ children, label, onClose, opener }: DialogProps) {
 
   useEffect(() => {
     const handleEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (event.key !== 'Escape') return;
       event.preventDefault();
       onClose();
     };
-    document.addEventListener("keydown", handleEscape);
-    return () => document.removeEventListener("keydown", handleEscape);
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
   }, [onClose]);
 
   function handleKeyDown(event: KeyboardEvent) {
-    if (event.key !== "Tab" || !panel.current) return;
+    if (event.key !== 'Tab' || !panel.current) return;
     const focusable = [...panel.current.querySelectorAll<HTMLElement>(selector)]
       .filter((element) => !element.hidden);
     const first = focusable[0];

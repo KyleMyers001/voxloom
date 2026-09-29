@@ -3,45 +3,45 @@ export {
   HOLD_MS,
   HOLD_RELEASE_CARBON_GRACE_MS,
   OVERLAY_WINDOW_LABEL,
-} from "./constants";
+} from './constants';
 export {
   shouldResetGesturesOnDocumentHidden,
   type ShortcutInputSource,
-} from "./focusPolicy";
-export { createDocumentShortcutController } from "./documentAdapter";
-export { matchesShortcut, toPluginHotkey } from "./formatHotkey";
+} from './focusPolicy';
+export { createDocumentShortcutController } from './documentAdapter';
+export { matchesShortcut, toPluginHotkey } from './formatHotkey';
 export {
   createGestureMachine,
   type GestureMachine,
   type KeyEdge,
-} from "./gestureMachine";
+} from './gestureMachine';
 export {
   HOLD_RELEASE_EVENT,
   createTauriHoldReleaseApi,
   type HoldReleaseApi,
-} from "./holdReleaseBridge";
+} from './holdReleaseBridge';
 export {
   createNativeShortcutController,
   createTauriShortcutApi,
   type NativeShortcutApi,
   type NativeShortcutController,
-} from "./nativeRegistration";
+} from './nativeRegistration';
 export {
   createOverlayBridge,
   overlaySyncPlan,
   type OverlayBridge,
-} from "./overlayBridge";
+} from './overlayBridge';
 export {
   isOverlayVisible,
   overlayWaveformFromDictation,
-} from "./overlayVisibility";
+} from './overlayVisibility';
 export {
   createPendingFinishGate,
   type PendingFinishGate,
   type PendingFinishGateOptions,
-} from "./pendingFinish";
+} from './pendingFinish';
 export {
   registerOrRevert,
   type RegisterOutcome,
   type ShortcutBinder,
-} from "./registerOrRevert";
+} from './registerOrRevert';

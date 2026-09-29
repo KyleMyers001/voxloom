@@ -1,17 +1,17 @@
-import { isTauri } from "@tauri-apps/api/core";
-import { useEffect, useRef } from "react";
-import { hasOpenModal, subscribeModal } from "./modalState";
-import type { AppState } from "./state";
-import type { OnboardingState } from "../domain/types";
+import { isTauri } from '@tauri-apps/api/core';
+import { useEffect, useRef } from 'react';
+import { hasOpenModal, subscribeModal } from './modalState';
+import type { AppState } from './state';
+import type { OnboardingState } from '../domain/types';
 import type {
   DictationLifecycle,
   SetupLifecycle,
   ShortcutContext,
   ShortcutController,
   ShortcutGesture,
-} from "../services/contracts";
+} from '../services/contracts';
 import { createShortcutController } from
-  "../services/shortcutController";
+  '../services/shortcutController';
 import {
   createNativeShortcutController,
   createOverlayBridge,
@@ -19,11 +19,11 @@ import {
   type NativeShortcutController,
   type OverlayBridge,
   type PendingFinishGate,
-} from "../services/shortcut";
+} from '../services/shortcut';
 import type {
   DogfoodPhase,
   UseDogfoodCaptureResult,
-} from "../services/stt/useDogfoodCapture";
+} from '../services/stt/useDogfoodCapture';
 
 /**
  * Product gestures drive real dogfood capture → STT → deliverTranscript.
@@ -43,7 +43,7 @@ import type {
  */
 export interface GestureDogfoodBridge {
   cancel: () => void;
-  origin?: "home" | "gesture" | null;
+  origin?: 'home' | 'gesture' | null;
   phase: DogfoodPhase;
   start: () => Promise<void>;
   stop: () => Promise<void>;
@@ -68,13 +68,13 @@ const browserScheduler = {
 };
 
 function isDogfoodBusy(phase: DogfoodPhase): boolean {
-  return phase === "recording" || phase === "transcribing";
+  return phase === 'recording' || phase === 'transcribing';
 }
 
 function isDogfoodTerminal(phase: DogfoodPhase): boolean {
-  return phase === "success"
-    || phase === "error"
-    || phase === "cancelled";
+  return phase === 'success'
+    || phase === 'error'
+    || phase === 'cancelled';
 }
 
 /**
@@ -86,7 +86,7 @@ function tearDownOverlayDictation(
   runId?: number,
 ): void {
   const d = options.state.dictation;
-  if (d.kind !== "listening" && d.kind !== "processing") return;
+  if (d.kind !== 'listening' && d.kind !== 'processing') return;
   if (runId !== undefined && d.runId !== runId) return;
   options.dictation.cancel(d.runId);
 }
@@ -94,7 +94,7 @@ function tearDownOverlayDictation(
 /** Dictation run the overlay currently shows, if any. */
 function visibleRunId(options: GestureOptions): number | null {
   const d = options.state.dictation;
-  return d.kind === "listening" || d.kind === "processing" ? d.runId : null;
+  return d.kind === 'listening' || d.kind === 'processing' ? d.runId : null;
 }
 
 /**
@@ -147,7 +147,7 @@ export function useShortcutGestures(options: GestureOptions) {
       },
       listeningRunId: () => {
         const { dictation } = optionsRef.current.state;
-        return dictation.kind === "listening" ? dictation.runId : null;
+        return dictation.kind === 'listening' ? dictation.runId : null;
       },
     });
   }
@@ -272,19 +272,19 @@ export function useShortcutGestures(options: GestureOptions) {
   useEffect(() => {
     const overlay = overlayRef.current;
     if (!overlay) return;
-    const homeRecording = options.dogfood.origin === "home"
-      && options.dogfood.phase === "recording";
+    const homeRecording = options.dogfood.origin === 'home'
+      && options.dogfood.phase === 'recording';
     void overlay.sync(options.state.dictation, homeRecording);
     const kind = options.state.dictation.kind;
-    if (kind === "listening") {
+    if (kind === 'listening') {
       pendingFinishRef.current?.onListening();
     }
     // Cancel / error / success clear gesture partials so latch cannot resume.
     if (
-      kind === "cancelled" ||
-      kind === "error" ||
-      kind === "success" ||
-      kind === "ready"
+      kind === 'cancelled' ||
+      kind === 'error' ||
+      kind === 'success' ||
+      kind === 'ready'
     ) {
       pendingFinishRef.current?.clear();
       nativeControllerRef.current?.resetPartial();
@@ -309,7 +309,7 @@ export function useShortcutGestures(options: GestureOptions) {
     // commit lags — overlay sync to a non-visible kind.
     const overlay = overlayRef.current;
     if (overlay) {
-      void overlay.sync({ kind: "ready" });
+      void overlay.sync({ kind: 'ready' });
     }
   }, [options.dogfood.phase]);
 }
@@ -328,16 +328,16 @@ function handleGesture(
     return;
   }
   if (onboardingOpen) return;
-  if (gesture === "hold-start" || gesture === "latch-start") {
+  if (gesture === 'hold-start' || gesture === 'latch-start') {
     // Leftover overlay run (missed finish): clear it before the new run.
     tearDownOverlayDictation(options);
-    if (dogfood.phase === "recording") {
+    if (dogfood.phase === 'recording') {
       // Prior capture never stopped (Home Start / missed hold-finish):
       // abandon it so the new hold can start — never silently ignore as busy.
       // Mark the resulting "cancelled" as handled: it commits in the same
       // React batch as the new listening run, which must survive.
       dogfood.cancel();
-      phaseGuard.seen = "cancelled";
+      phaseGuard.seen = 'cancelled';
     }
     // "transcribing": prior utterance's STT/delivery keeps running in the
     // background; dogfood.start() supersedes its phase (session-guarded).
@@ -350,8 +350,8 @@ function handleGesture(
       // start failure → tear down overlay (phase effect also covers terminal)
       tearDownOverlayDictation(optionsRef.current);
     });
-  } else if (gesture === "hold-finish" || gesture === "latch-finish") {
-    if (state.dictation.kind === "listening") {
+  } else if (gesture === 'hold-finish' || gesture === 'latch-finish') {
+    if (state.dictation.kind === 'listening') {
       const runId = state.dictation.runId;
       if (pending) pending.requestFinish(true, runId);
       else endGestureCapture(optionsRef);
@@ -366,23 +366,23 @@ function handleGesture(
 
 function interactionContext(options: GestureOptions): ShortcutContext {
   if (options.onboardingOpen) {
-    return options.state.onboarding.step === 3 ? "practice" : null;
+    return options.state.onboarding.step === 3 ? 'practice' : null;
   }
-  return options.shortcutOpen || hasOpenModal() ? null : "product";
+  return options.shortcutOpen || hasOpenModal() ? null : 'product';
 }
 
 function handlePractice(options: GestureOptions, gesture: ShortcutGesture) {
   const changes: Partial<OnboardingState> = {};
-  if (gesture === "hold-start") {
-    changes.recognizedText = "Hold gesture started (no speech captured).";
+  if (gesture === 'hold-start') {
+    changes.recognizedText = 'Hold gesture started (no speech captured).';
   }
-  if (gesture === "hold-finish") changes.holdTested = true;
-  if (gesture === "latch-start") {
+  if (gesture === 'hold-finish') changes.holdTested = true;
+  if (gesture === 'latch-start') {
     changes.recognizedText =
-      "Double-tap latched. Activate once more to finish (no speech captured).";
+      'Double-tap latched. Activate once more to finish (no speech captured).';
   }
-  if (gesture === "latch-finish") {
-    changes.recognizedText = "Double-tap gesture finished (no speech captured).";
+  if (gesture === 'latch-finish') {
+    changes.recognizedText = 'Double-tap gesture finished (no speech captured).';
     changes.tapTested = true;
   }
   options.setup.update(changes);
@@ -396,7 +396,7 @@ export function toGestureDogfoodBridge(
     cancel: dogfood.cancel,
     origin: dogfood.origin,
     phase: dogfood.phase,
-    start: () => dogfood.start("gesture"),
+    start: () => dogfood.start('gesture'),
     stop: dogfood.stop,
   };
 }

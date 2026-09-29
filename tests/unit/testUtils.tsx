@@ -1,6 +1,6 @@
-import type { ReactElement } from "react";
-import { render, type RenderResult } from "@testing-library/react";
-import { AppProvider } from "../../src/app/AppContext";
+import type { ReactElement } from 'react';
+import { render, type RenderResult } from '@testing-library/react';
+import { AppProvider } from '../../src/app/AppContext';
 
 export function renderWithApp(
   element: ReactElement,

@@ -1,28 +1,28 @@
-import { isTauri } from "@tauri-apps/api/core";
+import { isTauri } from '@tauri-apps/api/core';
 
-import { createMemorySettingsIo } from "./io";
+import { createMemorySettingsIo } from './io';
 import {
   createSettingsStore,
   type DurableSettingsStore,
-} from "./store";
-import { createTauriSettingsIo } from "./tauriIo";
+} from './store';
+import { createTauriSettingsIo } from './tauriIo';
 
-export type { SettingsFileIo } from "./io";
-export type { SettingsLoadResult, DurableSettingsStore } from "./store";
-export type { SettingsFile, ParseSettingsResult } from "./format";
+export type { SettingsFileIo } from './io';
+export type { SettingsLoadResult, DurableSettingsStore } from './store';
+export type { SettingsFile, ParseSettingsResult } from './format';
 export {
   SETTINGS_FILE_VERSION,
   coerceSettings,
   defaultSettingsFile,
   parseSettingsJson,
   serializeSettingsFile,
-} from "./format";
-export { createSettingsStore } from "./store";
-export { createMemorySettingsIo } from "./io";
+} from './format';
+export { createSettingsStore } from './store';
+export { createMemorySettingsIo } from './io';
 export {
   createTauriSettingsIo,
   isSettingsPersistenceAvailable,
-} from "./tauriIo";
+} from './tauriIo';
 
 /**
  * Default store: Tauri app-data when running in the shell; otherwise an

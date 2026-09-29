@@ -1,24 +1,24 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
-import { App } from "../../src/app/App";
-import { AppProvider } from "../../src/app/AppContext";
-import { initialSettings } from "../../src/domain/fixtures";
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
+import { App } from '../../src/app/App';
+import { AppProvider } from '../../src/app/AppContext';
+import { initialSettings } from '../../src/domain/fixtures';
 import {
   createMemorySettingsIo,
   createSettingsStore,
   serializeSettingsFile,
-} from "../../src/services/settings";
+} from '../../src/services/settings';
 import {
   createHistoryStore,
   createMemoryHistoryIo,
-} from "../../src/services/history";
+} from '../../src/services/history';
 
-describe("durable settings persistence", () => {
-  it("hydrates retention from settings.json on boot", async () => {
+describe('durable settings persistence', () => {
+  it('hydrates retention from settings.json on boot', async () => {
     const settingsIo = createMemorySettingsIo(
       serializeSettingsFile(
-        { ...initialSettings, transcriptRetention: "forever" },
+        { ...initialSettings, transcriptRetention: 'forever' },
         true,
       ),
     );
@@ -41,15 +41,15 @@ describe("durable settings persistence", () => {
 
     // onboardingComplete=true → overlay should close without Skip.
     await waitFor(() => {
-      expect(screen.queryByText("Step 1 of 3")).not.toBeInTheDocument();
+      expect(screen.queryByText('Step 1 of 3')).not.toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole('button', { name: 'Settings' }));
     const retention = await screen.findByLabelText(/Transcript retention/i);
-    expect(retention).toHaveValue("forever");
+    expect(retention).toHaveValue('forever');
   });
 
-  it("persists retention changes and rolls back on save failure", async () => {
+  it('persists retention changes and rolls back on save failure', async () => {
     const settingsIo = createMemorySettingsIo(
       serializeSettingsFile(initialSettings, true),
     );
@@ -65,46 +65,46 @@ describe("durable settings persistence", () => {
     );
 
     await waitFor(() => {
-      expect(screen.queryByText("Step 1 of 3")).not.toBeInTheDocument();
+      expect(screen.queryByText('Step 1 of 3')).not.toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole('button', { name: 'Settings' }));
 
     const retention = await screen.findByLabelText(/Transcript retention/i);
-    await user.selectOptions(retention, "off");
+    await user.selectOptions(retention, 'off');
     await waitFor(() => {
       expect(settingsIo.snapshot()).toContain('"transcriptRetention": "off"');
     });
 
-    const saveSpy = vi.spyOn(store, "save").mockRejectedValueOnce(
-      new Error("disk full"),
+    const saveSpy = vi.spyOn(store, 'save').mockRejectedValueOnce(
+      new Error('disk full'),
     );
-    await user.selectOptions(retention, "forever");
+    await user.selectOptions(retention, 'forever');
     await waitFor(() => {
       expect(screen.getByText(/Failed to save settings/i)).toBeInTheDocument();
     });
     await waitFor(() => {
-      expect(retention).toHaveValue("off");
+      expect(retention).toHaveValue('off');
     });
     saveSpy.mockRestore();
   });
 
-  it("uses defaults + toast on corrupt settings without wiping history IO", async () => {
+  it('uses defaults + toast on corrupt settings without wiping history IO', async () => {
     const historyIo = createMemoryHistoryIo(
       JSON.stringify({
         records: [{
           createdAt: 1_800_000_000_000,
           durationSeconds: 1,
-          id: "keep-me",
+          id: 'keep-me',
           model: null,
           recoveryExpiresAt: null,
-          status: "copied",
-          style: "formal",
-          text: "must survive",
+          status: 'copied',
+          style: 'formal',
+          text: 'must survive',
         }],
         version: 1,
       }),
     );
-    const settingsIo = createMemorySettingsIo("{corrupt");
+    const settingsIo = createMemorySettingsIo('{corrupt');
     const user = userEvent.setup();
     render(
       <AppProvider
@@ -127,13 +127,13 @@ describe("durable settings persistence", () => {
         .toBeInTheDocument();
     });
     // Corrupt settings bytes left untouched until a later successful save.
-    expect(settingsIo.snapshot()).toBe("{corrupt");
+    expect(settingsIo.snapshot()).toBe('{corrupt');
     // History file still holds its original payload.
-    expect(historyIo.snapshot()).toContain("keep-me");
+    expect(historyIo.snapshot()).toContain('keep-me');
 
-    await user.click(screen.getByRole("button", { name: "Skip" }));
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole('button', { name: 'Skip' }));
+    await user.click(screen.getByRole('button', { name: 'Settings' }));
     const retention = await screen.findByLabelText(/Transcript retention/i);
-    expect(retention).toHaveValue("30-days");
+    expect(retention).toHaveValue('30-days');
   });
 });
