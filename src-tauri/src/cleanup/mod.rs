@@ -3,15 +3,33 @@ pub mod model_store;
 mod picker;
 pub mod protocol;
 pub mod supervisor;
+mod worker_process;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use serde::Deserialize;
 use tauri::{AppHandle, Manager, Runtime, State};
 
-use model_store::{CleanupModelStore, ModelStatus};
+use model_store::{CleanupModelStore, ModelLease, ModelStatus};
 use supervisor::WorkerSupervisor;
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanupCommandError {
+    code: &'static str,
+    message: String,
+}
+
+impl CleanupCommandError {
+    fn model(message: String) -> Self {
+        Self {
+            code: "model-missing",
+            message,
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,6 +41,7 @@ pub struct CleanupRequestDto {
 }
 
 pub struct CleanupState {
+    leases: Arc<Mutex<HashMap<String, (String, ModelLease)>>>,
     models: Arc<CleanupModelStore>,
     supervisor: Arc<WorkerSupervisor>,
 }
@@ -42,6 +61,7 @@ impl CleanupState {
             development_worker_path()
         };
         Ok(Self {
+            leases: Arc::new(Mutex::new(HashMap::new())),
             models: Arc::new(models),
             supervisor: Arc::new(WorkerSupervisor::new(worker_path)),
         })
@@ -101,24 +121,83 @@ pub async fn cleanup_model_status(
 }
 
 #[tauri::command]
+pub async fn cleanup_acquire(
+    state: State<'_, CleanupState>,
+    model_id: String,
+    request_id: String,
+) -> Result<(), CleanupCommandError> {
+    if request_id.is_empty() || request_id.len() > 128 {
+        return Err(CleanupCommandError {
+            code: "runtime-error",
+            message: "cleanup request ID must be 1 to 128 bytes".into(),
+        });
+    }
+    let lease_model_id = model_id.clone();
+    let models = Arc::clone(&state.models);
+    let lease = tauri::async_runtime::spawn_blocking(move || {
+        models.lease(&model_id)
+    })
+    .await
+    .map_err(|error| CleanupCommandError {
+        code: "runtime-error",
+        message: format!("cleanup lease task failed: {error}"),
+    })?
+    .map_err(CleanupCommandError::model)?;
+    let mut leases = state.leases.lock().unwrap();
+    if leases.contains_key(&request_id) {
+        return Err(CleanupCommandError {
+            code: "runtime-error",
+            message: "cleanup request already has a model lease".into(),
+        });
+    }
+    leases.insert(request_id, (lease_model_id, lease));
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn cleanup_run(
     state: State<'_, CleanupState>,
     request: CleanupRequestDto,
-) -> Result<String, String> {
+) -> Result<String, CleanupCommandError> {
     if request.request_id.is_empty() || request.request_id.len() > 128 {
-        return Err("cleanup request ID must be 1 to 128 bytes".into());
+        return Err(CleanupCommandError {
+            code: "runtime-error",
+            message: "cleanup request ID must be 1 to 128 bytes".into(),
+        });
     }
     if request.raw_text.as_bytes().len() > 16_000 {
-        return Err("cleanup input exceeds 16000 UTF-8 bytes".into());
+        return Err(CleanupCommandError {
+            code: "context-overflow",
+            message: "cleanup input exceeds 16000 UTF-8 bytes".into(),
+        });
     }
-    let models = Arc::clone(&state.models);
+    let (leased_model_id, lease) = state
+        .leases
+        .lock()
+        .unwrap()
+        .remove(&request.request_id)
+        .ok_or_else(|| CleanupCommandError::model(
+            "cleanup model lease is unavailable".into(),
+        ))?;
+    if leased_model_id != request.model_id {
+        return Err(CleanupCommandError::model(
+            "cleanup model lease does not match request".into(),
+        ));
+    }
     let supervisor = Arc::clone(&state.supervisor);
     tauri::async_runtime::spawn_blocking(move || {
-        let lease = models.lease(&request.model_id)?;
-        supervisor.run(&lease.path, request.prompt, request.request_id)
+        supervisor
+            .run(&lease.file, request.prompt, request.request_id)
+            .map_err(|error| CleanupCommandError {
+                code: error.code,
+                message: error.message,
+            })
     })
     .await
-    .map_err(|error| format!("cleanup task failed: {error}"))?
+    .map_err(|error| CleanupCommandError {
+        code: "runtime-error",
+        message: format!("cleanup task failed: {error}"),
+    })?
 }
 
 #[tauri::command]
@@ -129,5 +208,14 @@ pub fn cleanup_cancel(
     if request_id.is_empty() || request_id.len() > 128 {
         return false;
     }
+    state.leases.lock().unwrap().remove(&request_id);
     state.supervisor.cancel(&request_id)
+}
+
+#[tauri::command]
+pub fn cleanup_release(
+    state: State<'_, CleanupState>,
+    request_id: String,
+) -> bool {
+    state.leases.lock().unwrap().remove(&request_id).is_some()
 }

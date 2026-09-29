@@ -104,8 +104,14 @@ export interface UseDogfoodCaptureResult {
 interface Admission {
   clipboardFallback: boolean;
   cleanup: CleanupSnapshot;
+  cleanupEngine: CleanupEngine;
+  clipboard: ClipboardAdapter;
+  deliveryPlatform: DeliveryPlatformAdapter;
+  dogfood: typeof dogfoodTranscribeAndCopy;
+  history: ((record: DictationRecord) => void) | undefined;
   intended: TargetSnapshot | null;
   modelId: string;
+  now: () => number;
   reservation: ProcessingReservation<DogfoodResult>;
 }
 
@@ -147,6 +153,21 @@ function resolvePlatform(
   } catch {
     return createStubDeliveryAdapter({ clipboard });
   }
+}
+
+async function releaseCleanupLease(admission: Admission): Promise<void> {
+  try {
+    await admission.cleanupEngine.release?.(admission.reservation.id);
+  } catch {
+    // The job is settled; release failure must not rewrite its evidence.
+  }
+}
+
+function cancelAdmission(admission: Admission): void {
+  admission.reservation.cancel();
+  void admission.cleanupEngine
+    .cancel(admission.reservation.id)
+    .catch(() => undefined);
 }
 
 export function useDogfoodCapture(
@@ -241,52 +262,55 @@ export function useDogfoodCapture(
     try {
       const modelId = resolveTranscriptionModelId(admission.modelId);
       const result = await admission.reservation.submit(async (signal) => {
-        await ensureModelAvailable(admission.modelId);
-        if (current()) {
-          setPhase('transcribing');
-          announce('Transcribing…');
+        try {
+          await ensureModelAvailable(admission.modelId);
+          if (current()) {
+            setPhase('transcribing');
+            announce('Transcribing…');
+          }
+          const result = await admission.dogfood({
+            audio,
+            cleanup: {
+              engine: admission.cleanupEngine,
+              requestId: admission.reservation.id,
+              signal,
+              snapshot: admission.cleanup,
+            },
+            clipboard: admission.clipboard,
+            clipboardFallback: admission.clipboardFallback,
+            deliveryPlatform: admission.deliveryPlatform,
+            intended: admission.intended,
+            modelId,
+            onCleanupStart: () => {
+              if (current() && admission.cleanup.enabled) {
+                setPhase('cleaning');
+                announce('Cleaning up locally…');
+              }
+            },
+          });
+          const record = createDogfoodRecord({
+            cleanup: await createCleanupProvenance(
+              admission.cleanup,
+              result.cleanup,
+            ),
+            durationMs: audio.duration_ms,
+            id: `dogfood-${audio.id}`,
+            model: modelId,
+            now: admission.now(),
+            rawText: result.rawTranscript?.text ?? result.transcript.text,
+            status: result.delivery.status,
+            style: admission.cleanup.style,
+            text: result.transcript.text,
+          });
+          if (record) admission.history?.(record);
+          return result;
+        } finally {
+          await releaseCleanupLease(admission);
         }
-        return dogfoodRef.current({
-          audio,
-          cleanup: {
-            engine: cleanupEngineRef.current,
-            requestId: admission.reservation.id,
-            signal,
-            snapshot: admission.cleanup,
-          },
-          clipboard: clipboardRef.current,
-          clipboardFallback: admission.clipboardFallback,
-          deliveryPlatform: platformRef.current,
-          intended: admission.intended,
-          modelId,
-          onCleanupStart: () => {
-            if (current() && admission.cleanup.enabled) {
-              setPhase('cleaning');
-              announce('Cleaning up locally…');
-            }
-          },
-        });
       });
       if (current()) {
         setTranscript(result.transcript);
         setPhase('success');
-      }
-      const record = createDogfoodRecord({
-        cleanup: await createCleanupProvenance(
-          admission.cleanup,
-          result.cleanup,
-        ),
-        durationMs: audio.duration_ms,
-        id: `dogfood-${audio.id}`,
-        model: modelId,
-        now: nowRef.current(),
-        rawText: result.rawTranscript?.text ?? result.transcript.text,
-        status: result.delivery.status,
-        style: admission.cleanup.style,
-        text: result.transcript.text,
-      });
-      if (record) {
-        historyRef.current?.(record);
       }
       // Stale session: evidence still surfaces as a toast, phase untouched.
       if (current()) announce(result.delivery.message);
@@ -313,17 +337,17 @@ export function useDogfoodCapture(
   }, [announce, ensureModelAvailable]);
 
   // Auto dogfood on clean stop (user stop or 120s/capacity bound).
-  const handledAudioIdRef = useRef<string | null>(null);
+  const handledAudioIdsRef = useRef(new Set<string>());
   useEffect(() => {
     if (capture.captureState.kind === 'cancelled') {
-      admissionRef.current?.reservation.cancel();
+      if (admissionRef.current) cancelAdmission(admissionRef.current);
       admissionRef.current = null;
       setPhase('cancelled');
       setMessage('Capture cancelled — nothing transcribed.');
       return;
     }
     if (capture.captureState.kind === 'error') {
-      admissionRef.current?.reservation.cancel();
+      if (admissionRef.current) cancelAdmission(admissionRef.current);
       admissionRef.current = null;
       setPhase('error');
       setMessage(capture.captureState.message);
@@ -332,18 +356,22 @@ export function useDogfoodCapture(
     if (capture.captureState.kind !== 'stopped') return;
     const audio = capture.captureState.audio;
     if (!audio) {
-      admissionRef.current?.reservation.cancel();
+      if (admissionRef.current) cancelAdmission(admissionRef.current);
       admissionRef.current = null;
       setPhase('error');
       announce('Capture stopped without audio — nothing to transcribe.');
       return;
     }
-    if (handledAudioIdRef.current === audio.id) return;
-    handledAudioIdRef.current = audio.id;
+    if (handledAudioIdsRef.current.has(audio.id)) return;
+    handledAudioIdsRef.current.add(audio.id);
     void runDogfood(audio);
   }, [announce, capture.captureState, runDogfood]);
 
   const start = useCallback(async (source: 'home' | 'gesture' = 'home') => {
+    if (admissionRef.current) {
+      announce('A capture session is already starting or recording.');
+      return;
+    }
     const reservation = coordinatorRef.current.reserve();
     if (!reservation) {
       setPhase('error');
@@ -360,13 +388,20 @@ export function useDogfoodCapture(
         modelId: options.cleanupModelId ?? null,
         style: options.style ?? 'formal',
       },
+      cleanupEngine: cleanupEngineRef.current,
+      clipboard: clipboardRef.current,
+      deliveryPlatform: platformRef.current,
+      dogfood: dogfoodRef.current,
+      history: historyRef.current,
       intended: null,
       modelId: options.modelId,
+      now: nowRef.current,
       reservation,
     };
     admissionRef.current = admission;
     const abandon = () => {
       reservation.cancel();
+      void releaseCleanupLease(admission);
       if (admissionRef.current === admission) admissionRef.current = null;
     };
     const session = ++sessionRef.current;
@@ -374,7 +409,6 @@ export function useDogfoodCapture(
     const superseded = () => session !== sessionRef.current;
     setTranscript(null);
     setMessage(null);
-    handledAudioIdRef.current = null;
     stopRequestedRef.current = false;
     try {
       await ensureModelAvailable(admission.modelId);
@@ -389,10 +423,24 @@ export function useDogfoodCapture(
       abandon();
       return;
     }
+    if (admission.cleanup.enabled && admission.cleanup.modelId) {
+      try {
+        await admission.cleanupEngine.acquire?.(
+          reservation.id,
+          admission.cleanup.modelId,
+        );
+      } catch {
+        admission.cleanup = { ...admission.cleanup, modelId: null };
+      }
+    }
+    if (superseded()) {
+      abandon();
+      return;
+    }
 
     // ADR §4: snapshot intended target at invocation (capture start).
     try {
-      const snap = await platformRef.current.snapshotTarget();
+      const snap = await admission.deliveryPlatform.snapshotTarget();
       if (superseded()) {
         abandon();
         return;
@@ -476,13 +524,12 @@ export function useDogfoodCapture(
     const session = sessionRef.current;
     const processing = processingRef.current;
     if (admissionRef.current) {
-      admissionRef.current.reservation.cancel();
+      cancelAdmission(admissionRef.current);
     } else if (processing?.session === session) {
       processing.admission.reservation.cancel();
     }
     sessionRef.current += 1;
     stopRequestedRef.current = true;
-    handledAudioIdRef.current = null;
     intendedRef.current = null;
     admissionRef.current = null;
     setIntendedTarget(null);

@@ -260,6 +260,33 @@ describe('dogfoodTranscribeAndCopy cleanup integration', () => {
     expect(clip.copy).not.toHaveBeenCalled();
   });
 
+  it('does not write when cancellation arrives during STT', async () => {
+    let aborted = false;
+    const clip = clipboard();
+    await expect(dogfoodTranscribeAndCopy({
+      audio: { duration_ms: 100, id: 'cancel-stt', sample_rate_hz: 16_000 },
+      cleanup: {
+        engine: { cancel: vi.fn(), run: vi.fn() },
+        requestId: 'cleanup-stt',
+        signal: {
+          get aborted() { return aborted; },
+          onAbort: vi.fn(),
+        },
+        snapshot: cleanupSnapshot,
+      },
+      clipboard: clip,
+      createEngine: () => ({
+        modelId: 'whisper-tiny.en',
+        async transcribe() {
+          aborted = true;
+          return { language: 'en', text: 'must not deliver' };
+        },
+      }),
+      modelId: 'whisper-tiny.en',
+    })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(clip.copy).not.toHaveBeenCalled();
+  });
+
   it('reports an insert that had already begun when cancellation arrives', async () => {
     let aborted = false;
     const intended = {

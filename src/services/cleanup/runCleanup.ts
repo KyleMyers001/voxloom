@@ -8,6 +8,7 @@ import type {
   CleanupOutcome,
   CleanupSnapshot,
 } from './types';
+import { CleanupEngineError } from './types';
 import { validateCleanupOutput } from './validation';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -23,11 +24,10 @@ async function cancelSafely(
   }
 }
 
-function errorReason(error: unknown): 'model-missing' | 'runtime-error' {
-  const message = error instanceof Error ? error.message : String(error);
-  return /cleanup model|unknown cleanup model/i.test(message)
-    ? 'model-missing'
-    : 'runtime-error';
+function errorReason(error: unknown) {
+  return error instanceof CleanupEngineError
+    ? error.code
+    : 'runtime-error' as const;
 }
 
 type RaceResult =
@@ -67,6 +67,7 @@ export async function runCleanup(input: {
       style: input.snapshot.style,
     });
   } catch {
+    await cancelSafely(input.engine, input.requestId);
     return {
       finalText: input.rawText,
       reason: 'context-overflow',

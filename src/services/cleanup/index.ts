@@ -23,6 +23,7 @@ export type {
   CleanupSnapshot,
 } from './types';
 export {
+  CleanupEngineError,
   CLEANUP_MODEL_ID,
   CLEANUP_MODEL_SHA256,
 } from './types';

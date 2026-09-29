@@ -37,4 +37,37 @@ describe('Tauri cleanup adapters', () => {
       'cleanup_pick_and_import_model',
     );
   });
+
+  it('acquires and releases a request-scoped native model lease', async () => {
+    invoke.mockResolvedValue(undefined);
+    const engine = createTauriCleanupEngine();
+    await engine.acquire?.('r-lease', 'qwen3-0.6b-q4-k-m');
+    expect(invoke).toHaveBeenCalledWith('cleanup_acquire', {
+      modelId: 'qwen3-0.6b-q4-k-m',
+      requestId: 'r-lease',
+    });
+    await engine.release?.('r-lease');
+    expect(invoke).toHaveBeenLastCalledWith('cleanup_release', {
+      requestId: 'r-lease',
+    });
+  });
+
+  it('maps structured native failures without parsing messages', async () => {
+    invoke.mockRejectedValueOnce({
+      code: 'context-overflow',
+      message: 'prompt does not fit',
+    });
+    const engine = createTauriCleanupEngine();
+    await expect(engine.run({
+      dictionary: [],
+      modelId: 'qwen3-0.6b-q4-k-m',
+      prompt: 'prompt',
+      rawText: 'raw',
+      requestId: 'r-overflow',
+      style: 'formal',
+    })).rejects.toMatchObject({
+      code: 'context-overflow',
+      message: 'prompt does not fit',
+    });
+  });
 });

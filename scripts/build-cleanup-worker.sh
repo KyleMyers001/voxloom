@@ -30,3 +30,5 @@ mkdir -p "$worker_dir"
 cp "$build_root/voxloom-cleanup-worker" \
   "$worker_dir/voxloom-cleanup-worker"
 chmod 0755 "$worker_dir/voxloom-cleanup-worker"
+python3 "$repo_root/scripts/smoke-cleanup-worker.py" \
+  "$worker_dir/voxloom-cleanup-worker"

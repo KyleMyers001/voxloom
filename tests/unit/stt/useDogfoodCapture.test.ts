@@ -2,6 +2,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { DictationRecord } from '../../../src/domain/types';
 import type { ClipboardAdapter } from '../../../src/services/clipboard';
 import type { DeliveryPlatformAdapter, TargetSnapshot } from
   '../../../src/services/delivery';
@@ -84,6 +85,32 @@ async function mockDogfoodSuccess(
 }
 
 describe('useDogfoodCapture', () => {
+  it('owns deferred capture acquisition across racing starts', async () => {
+    const store = createMockSttModelStore();
+    await store.download('whisper-tiny.en');
+    let acquired!: (status: 'started') => void;
+    const startFullCaptureSession = vi.fn(() =>
+      new Promise<'started'>((resolve) => { acquired = resolve; }));
+    const { result } = renderHook(() => useDogfoodCapture({
+      captureApi: {
+        ...stubCapture({ kind: 'idle' }),
+        startFullCaptureSession,
+      },
+      clipboard: clipboard(),
+      createModelStore: () => store,
+      modelId: 'whisper-tiny.en',
+    }));
+
+    let first!: Promise<void>;
+    act(() => { first = result.current.start(); });
+    await waitFor(() => expect(startFullCaptureSession).toHaveBeenCalledOnce());
+    await act(async () => { await result.current.start(); });
+    expect(startFullCaptureSession).toHaveBeenCalledOnce();
+    acquired('started');
+    await act(async () => { await first; });
+    expect(result.current.phase).toBe('recording');
+  });
+
   it('does not claim recording when capture is still owned by a previous hold', async () => {
     const store = createMockSttModelStore();
     await store.download('whisper-tiny.en');
@@ -207,6 +234,38 @@ describe('useDogfoodCapture', () => {
     await waitFor(() => expect(result.current.phase).toBe('success'));
     expect(result.current.transcript?.text).toBeTruthy();
     expect(result.current.message).toMatch(/^Copied/i);
+  });
+
+  it('handles each stopped audio ID once across sessions', async () => {
+    const store = createMockSttModelStore();
+    await store.download('whisper-tiny.en');
+    const dogfood = vi.fn(mockDogfoodSuccess);
+    const stopped: CaptureState = {
+      audio: {
+        duration_ms: 100,
+        id: 'same-stopped-event',
+        sample_rate_hz: 16_000,
+      },
+      kind: 'stopped',
+    };
+    const { rerender, result } = renderHook(
+      ({ state }: { state: CaptureState }) => useDogfoodCapture({
+        captureApi: stubCapture(state),
+        clipboard: clipboard(),
+        createModelStore: () => store,
+        dogfood: dogfood as never,
+        modelId: 'whisper-tiny.en',
+      }),
+      { initialProps: { state: { kind: 'idle' } as CaptureState } },
+    );
+
+    await act(async () => { await result.current.start(); });
+    rerender({ state: stopped });
+    await waitFor(() => expect(dogfood).toHaveBeenCalledOnce());
+    rerender({ state: { kind: 'idle' } });
+    rerender({ state: stopped });
+    await Promise.resolve();
+    expect(dogfood).toHaveBeenCalledOnce();
   });
 
   it('uses admission-time settings after later settings change', async () => {
@@ -479,6 +538,93 @@ describe('useDogfoodCapture', () => {
     expect(result.current.phase).toBe('recording');
     await waitFor(() => expect(onHistoryRecord).toHaveBeenCalledOnce());
     expect(onToast).toHaveBeenCalledWith(late.delivery.message);
+  });
+
+  it('keeps jobs FIFO through history and rejects a third capture', async () => {
+    const store = createMockSttModelStore();
+    await store.download('whisper-tiny.en');
+    const events: string[] = [];
+    const resolvers: Array<(result: DogfoodResult) => void> = [];
+    const dogfood = vi.fn(() => new Promise<DogfoodResult>((resolve) => {
+      events.push(`dogfood-${resolvers.length + 1}`);
+      resolvers.push(resolve);
+    }));
+    const onHistoryRecord = vi.fn((record: DictationRecord) => {
+      events.push(`history-${record.id}`);
+    });
+    let state: CaptureState = { kind: 'idle' };
+    let generation = 0;
+    const startFullCaptureSession = vi.fn(async () => {
+      generation += 1;
+      state = {
+        device: 'Mic',
+        generation,
+        kind: 'active',
+        request_id: `full-${generation}`,
+      };
+      return 'started' as const;
+    });
+    const stopFullCapture = vi.fn(async () => {
+      state = {
+        audio: {
+          duration_ms: 100,
+          id: `fifo-${generation}`,
+          sample_rate_hz: 16_000,
+        },
+        kind: 'stopped',
+      };
+    });
+    const { rerender, result } = renderHook(
+      ({ captureState }: { captureState: CaptureState }) =>
+        useDogfoodCapture({
+          captureApi: {
+            ...stubCapture(captureState),
+            startFullCaptureSession,
+            stopFullCapture,
+          },
+          clipboard: clipboard(),
+          createModelStore: () => store,
+          dogfood: dogfood as never,
+          modelId: 'whisper-tiny.en',
+          onHistoryRecord,
+        }),
+      { initialProps: { captureState: state } },
+    );
+
+    await act(async () => { await result.current.start(); });
+    rerender({ captureState: state });
+    await act(async () => { await result.current.stop(); });
+    rerender({ captureState: state });
+    await waitFor(() => expect(dogfood).toHaveBeenCalledOnce());
+
+    await act(async () => { await result.current.start(); });
+    rerender({ captureState: state });
+    await act(async () => { await result.current.stop(); });
+    rerender({ captureState: state });
+    expect(dogfood).toHaveBeenCalledOnce();
+
+    await act(async () => { await result.current.start(); });
+    expect(startFullCaptureSession).toHaveBeenCalledTimes(2);
+
+    const first = await mockDogfoodSuccess({
+      audio: { duration_ms: 100, id: 'fifo-1', sample_rate_hz: 16_000 },
+      modelId: 'whisper-tiny.en',
+    });
+    await act(async () => { resolvers[0]?.(first); });
+    await waitFor(() => expect(dogfood).toHaveBeenCalledTimes(2));
+    expect(events.slice(0, 3)).toEqual([
+      'dogfood-1',
+      'history-dogfood-fifo-1',
+      'dogfood-2',
+    ]);
+
+    const second = await mockDogfoodSuccess({
+      audio: { duration_ms: 100, id: 'fifo-2', sample_rate_hz: 16_000 },
+      modelId: 'whisper-tiny.en',
+    });
+    await act(async () => { resolvers[1]?.(second); });
+    await waitFor(() => expect(onHistoryRecord).toHaveBeenCalledTimes(2));
+    expect(events.at(-1)).toBe('history-dogfood-fifo-2');
   });
 
   it('appends a copied history record after successful dogfood', async () => {

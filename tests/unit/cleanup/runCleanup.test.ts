@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { runCleanup } from '../../../src/services/cleanup/runCleanup';
+import { CleanupEngineError } from '../../../src/services/cleanup/types';
 import type { ProcessingSignal } from
   '../../../src/services/dictation/coordinator';
 
@@ -64,6 +65,26 @@ describe('runCleanup', () => {
       reason: 'timeout',
     });
     expect(engine.cancel).toHaveBeenCalledWith('r-timeout');
+  });
+
+  it('preserves structured native context-overflow reasons', async () => {
+    const engine = {
+      cancel: vi.fn(),
+      run: vi.fn().mockRejectedValue(
+        new CleanupEngineError('context-overflow', 'context is full'),
+      ),
+    };
+    await expect(runCleanup({
+      engine,
+      rawText: 'Keep this.',
+      requestId: 'r-overflow',
+      signal: signal(),
+      snapshot,
+    })).resolves.toEqual({
+      finalText: 'Keep this.',
+      reason: 'context-overflow',
+      status: 'fallback',
+    });
   });
 
   it('does not fall back when cancellation races worker failure', async () => {

@@ -27,7 +27,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 The cleanup model is not distributed with Voxloom. The explicit importer only
-accepts the locally supplied Qwen3 0.6B Q4_K_M artifact identified in the
-implementation review. Users remain responsible for the model artifact and
-its license. The staged artifact evidence did not include an upstream model
-license file, so its license text must be verified before any redistribution.
+accepts the locally supplied Qwen3 0.6B Q4_K_M artifact identified in
+`qwen3-0.6b.md`, which records its reviewed source and Apache-2.0 license
+material. Users remain responsible for their local model artifact. No legal
+certification or redistribution right is claimed here.

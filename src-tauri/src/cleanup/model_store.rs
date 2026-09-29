@@ -1,11 +1,11 @@
-use std::fs;
+use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use tauri::{AppHandle, Manager};
 
 use super::artifact::{
-    copy_private, validate as validate_artifact, validate_shape, ArtifactSpec,
+    copy_private, open_verified, validate as validate_artifact, ArtifactSpec,
 };
 
 pub const MODEL_ID: &str = "qwen3-0.6b-q4-k-m";
@@ -28,6 +28,7 @@ pub struct ModelStatus {
     pub sha256: &'static str,
 }
 
+#[derive(Debug)]
 struct StoreInner {
     importing: bool,
     leases: usize,
@@ -38,9 +39,10 @@ pub struct CleanupModelStore {
     root: PathBuf,
 }
 
+#[derive(Debug)]
 pub struct ModelLease {
+    pub file: File,
     inner: Arc<Mutex<StoreInner>>,
-    pub path: PathBuf,
 }
 
 struct ImportGuard {
@@ -127,6 +129,14 @@ impl CleanupModelStore {
     }
 
     pub fn lease(&self, model_id: &str) -> Result<ModelLease, String> {
+        self.lease_artifact(model_id, ARTIFACT)
+    }
+
+    fn lease_artifact(
+        &self,
+        model_id: &str,
+        artifact: ArtifactSpec,
+    ) -> Result<ModelLease, String> {
         if model_id != MODEL_ID {
             return Err(format!("unknown cleanup model: {model_id}"));
         }
@@ -134,12 +144,11 @@ impl CleanupModelStore {
         if inner.importing {
             return Err("cleanup model is being imported".into());
         }
-        let path = self.model_path();
-        validate_shape(&path, ARTIFACT)?;
+        let file = open_verified(&self.model_path(), artifact)?;
         inner.leases += 1;
         Ok(ModelLease {
+            file,
             inner: Arc::clone(&self.inner),
-            path,
         })
     }
 
@@ -220,6 +229,58 @@ mod tests {
             )
             .unwrap_err();
         assert!(error.contains("in use"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn lease_rejects_same_size_tampering() {
+        let root = temp_root("tamper");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let bytes = b"GGUFtest";
+        let digest = Box::leak(
+            format!("{:x}", Sha256::digest(bytes)).into_boxed_str(),
+        );
+        let store = CleanupModelStore::new(root.clone());
+        fs::write(store.model_path(), b"GGUFevil").unwrap();
+        let error = store.lease_artifact(
+            MODEL_ID,
+            ArtifactSpec {
+                sha256: digest,
+                size: bytes.len() as u64,
+            },
+        ).unwrap_err();
+        assert!(error.contains("SHA-256 mismatch"));
+        assert_eq!(store.inner.lock().unwrap().leases, 0);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn verified_lease_blocks_concurrent_import_until_drop() {
+        let root = temp_root("lease-import");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let bytes = b"GGUFtest";
+        let digest = Box::leak(
+            format!("{:x}", Sha256::digest(bytes)).into_boxed_str(),
+        );
+        let artifact = ArtifactSpec {
+            sha256: digest,
+            size: bytes.len() as u64,
+        };
+        let store = CleanupModelStore::new(root.clone());
+        fs::write(store.model_path(), bytes).unwrap();
+        let first = store.lease_artifact(MODEL_ID, artifact).unwrap();
+        let queued = store.lease_artifact(MODEL_ID, artifact).unwrap();
+        assert!(store.import_artifact(&store.model_path(), artifact)
+            .unwrap_err()
+            .contains("in use"));
+        drop(first);
+        assert!(store.import_artifact(&store.model_path(), artifact)
+            .unwrap_err()
+            .contains("in use"));
+        drop(queued);
+        assert!(store.import_artifact(&store.model_path(), artifact).is_ok());
         let _ = fs::remove_dir_all(root);
     }
 }

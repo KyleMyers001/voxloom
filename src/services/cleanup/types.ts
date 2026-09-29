@@ -12,6 +12,16 @@ export type CleanupReason =
   | 'runtime-error'
   | 'timeout';
 
+export class CleanupEngineError extends Error {
+  constructor(
+    readonly code: CleanupReason,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'CleanupEngineError';
+  }
+}
+
 export interface CleanupSnapshot {
   dictionary: readonly string[];
   enabled: boolean;

@@ -157,6 +157,7 @@ int main() {
         const std::string text = generate(model_path, prompt);
         voxloom::write_frame({
             {"error", nullptr},
+            {"errorCode", nullptr},
             {"requestId", request_id},
             {"status", "ok"},
             {"text", text},
@@ -165,8 +166,13 @@ int main() {
     } catch (const std::exception & error) {
         std::cerr << "cleanup worker: " << error.what() << "\n";
         try {
+            const std::string code =
+                std::string(error.what()) == "context-overflow"
+                ? "context-overflow"
+                : "runtime-error";
             voxloom::write_frame({
                 {"error", error.what()},
+                {"errorCode", code},
                 {"requestId", request_id},
                 {"status", "error"},
                 {"text", nullptr},

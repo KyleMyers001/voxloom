@@ -1,5 +1,5 @@
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use sha2::{Digest, Sha256};
@@ -37,8 +37,54 @@ pub fn copy_private(source: &Path, destination: &Path) -> Result<(), String> {
 
 pub fn validate(path: &Path, spec: ArtifactSpec) -> Result<(), String> {
     validate_shape(path, spec)?;
-    let mut file = File::open(path)
-        .map_err(|error| format!("open cleanup model: {error}"))?;
+    let mut file = open_regular(path)?;
+    validate_file(&mut file, spec)
+}
+
+pub fn open_verified(path: &Path, spec: ArtifactSpec) -> Result<File, String> {
+    let mut file = open_regular(path)?;
+    validate_file(&mut file, spec)?;
+    Ok(file)
+}
+
+fn open_regular(path: &Path) -> Result<File, String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("read cleanup model metadata: {error}"))?;
+    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+        return Err("cleanup model must be a regular non-symlink file".into());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        return OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(path)
+            .map_err(|error| format!("open cleanup model: {error}"));
+    }
+    #[cfg(not(unix))]
+    File::open(path).map_err(|error| format!("open cleanup model: {error}"))
+}
+
+fn validate_file(file: &mut File, spec: ArtifactSpec) -> Result<(), String> {
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("read cleanup model metadata: {error}"))?;
+    if !metadata.is_file() || metadata.len() != spec.size {
+        return Err(format!(
+            "cleanup model size mismatch: expected {}, got {}",
+            spec.size,
+            metadata.len(),
+        ));
+    }
+    let mut magic = [0_u8; 4];
+    file.read_exact(&mut magic)
+        .map_err(|error| format!("read GGUF header: {error}"))?;
+    if &magic != b"GGUF" {
+        return Err("cleanup model is not a GGUF file".into());
+    }
+    file.seek(SeekFrom::Start(0))
+        .map_err(|error| format!("rewind cleanup model: {error}"))?;
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 1024 * 1024];
     loop {
@@ -53,6 +99,8 @@ pub fn validate(path: &Path, spec: ArtifactSpec) -> Result<(), String> {
     if format!("{:x}", hasher.finalize()) != spec.sha256 {
         return Err("cleanup model SHA-256 mismatch".into());
     }
+    file.seek(SeekFrom::Start(0))
+        .map_err(|error| format!("rewind cleanup model: {error}"))?;
     Ok(())
 }
 

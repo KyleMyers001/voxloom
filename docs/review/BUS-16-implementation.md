@@ -72,8 +72,45 @@ then run:
 
 The script verifies the immutable commit, builds static CPU/Accelerate/Metal
 libraries with embedded Metal resources, runs the non-thinking template
-check, and places the ignored worker executable in the Tauri resource tree.
+check, places the ignored worker executable in the Tauri resource tree, and
+runs the committed weight-free framed-protocol smoke.
 The build cache is intentionally retained outside the worktree for review.
+
+## Independent review pass 1 resolutions
+
+Review pass 1 requested changes against `4238c95`; this follow-up resolves all
+accepted findings:
+
+- **A — capture acquisition ownership:** a pending/active capture admission
+  rejects another start without advancing its UI session or invoking native
+  capture. Deferred acquisition, duplicate stopped-event, FIFO overlap, and
+  third-start-before-mic regressions are deterministic hook tests.
+- **B/C — supervisor timeout and lock ordering:** the child is registered
+  before a writer thread touches stdin; one spawn-based deadline covers stdin
+  and stdout; cancellation can kill the child without holding the active-state
+  mutex; kill/reap completes before the slot clears. Fake-process tests cover
+  pipe backpressure, concurrent/repeated cancellation, timeout, and recovery.
+- **D — complete FIFO jobs:** provenance hashing, record construction, and the
+  history callback now run inside the reserved job before it settles. An
+  overlapping full-capture test proves first history precedes second STT and
+  that a third start never reaches microphone acquisition.
+- **E — model integrity and leases:** admission acquires a request-scoped
+  native lease, queued and active leases block import, and every lease hashes
+  an opened regular file. That same descriptor is inherited by the worker as
+  `/dev/fd/3`, closing pathname reopen races. Tests cover same-size tampering
+  and multiple queued/inflight leases against import.
+- **F — dynamic prompt data:** transcript and dictionary values are serialized
+  as one escaped JSON payload; angle brackets, ampersands, quotes, and newlines
+  cannot break its line boundary. This is delimiter hardening, not a claim of
+  semantic prompt-injection prevention; output validation remains mechanical.
+- **G — direct runtime coverage:** committed fake-worker tests cover framed
+  success, blocked stdin, active cancellation, timeout kill/reap, malformed
+  and mismatched output, crash recovery, and late-output isolation. Resource
+  layout has a direct test and the build script runs a committed protocol
+  smoke. Signing/notarization remains a manual check.
+- **H — truthful fallback reasons:** native command failures are structured by
+  code, including context overflow, timeout, cancellation, missing model, and
+  runtime failure. Renderer history no longer infers these from message text.
 
 ## Verification and remaining live checks
 
@@ -81,8 +118,8 @@ Automated coverage includes admission capacity/FIFO/cancel isolation, prompt
 and output bounds, cleanup timeout/fallback, native command adapters, settings
 import, settings/history migrations, raw/final integration, cancellation at
 delivery write boundaries, model validation/private atomic copy/leases,
-bounded framing, supervisor refusal without a worker, worker compilation,
-template rendering, and framed protocol smoke.
+bounded framing, full fake-process supervisor behavior, worker compilation,
+template rendering, resource layout, and a repeatable framed protocol smoke.
 
 ### Implementation-surface audit
 
@@ -95,8 +132,8 @@ template rendering, and framed protocol smoke.
 - settings/history formats and record creation have direct migration and
   retention tests.
 - native protocol, model store, and supervisor have colocated Rust tests.
-- the C++ frame implementation is covered by a real process protocol smoke;
-  the worker and template check are compiled against the exact pin.
+- the C++ frame implementation is covered by the committed weight-free process
+  smoke; the worker and template check are compiled against the exact pin.
 - `cleanup/mod.rs`, the NSOpenPanel FFI adapter, CMake target declarations,
   and Tauri command registration are thin boundary/bootstrap wiring. They are
   compile-checked; live picker behavior remains a manual check.
@@ -108,8 +145,25 @@ Still unverified because no weight or live system interaction was authorized:
 - live native model picker/import of the 396705472-byte artifact
 - microphone capture and macOS Accessibility insertion
 - packaged signing/notarization of the generated worker and Metal resources
-- Qwen artifact license/notice text (the staged inputs contained only its LFS
-  identity, not an upstream license file; no model is redistributed here)
+
+The reviewed Qwen base-model Apache-2.0 license identity and exact artifact
+repository attribution are recorded in `docs/third-party/qwen3-0.6b.md`. This
+is not a legal certification, and no model is redistributed here.
+
+### Pass 1 fix verification
+
+- `npm run lint` — passed
+- `npm run typecheck` — passed
+- `npm run test:unit` — 346 passed
+- `npm run build` — passed
+- `cargo check` — passed with four pre-existing warnings
+- `cargo test --lib` — 152 passed
+- `./scripts/build-cleanup-worker.sh` — pinned build, Qwen3 non-thinking
+  template check, and committed protocol smoke passed
+- `npm run tauri -- build --debug` — app bundle built with the worker at
+  `Contents/Resources/cleanup/voxloom-cleanup-worker`
+- `codesign --verify --deep --strict` — the local ad-hoc debug bundle passed;
+  distribution signing and notarization remain unverified
 
 Cold one-shot worker/model load is intentionally unoptimized and unbenchmarked
 in this first slice. No quality benchmark claim is made.

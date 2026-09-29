@@ -16,6 +16,7 @@ pub struct WorkerRequest {
 #[serde(rename_all = "camelCase")]
 pub struct WorkerResponse {
     pub error: Option<String>,
+    pub error_code: Option<String>,
     pub request_id: String,
     pub status: String,
     pub text: Option<String>,
