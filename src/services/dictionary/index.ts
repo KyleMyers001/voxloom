@@ -1,28 +1,28 @@
-import { isTauri } from "@tauri-apps/api/core";
+import { isTauri } from '@tauri-apps/api/core';
 
-import { createMemoryDictionaryIo } from "./io";
+import { createMemoryDictionaryIo } from './io';
 import {
   createDictionaryStore,
   type DurableDictionaryStore,
-} from "./store";
-import { createTauriDictionaryIo } from "./tauriIo";
+} from './store';
+import { createTauriDictionaryIo } from './tauriIo';
 
-export type { DictionaryFileIo } from "./io";
-export type { DictionaryLoadResult, DurableDictionaryStore } from "./store";
-export type { DictionaryFile, ParseDictionaryResult } from "./format";
+export type { DictionaryFileIo } from './io';
+export type { DictionaryLoadResult, DurableDictionaryStore } from './store';
+export type { DictionaryFile, ParseDictionaryResult } from './format';
 export {
   DICTIONARY_FILE_VERSION,
   defaultDictionaryFile,
   normalizeWords,
   parseDictionaryJson,
   serializeDictionaryFile,
-} from "./format";
-export { createDictionaryStore } from "./store";
-export { createMemoryDictionaryIo } from "./io";
+} from './format';
+export { createDictionaryStore } from './store';
+export { createMemoryDictionaryIo } from './io';
 export {
   createTauriDictionaryIo,
   isDictionaryPersistenceAvailable,
-} from "./tauriIo";
+} from './tauriIo';
 
 /**
  * Default store: Tauri app-data when running in the shell; otherwise an

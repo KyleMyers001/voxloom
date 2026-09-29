@@ -1,15 +1,15 @@
-import { type FormEvent, useRef, useState } from "react";
-import { useApp } from "../../app/AppContext";
-import { Dialog } from "../../components/Dialog";
-import { validateWord } from "../../domain/dictionary";
+import { type FormEvent, useRef, useState } from 'react';
+import { useApp } from '../../app/AppContext';
+import { Dialog } from '../../components/Dialog';
+import { validateWord } from '../../domain/dictionary';
 
 export function Dictionary() {
   const { dictionary, state } = useApp();
   const [editing, setEditing] = useState<string>();
-  const [error, setError] = useState("");
+  const [error, setError] = useState('');
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [value, setValue] = useState("");
+  const [query, setQuery] = useState('');
+  const [value, setValue] = useState('');
   const opener = useRef<HTMLElement | null>(null);
   const words = state.words.filter((word) =>
     word.toLowerCase().includes(query.toLowerCase())
@@ -18,9 +18,9 @@ export function Dictionary() {
   function edit(word: string | undefined, element: HTMLElement) {
     opener.current = element;
     setEditing(word);
-    setError("");
+    setError('');
     setOpen(true);
-    setValue(word ?? "");
+    setValue(word ?? '');
   }
 
   function save(event: FormEvent) {
@@ -81,11 +81,11 @@ export function Dictionary() {
       </div>
       {open && (
         <Dialog
-          label={editing ? "Edit dictionary word" : "Add dictionary word"}
+          label={editing ? 'Edit dictionary word' : 'Add dictionary word'}
           onClose={() => setOpen(false)}
           opener={opener.current}
         >
-          <h2>{editing ? "Edit dictionary word" : "Add dictionary word"}</h2>
+          <h2>{editing ? 'Edit dictionary word' : 'Add dictionary word'}</h2>
           <form className="editor-form" onSubmit={save}>
             <label htmlFor="dictionary-word">Word</label>
             <input

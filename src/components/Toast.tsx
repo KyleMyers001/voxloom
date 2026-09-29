@@ -4,7 +4,7 @@ interface ToastProps {
 
 export function Toast({ message }: ToastProps) {
   return (
-    <div aria-live="polite" className={message ? "toast visible" : "toast"}>
+    <div aria-live="polite" className={message ? 'toast visible' : 'toast'}>
       {message}
     </div>
   );

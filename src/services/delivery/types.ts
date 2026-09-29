@@ -5,12 +5,12 @@
 
 /** Why a target is or is not insertable. */
 export type TargetKind =
-  | "insertable"
-  | "secure"
-  | "unsupported"
-  | "changed"
-  | "closed"
-  | "unavailable";
+  | 'insertable'
+  | 'secure'
+  | 'unsupported'
+  | 'changed'
+  | 'closed'
+  | 'unavailable';
 
 /**
  * Invocation-time snapshot of the intended insertion target
@@ -35,7 +35,7 @@ export interface TargetSnapshot {
 }
 
 /** Evidence-backed delivery result — never claim Inserted/Copied/Failed without it. */
-export type DeliveryStatus = "inserted" | "copied" | "failed";
+export type DeliveryStatus = 'inserted' | 'copied' | 'failed';
 
 export interface DeliveryOutcome {
   /** Clipboard restore ran successfully after a temporary paste path. */

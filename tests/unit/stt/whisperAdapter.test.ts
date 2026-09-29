@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { mockInvoke, mockIsTauri, mockListen } = vi.hoisted(() => ({
   mockInvoke: vi.fn(),
@@ -7,57 +7,57 @@ const { mockInvoke, mockIsTauri, mockListen } = vi.hoisted(() => ({
   mockListen: vi.fn(async () => () => {}),
 }));
 
-vi.mock("@tauri-apps/api/core", () => ({
+vi.mock('@tauri-apps/api/core', () => ({
   invoke: mockInvoke,
   isTauri: () => mockIsTauri(),
 }));
 
-vi.mock("@tauri-apps/api/event", () => ({
+vi.mock('@tauri-apps/api/event', () => ({
   listen: mockListen,
 }));
 
 import {
   createWhisperSttEngine,
   createWhisperSttModelStore,
-} from "../../../src/services/stt/whisperAdapter";
-import { SttError } from "../../../src/services/stt/types";
+} from '../../../src/services/stt/whisperAdapter';
+import { SttError } from '../../../src/services/stt/types';
 
-describe("createWhisperSttEngine", () => {
+describe('createWhisperSttEngine', () => {
   beforeEach(() => {
     mockInvoke.mockReset();
     mockIsTauri.mockReturnValue(true);
     mockListen.mockClear();
   });
 
-  it("requires explicit non-empty modelId (no silent default download)", () => {
-    expect(() => createWhisperSttEngine({ modelId: "" })).toThrow(SttError);
-    expect(() => createWhisperSttEngine({ modelId: "   " })).toThrow(
+  it('requires explicit non-empty modelId (no silent default download)', () => {
+    expect(() => createWhisperSttEngine({ modelId: '' })).toThrow(SttError);
+    expect(() => createWhisperSttEngine({ modelId: '   ' })).toThrow(
       SttError,
     );
   });
 
-  it("does not invoke download or transcribe on construct", () => {
-    const engine = createWhisperSttEngine({ modelId: "whisper-tiny.en" });
-    expect(engine.modelId).toBe("whisper-tiny.en");
+  it('does not invoke download or transcribe on construct', () => {
+    const engine = createWhisperSttEngine({ modelId: 'whisper-tiny.en' });
+    expect(engine.modelId).toBe('whisper-tiny.en');
     expect(mockInvoke).not.toHaveBeenCalled();
   });
 
-  it("transcribe passes modelId and buffer id to native command", async () => {
-    mockInvoke.mockResolvedValue({ language: "en", text: "hello" });
-    const engine = createWhisperSttEngine({ modelId: "whisper-base.en" });
+  it('transcribe passes modelId and buffer id to native command', async () => {
+    mockInvoke.mockResolvedValue({ language: 'en', text: 'hello' });
+    const engine = createWhisperSttEngine({ modelId: 'whisper-base.en' });
     const result = await engine.transcribe({
       durationMs: 100,
-      id: "pcm-1",
+      id: 'pcm-1',
       sampleRateHz: 16_000,
     });
-    expect(result.text).toBe("hello");
-    expect(mockInvoke).toHaveBeenCalledWith("stt_transcribe", {
-      modelId: "whisper-base.en",
-      bufferId: "pcm-1",
+    expect(result.text).toBe('hello');
+    expect(mockInvoke).toHaveBeenCalledWith('stt_transcribe', {
+      modelId: 'whisper-base.en',
+      bufferId: 'pcm-1',
     });
   });
 
-  it("transcribe awaits native async result (text from invoke, not early)", async () => {
+  it('transcribe awaits native async result (text from invoke, not early)', async () => {
     let resolveInvoke: (value: unknown) => void = () => {};
     mockInvoke.mockImplementation(
       () =>
@@ -65,10 +65,10 @@ describe("createWhisperSttEngine", () => {
           resolveInvoke = resolve;
         }),
     );
-    const engine = createWhisperSttEngine({ modelId: "whisper-tiny.en" });
+    const engine = createWhisperSttEngine({ modelId: 'whisper-tiny.en' });
     const pending = engine.transcribe({
       durationMs: 50,
-      id: "pcm-slow",
+      id: 'pcm-slow',
       sampleRateHz: 16_000,
     });
     let settled = false;
@@ -77,29 +77,29 @@ describe("createWhisperSttEngine", () => {
     });
     await Promise.resolve();
     expect(settled).toBe(false);
-    resolveInvoke({ language: "en", text: "done after native finish" });
+    resolveInvoke({ language: 'en', text: 'done after native finish' });
     await expect(pending).resolves.toMatchObject({
-      text: "done after native finish",
+      text: 'done after native finish',
     });
     expect(settled).toBe(true);
   });
 
-  it("maps native JSON errors to SttError", async () => {
+  it('maps native JSON errors to SttError', async () => {
     mockInvoke.mockRejectedValue(
-      JSON.stringify({ code: "model-missing", message: "not downloaded" }),
+      JSON.stringify({ code: 'model-missing', message: 'not downloaded' }),
     );
-    const engine = createWhisperSttEngine({ modelId: "whisper-tiny.en" });
+    const engine = createWhisperSttEngine({ modelId: 'whisper-tiny.en' });
     await expect(
       engine.transcribe({
         durationMs: 1,
-        id: "pcm-2",
+        id: 'pcm-2',
         sampleRateHz: 16_000,
       }),
-    ).rejects.toMatchObject({ code: "model-missing" });
+    ).rejects.toMatchObject({ code: 'model-missing' });
   });
 });
 
-describe("createWhisperSttModelStore", () => {
+describe('createWhisperSttModelStore', () => {
   beforeEach(() => {
     mockInvoke.mockReset();
     mockIsTauri.mockReturnValue(true);
@@ -107,21 +107,21 @@ describe("createWhisperSttModelStore", () => {
     mockListen.mockImplementation(async () => () => {});
   });
 
-  it("construct does not download", () => {
+  it('construct does not download', () => {
     createWhisperSttModelStore();
     expect(mockInvoke).not.toHaveBeenCalled();
   });
 
-  it("download invokes explicit user-triggered command", async () => {
+  it('download invokes explicit user-triggered command', async () => {
     mockInvoke.mockResolvedValue(undefined);
     const store = createWhisperSttModelStore();
-    await store.download("whisper-tiny.en");
-    expect(mockInvoke).toHaveBeenCalledWith("stt_download_model", {
-      modelId: "whisper-tiny.en",
+    await store.download('whisper-tiny.en');
+    expect(mockInvoke).toHaveBeenCalledWith('stt_download_model', {
+      modelId: 'whisper-tiny.en',
     });
   });
 
-  it("download subscribes to progress before invoke and does not complete on progress alone", async () => {
+  it('download subscribes to progress before invoke and does not complete on progress alone', async () => {
     const callOrder: string[] = [];
     let progressHandler:
       | ((event: { payload: { modelId: string; ratio: number } }) => void)
@@ -132,10 +132,10 @@ describe("createWhisperSttModelStore", () => {
         _event: string,
         handler: (event: { payload: { modelId: string; ratio: number } }) => void,
       ) => {
-        callOrder.push("listen");
+        callOrder.push('listen');
         progressHandler = handler;
         return () => {
-          callOrder.push("unlisten");
+          callOrder.push('unlisten');
         };
       }) as typeof mockListen,
     );
@@ -143,7 +143,7 @@ describe("createWhisperSttModelStore", () => {
     let resolveDownload: (value?: unknown) => void = () => {};
     mockInvoke.mockImplementation(((cmd: string) => {
       callOrder.push(`invoke:${cmd}`);
-      if (cmd === "stt_download_model") {
+      if (cmd === 'stt_download_model') {
         return new Promise((resolve) => {
           resolveDownload = resolve;
         });
@@ -153,21 +153,21 @@ describe("createWhisperSttModelStore", () => {
 
     const store = createWhisperSttModelStore();
     const onProgress = vi.fn();
-    const pending = store.download("whisper-tiny.en", onProgress);
+    const pending = store.download('whisper-tiny.en', onProgress);
 
     await vi.waitFor(() => {
       expect(callOrder).toEqual([
-        "listen",
-        "invoke:stt_download_model",
+        'listen',
+        'invoke:stt_download_model',
       ]);
     });
 
     // Simulate native progress including a premature-looking ratio.
     progressHandler?.({
-      payload: { modelId: "whisper-tiny.en", ratio: 0.999 },
+      payload: { modelId: 'whisper-tiny.en', ratio: 0.999 },
     });
     progressHandler?.({
-      payload: { modelId: "whisper-tiny.en", ratio: 1 },
+      payload: { modelId: 'whisper-tiny.en', ratio: 1 },
     });
     expect(onProgress).toHaveBeenCalled();
     // Promise must still be pending until invoke resolves.
@@ -181,30 +181,30 @@ describe("createWhisperSttModelStore", () => {
     resolveDownload(undefined);
     await pending;
     expect(done).toBe(true);
-    expect(callOrder).toContain("unlisten");
+    expect(callOrder).toContain('unlisten');
   });
 
-  it("cancel invokes stt_cancel_download (works while download is async)", async () => {
+  it('cancel invokes stt_cancel_download (works while download is async)', async () => {
     mockInvoke.mockResolvedValue(undefined);
     const store = createWhisperSttModelStore();
-    await store.cancel("whisper-tiny.en");
-    expect(mockInvoke).toHaveBeenCalledWith("stt_cancel_download", {
-      modelId: "whisper-tiny.en",
+    await store.cancel('whisper-tiny.en');
+    expect(mockInvoke).toHaveBeenCalledWith('stt_cancel_download', {
+      modelId: 'whisper-tiny.en',
     });
   });
 
-  it("list uses stt_list_models", async () => {
+  it('list uses stt_list_models', async () => {
     mockInvoke.mockResolvedValue([
       {
-        id: "whisper-tiny.en",
-        label: "Whisper Tiny (English)",
+        id: 'whisper-tiny.en',
+        label: 'Whisper Tiny (English)',
         sizeBytes: 1,
-        status: "missing",
+        status: 'missing',
       },
     ]);
     const store = createWhisperSttModelStore();
     const models = await store.list();
-    expect(models[0]?.status).toBe("missing");
-    expect(mockInvoke).toHaveBeenCalledWith("stt_list_models");
+    expect(models[0]?.status).toBe('missing');
+    expect(mockInvoke).toHaveBeenCalledWith('stt_list_models');
   });
 });

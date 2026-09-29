@@ -1,27 +1,27 @@
-import { useEffect, useRef } from "react";
-import { useApp } from "../../app/AppContext";
+import { useEffect, useRef } from 'react';
+import { useApp } from '../../app/AppContext';
 import {
   audioRetentions,
   parseChoice,
   transcriptRetentions,
   writingStyles,
-} from "../../domain/settings";
-import { isTauriEnv } from "../../services/capture/captureService";
+} from '../../domain/settings';
+import { isTauriEnv } from '../../services/capture/captureService';
 import { SYSTEM_DEFAULT_DEVICE_ID } from
-  "../../services/capture/types";
-import { useCaptureState } from "../../services/capture/useCaptureState";
-import { useSttModels } from "../../services/stt/useSttModels";
-import type { Appearance } from "../../domain/types";
+  '../../services/capture/types';
+import { useCaptureState } from '../../services/capture/useCaptureState';
+import { useSttModels } from '../../services/stt/useSttModels';
+import type { Appearance } from '../../domain/types';
 
 interface SettingsProps {
   onSetup: (opener: HTMLElement) => void;
 }
 
 const appearances: { label: string; value: Appearance }[] = [
-  { label: "Follow system", value: "system" },
-  { label: "Light", value: "light" },
-  { label: "Dark", value: "dark" },
-  { label: "Sodium Rain", value: "sodium-rain" },
+  { label: 'Follow system', value: 'system' },
+  { label: 'Light', value: 'light' },
+  { label: 'Dark', value: 'dark' },
+  { label: 'Sodium Rain', value: 'sodium-rain' },
 ];
 
 export function Settings({ onSetup }: SettingsProps) {
@@ -56,19 +56,19 @@ export function Settings({ onSetup }: SettingsProps) {
     selectedModelId,
   } = useSttModels({
     onSelect: (modelId) => settings.update({
-      key: "transcriptionModel",
+      key: 'transcriptionModel',
       value: modelId,
     }),
     selectedModelId: state.settings.transcriptionModel,
   });
 
   const isNative = isTauriEnv();
-  const micAuthorized = permissionStatus === "authorized";
-  const micTesting = captureState.kind === "test-running";
-  const micSwitching = captureState.kind === "switching-device";
-  const micTestDone = captureState.kind === "test-complete";
+  const micAuthorized = permissionStatus === 'authorized';
+  const micTesting = captureState.kind === 'test-running';
+  const micSwitching = captureState.kind === 'switching-device';
+  const micTestDone = captureState.kind === 'test-complete';
   const micError =
-    captureState.kind === "error" ? captureState.message : null;
+    captureState.kind === 'error' ? captureState.message : null;
 
   const selectedDevice = state.settings.microphone;
   const selectedDescriptor = devices.find(
@@ -84,14 +84,14 @@ export function Settings({ onSetup }: SettingsProps) {
   }, [selectedDescriptor]);
   const missingDeviceLabel = selectedLabelRef.current?.id === selectedDevice
     ? selectedLabelRef.current.label
-    : "Previously selected microphone";
+    : 'Previously selected microphone';
   const selectionUnavailable = selectedDevice !== SYSTEM_DEFAULT_DEVICE_ID
     && (!selectedDescriptor || !selectedDescriptor.available);
 
   async function handleDeviceChange(deviceId: string) {
     if (deviceId === selectedDevice) return;
     if (await prepareDeviceChange()) {
-      settings.update({ key: "microphone", value: deviceId });
+      settings.update({ key: 'microphone', value: deviceId });
     }
   }
 
@@ -130,7 +130,7 @@ export function Settings({ onSetup }: SettingsProps) {
           <label className="field">Shortcut
             <input
               onChange={(event) => settings.update({
-                key: "shortcut",
+                key: 'shortcut',
                 value: event.target.value,
               })}
               value={state.settings.shortcut}
@@ -159,7 +159,7 @@ export function Settings({ onSetup }: SettingsProps) {
                     value={device.id}
                   >
                     {device.label}
-                    {device.available ? "" : " (unavailable)"}
+                    {device.available ? '' : ' (unavailable)'}
                   </option>
                 ))}
             </select>
@@ -174,7 +174,7 @@ export function Settings({ onSetup }: SettingsProps) {
               onClick={() => { void refreshDevices(); }}
               type="button"
             >
-              {devicesLoading ? "Refreshing…" : "Refresh microphones"}
+              {devicesLoading ? 'Refreshing…' : 'Refresh microphones'}
             </button>
             {deviceListError && (
               <span className="form-error" role="alert">
@@ -188,23 +188,23 @@ export function Settings({ onSetup }: SettingsProps) {
             <div className="onboarding-status">
               <span>
                 {!isNative
-                  ? "Native microphone capture is unavailable here"
+                  ? 'Native microphone capture is unavailable here'
                   : !micAuthorized
-                  ? permissionStatus === "denied"
-                    ? "Permission denied — enable in System Settings"
-                    : "Permission required"
+                  ? permissionStatus === 'denied'
+                    ? 'Permission denied — enable in System Settings'
+                    : 'Permission required'
                   : micSwitching
-                    ? "Waiting for microphone to stop…"
+                    ? 'Waiting for microphone to stop…'
                   : selectionUnavailable
-                    ? "Selected microphone is unavailable"
+                    ? 'Selected microphone is unavailable'
                   : micTestDone
-                    ? captureState.kind === "test-complete"
+                    ? captureState.kind === 'test-complete'
                       && captureState.metadata.detected_activity
-                      ? "Audio activity detected"
-                      : "No audio activity detected"
+                      ? 'Audio activity detected'
+                      : 'No audio activity detected'
                     : micTesting
-                      ? "Listening\u2026 (10 s auto-stop)"
-                      : "Ready"}
+                      ? 'Listening\u2026 (10 s auto-stop)'
+                      : 'Ready'}
               </span>
               {!isNative ? (
                 <button className="btn" disabled>
@@ -224,7 +224,7 @@ export function Settings({ onSetup }: SettingsProps) {
                   }
                   onClick={handleTestMic}
                 >
-                  {micTesting ? "Stop test" : "Test Microphone"}
+                  {micTesting ? 'Stop test' : 'Test Microphone'}
                 </button>
               )}
             </div>
@@ -234,14 +234,14 @@ export function Settings({ onSetup }: SettingsProps) {
           </div>
 
           <label className="field">
-            {isNative ? "Language · English-first (other choices unavailable)" : "Language"}
+            {isNative ? 'Language · English-first (other choices unavailable)' : 'Language'}
             <select
               disabled={isNative}
               onChange={(event) => settings.update({
-                key: "language",
+                key: 'language',
                 value: event.target.value,
               })}
-              value={isNative ? "English (US)" : state.settings.language}
+              value={isNative ? 'English (US)' : state.settings.language}
             >
               <option>English (US)</option>
               {!isNative && <option>English (UK)</option>}
@@ -249,10 +249,10 @@ export function Settings({ onSetup }: SettingsProps) {
           </label>
 
           <label className="field">
-            {isNative ? "Style preference · cleanup unavailable" : "Current style"}
+            {isNative ? 'Style preference · cleanup unavailable' : 'Current style'}
             <select
               onChange={(event) => settings.update({
-                key: "style",
+                key: 'style',
                 value: parseChoice(event.target.value, writingStyles),
               })}
               value={state.settings.style}
@@ -265,15 +265,15 @@ export function Settings({ onSetup }: SettingsProps) {
 
           <label className="field">
             {isNative
-              ? "Language-processing model · unavailable in desktop"
-              : "Language-processing model · simulated"}
+              ? 'Language-processing model · unavailable in desktop'
+              : 'Language-processing model · simulated'}
             <select
               disabled={isNative}
               onChange={(event) => settings.update({
-                key: "languageModel",
+                key: 'languageModel',
                 value: event.target.value,
               })}
-              value={isNative ? "" : state.settings.languageModel}
+              value={isNative ? '' : state.settings.languageModel}
             >
               {isNative ? <option value="">No cleanup model installed</option> : <>
                 <option>Alder Text Small · local</option>
@@ -287,21 +287,21 @@ export function Settings({ onSetup }: SettingsProps) {
               checked={isNative ? false : state.settings.startAtLogin}
               disabled={isNative}
               onChange={(event) => settings.update({
-                key: "startAtLogin",
+                key: 'startAtLogin',
                 value: event.target.checked,
               })}
               type="checkbox"
             />
             {isNative
-              ? "Start at login · unavailable in desktop"
-              : "Start at login · simulated"}
+              ? 'Start at login · unavailable in desktop'
+              : 'Start at login · simulated'}
           </label>
 
           <label className="check">
             <input
               checked={state.settings.clipboardFallback}
               onChange={(event) => settings.update({
-                key: "clipboardFallback",
+                key: 'clipboardFallback',
                 value: event.target.checked,
               })}
               type="checkbox"
@@ -334,7 +334,7 @@ export function Settings({ onSetup }: SettingsProps) {
         )}
         <ul className="stt-model-list">
           {sttModels.map((model) => {
-            const downloading = model.status === "downloading"
+            const downloading = model.status === 'downloading'
               || sttProgress?.modelId === model.id;
             const selected = selectedModelId === model.id;
             const ratio = sttProgress?.modelId === model.id
@@ -363,7 +363,7 @@ export function Settings({ onSetup }: SettingsProps) {
                     <>
                       <span className="stt-model-progress" role="status">
                         {ratio === null
-                          ? "Downloading…"
+                          ? 'Downloading…'
                           : `${Math.round(ratio * 100)}%`}
                       </span>
                       <button
@@ -374,7 +374,7 @@ export function Settings({ onSetup }: SettingsProps) {
                         Cancel download
                       </button>
                     </>
-                  ) : model.status === "available" ? (
+                  ) : model.status === 'available' ? (
                     <span className="empty-note">On disk</span>
                   ) : (
                     <button
@@ -389,9 +389,9 @@ export function Settings({ onSetup }: SettingsProps) {
                 {selected && (
                   <p className="empty-note stt-model-selected-note">
                     Selected for transcription
-                    {model.status !== "available"
-                      ? " · download required before dogfood STT"
-                      : ""}
+                    {model.status !== 'available'
+                      ? ' · download required before dogfood STT'
+                      : ''}
                   </p>
                 )}
               </li>
@@ -413,7 +413,7 @@ export function Settings({ onSetup }: SettingsProps) {
                 checked={state.settings.appearance === value}
                 name="appearance"
                 onChange={() => settings.update({
-                  key: "appearance",
+                  key: 'appearance',
                   value,
                 })}
                 type="radio"
@@ -438,7 +438,7 @@ export function Settings({ onSetup }: SettingsProps) {
           <label className="field">Transcript retention
             <select
               onChange={(event) => settings.update({
-                key: "transcriptRetention",
+                key: 'transcriptRetention',
                 value: parseChoice(
                   event.target.value,
                   transcriptRetentions,
@@ -452,17 +452,17 @@ export function Settings({ onSetup }: SettingsProps) {
             </select>
           </label>
           <label className="field">
-            {isNative ? "Audio retention · unavailable (no saved audio)" : "Audio retention"}
+            {isNative ? 'Audio retention · unavailable (no saved audio)' : 'Audio retention'}
             <select
               disabled={isNative}
               onChange={(event) => settings.update({
-                key: "audioRetention",
+                key: 'audioRetention',
                 value: parseChoice(
                   event.target.value,
                   audioRetentions,
                 ),
               })}
-              value={isNative ? "off" : state.settings.audioRetention}
+              value={isNative ? 'off' : state.settings.audioRetention}
             >
               <option value="off">Off · recommended</option>
               <option value="24-hours">24 hours</option>
@@ -481,17 +481,17 @@ export function Settings({ onSetup }: SettingsProps) {
         <h2>Error &amp; recovery patterns</h2>
         <div className="recovery-list">
           {[
-            "Microphone denied \u00b7 Enable in System Settings > " +
-              "Privacy & Security > Microphone.",
-            "Shortcut collision \u00b7 Choose another combo; prior binding is kept.",
-            "Model unavailable \u00b7 Download an STT model in Settings.",
-            "No audio activity detected \u00b7 No transcript is created.",
-            "Insertion failed \u00b7 Clipboard result is reported " +
-              "truthfully.",
+            'Microphone denied \u00b7 Enable in System Settings > ' +
+              'Privacy & Security > Microphone.',
+            'Shortcut collision \u00b7 Choose another combo; prior binding is kept.',
+            'Model unavailable \u00b7 Download an STT model in Settings.',
+            'No audio activity detected \u00b7 No transcript is created.',
+            'Insertion failed \u00b7 Clipboard result is reported ' +
+              'truthfully.',
             isNative
-              ? "Transcription failed · No audio retry is available; " +
-                "copy any surviving transcript."
-              : "Transcription failed · Temporary recovery buffers expire.",
+              ? 'Transcription failed · No audio retry is available; ' +
+                'copy any surviving transcript.'
+              : 'Transcription failed · Temporary recovery buffers expire.',
           ].map((message) => (
             <p className="recovery-item" key={message}>{message}</p>
           ))}

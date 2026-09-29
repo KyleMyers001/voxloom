@@ -1,4 +1,4 @@
-import { isTauri } from "@tauri-apps/api/core";
+import { isTauri } from '@tauri-apps/api/core';
 
 export interface ClipboardAdapter {
   copy(text: string): Promise<void>;
@@ -12,7 +12,7 @@ export type ClipboardWriteFn = (text: string) => Promise<void>;
 export type ClipboardReadFn = () => Promise<string | null>;
 
 async function browserWriteText(text: string): Promise<void> {
-  if (!navigator.clipboard) throw new Error("Clipboard unavailable");
+  if (!navigator.clipboard) throw new Error('Clipboard unavailable');
   await navigator.clipboard.writeText(text);
 }
 
@@ -30,15 +30,15 @@ async function browserReadText(): Promise<string | null> {
  * requirement (fixes NotAllowedError after async STT on capture-stopped).
  */
 async function tauriWriteText(text: string): Promise<void> {
-  const { writeText } = await import("@tauri-apps/plugin-clipboard-manager");
+  const { writeText } = await import('@tauri-apps/plugin-clipboard-manager');
   await writeText(text);
 }
 
 async function tauriReadText(): Promise<string | null> {
   try {
-    const { readText } = await import("@tauri-apps/plugin-clipboard-manager");
+    const { readText } = await import('@tauri-apps/plugin-clipboard-manager');
     const text = await readText();
-    return text ?? "";
+    return text ?? '';
   } catch {
     return null;
   }
@@ -73,11 +73,11 @@ export function createClipboardAdapter(
   const doRead = resolveClipboardRead(read);
   return {
     async copy(text: string) {
-      if (shouldFail()) throw new Error("Simulated clipboard failure");
+      if (shouldFail()) throw new Error('Simulated clipboard failure');
       await doWrite(text);
     },
     async read() {
-      if (shouldFail()) throw new Error("Simulated clipboard failure");
+      if (shouldFail()) throw new Error('Simulated clipboard failure');
       return doRead();
     },
   };

@@ -1,13 +1,13 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { invoke, isTauri } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 import type {
   CaptureEvent,
   CaptureStatus,
   InputDeviceDescriptor,
-} from "./types";
+} from './types';
 
-const CAPTURE_EVENT = "capture:event";
+const CAPTURE_EVENT = 'capture:event';
 let nextRequestId = 1;
 
 export { isTauri as isTauriEnv };
@@ -28,12 +28,12 @@ export async function onCaptureEvent(
 
 export async function queryPermission(requestId: string): Promise<void> {
   if (!isTauri()) return;
-  await invoke("capture_query_permission", { requestId });
+  await invoke('capture_query_permission', { requestId });
 }
 
 export async function requestPermission(requestId: string): Promise<void> {
   if (!isTauri()) return;
-  await invoke("capture_request_permission", { requestId });
+  await invoke('capture_request_permission', { requestId });
 }
 
 export async function startMicTest(
@@ -41,9 +41,9 @@ export async function startMicTest(
   preferredDeviceId?: string,
 ): Promise<CaptureStatus> {
   if (!isTauri()) {
-    throw new Error("capture-unavailable");
+    throw new Error('capture-unavailable');
   }
-  return invoke<CaptureStatus>("capture_start", {
+  return invoke<CaptureStatus>('capture_start', {
     preferredDeviceId: preferredDeviceId ?? null,
     requestId,
     testMode: true,
@@ -56,9 +56,9 @@ export async function startFullCapture(
   preferredDeviceId?: string,
 ): Promise<CaptureStatus> {
   if (!isTauri()) {
-    throw new Error("capture-unavailable");
+    throw new Error('capture-unavailable');
   }
-  return invoke<CaptureStatus>("capture_start", {
+  return invoke<CaptureStatus>('capture_start', {
     preferredDeviceId: preferredDeviceId ?? null,
     requestId,
     testMode: false,
@@ -68,7 +68,7 @@ export async function startFullCapture(
 /** Discard in-flight capture (no PCM deposit). */
 export async function cancelCapture(requestId: string): Promise<boolean> {
   if (!isTauri()) return false;
-  return invoke<boolean>("capture_cancel", { requestId });
+  return invoke<boolean>('capture_cancel', { requestId });
 }
 
 /**
@@ -77,15 +77,15 @@ export async function cancelCapture(requestId: string): Promise<boolean> {
  */
 export async function stopCapture(): Promise<void> {
   if (!isTauri()) return;
-  await invoke("capture_stop");
+  await invoke('capture_stop');
 }
 
 export async function getCaptureStatus(): Promise<CaptureStatus | null> {
   if (!isTauri()) return null;
-  return invoke<CaptureStatus | null>("capture_status");
+  return invoke<CaptureStatus | null>('capture_status');
 }
 
 export async function listDevices(): Promise<InputDeviceDescriptor[]> {
   if (!isTauri()) return [];
-  return invoke<InputDeviceDescriptor[]>("capture_list_devices");
+  return invoke<InputDeviceDescriptor[]>('capture_list_devices');
 }

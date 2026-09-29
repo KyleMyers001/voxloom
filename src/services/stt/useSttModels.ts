@@ -1,12 +1,12 @@
 /// Settings STT model list / download / select.
 /// Opening this hook (Settings mount) only lists status — never downloads.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { SttModelStore } from "./contracts";
-import { createSttModelStore } from "./factory";
-import { resolveTranscriptionModelId } from "./resolveModelId";
-import { SttError, type SttDownloadProgress, type SttModelInfo } from "./types";
+import type { SttModelStore } from './contracts';
+import { createSttModelStore } from './factory';
+import { resolveTranscriptionModelId } from './resolveModelId';
+import { SttError, type SttDownloadProgress, type SttModelInfo } from './types';
 
 export interface UseSttModelsOptions {
   /** Persist selection (Settings `transcriptionModel`). */

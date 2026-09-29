@@ -1,6 +1,6 @@
-import { isTauri } from "@tauri-apps/api/core";
+import { isTauri } from '@tauri-apps/api/core';
 
-export const HOLD_RELEASE_EVENT = "shortcut:hold-release";
+export const HOLD_RELEASE_EVENT = 'shortcut:hold-release';
 
 export interface HoldReleaseApi {
   /**
@@ -24,19 +24,19 @@ export function createTauriHoldReleaseApi(): HoldReleaseApi {
     isAvailable: () => isTauri(),
     async arm(pluginHotkey) {
       if (!isTauri()) return false;
-      const { invoke } = await import("@tauri-apps/api/core");
-      return await invoke<boolean>("hold_release_arm", {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<boolean>('hold_release_arm', {
         hotkey: pluginHotkey,
       });
     },
     async disarm() {
       if (!isTauri()) return;
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("hold_release_disarm");
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('hold_release_disarm');
     },
     async listen(onRelease) {
       if (!isTauri()) return () => undefined;
-      const { listen } = await import("@tauri-apps/api/event");
+      const { listen } = await import('@tauri-apps/api/event');
       const unlisten = await listen(HOLD_RELEASE_EVENT, () => {
         onRelease();
       });

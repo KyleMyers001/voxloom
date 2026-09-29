@@ -7,7 +7,7 @@ import type {
   SttDownloadProgress,
   SttModelInfo,
   Transcript,
-} from "./types";
+} from './types';
 
 /**
  * Local model inventory and explicit download/cancel.

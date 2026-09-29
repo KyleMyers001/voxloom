@@ -5,10 +5,10 @@
 /// blocking work on a pool (`spawn_blocking`). The webview stays responsive;
 /// `invoke` still resolves only when the native work finishes (or errors).
 
-import { invoke, isTauri } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { invoke, isTauri } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
-import type { SttEngine, SttModelStore } from "./contracts";
+import type { SttEngine, SttModelStore } from './contracts';
 import {
   SttError,
   type AudioBufferHandle,
@@ -16,9 +16,9 @@ import {
   type SttErrorCode,
   type SttModelInfo,
   type Transcript,
-} from "./types";
+} from './types';
 
-const DOWNLOAD_PROGRESS_EVENT = "stt:download-progress";
+const DOWNLOAD_PROGRESS_EVENT = 'stt:download-progress';
 
 interface NativeSttError {
   code?: string;
@@ -28,13 +28,13 @@ interface NativeSttError {
 function mapNativeError(error: unknown): SttError {
   if (error instanceof SttError) return error;
   const payload =
-    typeof error === "string"
+    typeof error === 'string'
       ? safeParse(error)
       : ((error as NativeSttError) ?? {});
   const code = normalizeCode(payload?.code);
   const message =
     payload?.message ??
-    (typeof error === "string" ? error : "STT native call failed");
+    (typeof error === 'string' ? error : 'STT native call failed');
   return new SttError(code, message);
 }
 
@@ -48,15 +48,15 @@ function safeParse(raw: string): NativeSttError | null {
 
 function normalizeCode(code: string | undefined): SttErrorCode {
   switch (code) {
-    case "cancelled":
-    case "download-failed":
-    case "model-missing":
-    case "transcribe-failed":
-    case "unsupported-audio":
-    case "engine-unavailable":
+    case 'cancelled':
+    case 'download-failed':
+    case 'model-missing':
+    case 'transcribe-failed':
+    case 'unsupported-audio':
+    case 'engine-unavailable':
       return code;
     default:
-      return "transcribe-failed";
+      return 'transcribe-failed';
   }
 }
 
@@ -64,8 +64,8 @@ function requireModelId(modelId: string): string {
   const id = modelId.trim();
   if (!id) {
     throw new SttError(
-      "model-missing",
-      "SttEngine requires an explicit non-empty modelId",
+      'model-missing',
+      'SttEngine requires an explicit non-empty modelId',
     );
   }
   return id;
@@ -84,12 +84,12 @@ export function createWhisperSttModelStore(): SttModelStore {
     async list() {
       if (!isTauri()) {
         throw new SttError(
-          "engine-unavailable",
-          "Whisper model store requires the Tauri shell",
+          'engine-unavailable',
+          'Whisper model store requires the Tauri shell',
         );
       }
       try {
-        return await invoke<SttModelInfo[]>("stt_list_models");
+        return await invoke<SttModelInfo[]>('stt_list_models');
       } catch (error) {
         throw mapNativeError(error);
       }
@@ -98,12 +98,12 @@ export function createWhisperSttModelStore(): SttModelStore {
     async status(modelId) {
       if (!isTauri()) {
         throw new SttError(
-          "engine-unavailable",
-          "Whisper model store requires the Tauri shell",
+          'engine-unavailable',
+          'Whisper model store requires the Tauri shell',
         );
       }
       try {
-        return await invoke<SttModelInfo | null>("stt_model_status", {
+        return await invoke<SttModelInfo | null>('stt_model_status', {
           modelId,
         });
       } catch (error) {
@@ -114,8 +114,8 @@ export function createWhisperSttModelStore(): SttModelStore {
     async download(modelId, onProgress) {
       if (!isTauri()) {
         throw new SttError(
-          "engine-unavailable",
-          "Whisper model store requires the Tauri shell",
+          'engine-unavailable',
+          'Whisper model store requires the Tauri shell',
         );
       }
       let unlisten: UnlistenFn | undefined;
@@ -132,7 +132,7 @@ export function createWhisperSttModelStore(): SttModelStore {
             },
           );
         }
-        await invoke("stt_download_model", { modelId });
+        await invoke('stt_download_model', { modelId });
       } catch (error) {
         throw mapNativeError(error);
       } finally {
@@ -143,13 +143,13 @@ export function createWhisperSttModelStore(): SttModelStore {
     async cancel(modelId) {
       if (!isTauri()) {
         throw new SttError(
-          "engine-unavailable",
-          "Whisper model store requires the Tauri shell",
+          'engine-unavailable',
+          'Whisper model store requires the Tauri shell',
         );
       }
       try {
         // Sync native command — safe while download runs on the blocking pool.
-        await invoke("stt_cancel_download", { modelId });
+        await invoke('stt_cancel_download', { modelId });
       } catch (error) {
         throw mapNativeError(error);
       }
@@ -179,18 +179,18 @@ export function createWhisperSttEngine(
     async transcribe(audio: AudioBufferHandle): Promise<Transcript> {
       if (!audio.id) {
         throw new SttError(
-          "unsupported-audio",
-          "Audio buffer handle requires a non-empty id",
+          'unsupported-audio',
+          'Audio buffer handle requires a non-empty id',
         );
       }
       if (!isTauri()) {
         throw new SttError(
-          "engine-unavailable",
-          "Whisper STT requires the Tauri shell",
+          'engine-unavailable',
+          'Whisper STT requires the Tauri shell',
         );
       }
       try {
-        return await invoke<Transcript>("stt_transcribe", {
+        return await invoke<Transcript>('stt_transcribe', {
           modelId,
           bufferId: audio.id,
         });

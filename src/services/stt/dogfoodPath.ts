@@ -4,7 +4,7 @@
 /// Delivery soft-fails: STT success still returns the transcript when
 /// insert/Copy cannot complete (manual recovery always available).
 
-import type { ClipboardAdapter } from "../clipboard";
+import type { ClipboardAdapter } from '../clipboard';
 import {
   createStubDeliveryAdapter,
   createTauriDeliveryAdapter,
@@ -12,12 +12,12 @@ import {
   type DeliveryOutcome,
   type DeliveryPlatformAdapter,
   type TargetSnapshot,
-} from "../delivery";
-import type { SttEngine } from "./contracts";
-import { audioHandleFromCapture } from "./fromCapture";
-import { createSttEngine } from "./factory";
-import { resolveTranscriptionModelId } from "./resolveModelId";
-import type { Transcript } from "./types";
+} from '../delivery';
+import type { SttEngine } from './contracts';
+import { audioHandleFromCapture } from './fromCapture';
+import { createSttEngine } from './factory';
+import { resolveTranscriptionModelId } from './resolveModelId';
+import type { Transcript } from './types';
 
 export interface CaptureAudioMeta {
   duration_ms: number;
@@ -102,8 +102,8 @@ export async function dogfoodTranscribeAndCopy(
       text: transcript.text,
     });
     return {
-      copied: delivery.status === "copied",
-      copyWarning: delivery.status === "failed"
+      copied: delivery.status === 'copied',
+      copyWarning: delivery.status === 'failed'
         ? (delivery.detail ?? delivery.message)
         : undefined,
       delivery,
@@ -118,7 +118,7 @@ export async function dogfoodTranscribeAndCopy(
       detail: copyWarning,
       message: `Failed — ${copyWarning}`,
       restoreSkippedReason: null,
-      status: "failed",
+      status: 'failed',
       text: transcript.text,
     };
     return { copied: false, copyWarning, delivery, transcript };

@@ -1,4 +1,4 @@
-import type { SttEngine, SttModelStore } from "./contracts";
+import type { SttEngine, SttModelStore } from './contracts';
 import {
   DEFAULT_STT_MODEL_ID,
   STT_MODEL_CATALOG,
@@ -7,9 +7,9 @@ import {
   type SttDownloadProgress,
   type SttModelInfo,
   type Transcript,
-} from "./types";
+} from './types';
 
-const DETERMINISTIC_TEXT = "mock transcript from local STT scaffold";
+const DETERMINISTIC_TEXT = 'mock transcript from local STT scaffold';
 
 export interface MockSttOptions {
   /** Explicit model id bound to the engine (required for real path parity). */
@@ -21,7 +21,7 @@ export interface MockSttOptions {
 }
 
 interface MutableModel extends SttModelInfo {
-  status: SttModelInfo["status"];
+  status: SttModelInfo['status'];
 }
 
 /**
@@ -35,7 +35,7 @@ export function createMockSttModelStore(
   const models = new Map<string, MutableModel>(
     STT_MODEL_CATALOG.map((m) => [
       m.id,
-      { ...m, status: "missing" as const },
+      { ...m, status: 'missing' as const },
     ]),
   );
   const cancelled = new Set<string>();
@@ -53,25 +53,25 @@ export function createMockSttModelStore(
     async download(modelId, onProgress) {
       const model = models.get(modelId);
       if (!model) {
-        throw new SttError("download-failed", `Unknown model: ${modelId}`);
+        throw new SttError('download-failed', `Unknown model: ${modelId}`);
       }
       if (inFlight.has(modelId)) {
         throw new SttError(
-          "download-failed",
+          'download-failed',
           `Download already in progress: ${modelId}`,
         );
       }
 
       cancelled.delete(modelId);
       inFlight.add(modelId);
-      model.status = "downloading";
+      model.status = 'downloading';
 
       try {
         for (let i = 1; i <= steps; i += 1) {
           if (cancelled.has(modelId)) {
-            model.status = "missing";
+            model.status = 'missing';
             throw new SttError(
-              "cancelled",
+              'cancelled',
               `Download cancelled: ${modelId}`,
             );
           }
@@ -84,12 +84,12 @@ export function createMockSttModelStore(
           };
           onProgress?.(progress);
         }
-        model.status = "available";
+        model.status = 'available';
       } catch (error) {
-        if (error instanceof SttError && error.code === "cancelled") {
+        if (error instanceof SttError && error.code === 'cancelled') {
           throw error;
         }
-        model.status = "failed";
+        model.status = 'failed';
         throw error;
       } finally {
         inFlight.delete(modelId);
@@ -98,23 +98,23 @@ export function createMockSttModelStore(
 
     async cancel(modelId) {
       if (!models.has(modelId)) {
-        throw new SttError("download-failed", `Unknown model: ${modelId}`);
+        throw new SttError('download-failed', `Unknown model: ${modelId}`);
       }
       cancelled.add(modelId);
       const model = models.get(modelId);
-      if (model?.status === "downloading") {
-        model.status = "missing";
+      if (model?.status === 'downloading') {
+        model.status = 'missing';
       }
     },
   };
 }
 
 function requireModelId(modelId: string | undefined): string {
-  const id = (modelId ?? "").trim();
+  const id = (modelId ?? '').trim();
   if (!id) {
     throw new SttError(
-      "model-missing",
-      "SttEngine requires an explicit non-empty modelId",
+      'model-missing',
+      'SttEngine requires an explicit non-empty modelId',
     );
   }
   return id;
@@ -132,11 +132,11 @@ export function createMockSttEngine(
     async transcribe(audio: AudioBufferHandle): Promise<Transcript> {
       if (!audio.id) {
         throw new SttError(
-          "unsupported-audio",
-          "Audio buffer handle requires a non-empty id",
+          'unsupported-audio',
+          'Audio buffer handle requires a non-empty id',
         );
       }
-      return { language: "en", text };
+      return { language: 'en', text };
     },
   };
 }

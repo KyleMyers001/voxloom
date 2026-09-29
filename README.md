@@ -93,10 +93,22 @@ Details: `docs/review/BUS-10-whisper.md`.
 
 ## Verification
 
+Pull requests targeting `main` run GitHub Actions CI on Node 24 and Ubuntu:
+ESLint, Vitest unit tests, the TypeScript/Vite build, and Playwright Chromium
+browser tests. To run the same checks locally after `npm ci`:
+
 ```sh
-npm run typecheck
+PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers npx playwright install chromium
 npm run lint
 npm run test:unit
-npm run build
+npm run build             # includes tsc -b (typecheck)
 npm run test:e2e
 ```
+
+`npm run typecheck` remains available separately. ESLint enforces the
+[Google TypeScript style guide](https://google.github.io/styleguide/tsguide.html)
+subset of single-quoted ordinary strings and semicolons in JS/TS sources;
+existing recommended correctness rules still apply. JSX attribute quotes
+remain double-quoted. This is not a full style-guide migration.
+CI does not build the macOS Tauri/Rust application or verify native microphone,
+Accessibility, or permission behavior; those still need on-device checks.

@@ -1,11 +1,11 @@
-import type { DictationRecord } from "../../domain/types";
+import type { DictationRecord } from '../../domain/types';
 import {
   applyTranscriptRetention,
   parseHistoryJson,
   serializeHistoryFile,
   type TranscriptRetention,
-} from "./format";
-import type { HistoryFileIo } from "./io";
+} from './format';
+import type { HistoryFileIo } from './io';
 
 export type HistoryLoadResult =
   | { ok: true; records: DictationRecord[] }
@@ -42,7 +42,7 @@ export function createHistoryStore(io: HistoryFileIo): HistoryStore {
           ok: false,
         };
       }
-      if (raw === null || raw.trim() === "") {
+      if (raw === null || raw.trim() === '') {
         return { ok: true, records: [] };
       }
       const parsed = parseHistoryJson(raw);

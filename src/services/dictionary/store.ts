@@ -3,8 +3,8 @@ import {
   parseDictionaryJson,
   serializeDictionaryFile,
   type DictionaryFile,
-} from "./format";
-import type { DictionaryFileIo } from "./io";
+} from './format';
+import type { DictionaryFileIo } from './io';
 
 export type DictionaryLoadResult =
   | { ok: true; file: DictionaryFile }
@@ -37,7 +37,7 @@ export function createDictionaryStore(
           ok: false,
         };
       }
-      if (raw === null || raw.trim() === "") {
+      if (raw === null || raw.trim() === '') {
         return { file: defaultDictionaryFile(), ok: true };
       }
       const parsed = parseDictionaryJson(raw);

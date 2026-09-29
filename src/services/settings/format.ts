@@ -1,10 +1,10 @@
-import { initialSettings } from "../../domain/fixtures";
+import { initialSettings } from '../../domain/fixtures';
 import {
   audioRetentions,
   transcriptRetentions,
   writingStyles,
-} from "../../domain/settings";
-import type { Appearance, Settings, WritingStyle } from "../../domain/types";
+} from '../../domain/settings';
+import type { Appearance, Settings, WritingStyle } from '../../domain/types';
 
 /** On-disk schema version for `settings.json`. */
 export const SETTINGS_FILE_VERSION = 1 as const;
@@ -16,10 +16,10 @@ export interface SettingsFile {
 }
 
 const APPEARANCES: readonly Appearance[] = [
-  "system",
-  "light",
-  "dark",
-  "sodium-rain",
+  'system',
+  'light',
+  'dark',
+  'sodium-rain',
 ];
 
 export type ParseSettingsResult =
@@ -27,7 +27,7 @@ export type ParseSettingsResult =
   | { ok: false; error: string };
 
 function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function asChoice<const Choices extends readonly string[]>(
@@ -35,18 +35,18 @@ function asChoice<const Choices extends readonly string[]>(
   choices: Choices,
   fallback: Choices[number],
 ): Choices[number] {
-  if (typeof value === "string" && choices.includes(value)) {
+  if (typeof value === 'string' && choices.includes(value)) {
     return value as Choices[number];
   }
   return fallback;
 }
 
 function asString(value: unknown, fallback: string): string {
-  return typeof value === "string" && value.length > 0 ? value : fallback;
+  return typeof value === 'string' && value.length > 0 ? value : fallback;
 }
 
 function asBoolean(value: unknown, fallback: boolean): boolean {
-  return typeof value === "boolean" ? value : fallback;
+  return typeof value === 'boolean' ? value : fallback;
 }
 
 /**
@@ -97,10 +97,10 @@ export function parseSettingsJson(raw: string): ParseSettingsResult {
   try {
     parsed = JSON.parse(raw) as unknown;
   } catch {
-    return { error: "Settings file is not valid JSON", ok: false };
+    return { error: 'Settings file is not valid JSON', ok: false };
   }
   if (!isObject(parsed)) {
-    return { error: "Settings file root must be an object", ok: false };
+    return { error: 'Settings file root must be an object', ok: false };
   }
   if (parsed.version !== SETTINGS_FILE_VERSION) {
     return {

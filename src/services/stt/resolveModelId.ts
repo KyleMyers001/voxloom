@@ -5,11 +5,11 @@
 import {
   DEFAULT_STT_MODEL_ID,
   STT_MODEL_CATALOG,
-} from "./types";
+} from './types';
 
 const LEGACY_SIMULATED_LABELS = new Set([
-  "Pine Voice Small · local",
-  "Pine Voice Medium · unavailable",
+  'Pine Voice Small · local',
+  'Pine Voice Medium · unavailable',
 ]);
 
 export function isKnownSttModelId(modelId: string): boolean {
@@ -23,7 +23,7 @@ export function isKnownSttModelId(modelId: string): boolean {
 export function resolveTranscriptionModelId(
   raw: string | null | undefined,
 ): string {
-  const trimmed = (raw ?? "").trim();
+  const trimmed = (raw ?? '').trim();
   if (!trimmed || LEGACY_SIMULATED_LABELS.has(trimmed)) {
     return DEFAULT_STT_MODEL_ID;
   }

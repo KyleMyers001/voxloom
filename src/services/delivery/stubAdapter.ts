@@ -3,13 +3,13 @@
  * Clipboard uses the injectable / resolved write path.
  */
 
-import type { ClipboardAdapter } from "../clipboard";
+import type { ClipboardAdapter } from '../clipboard';
 import type {
   ClipboardSnapshot,
   DeliveryPlatformAdapter,
   TargetSnapshot,
-} from "./types";
-import { unavailableSnapshot } from "./policy";
+} from './types';
+import { unavailableSnapshot } from './policy';
 
 export interface StubAdapterOptions {
   clipboard: ClipboardAdapter;
@@ -50,14 +50,14 @@ export function createStubDeliveryAdapter(
         return;
       }
       throw new Error(
-        "insert unavailable on this platform (macOS AX adapter required)",
+        'insert unavailable on this platform (macOS AX adapter required)',
       );
     },
     async snapshotTarget() {
       if (options.snapshot) return options.snapshot();
       return unavailableSnapshot(
         now(),
-        "Accessibility insert is macOS-only in this build",
+        'Accessibility insert is macOS-only in this build',
       );
     },
     async validateTarget(intended: TargetSnapshot) {
@@ -66,9 +66,9 @@ export function createStubDeliveryAdapter(
       return {
         ...intended,
         insertable: false,
-        kind: intended.kind === "insertable" ? "unavailable" : intended.kind,
+        kind: intended.kind === 'insertable' ? 'unavailable' : intended.kind,
         reason: intended.reason
-          ?? "Accessibility insert is macOS-only in this build",
+          ?? 'Accessibility insert is macOS-only in this build',
       };
     },
   };

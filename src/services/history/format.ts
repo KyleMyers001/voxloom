@@ -1,18 +1,18 @@
 import type { DictationRecord, HistoryStatus, WritingStyle } from
-  "../../domain/types";
+  '../../domain/types';
 
 /** On-disk schema version for `history.json`. */
 export const HISTORY_FILE_VERSION = 1 as const;
 
-export type TranscriptRetention = "30-days" | "forever" | "off";
+export type TranscriptRetention = '30-days' | 'forever' | 'off';
 
 export interface HistoryFile {
   records: DictationRecord[];
   version: typeof HISTORY_FILE_VERSION;
 }
 
-const STATUSES: readonly HistoryStatus[] = ["copied", "failed", "inserted"];
-const STYLES: readonly WritingStyle[] = ["casual", "formal", "very-casual"];
+const STATUSES: readonly HistoryStatus[] = ['copied', 'failed', 'inserted'];
+const STYLES: readonly WritingStyle[] = ['casual', 'formal', 'very-casual'];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const RETENTION_30_DAYS_MS = 30 * DAY_MS;
@@ -22,7 +22,7 @@ export type ParseHistoryResult =
   | { ok: false; error: string };
 
 function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function parseRecord(value: unknown): DictationRecord | null {
@@ -37,22 +37,22 @@ function parseRecord(value: unknown): DictationRecord | null {
     style,
     text,
   } = value;
-  if (typeof createdAt !== "number" || !Number.isFinite(createdAt)) return null;
-  if (typeof durationSeconds !== "number" || !Number.isFinite(durationSeconds)) {
+  if (typeof createdAt !== 'number' || !Number.isFinite(createdAt)) return null;
+  if (typeof durationSeconds !== 'number' || !Number.isFinite(durationSeconds)) {
     return null;
   }
-  if (typeof id !== "string" || !id) return null;
-  if (!(model === null || typeof model === "string")) return null;
-  if (!(recoveryExpiresAt === null || typeof recoveryExpiresAt === "number")) {
+  if (typeof id !== 'string' || !id) return null;
+  if (!(model === null || typeof model === 'string')) return null;
+  if (!(recoveryExpiresAt === null || typeof recoveryExpiresAt === 'number')) {
     return null;
   }
-  if (typeof status !== "string" || !STATUSES.includes(status as HistoryStatus)) {
+  if (typeof status !== 'string' || !STATUSES.includes(status as HistoryStatus)) {
     return null;
   }
-  if (typeof style !== "string" || !STYLES.includes(style as WritingStyle)) {
+  if (typeof style !== 'string' || !STYLES.includes(style as WritingStyle)) {
     return null;
   }
-  if (typeof text !== "string") return null;
+  if (typeof text !== 'string') return null;
   return {
     createdAt,
     durationSeconds,
@@ -75,10 +75,10 @@ export function parseHistoryJson(raw: string): ParseHistoryResult {
   try {
     parsed = JSON.parse(raw) as unknown;
   } catch {
-    return { error: "History file is not valid JSON", ok: false };
+    return { error: 'History file is not valid JSON', ok: false };
   }
   if (!isObject(parsed)) {
-    return { error: "History file root must be an object", ok: false };
+    return { error: 'History file root must be an object', ok: false };
   }
   if (parsed.version !== HISTORY_FILE_VERSION) {
     return {
@@ -87,7 +87,7 @@ export function parseHistoryJson(raw: string): ParseHistoryResult {
     };
   }
   if (!Array.isArray(parsed.records)) {
-    return { error: "History file records must be an array", ok: false };
+    return { error: 'History file records must be an array', ok: false };
   }
   const records: DictationRecord[] = [];
   for (const row of parsed.records) {
@@ -117,8 +117,8 @@ export function applyTranscriptRetention(
   retention: TranscriptRetention,
   now: number,
 ): DictationRecord[] {
-  if (retention === "off") return [];
-  if (retention === "forever") return [...records];
+  if (retention === 'off') return [];
+  if (retention === 'forever') return [...records];
   const cutoff = now - RETENTION_30_DAYS_MS;
   return records.filter((record) => record.createdAt >= cutoff);
 }

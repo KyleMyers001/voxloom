@@ -1,11 +1,11 @@
-import type { Settings } from "../../domain/types";
+import type { Settings } from '../../domain/types';
 import {
   defaultSettingsFile,
   parseSettingsJson,
   serializeSettingsFile,
   type SettingsFile,
-} from "./format";
-import type { SettingsFileIo } from "./io";
+} from './format';
+import type { SettingsFileIo } from './io';
 
 export type SettingsLoadResult =
   | { ok: true; file: SettingsFile }
@@ -36,7 +36,7 @@ export function createSettingsStore(io: SettingsFileIo): DurableSettingsStore {
           ok: false,
         };
       }
-      if (raw === null || raw.trim() === "") {
+      if (raw === null || raw.trim() === '') {
         return { file: defaultSettingsFile(), ok: true };
       }
       const parsed = parseSettingsJson(raw);

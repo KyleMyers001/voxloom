@@ -2,10 +2,10 @@ import type {
   Scheduler,
   ShortcutContext,
   ShortcutGesture,
-} from "../contracts";
-import { DOUBLE_TAP_MS, HOLD_MS } from "./constants";
+} from '../contracts';
+import { DOUBLE_TAP_MS, HOLD_MS } from './constants';
 
-export type KeyEdge = "pressed" | "released";
+export type KeyEdge = 'pressed' | 'released';
 
 export interface GestureMachine {
   dispose(): void;
@@ -42,7 +42,7 @@ export function createGestureMachine({
   let latched = false;
   let lastTap: number | null = null;
   let tapTimer: number | null = null;
-  let context: ShortcutContext = "product";
+  let context: ShortcutContext = 'product';
   let disposed = false;
 
   function clear(timer: number | null) {
@@ -67,7 +67,7 @@ export function createGestureMachine({
     if (latched) {
       latched = false;
       ignoreUp = true;
-      onGesture("latch-finish");
+      onGesture('latch-finish');
       return;
     }
     const current = clock();
@@ -76,14 +76,14 @@ export function createGestureMachine({
       lastTap = null;
       latched = true;
       ignoreUp = true;
-      onGesture("latch-start");
+      onGesture('latch-start');
       return;
     }
     downAt = current;
     holdTimer = scheduler.set(() => {
       if (downAt === null) return;
       holding = true;
-      onGesture("hold-start");
+      onGesture('hold-start');
     }, holdMs);
   }
 
@@ -96,7 +96,7 @@ export function createGestureMachine({
     clear(holdTimer);
     if (holding) {
       holding = false;
-      onGesture("hold-finish");
+      onGesture('hold-finish');
     } else if (downAt !== null) {
       lastTap = clock();
       tapTimer = scheduler.set(() => {
@@ -112,7 +112,7 @@ export function createGestureMachine({
       resetPartial();
     },
     handle(edge) {
-      if (edge === "pressed") handlePressed();
+      if (edge === 'pressed') handlePressed();
       else handleReleased();
     },
     resetPartial,
