@@ -1,7 +1,7 @@
 //! BUS-14 insertion delivery — platform adapter boundary.
 //! macOS: Accessibility (AX) snapshot + insert. Other OS: honest stubs.
 //! Never synthesizes Enter / Tab / command chords as product submit.
-//! Paste without trailing Enter is allowed only as AX setValue fallback.
+//! macOS inserts via AXSelectedText only; failures use the TS Copy policy.
 
 mod types;
 

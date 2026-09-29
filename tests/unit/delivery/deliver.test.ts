@@ -137,6 +137,113 @@ describe("deliverTranscript", () => {
     expect(outcome.message).toMatch(/insert failed/);
   });
 
+  it("AX selected-text failure Copies without claiming Inserted", async () => {
+    const platform = adapter({
+      insertText: vi.fn().mockRejectedValue(new Error("AX set AXSelectedText failed")),
+      clipboardRead: vi.fn().mockResolvedValue({ ok: true, text: "dictation" }),
+    });
+    const outcome = await deliverTranscript({
+      clipboardFallback: true,
+      intended: snap(),
+      platform,
+      text: "dictation",
+    });
+    expect(outcome.status).toBe("copied");
+    expect(outcome.message).toContain("AXSelectedText failed");
+    expect(platform.clipboardWrite).toHaveBeenCalledWith("dictation");
+  });
+
+  it("AX selected-text failure with Copy off fails without writing", async () => {
+    const platform = adapter({
+      insertText: vi.fn().mockRejectedValue(new Error("AX set AXSelectedText failed")),
+    });
+    const outcome = await deliverTranscript({
+      clipboardFallback: false,
+      intended: snap(),
+      platform,
+      text: "dictation",
+    });
+    expect(outcome.status).toBe("failed");
+    expect(outcome.message).toMatch(/manual Copy/i);
+    expect(platform.clipboardWrite).not.toHaveBeenCalled();
+  });
+
+  it("unavailable AX focus Copies without claiming the app closed", async () => {
+    const platform = adapter({
+      validateTarget: vi.fn().mockResolvedValue(snap({
+        appPid: null,
+        elementId: null,
+        insertable: false,
+        kind: "unavailable",
+        reason: "Accessibility permission denied — insert skipped",
+      })),
+      clipboardRead: vi.fn().mockResolvedValue({ ok: true, text: "dictation" }),
+    });
+    const outcome = await deliverTranscript({
+      clipboardFallback: true,
+      intended: snap(),
+      platform,
+      text: "dictation",
+    });
+    expect(outcome.status).toBe("copied");
+    expect(outcome.message).toMatch(/Accessibility permission denied/);
+    expect(outcome.message).not.toMatch(/closed|focus lost/);
+    expect(platform.insertText).not.toHaveBeenCalled();
+  });
+
+  it("unavailable AX focus with Copy off reports Failed without writing", async () => {
+    const platform = adapter({
+      validateTarget: vi.fn().mockResolvedValue(snap({
+        appPid: null,
+        elementId: null,
+        insertable: false,
+        kind: "unavailable",
+        reason: "Accessibility permission denied — insert skipped",
+      })),
+    });
+    const outcome = await deliverTranscript({
+      clipboardFallback: false,
+      intended: snap(),
+      platform,
+      text: "dictation",
+    });
+    expect(outcome.status).toBe("failed");
+    expect(outcome.message).toMatch(/Accessibility permission denied/);
+    expect(outcome.message).not.toMatch(/closed|focus lost/);
+    expect(platform.insertText).not.toHaveBeenCalled();
+    expect(platform.clipboardWrite).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])(
+    "completion AX diagnostic with fallback %s reports the actual stage/code",
+    async (clipboardFallback) => {
+      const platform = adapter({
+        validateTarget: vi.fn().mockResolvedValue(snap({
+          appPid: null,
+          elementId: null,
+          insertable: false,
+          kind: "unavailable",
+          reason: "Accessibility focus unavailable at delivery validation "
+            + "(AX trusted=yes; AXFocusedApplication=0; "
+            + "AXFocusedUIElement=-25204)",
+        })),
+        clipboardRead: vi.fn().mockResolvedValue({ ok: true, text: "dictation" }),
+      });
+      const outcome = await deliverTranscript({
+        clipboardFallback,
+        intended: snap(),
+        platform,
+        text: "dictation",
+      });
+      expect(outcome.status).toBe(clipboardFallback ? "copied" : "failed");
+      expect(outcome.message).toContain("delivery validation");
+      expect(outcome.message).toContain("AXFocusedUIElement=-25204");
+      expect(outcome.message).not.toContain("closed");
+      expect(platform.insertText).not.toHaveBeenCalled();
+      expect(platform.clipboardWrite).toHaveBeenCalledTimes(clipboardFallback ? 1 : 0);
+    },
+  );
+
   it("clipboard write failure → Failed recoverable messaging", async () => {
     const unavailable = snap({
       insertable: false,
