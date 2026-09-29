@@ -24,7 +24,7 @@ Copy sink remains the reliable floor. No Enter / command chords. No cloud STT.
 | 3. Inserted / Copied / Failed only with evidence | `deliverTranscript` + `delivery.message`; history via `createDogfoodRecord({ status })` |
 | 4. Clipboard fallback toggle + preserve/restore/conflict | Settings `clipboardFallback`; `shouldRestoreClipboard` / `restoreAfterPaste` for temp paste; Copy-as-delivery leaves transcript on clipboard |
 | 5. Never wrong-app insert; manual recovery if history off | Validate before insert; Home “Copy last transcript” always available |
-| 6. No Enter / command execution / duplicate stale completion | AX setSelectedText / setValue only; dogfood `handledAudioIdRef` unchanged |
+| 6. No Enter / command execution / duplicate stale completion | AX selected-text only; dogfood `handledAudioIdRef` unchanged |
 | 7. Clipboard unavailable/change/failure → truthful messaging | Failed toasts with detail + manual recovery hint |
 
 ## App/field evidence notes (limitations)
@@ -33,10 +33,10 @@ Documented expectations for Clara Mac dogfood (not CI-provable on Linux):
 
 | Surface | Expected | Limitation |
 |---------|----------|------------|
-| **Notes / TextEdit** (AXTextArea / AXTextField) | Insert via AX selected-text or value | Caret/selection replace preferred over full-value overwrite |
-| **Neovim / terminal** | Often unsupported or flaky AX tree | Expect **Copied** + reason; do not claim Inserted without AX success |
-| **Browser text field** | Best-effort when role is text-like / web area | ContentEditable / React fields may refuse AX set → Copy fallback |
-| **Chat apps** (Messages, Slack, etc.) | Mixed; secure/password never insert | If role unsupported or changed mid-utterance → Copy, never wrong thread |
+| **Notes / TextEdit** (AXTextArea / AXTextField) | Insert via AX selected-text only | If selection set fails, Copy/Failed; never set full-field AXValue |
+| **Neovim / terminal** | Often unsupported or flaky AX tree | Require AXValue readback change before Inserted; otherwise Copy |
+| **Browser text field** | Direct text-like role only | Generic AXWebArea / AXScrollArea / AXGroup refuses insert; controlled editors may still diverge from AXValue |
+| **Chat apps** (Messages, Slack, etc.) | Mixed; secure/password never insert | Generic containers Copy; never claim Inserted solely from AX setter success |
 | **Secure fields** | Always skip insert | Toast: Copied/Failed — secure field |
 
 ## Emma review bar
@@ -54,12 +54,14 @@ Documented expectations for Clara Mac dogfood (not CI-provable on Linux):
 |---|------|----------|
 | C1 | Notes focused → **global hold/latch** (do not click Home Start) → speak → release/finish | **Inserted** (or Copied if AX denied). Home Start focuses Voxloom first → often honest **Copy** |
 | C2 | Password / secure field focused at start | No insert; **Copied** (fallback on) or **Failed** (off) naming secure field |
-| C3 | Start in Notes, close Notes before Stop completes | **Copied — original app closed** (or Failed if fallback off); never insert elsewhere |
+| C3 | Start in Notes, close Notes before Stop completes | **Copied — target changed** when another identifiable app is focused, or **Copied — target unavailable** when AX focus is missing (Failed if fallback off); never claim closure without evidence or insert elsewhere |
 | C4 | Start in Notes, focus Safari mid-capture | Still targets Notes identity; if changed at completion → Copy, not Safari insert |
 | C5 | Clipboard fallback off + refused target | **Failed** + last transcript Copy button works with History retention **off** |
 | C6 | Confirm no trailing Enter / accidental send in chat | Text only appears; message not submitted |
-| C7 | Accessibility denied | Snapshot/validate unavailable → Copy/Failed honest; no crash |
+| C7 | Accessibility denied for the actual test host/app | Snapshot/validate unavailable → Copied — Accessibility permission denied (or Failed with fallback off); never "original app closed or focus lost"; no crash |
 | C8 | After paste-path restore skip (if exercised) | Toast admits clipboard not restored |
+| C9 | Existing Notes/TextEdit paragraph, caret in middle; dictate | If AXSelectedText succeeds, text appears at caret and surrounding content remains intact; if it fails, Copied/Failed without a full-field AX retry; inspect original content |
+| C10 | Select a range inside existing text; dictate | Only selected range replaced on AX success; on failure, no AXValue retry; inspect original content and verify Copy-on/Copy-off outcomes |
 
 
 ### Clara note — C1 Inserted via global gesture
@@ -207,7 +209,7 @@ Do **not** treat browser unit tests as proof of native AX insert.
 
 | Residual | Notes |
 |----------|-------|
-| AX setValue may overwrite full field vs caret insert | Prefer AXSelectedText; Clara to confirm Notes/TextEdit |
+| AXSelectedText may be unsupported or fail for some apps | No AXValue fallback; use Copy/Failed per Settings. Verify caret/selection behavior in Notes/TextEdit on Mac |
 | Browser / Electron / game overlays | Unsupported → Copy; may need later heuristics |
 | Paste-via-⌘V path not used in v1 (AX only) | ADR allows paste without Enter; deferred if AX set fails broadly |
 | Home Start while Voxloom focused | Expected **Copied**; use global hold for Notes Inserted smoke |
@@ -242,9 +244,76 @@ consecutive holds looked good. With Notes focused, delivery initially reported
 Accessibility permission. After Kyle enabled Accessibility for WezTerm (the
 dev host running Voxloom), Notes insertion worked. This confirms one
 permission-dependent Notes path by user report; it does **not** establish that
-Notes closed or lost focus in the initial test. The native AX validator also
-uses that broad message when macOS supplies no focused Accessibility element,
-so the copy is not a reliable diagnosis of a closed app.
+Notes closed or lost focus in the initial test. The old native AX validator also
+used that broad message when macOS supplied no focused Accessibility element,
+so the copy was not a reliable diagnosis of a closed app. The safe AX delivery
+slice classifies denied permission as unavailable instead; a separately
+launched current-code app still needs native verification.
+
+### Packaged AX diagnostic follow-up (native QA pending)
+
+On the safe-AX branch, focus-query failures now report **which stage** failed
+(`capture start`, `delivery validation`, or `insert`), the process's AX trust
+check, and error codes for `AXFocusedApplication` and `AXFocusedUIElement`.
+`AX trusted=yes` is not proof that the target app exposed a focused element;
+`AXFocusedUIElement=0 (null)` means the query succeeded without one. No field
+text, AX description or transcript is included in these diagnostic reasons.
+Changed-target and selected-text failures still use the existing Copy/Failed
+path. Kyle reports **Inserted without visible text** using the global shortcut
+in WezTerm, Chrome, and Obsidian, while Notes inserts. A plausible code cause:
+generic container roles were considered editable and `AX_OK` from the setter
+alone was treated as proof of insertion. Their actual AX roles remain unmeasured.
+Generic containers now Copy;
+text-like roles require a readable `AXValue` before the write and a changed
+post-write value containing the transcript before claiming Inserted. This is
+conservative, not an end-to-end guarantee that a React/controlled editor
+committed the value; Mac verification remains required. On unverifiable
+post-write success, Copy may contain a duplicate of text that actually landed:
+check the field before manually pasting.
+
+Typecheck, lint, 303 TS unit tests, 138 Rust library tests, and frontend
+build passed on the working tree based on `c5535f9`. The revised separate
+Whisper-featured app at `/tmp/voxloom-ax-readback/release/bundle/macos/Voxloom.app`
+was built, with signature and audio-input entitlement verified. It has **not**
+been launched or smoke-tested. The native cause in the installed bundle has
+not been reproduced with captured AX role/error evidence. Native QA was
+reported by Kyle; no independent UI automation or terminal host insertion
+verification was run for this bundle.
+
+**Kyle's diagnostic bundle feedback (global shortcut, 2026-09-28):** Obsidian
+reported `Copied — Accessibility focus unavailable at delivery validation`
+with both AX attributes returning `-25212` (`kAXErrorNoValue` in the macOS
+SDK) while `AXIsProcessTrusted` was true. WezTerm/Pi reported `Copied —
+unsupported or unknown AX role`. Chrome/Telegram Web reported `Copied —
+insert failed: AXSelectedText returned success but insertion could not be
+verified via AXValue`. These prove different failure classes, not an all-app
+Accessibility denial. Kyle subsequently reported **Notes insertion still works** in his follow-up
+testing. Brave and Chrome address bars also insert, while fields inside web pages do
+not (including a Google web search box). This separates native address-bar
+text controls from page-hosted editors; the latter require a different,
+explicitly designed delivery path rather than treating AX setter success as
+proof. A selected-range replacement in a pre-populated Notes field remains
+unverified. Nothing here establishes an Obsidian app closure or proves whether
+Chrome's DOM editor committed a write.
+
+Build a separate test artifact on Mac without replacing the installed app:
+
+```sh
+CARGO_TARGET_DIR=/tmp/voxloom-ax-readback npm run tauri -- build --bundles app -- --features whisper
+npm run macos:assert-entitlements -- /tmp/voxloom-ax-readback/release/bundle/macos/Voxloom.app
+```
+
+After Kyle chooses a permission-approved test location/host, quit the
+installed Voxloom before launching that bundle. Both use the same bundle ID;
+macOS may associate their permissions. Do not replace `/Applications/Voxloom.app`
+or reset TCC just to get a green result. Record the exact artifact path and
+source commit, the **generic** reason/stage/code (no app titles or text),
+clipboardFallback setting, and whether text was inserted or copied. Test a
+blank and a pre-populated Notes/TextEdit field at the caret, then a deliberate
+focus change. Test denied Accessibility only with Kyle's permission. If an
+unchanged field reports focus unavailable, compare overlay-visible and hidden
+moments before attributing it to waveform changes. Avoid important field data:
+existing text must never be replaced by a failed AXSelectedText set.
 
 **Still pending:** measured immediate re-hold, latch/Home Stop, browser and
 terminal/chat targets, secure/changed targets, denied permissions, clipboard
