@@ -105,6 +105,7 @@ impl AxAttr {
             AXUIElementCopyAttributeValue(self.element, self.name, &mut value)
         };
         if err != AX_OK {
+            release(value);
             return Err(err);
         }
         Ok(value)
@@ -113,8 +114,12 @@ impl AxAttr {
 
 fn copy_string_attr(element: AXUIElementRef, attr: &str) -> Option<String> {
     let name = cfstr(attr);
-    let result = AxAttr { element, name }.copy().ok().and_then(cfstring_to_rust);
+    let copied = AxAttr { element, name }.copy();
     release(name);
+    let value = copied.ok()?;
+    // CopyAttributeValue transfers ownership even if conversion returns None.
+    let result = cfstring_to_rust(value);
+    release(value);
     result
 }
 
