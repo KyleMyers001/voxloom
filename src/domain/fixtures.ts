@@ -48,9 +48,10 @@ export const initialOnboarding: OnboardingState = {
 export const initialSettings: Settings = {
   appearance: 'system',
   audioRetention: 'off',
+  cleanupEnabled: false,
+  cleanupModelId: null,
   clipboardFallback: true,
   language: 'English (US)',
-  languageModel: 'Alder Text Small · local',
   // Sentinel value that the Settings mic select treats as
   // "use system default". Must match the <option> value in Settings.tsx.
   microphone: SYSTEM_DEFAULT_DEVICE_ID,

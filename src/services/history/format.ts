@@ -2,7 +2,7 @@ import type { DictationRecord, HistoryStatus, WritingStyle } from
   '../../domain/types';
 
 /** On-disk schema version for `history.json`. */
-export const HISTORY_FILE_VERSION = 1 as const;
+export const HISTORY_FILE_VERSION = 2 as const;
 
 export type TranscriptRetention = '30-days' | 'forever' | 'off';
 
@@ -25,13 +25,61 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function parseRecord(value: unknown): DictationRecord | null {
+function legacyCleanup(): NonNullable<DictationRecord['cleanup']> {
+  return {
+    dictionaryDigest: null,
+    dictionaryVersion: 1,
+    modelDigest: null,
+    modelId: null,
+    promptVersion: 'legacy-v1',
+    reason: 'migrated from history v1',
+    status: 'skipped',
+  };
+}
+
+function parseCleanup(value: unknown): DictationRecord['cleanup'] | null {
   if (!isObject(value)) return null;
   const {
+    dictionaryDigest,
+    dictionaryVersion,
+    modelDigest,
+    modelId,
+    promptVersion,
+    reason,
+    status,
+  } = value;
+  if (
+    !(dictionaryDigest === null || typeof dictionaryDigest === 'string')
+    || dictionaryVersion !== 1
+    || !(modelDigest === null || typeof modelDigest === 'string')
+    || !(modelId === null || typeof modelId === 'string')
+    || typeof promptVersion !== 'string'
+    || !(reason === null || typeof reason === 'string')
+    || !['cleaned', 'fallback', 'skipped'].includes(String(status))
+  ) return null;
+  return {
+    dictionaryDigest,
+    dictionaryVersion,
+    modelDigest,
+    modelId,
+    promptVersion,
+    reason,
+    status: status as 'cleaned' | 'fallback' | 'skipped',
+  };
+}
+
+function parseRecord(
+  value: unknown,
+  legacy: boolean,
+): DictationRecord | null {
+  if (!isObject(value)) return null;
+  const {
+    cleanup: rawCleanup,
     createdAt,
     durationSeconds,
     id,
     model,
+    rawText,
     recoveryExpiresAt,
     status,
     style,
@@ -53,11 +101,16 @@ function parseRecord(value: unknown): DictationRecord | null {
     return null;
   }
   if (typeof text !== 'string') return null;
+  const cleanup = legacy ? legacyCleanup() : parseCleanup(rawCleanup);
+  const parsedRawText = legacy ? text : rawText;
+  if (!cleanup || typeof parsedRawText !== 'string') return null;
   return {
+    cleanup,
     createdAt,
     durationSeconds,
     id,
     model,
+    rawText: parsedRawText,
     recoveryExpiresAt,
     status: status as HistoryStatus,
     style: style as WritingStyle,
@@ -80,7 +133,7 @@ export function parseHistoryJson(raw: string): ParseHistoryResult {
   if (!isObject(parsed)) {
     return { error: 'History file root must be an object', ok: false };
   }
-  if (parsed.version !== HISTORY_FILE_VERSION) {
+  if (parsed.version !== 1 && parsed.version !== HISTORY_FILE_VERSION) {
     return {
       error: `Unsupported history file version: ${String(parsed.version)}`,
       ok: false,
@@ -90,8 +143,9 @@ export function parseHistoryJson(raw: string): ParseHistoryResult {
     return { error: 'History file records must be an array', ok: false };
   }
   const records: DictationRecord[] = [];
+  const legacy = parsed.version === 1;
   for (const row of parsed.records) {
-    const record = parseRecord(row);
+    const record = parseRecord(row, legacy);
     if (record) records.push(record);
   }
   return {
@@ -102,7 +156,11 @@ export function parseHistoryJson(raw: string): ParseHistoryResult {
 
 export function serializeHistoryFile(records: DictationRecord[]): string {
   const file: HistoryFile = {
-    records,
+    records: records.map((record) => ({
+      ...record,
+      cleanup: record.cleanup ?? legacyCleanup(),
+      rawText: record.rawText ?? record.text,
+    })),
     version: HISTORY_FILE_VERSION,
   };
   return `${JSON.stringify(file, null, 2)}\n`;

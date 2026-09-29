@@ -24,13 +24,27 @@ function sample(overrides: Partial<DictationRecord> = {}): DictationRecord {
 }
 
 describe('parseHistoryJson', () => {
-  it('accepts a valid v1 document', () => {
+  it('accepts a valid v2 document', () => {
     const raw = serializeHistoryFile([sample()]);
     const parsed = parseHistoryJson(raw);
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     expect(parsed.file.records).toHaveLength(1);
     expect(parsed.file.records[0]?.text).toBe('hello');
+  });
+
+  it('migrates v1 text to raw and final with skipped provenance', () => {
+    const parsed = parseHistoryJson(JSON.stringify({
+      records: [sample()],
+      version: 1,
+    }));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.file.records[0]).toMatchObject({
+      cleanup: { status: 'skipped' },
+      rawText: 'hello',
+      text: 'hello',
+    });
   });
 
   it('rejects corrupt JSON without inventing an empty store', () => {
@@ -97,8 +111,11 @@ describe('createHistoryStore', () => {
     const rows = [sample({ id: 'a' }), sample({ id: 'b', text: 'two' })];
     await store.save(rows, 'forever', 1);
     const loaded = await store.load('forever', 1);
-    expect(loaded).toEqual({ ok: true, records: rows });
-    expect(io.snapshot()).toContain('"version": 1');
+    expect(loaded).toMatchObject({
+      ok: true,
+      records: rows.map((row) => ({ ...row, rawText: row.text })),
+    });
+    expect(io.snapshot()).toContain('"version": 2');
   });
 
   it('delete path: save without a row removes it from disk', async () => {

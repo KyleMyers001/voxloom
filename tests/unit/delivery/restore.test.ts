@@ -66,6 +66,8 @@ describe('withRestoreHonesty', () => {
       restoreSkippedReason: null,
       status: 'inserted',
       text: 'hi',
+      writeCommitted: true,
+      writeStarted: true,
     };
     const next = withRestoreHonesty(base, false, 'no prior clipboard snapshot');
     expect(next.message).toMatch(/clipboard not restored/);

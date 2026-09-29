@@ -7,7 +7,7 @@ import {
 import type { Appearance, Settings, WritingStyle } from '../../domain/types';
 
 /** On-disk schema version for `settings.json`. */
-export const SETTINGS_FILE_VERSION = 1 as const;
+export const SETTINGS_FILE_VERSION = 2 as const;
 
 export interface SettingsFile {
   onboardingComplete: boolean;
@@ -49,6 +49,10 @@ function asBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
 }
 
+function asNullableString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
 /**
  * Merge a partial/unknown settings object onto defaults.
  * Invalid individual fields fall back; does not throw.
@@ -63,9 +67,10 @@ export function coerceSettings(raw: unknown): Settings {
       audioRetentions,
       base.audioRetention,
     ),
+    cleanupEnabled: asBoolean(raw.cleanupEnabled, base.cleanupEnabled),
+    cleanupModelId: asNullableString(raw.cleanupModelId),
     clipboardFallback: asBoolean(raw.clipboardFallback, base.clipboardFallback),
     language: asString(raw.language, base.language),
-    languageModel: asString(raw.languageModel, base.languageModel),
     microphone: asString(raw.microphone, base.microphone),
     shortcut: asString(raw.shortcut, base.shortcut),
     startAtLogin: asBoolean(raw.startAtLogin, base.startAtLogin),
@@ -102,7 +107,7 @@ export function parseSettingsJson(raw: string): ParseSettingsResult {
   if (!isObject(parsed)) {
     return { error: 'Settings file root must be an object', ok: false };
   }
-  if (parsed.version !== SETTINGS_FILE_VERSION) {
+  if (parsed.version !== 1 && parsed.version !== SETTINGS_FILE_VERSION) {
     return {
       error: `Unsupported settings file version: ${String(parsed.version)}`,
       ok: false,

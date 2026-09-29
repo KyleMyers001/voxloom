@@ -39,10 +39,20 @@ describe('createDogfoodRecord', () => {
       text: '  hello world  ',
     });
     expect(record).toEqual({
+      cleanup: {
+        dictionaryDigest: null,
+        dictionaryVersion: 1,
+        modelDigest: null,
+        modelId: null,
+        promptVersion: 'cleanup-v1',
+        reason: null,
+        status: 'skipped',
+      },
       createdAt: 1_000,
       durationSeconds: 2,
       id: 'dogfood-pcm-1',
       model: null,
+      rawText: 'hello world',
       recoveryExpiresAt: null,
       status: 'copied',
       style: 'casual',

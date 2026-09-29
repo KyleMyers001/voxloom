@@ -6,6 +6,13 @@
 
 import type { ClipboardAdapter } from '../clipboard';
 import {
+  runCleanup,
+  type CleanupEngine,
+  type CleanupOutcome,
+  type CleanupSnapshot,
+} from '../cleanup';
+import type { ProcessingSignal } from '../dictation/coordinator';
+import {
   createStubDeliveryAdapter,
   createTauriDeliveryAdapter,
   deliverTranscript,
@@ -13,6 +20,7 @@ import {
   type DeliveryPlatformAdapter,
   type TargetSnapshot,
 } from '../delivery';
+import { DeliveryCancelledError } from '../delivery/types';
 import type { SttEngine } from './contracts';
 import { audioHandleFromCapture } from './fromCapture';
 import { createSttEngine } from './factory';
@@ -34,6 +42,13 @@ export interface DogfoodTranscribeOptions {
    * When false, insert failure surfaces Failed + manual recovery — no Copy.
    */
   clipboardFallback?: boolean;
+  cleanup?: {
+    engine: CleanupEngine;
+    requestId: string;
+    signal: ProcessingSignal;
+    snapshot: CleanupSnapshot;
+  };
+  onCleanupStart?: () => void;
   /**
    * Invocation-time intended target snapshot (ADR §4).
    * When omitted, delivery treats the target as unavailable → Copy/Fail.
@@ -51,6 +66,7 @@ export interface DogfoodTranscribeOptions {
 }
 
 export interface DogfoodResult {
+  cleanup?: CleanupOutcome;
   /**
    * True when Copy (clipboard write) completed successfully.
    * Kept for older callers; prefer `delivery.status`.
@@ -60,6 +76,7 @@ export interface DogfoodResult {
   copyWarning?: string;
   /** Evidence-backed delivery outcome (Inserted / Copied / Failed). */
   delivery: DeliveryOutcome;
+  rawTranscript?: Transcript;
   transcript: Transcript;
 }
 
@@ -87,6 +104,20 @@ export async function dogfoodTranscribeAndCopy(
   const engine = (options.createEngine ?? createSttEngine)(modelId);
   const handle = audioHandleFromCapture(options.audio);
   const transcript = await engine.transcribe(handle);
+  options.onCleanupStart?.();
+  const cleanup = options.cleanup
+    ? await runCleanup({
+        engine: options.cleanup.engine,
+        rawText: transcript.text,
+        requestId: options.cleanup.requestId,
+        signal: options.cleanup.signal,
+        snapshot: options.cleanup.snapshot,
+      })
+    : { finalText: transcript.text, status: 'skipped' as const };
+  if (cleanup.status === 'cancelled') {
+    throw new DOMException('Dictation cancelled', 'AbortError');
+  }
+  const finalTranscript = { ...transcript, text: cleanup.finalText };
 
   const platform = resolvePlatform(
     options.clipboard,
@@ -97,19 +128,25 @@ export async function dogfoodTranscribeAndCopy(
   try {
     const delivery = await deliverTranscript({
       clipboardFallback,
+      canWrite: () => !options.cleanup?.signal.aborted,
       intended: options.intended ?? null,
       platform,
-      text: transcript.text,
+      text: finalTranscript.text,
     });
     return {
       copied: delivery.status === 'copied',
       copyWarning: delivery.status === 'failed'
         ? (delivery.detail ?? delivery.message)
         : undefined,
+      cleanup,
       delivery,
-      transcript,
+      rawTranscript: transcript,
+      transcript: finalTranscript,
     };
   } catch (error: unknown) {
+    if (error instanceof DeliveryCancelledError) {
+      throw new DOMException('Dictation cancelled', 'AbortError');
+    }
     const copyWarning = error instanceof Error
       ? error.message
       : String(error);
@@ -119,8 +156,17 @@ export async function dogfoodTranscribeAndCopy(
       message: `Failed — ${copyWarning}`,
       restoreSkippedReason: null,
       status: 'failed',
-      text: transcript.text,
+      text: finalTranscript.text,
+      writeCommitted: false,
+      writeStarted: false,
     };
-    return { copied: false, copyWarning, delivery, transcript };
+    return {
+      cleanup,
+      copied: false,
+      copyWarning,
+      delivery,
+      rawTranscript: transcript,
+      transcript: finalTranscript,
+    };
   }
 }

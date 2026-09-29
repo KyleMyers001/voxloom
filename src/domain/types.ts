@@ -3,13 +3,25 @@ export type HistoryStatus = 'copied' | 'failed' | 'inserted';
 export type Screen = 'dictionary' | 'history' | 'home' | 'settings';
 export type WritingStyle = 'casual' | 'formal' | 'very-casual';
 
+export interface CleanupProvenance {
+  dictionaryDigest: string | null;
+  dictionaryVersion: number;
+  modelDigest: string | null;
+  modelId: string | null;
+  promptVersion: string;
+  reason: string | null;
+  status: 'cleaned' | 'fallback' | 'skipped';
+}
+
 export interface DictationRecord {
+  cleanup?: CleanupProvenance;
   createdAt: number;
   durationSeconds: number;
   id: string;
   /** Transcription model id when known (dogfood / persisted); null for fixtures. */
   model: string | null;
   recoveryExpiresAt: number | null;
+  rawText?: string;
   status: HistoryStatus;
   style: WritingStyle;
   text: string;
@@ -31,9 +43,10 @@ export type DictationState =
 export interface Settings {
   appearance: Appearance;
   audioRetention: 'off' | '24-hours' | '7-days';
+  cleanupEnabled: boolean;
+  cleanupModelId: string | null;
   clipboardFallback: boolean;
   language: string;
-  languageModel: string;
   microphone: string;
   shortcut: string;
   startAtLogin: boolean;

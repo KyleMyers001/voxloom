@@ -1,4 +1,5 @@
 mod capture;
+mod cleanup;
 mod delivery;
 mod dictionary;
 mod history;
@@ -150,6 +151,9 @@ pub fn run() {
             let coordinator =
                 CaptureCoordinator::with_pcm_store(Arc::clone(&buffers));
             app.manage(coordinator);
+            let cleanup = cleanup::CleanupState::from_app(app.handle())
+                .expect("initialize cleanup state");
+            app.manage(cleanup);
             app.manage(SttState::new(models, buffers));
             Ok(())
         })
@@ -161,6 +165,12 @@ pub fn run() {
             capture_start,
             capture_status,
             capture_stop,
+            cleanup::cleanup_acquire,
+            cleanup::cleanup_cancel,
+            cleanup::cleanup_pick_and_import_model,
+            cleanup::cleanup_model_status,
+            cleanup::cleanup_release,
+            cleanup::cleanup_run,
             delivery::delivery_insert_text,
             delivery::delivery_snapshot_target,
             delivery::delivery_validate_target,

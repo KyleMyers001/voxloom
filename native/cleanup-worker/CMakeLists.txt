@@ -1,0 +1,37 @@
+cmake_minimum_required(VERSION 3.20)
+project(voxloom_cleanup_worker LANGUAGES C CXX)
+
+if(NOT LLAMA_CPP_SOURCE)
+  message(FATAL_ERROR "LLAMA_CPP_SOURCE is required")
+endif()
+
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(GGML_CPU_KLEIDIAI OFF CACHE BOOL "" FORCE)
+set(GGML_METAL ON CACHE BOOL "" FORCE)
+set(GGML_METAL_EMBED_LIBRARY ON CACHE BOOL "" FORCE)
+set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_APP OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_COMMON ON CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_UI OFF CACHE BOOL "" FORCE)
+set(LLAMA_LLGUIDANCE OFF CACHE BOOL "" FORCE)
+set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
+set(LLAMA_SUBPROCESS OFF CACHE BOOL "" FORCE)
+set(LLAMA_USE_PREBUILT_UI OFF CACHE BOOL "" FORCE)
+
+add_subdirectory(${LLAMA_CPP_SOURCE} llama.cpp)
+
+add_executable(voxloom-cleanup-worker main.cpp)
+target_compile_features(voxloom-cleanup-worker PRIVATE cxx_std_17)
+target_link_libraries(voxloom-cleanup-worker PRIVATE llama-common)
+
+add_executable(voxloom-template-check template_check.cpp)
+target_compile_features(voxloom-template-check PRIVATE cxx_std_17)
+target_link_libraries(voxloom-template-check PRIVATE llama-common)
+
+add_executable(voxloom-generation-state-check generation_state_check.cpp)
+target_compile_features(voxloom-generation-state-check PRIVATE cxx_std_17)
+target_link_libraries(voxloom-generation-state-check PRIVATE llama)

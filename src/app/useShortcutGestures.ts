@@ -68,7 +68,10 @@ const browserScheduler = {
 };
 
 function isDogfoodBusy(phase: DogfoodPhase): boolean {
-  return phase === 'recording' || phase === 'transcribing';
+  return phase === 'cleaning'
+    || phase === 'queued'
+    || phase === 'recording'
+    || phase === 'transcribing';
 }
 
 function isDogfoodTerminal(phase: DogfoodPhase): boolean {
@@ -339,7 +342,7 @@ function handleGesture(
       dogfood.cancel();
       phaseGuard.seen = 'cancelled';
     }
-    // "transcribing": prior utterance's STT/delivery keeps running in the
+    // Prior processing keeps running in the background; the new start
     // background; dogfood.start() supersedes its phase (session-guarded).
     pending?.resetForStart();
     // Overlay first (sync), then real capture. dogfood.start snapshots the

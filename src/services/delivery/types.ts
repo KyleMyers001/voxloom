@@ -49,6 +49,10 @@ export interface DeliveryOutcome {
   status: DeliveryStatus;
   /** Always the transcript text for manual recovery (even if history is off). */
   text: string;
+  /** An OS insertion or clipboard write was invoked. */
+  writeStarted: boolean;
+  /** The invoked OS write completed successfully. */
+  writeCommitted: boolean;
 }
 
 export interface ClipboardSnapshot {
@@ -86,6 +90,8 @@ export interface DeliveryPlatformAdapter {
 }
 
 export interface DeliverOptions {
+  /** False immediately before a write means the request was cancelled. */
+  canWrite?: () => boolean;
   /** Settings `clipboardFallback` — default-on per fixtures / ADR. */
   clipboardFallback: boolean;
   /** Injectable clock (tests). */
@@ -96,4 +102,11 @@ export interface DeliverOptions {
   intended: TargetSnapshot | null;
   /** Transcript text to deliver. */
   text: string;
+}
+
+export class DeliveryCancelledError extends Error {
+  constructor() {
+    super('Delivery cancelled before write');
+    this.name = 'DeliveryCancelledError';
+  }
 }
