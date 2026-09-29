@@ -157,6 +157,8 @@ export async function dogfoodTranscribeAndCopy(
       restoreSkippedReason: null,
       status: 'failed',
       text: finalTranscript.text,
+      writeCommitted: false,
+      writeStarted: false,
     };
     return {
       cleanup,

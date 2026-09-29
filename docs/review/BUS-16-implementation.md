@@ -71,9 +71,10 @@ then run:
 ```
 
 The script verifies the immutable commit, builds static CPU/Accelerate/Metal
-libraries with embedded Metal resources, runs the non-thinking template
-check, places the ignored worker executable in the Tauri resource tree, and
-runs the committed weight-free framed-protocol smoke.
+libraries with embedded Metal resources, checks stable generated-token batch
+storage, runs the non-thinking template check, places the ignored worker
+executable in the Tauri resource tree, and runs the committed weight-free
+framed-protocol smoke.
 The build cache is intentionally retained outside the worktree for review.
 
 ## Independent review pass 1 resolutions
@@ -111,6 +112,35 @@ accepted findings:
 - **H — truthful fallback reasons:** native command failures are structured by
   code, including context overflow, timeout, cancellation, missing model, and
   runtime failure. Renderer history no longer infers these from message text.
+
+## Independent review pass 2 resolutions
+
+Review pass 2 requested changes against `2db96b9`; this follow-up resolves all
+accepted findings:
+
+- **Cancellation lifecycle across remounts:** coordinator request IDs now use
+  a UUID-backed per-instance prefix. Cancelling an admitted request before a
+  native run releases its lease without creating a native cancellation
+  tombstone, and native release explicitly settles any existing tombstone.
+  Hook and supervisor regressions cover disabled/STT cancellation followed by
+  reuse from a new coordinator.
+- **History after asynchronous provenance:** delivery outcomes now carry
+  explicit `writeStarted` and `writeCommitted` evidence. Cancellation while
+  provenance hashing is pending suppresses history only when no delivery write
+  began; attempted or committed writes retain their actual outcome.
+- **Supervisor recovery:** malformed-output and crash fake workers fail once,
+  then succeed through the same supervisor instance. This proves recovery
+  rather than merely repeating a failure.
+- **Generated-token lifetime:** pinned llama.cpp's `llama_batch_get_one`
+  borrows its token pointer. The worker now owns stable token storage outside
+  the decode loop, and a compiled check verifies that consecutive batches
+  retain that address. This is a lifetime/control-flow check, not an inference
+  or quality result.
+- **Weight-free smoke startup:** the reproduced 10-second timeout was embedded
+  Metal initialization (about 10.4 seconds) occurring before the missing model
+  was rejected. The worker now validates the inherited model descriptor's GGUF
+  header before backend initialization, so the committed missing-model smoke
+  returns a structured framed error within its original 10-second bound.
 
 ## Verification and remaining live checks
 
@@ -163,6 +193,21 @@ is not a legal certification, and no model is redistributed here.
 - `npm run tauri -- build --debug` — app bundle built with the worker at
   `Contents/Resources/cleanup/voxloom-cleanup-worker`
 - `codesign --verify --deep --strict` — the local ad-hoc debug bundle passed;
+  distribution signing and notarization remain unverified
+
+### Pass 2 fix verification
+
+- `npm run lint` and `npm run typecheck` — passed
+- `npm run test:unit` — 351 passed
+- `npm run build` — passed
+- `cargo check` — passed with the same four pre-existing warnings
+- `cargo test --lib` — 153 passed
+- `./scripts/build-cleanup-worker.sh` — pinned worker build, stable-token
+  lifetime check, Qwen3 non-thinking template check, and 10-second-bounded
+  missing-model protocol smoke passed in 2.26 seconds with a warm build cache
+- packaged worker protocol smoke — passed in 0.02 seconds on the debug bundle
+- `npm run tauri -- build --debug` — passed with the worker resource present
+- `codesign --verify --deep --strict` — local ad-hoc debug bundle passed;
   distribution signing and notarization remain unverified
 
 Cold one-shot worker/model load is intentionally unoptimized and unbenchmarked

@@ -51,6 +51,8 @@ function failOutcome(
     restoreSkippedReason: extras?.restoreSkippedReason ?? null,
     status: 'failed',
     text,
+    writeCommitted: false,
+    writeStarted: false,
     ...extras,
   };
 }
@@ -95,6 +97,8 @@ export async function deliverTranscript(
         restoreSkippedReason: null,
         status: 'inserted',
         text,
+        writeCommitted: true,
+        writeStarted: true,
       };
     } catch (error: unknown) {
       const insertFail = error instanceof Error
@@ -102,7 +106,9 @@ export async function deliverTranscript(
         : String(error);
       // Insert API failed after a valid-looking target → Copy + toast if enabled.
       if (!options.clipboardFallback) {
-        return failOutcome(text, `insert failed: ${insertFail}`);
+        return failOutcome(text, `insert failed: ${insertFail}`, {
+          writeStarted: true,
+        });
       }
       return copyFallback(
         platform,
@@ -140,6 +146,7 @@ async function copyFallback(
     return failOutcome(
       text,
       `clipboard unavailable: ${detail}`,
+      { writeStarted: true },
     );
   }
 
@@ -165,6 +172,8 @@ async function copyFallback(
       restoreSkippedReason: 'clipboard changed after our write',
       status: 'failed',
       text,
+      writeCommitted: true,
+      writeStarted: true,
     };
   }
 
@@ -175,6 +184,8 @@ async function copyFallback(
     restoreSkippedReason: null,
     status: 'copied',
     text,
+    writeCommitted: true,
+    writeStarted: true,
   };
 }
 

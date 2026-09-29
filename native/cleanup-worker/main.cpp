@@ -1,5 +1,6 @@
 #include "chat.h"
 #include "framing.hpp"
+#include "generation_state.hpp"
 #include <nlohmann/json.hpp>
 #include "llama.h"
 
@@ -10,6 +11,9 @@
 #include <memory>
 #include <string>
 #include <vector>
+
+#include <fcntl.h>
+#include <unistd.h>
 
 using json = nlohmann::json;
 
@@ -89,6 +93,15 @@ std::string render_prompt(
 std::string generate(
     const std::string & model_path,
     const std::string & content) {
+    const int model_fd = open(model_path.c_str(), O_RDONLY | O_CLOEXEC);
+    if (model_fd < 0) throw std::runtime_error("model-unavailable");
+    std::array<char, 4> magic{};
+    const ssize_t read_count = pread(model_fd, magic.data(), magic.size(), 0);
+    close(model_fd);
+    if (read_count != static_cast<ssize_t>(magic.size())
+        || magic != std::array<char, 4>{'G', 'G', 'U', 'F'}) {
+        throw std::runtime_error("model-unavailable");
+    }
     ggml_backend_load_all();
     auto model_params = llama_model_default_params();
     model_params.n_gpu_layers = 99;
@@ -127,19 +140,20 @@ std::string generate(
 
     llama_batch batch =
         llama_batch_get_one(tokens.data(), static_cast<int32_t>(tokens.size()));
+    voxloom::GenerationToken generated_token;
     std::string output;
     for (int generated = 0; generated < output_tokens; ++generated) {
         if (llama_decode(context.get(), batch) != 0) {
             throw std::runtime_error("decode");
         }
-        llama_token token =
+        const llama_token token =
             llama_sampler_sample(sampler.get(), context.get(), -1);
         if (llama_vocab_is_eog(vocab, token)) return output;
         output += token_piece(vocab, token);
         if (output.size() > OUTPUT_MAX_BYTES) {
             throw std::runtime_error("output-byte-limit");
         }
-        batch = llama_batch_get_one(&token, 1);
+        batch = generated_token.batch(token);
     }
     throw std::runtime_error("output-truncated");
 }

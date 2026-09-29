@@ -32,9 +32,15 @@ function signalFor(controller: AbortController): ProcessingSignal {
 export class DictationCoordinator<Result> {
   private active: Entry<Result> | null = null;
   private nextId = 1;
+  private readonly prefix: string;
   private readonly queue: Entry<Result>[] = [];
 
-  constructor(private readonly capacity = 2) {}
+  constructor(
+    private readonly capacity = 2,
+    prefix = createRequestPrefix(),
+  ) {
+    this.prefix = prefix;
+  }
 
   get admitted(): number {
     return this.queue.length;
@@ -48,7 +54,7 @@ export class DictationCoordinator<Result> {
       entry = {
         controller,
         execute: null,
-        id: `dictation-${this.nextId++}`,
+        id: `${this.prefix}-${this.nextId++}`,
         reject,
         resolve,
       };
@@ -97,4 +103,19 @@ export class DictationCoordinator<Result> {
         this.pump();
       });
   }
+}
+
+let coordinatorInstance = 0;
+
+function createRequestPrefix(): string {
+  coordinatorInstance += 1;
+  const instance = coordinatorInstance.toString(36);
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return `dictation-${globalThis.crypto.randomUUID()}-${instance}`;
+  }
+  return [
+    'dictation',
+    Date.now().toString(36),
+    instance,
+  ].join('-');
 }

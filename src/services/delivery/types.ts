@@ -49,6 +49,10 @@ export interface DeliveryOutcome {
   status: DeliveryStatus;
   /** Always the transcript text for manual recovery (even if history is off). */
   text: string;
+  /** An OS insertion or clipboard write was invoked. */
+  writeStarted: boolean;
+  /** The invoked OS write completed successfully. */
+  writeCommitted: boolean;
 }
 
 export interface ClipboardSnapshot {

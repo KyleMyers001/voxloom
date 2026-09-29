@@ -46,6 +46,8 @@ describe('deliverTranscript', () => {
     });
     expect(outcome.status).toBe('inserted');
     expect(outcome.message).toBe('Inserted');
+    expect(outcome.writeCommitted).toBe(true);
+    expect(outcome.writeStarted).toBe(true);
     expect(platform.insertText).toHaveBeenCalledWith('hello', snap());
     expect(platform.clipboardWrite).not.toHaveBeenCalled();
   });
@@ -116,6 +118,8 @@ describe('deliverTranscript', () => {
     expect(outcome.message).toMatch(/^Failed —/);
     expect(outcome.message).toMatch(/manual Copy/i);
     expect(outcome.text).toBe('recover me');
+    expect(outcome.writeCommitted).toBe(false);
+    expect(outcome.writeStarted).toBe(false);
     expect(platform.clipboardWrite).not.toHaveBeenCalled();
   });
 
@@ -165,6 +169,8 @@ describe('deliverTranscript', () => {
     });
     expect(outcome.status).toBe('failed');
     expect(outcome.message).toMatch(/manual Copy/i);
+    expect(outcome.writeCommitted).toBe(false);
+    expect(outcome.writeStarted).toBe(true);
     expect(platform.clipboardWrite).not.toHaveBeenCalled();
   });
 
@@ -263,6 +269,8 @@ describe('deliverTranscript', () => {
     expect(outcome.status).toBe('failed');
     expect(outcome.message).toMatch(/clipboard unavailable/i);
     expect(outcome.text).toBe('keep me');
+    expect(outcome.writeCommitted).toBe(false);
+    expect(outcome.writeStarted).toBe(true);
   });
 
   it('clipboard conflict after write → Failed (no false Copied)', async () => {
@@ -287,6 +295,8 @@ describe('deliverTranscript', () => {
     expect(outcome.status).toBe('failed');
     expect(outcome.message).toMatch(/changed after write/i);
     expect(outcome.restoreSkippedReason).toMatch(/changed/);
+    expect(outcome.writeCommitted).toBe(true);
+    expect(outcome.writeStarted).toBe(true);
   });
 
   it('rechecks cancellation at the write boundary', async () => {

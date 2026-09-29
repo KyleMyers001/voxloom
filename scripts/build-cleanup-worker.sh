@@ -22,7 +22,9 @@ cmake \
   -DCMAKE_BUILD_TYPE=Release \
   -DLLAMA_CPP_SOURCE="$source_root"
 cmake --build "$build_root" --target \
-  voxloom-cleanup-worker voxloom-template-check -j 8
+  voxloom-cleanup-worker voxloom-generation-state-check \
+  voxloom-template-check -j 8
+"$build_root/voxloom-generation-state-check"
 "$build_root/voxloom-template-check" \
   "$source_root/models/templates/Qwen-Qwen3-0.6B.jinja"
 

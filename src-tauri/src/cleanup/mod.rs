@@ -217,5 +217,7 @@ pub fn cleanup_release(
     state: State<'_, CleanupState>,
     request_id: String,
 ) -> bool {
-    state.leases.lock().unwrap().remove(&request_id).is_some()
+    let removed = state.leases.lock().unwrap().remove(&request_id).is_some();
+    state.supervisor.release(&request_id);
+    removed
 }

@@ -81,6 +81,8 @@ export interface UseDogfoodCaptureOptions {
   captureApi?: UseCaptureStateResult;
   /** Test seam: model store (status checks; never download). */
   createModelStore?: () => SttModelStore;
+  /** Test seam: delayed provenance hashing. */
+  createProvenance?: typeof createCleanupProvenance;
   cleanupEngine?: CleanupEngine;
   /** Test seam: dogfood path. */
   dogfood?: typeof dogfoodTranscribeAndCopy;
@@ -112,6 +114,7 @@ interface Admission {
   intended: TargetSnapshot | null;
   modelId: string;
   now: () => number;
+  provenance: typeof createCleanupProvenance;
   reservation: ProcessingReservation<DogfoodResult>;
 }
 
@@ -165,9 +168,7 @@ async function releaseCleanupLease(admission: Admission): Promise<void> {
 
 function cancelAdmission(admission: Admission): void {
   admission.reservation.cancel();
-  void admission.cleanupEngine
-    .cancel(admission.reservation.id)
-    .catch(() => undefined);
+  void releaseCleanupLease(admission);
 }
 
 export function useDogfoodCapture(
@@ -288,11 +289,15 @@ export function useDogfoodCapture(
               }
             },
           });
+          const provenance = await admission.provenance(
+            admission.cleanup,
+            result.cleanup,
+          );
+          if (signal.aborted && !result.delivery.writeStarted) {
+            throw new DOMException('Dictation cancelled', 'AbortError');
+          }
           const record = createDogfoodRecord({
-            cleanup: await createCleanupProvenance(
-              admission.cleanup,
-              result.cleanup,
-            ),
+            cleanup: provenance,
             durationMs: audio.duration_ms,
             id: `dogfood-${audio.id}`,
             model: modelId,
@@ -396,6 +401,7 @@ export function useDogfoodCapture(
       intended: null,
       modelId: options.modelId,
       now: nowRef.current,
+      provenance: options.createProvenance ?? createCleanupProvenance,
       reservation,
     };
     admissionRef.current = admission;
@@ -504,6 +510,7 @@ export function useDogfoodCapture(
     options.cleanupEnabled,
     options.cleanupModelId,
     options.clipboardFallback,
+    options.createProvenance,
     options.dictionary,
     options.modelId,
     options.preferredDeviceId,

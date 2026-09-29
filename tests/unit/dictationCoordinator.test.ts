@@ -4,6 +4,11 @@ import {
 } from '../../src/services/dictation/coordinator';
 
 describe('DictationCoordinator', () => {
+  it('uses unique request IDs across coordinator remounts', () => {
+    const first = new DictationCoordinator<string>();
+    const second = new DictationCoordinator<string>();
+    expect(first.reserve()?.id).not.toBe(second.reserve()?.id);
+  });
   it('admits two jobs and rejects a third before execution', () => {
     const coordinator = new DictationCoordinator<string>();
     expect(coordinator.reserve()).not.toBeNull();

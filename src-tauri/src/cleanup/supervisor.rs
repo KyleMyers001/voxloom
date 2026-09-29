@@ -153,6 +153,10 @@ impl WorkerSupervisor {
         true
     }
 
+    pub fn release(&self, request_id: &str) {
+        self.take_cancelled(request_id);
+    }
+
     fn cancelled_error() -> SupervisorError {
         SupervisorError {
             code: "cancelled",
@@ -196,11 +200,15 @@ mod tests {
     use std::sync::Arc;
     use std::thread;
 
-    fn fake_worker(name: &str, body: &str) -> PathBuf {
-        let root = std::env::temp_dir().join(format!(
+    fn fake_root(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
             "voxloom-supervisor-{}-{name}",
             std::process::id(),
-        ));
+        ))
+    }
+
+    fn fake_worker(name: &str, body: &str) -> PathBuf {
+        let root = fake_root(name);
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         let path = root.join("worker.py");
@@ -249,17 +257,27 @@ write({{"error": None, "errorCode": None, "requestId": request["requestId"],
         assert_eq!(success.run(&model, "p".into(), "r1".into()).unwrap(),
             "cleaned");
 
-        let malformed_path = fake_worker("malformed", &[
-            FRAMING,
-            "\nread()\n",
-            "sys.stdout.buffer.write(b'\\x00\\x00\\x00\\x02xx')",
-        ].concat());
+        let malformed_marker = fake_root("malformed").join("failed-once");
+        let malformed_path = fake_worker("malformed", &format!(r#"{FRAMING}
+from pathlib import Path
+request = read()
+marker = Path(r"{}")
+if not marker.exists():
+    marker.touch()
+    sys.stdout.buffer.write(b'\x00\x00\x00\x02xx')
+else:
+    write({{"error": None, "errorCode": None,
+           "requestId": request["requestId"], "status": "ok",
+           "text": "recovered"}})
+"#, malformed_marker.display()));
         let malformed = WorkerSupervisor::with_timeout(
             malformed_path,
             Duration::from_secs(2),
         );
         assert!(malformed.run(&model, "p".into(), "bad".into()).is_err());
-        assert!(malformed.run(&model, "p".into(), "again".into()).is_err());
+        assert_eq!(malformed.run(
+            &model, "p".into(), "again".into(),
+        ).unwrap(), "recovered");
     }
 
     #[test]
@@ -364,13 +382,43 @@ write({{"error": None, "errorCode": None, "requestId": "other",
             &model_file("mismatch"), "p".into(), "expected".into(),
         ).unwrap_err().message.contains("mismatch"));
 
+        let crash_marker = fake_root("crash").join("failed-once");
+        let crash_worker = fake_worker("crash", &format!(r#"{FRAMING}
+from pathlib import Path
+request = read()
+marker = Path(r"{}")
+if not marker.exists():
+    marker.touch()
+    sys.exit(1)
+write({{"error": None, "errorCode": None,
+       "requestId": request["requestId"], "status": "ok",
+       "text": "recovered"}})
+"#, crash_marker.display()));
         let crash = WorkerSupervisor::with_timeout(
-            fake_worker("crash", "raise RuntimeError('boom')"),
+            crash_worker,
             Duration::from_secs(2),
         );
         assert!(crash.run(
             &model_file("crash"), "p".into(), "crash".into(),
         ).is_err());
+        assert_eq!(crash.run(
+            &model_file("after-crash"), "p".into(), "next".into(),
+        ).unwrap(), "recovered");
+    }
+
+    #[test]
+    fn released_prestart_cancel_does_not_poison_reused_request_id() {
+        let supervisor = WorkerSupervisor::with_timeout(
+            success_worker("released-cancel"),
+            Duration::from_secs(2),
+        );
+        assert!(supervisor.cancel("remount-request"));
+        supervisor.release("remount-request");
+        assert_eq!(supervisor.run(
+            &model_file("released-cancel"),
+            "p".into(),
+            "remount-request".into(),
+        ).unwrap(), "cleaned");
     }
 
     #[test]

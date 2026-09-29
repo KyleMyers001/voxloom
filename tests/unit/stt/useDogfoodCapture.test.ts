@@ -2,7 +2,10 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { DictationRecord } from '../../../src/domain/types';
+import type {
+  CleanupProvenance,
+  DictationRecord,
+} from '../../../src/domain/types';
 import type { ClipboardAdapter } from '../../../src/services/clipboard';
 import type { DeliveryPlatformAdapter, TargetSnapshot } from
   '../../../src/services/delivery';
@@ -38,6 +41,8 @@ function deliveryOutcome(
     restoreSkippedReason: null,
     status,
     text,
+    writeCommitted: status !== 'failed',
+    writeStarted: status !== 'failed',
   };
 }
 
@@ -79,6 +84,8 @@ async function mockDogfoodSuccess(
       restoreSkippedReason: null,
       status: 'copied' as const,
       text: transcript.text,
+      writeCommitted: true,
+      writeStarted: true,
     },
     transcript,
   };
@@ -450,6 +457,50 @@ describe('useDogfoodCapture', () => {
     expect(result.current.phase).toBe('cancelled');
   });
 
+  it('does not tombstone disabled cleanup across a hook remount', async () => {
+    const store = createMockSttModelStore();
+    await store.download('whisper-tiny.en');
+    const cleanupEngine = {
+      acquire: vi.fn().mockResolvedValue(undefined),
+      cancel: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn().mockResolvedValue(undefined),
+      run: vi.fn().mockResolvedValue('cleaned'),
+    };
+    const first = renderHook(() => useDogfoodCapture({
+      captureApi: stubCapture({ kind: 'idle' }),
+      cleanupEnabled: false,
+      cleanupEngine,
+      clipboard: clipboard(),
+      createModelStore: () => store,
+      modelId: 'whisper-tiny.en',
+    }));
+    await act(async () => { await first.result.current.start(); });
+    act(() => { first.result.current.cancel(); });
+    await waitFor(() => expect(cleanupEngine.release).toHaveBeenCalled());
+    const releasedId = cleanupEngine.release.mock.calls[0]?.[0];
+    expect(cleanupEngine.cancel).not.toHaveBeenCalled();
+    first.unmount();
+
+    const second = renderHook(() => useDogfoodCapture({
+      captureApi: stubCapture({ kind: 'idle' }),
+      cleanupEnabled: true,
+      cleanupEngine,
+      cleanupModelId: 'qwen3-0.6b-q4-k-m',
+      clipboard: clipboard(),
+      createModelStore: () => store,
+      modelId: 'whisper-tiny.en',
+    }));
+    await act(async () => { await second.result.current.start(); });
+    const acquiredId = cleanupEngine.acquire.mock.calls[0]?.[0];
+    expect(acquiredId).toBeTruthy();
+    expect(acquiredId).not.toBe(releasedId);
+    act(() => { second.result.current.cancel(); });
+    await waitFor(() => {
+      expect(cleanupEngine.release).toHaveBeenCalledWith(acquiredId);
+    });
+    second.unmount();
+  });
+
   it('a stale session\'s STT completion does not clobber a newer session\'s phase', async () => {
     // Hold 1 stops → transcribing (slow). User starts hold 2 before STT
     // resolves. Session 1's completion must still deliver + record history
@@ -810,6 +861,71 @@ describe('useDogfoodCapture', () => {
     expect(onHistoryRecord).not.toHaveBeenCalled();
     expect(dogfood).not.toHaveBeenCalled();
   });
+
+  it.each([
+    { committed: false, expected: 0, started: false, status: 'failed' },
+    { committed: false, expected: 1, started: true, status: 'failed' },
+    { committed: true, expected: 1, started: true, status: 'inserted' },
+  ] as const)(
+    'guards delayed provenance history for write evidence %#',
+    async ({ committed, expected, started, status }) => {
+      const store = createMockSttModelStore();
+      await store.download('whisper-tiny.en');
+      let finishProvenance!: (value: CleanupProvenance) => void;
+      const createProvenance = vi.fn(() =>
+        new Promise<CleanupProvenance>((resolve) => {
+          finishProvenance = resolve;
+        }));
+      const onHistoryRecord = vi.fn();
+      const stopped: CaptureState = {
+        audio: {
+          duration_ms: 100,
+          id: `provenance-${status}-${started}`,
+          sample_rate_hz: 16_000,
+        },
+        kind: 'stopped',
+      };
+      const dogfood = vi.fn(async (): Promise<DogfoodResult> => ({
+        copied: false,
+        delivery: {
+          ...deliveryOutcome(status, 'delayed provenance'),
+          writeCommitted: committed,
+          writeStarted: started,
+        },
+        transcript: { language: 'en', text: 'delayed provenance' },
+      }));
+      const { rerender, result } = renderHook(
+        ({ state }: { state: CaptureState }) => useDogfoodCapture({
+          captureApi: stubCapture(state),
+          clipboard: clipboard(),
+          createModelStore: () => store,
+          createProvenance,
+          dogfood: dogfood as never,
+          modelId: 'whisper-tiny.en',
+          onHistoryRecord,
+        }),
+        { initialProps: { state: { kind: 'idle' } as CaptureState } },
+      );
+
+      await act(async () => { await result.current.start(); });
+      rerender({ state: stopped });
+      await waitFor(() => expect(createProvenance).toHaveBeenCalledOnce());
+      act(() => { result.current.cancel(); });
+      await act(async () => {
+        finishProvenance({
+          dictionaryDigest: null,
+          dictionaryVersion: 1,
+          modelDigest: null,
+          modelId: null,
+          promptVersion: 'cleanup-v1',
+          reason: null,
+          status: 'skipped',
+        });
+      });
+      await waitFor(() => expect(result.current.phase).toBe('cancelled'));
+      expect(onHistoryRecord).toHaveBeenCalledTimes(expected);
+    },
+  );
 
 
   it('snapshots intended target at start and passes it to dogfood (no Voxloom focus required)', async () => {
