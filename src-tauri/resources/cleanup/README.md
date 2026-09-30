@@ -42,8 +42,16 @@ Dependency-free checks (no upstream source or model needed):
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/native -v
 ```
 
-**Current limitation:** these helper/tool tests pass, but the revised full C++
-worker and template checker have not been built against the pinned upstream,
-and the actual-GGUF check has not run. Real inference/corpus, packaged
-smoke/signatures, and live compatibility remain separate gates. The optional
-build is for local dogfooding, not certified public distribution.
+**Current build evidence:** the full revised worker/template checker builds
+against the clean pin; safety, token lifetime, upstream Jinja, and four framed
+error checks pass on macOS 26.6.2 (arm64). The scratch binary is arm64, declares
+11.0, and passes local `codesign --verify --strict`; it has not been installed or
+bundled. This is not packaged signing or older-system compatibility evidence.
+
+**Compatibility blocker:** pinned upstream has unguarded Metal calls introduced
+in macOS 12 and Accelerate NEWLAPACK calls introduced in 13.3. The latter remain
+weak imports in the binary; an 11.0 load command does not make those calls safe on
+11. No upstream patch or floor increase has been made. A revised floor/backend
+compatibility decision is needed. The actual-GGUF check, real inference/corpus,
+packaged smoke/signatures, and live compatibility remain separate gates. The
+optional build is for local dogfooding, not certified public distribution.

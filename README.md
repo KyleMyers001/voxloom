@@ -155,9 +155,13 @@ python3 scripts/check-cleanup-template.py \
 
 This holds a fully verified descriptor and uses metadata/vocabulary only. It is
 not a generation/fidelity test. Source and model downloads are never automatic.
-The revised C++ worker/template integration remains unbuilt against the pin;
-standalone helper tests are not a substitute for that gate. See
-`src-tauri/resources/cleanup/README.md` for checks and current limitations.
+The revised C++ worker/template checker now builds against the clean pin and
+passes weight-free checks on macOS 26.6.2 (arm64). **Compatibility remains blocked:**
+upstream calls unguarded macOS 12 Metal and 13.3 Accelerate APIs despite the
+currently declared 11.0 floor. That declaration is not proof of support; a revised
+compatibility decision is required before completion. No floor was raised or
+upstream source patched. Actual GGUF/template/inference checks remain unrun. See
+`src-tauri/resources/cleanup/README.md` for details.
 
 The worker script refuses to replace an existing resource unless explicitly
 allowed with `VOXLOOM_CLEANUP_REPLACE_WORKER=1`. Do not opt in without approval

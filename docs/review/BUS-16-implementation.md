@@ -1,6 +1,42 @@
 # BUS-16 local cleanup implementation
 
-## Worker safety/tooling checkpoint — 2026-09-30
+## Pinned worker build checkpoint — 2026-09-30
+
+Kyle explicitly approved fetching the pinned upstream source for scratch
+compilation/testing, without weights or artifact replacement. A fresh checkout
+of `b10621` matches `c1d0e7a004015f23bc0233470b747b596f29b264` and remains clean.
+The **full worker, template checker, safety checker, and token-state checker
+compile successfully**. All four weight-free checks pass on macOS 26.6.2/arm64,
+including the real worker's four structured-error protocol cases. An additional
+inherited synthetic `GGUFtest` descriptor reaches real backend/model loading and
+returns a fixed runtime error with quiet stderr and one clean frame. No actual
+allowlisted GGUF, generation, or actual-metadata template result is established.
+
+The scratch worker is **arm64**, declares **macOS 11.0**, links system frameworks,
+and passes `codesign --verify --strict`. Nothing was installed into checkout
+resources or an app bundle; this is not packaged/signing/distribution proof.
+
+**New compatibility blocker:** the pin's Metal event synchronization invokes
+`waitUntilSignaledValue:timeoutMS:` without a macOS 12 availability guard. Its
+BLAS backend calls macOS 13.3 `cblas_sgemm` NEWLAPACK/ILP64 APIs without a guard;
+the binary contains the corresponding weak Accelerate import. Build success and
+the 11.0 load command therefore do not establish support for the approved floor.
+Do not silently raise it, disable backends, or modify the clean source pin.
+A narrow compatibility decision is required before completion; recommending a
+13.3 optional floor avoids these diagnosed API-floor conflicts, but still would
+not certify old hardware/OS behavior. The ordinary workerless 10.15 declaration
+is unchanged.
+
+The SDK emitted these three availability warnings (two Accelerate calls, one
+Metal call). Configure also reported missing optional ccache and an unused
+`FETCHCONTENT_FULLY_DISCONNECTED` guard; no extra dependency download occurred.
+Previous frontend/helper/browser/Rust evidence below is unchanged-code evidence,
+not newly rerun for this build-only continuation. Hosted CI remains unrun.
+Corpus tooling, real-model quality/performance, packaged and permitted live
+checks still remain. No source code changed in this continuation; no weights,
+worker-resource/app replacements, push/merge, or PR/Jira mutation. Keep PR #24 draft.
+
+## Worker safety/tooling checkpoint — 2026-09-30 (historical)
 
 Current local checks: **489 frontend tests / 68 files**, lint, typecheck, isolated
 production build, **6 browser tests**, both offline locked Cargo checks, and five
