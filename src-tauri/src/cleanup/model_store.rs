@@ -5,7 +5,8 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager};
 
 use super::artifact::{
-    copy_private, open_verified, validate as validate_artifact, ArtifactSpec,
+    copy_private, open_regular, validate as validate_artifact, validate_file,
+    ArtifactSpec,
 };
 
 pub const MODEL_ID: &str = "qwen3-0.6b-q4-k-m";
@@ -42,7 +43,15 @@ pub struct CleanupModelStore {
 #[derive(Debug)]
 pub struct ModelLease {
     pub file: File,
+    artifact: ArtifactSpec,
     inner: Arc<Mutex<StoreInner>>,
+}
+
+impl ModelLease {
+    /// Hash the already reserved descriptor, without holding the store lock.
+    pub fn verify(&mut self) -> Result<(), String> {
+        validate_file(&mut self.file, self.artifact)
+    }
 }
 
 struct ImportGuard {
@@ -96,7 +105,7 @@ impl CleanupModelStore {
         Ok(self.status())
     }
 
-    fn import_artifact(
+    pub(super) fn import_artifact(
         &self,
         source: &Path,
         artifact: ArtifactSpec,
@@ -132,7 +141,7 @@ impl CleanupModelStore {
         self.lease_artifact(model_id, ARTIFACT)
     }
 
-    fn lease_artifact(
+    pub(super) fn lease_artifact(
         &self,
         model_id: &str,
         artifact: ArtifactSpec,
@@ -144,10 +153,14 @@ impl CleanupModelStore {
         if inner.importing {
             return Err("cleanup model is being imported".into());
         }
-        let file = open_verified(&self.model_path(), artifact)?;
+        if inner.leases >= 2 {
+            return Err("cleanup model descriptor capacity is full".into());
+        }
+        let file = open_regular(&self.model_path())?;
         inner.leases += 1;
         Ok(ModelLease {
             file,
+            artifact,
             inner: Arc::clone(&self.inner),
         })
     }
@@ -233,26 +246,99 @@ mod tests {
     }
 
     #[test]
+    fn admission_opens_without_hashing_the_model() {
+        let root = temp_root("cheap-admission");
+        fs::create_dir_all(&root).unwrap();
+        let store = CleanupModelStore::new(root);
+        fs::write(store.model_path(), b"GGUFevil").unwrap();
+        // Admission is only a reservation. Full verification belongs immediately
+        // before inference, on this same descriptor, not on the microphone path.
+        let lease = store.lease_artifact(
+            MODEL_ID,
+            ArtifactSpec {
+                sha256: "not-the-digest",
+                size: 8,
+            },
+        );
+        assert!(lease.is_ok(), "admission must not hash: {lease:?}");
+    }
+
+    #[test]
     fn lease_rejects_same_size_tampering() {
         let root = temp_root("tamper");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         let bytes = b"GGUFtest";
-        let digest = Box::leak(
-            format!("{:x}", Sha256::digest(bytes)).into_boxed_str(),
-        );
+        let digest =
+            Box::leak(format!("{:x}", Sha256::digest(bytes)).into_boxed_str());
         let store = CleanupModelStore::new(root.clone());
         fs::write(store.model_path(), b"GGUFevil").unwrap();
-        let error = store.lease_artifact(
-            MODEL_ID,
-            ArtifactSpec {
-                sha256: digest,
-                size: bytes.len() as u64,
-            },
-        ).unwrap_err();
+        let mut lease = store
+            .lease_artifact(
+                MODEL_ID,
+                ArtifactSpec {
+                    sha256: digest,
+                    size: bytes.len() as u64,
+                },
+            )
+            .unwrap();
+        let error = lease.verify().unwrap_err();
         assert!(error.contains("SHA-256 mismatch"));
+        assert_eq!(store.inner.lock().unwrap().leases, 1);
+        drop(lease);
         assert_eq!(store.inner.lock().unwrap().leases, 0);
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn bounds_descriptors_even_while_retired_acquisitions_are_finishing() {
+        let root = temp_root("descriptor-capacity");
+        fs::create_dir_all(&root).unwrap();
+        let store = CleanupModelStore::new(root);
+        fs::write(store.model_path(), b"GGUFtest").unwrap();
+        let first = store.lease(MODEL_ID).unwrap();
+        let second = store.lease(MODEL_ID).unwrap();
+        assert!(store.lease(MODEL_ID).is_err());
+        drop(first);
+        assert!(store.lease(MODEL_ID).is_ok());
+        drop(second);
+    }
+
+    #[test]
+    fn verification_uses_the_reserved_descriptor_without_store_lock() {
+        let root = temp_root("descriptor-verification");
+        fs::create_dir_all(&root).unwrap();
+        let bytes = b"GGUFtest";
+        let digest =
+            Box::leak(format!("{:x}", Sha256::digest(bytes)).into_boxed_str());
+        let store = CleanupModelStore::new(root.clone());
+        fs::write(store.model_path(), bytes).unwrap();
+        let mut lease = store
+            .lease_artifact(
+                MODEL_ID,
+                ArtifactSpec {
+                    sha256: digest,
+                    size: 8,
+                },
+            )
+            .unwrap();
+        fs::rename(store.model_path(), root.join("original.gguf")).unwrap();
+        fs::write(store.model_path(), b"GGUFevil").unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let lock = store.inner.lock().unwrap();
+        let verifier = std::thread::spawn(move || {
+            sender.send(lease.verify()).unwrap();
+            lease
+        });
+        let result = receiver.recv_timeout(std::time::Duration::from_secs(2));
+        drop(lock);
+        let mut lease = verifier.join().unwrap();
+        assert!(result.unwrap().is_ok());
+        // Mutation of the held descriptor is still detected on re-verification.
+        fs::write(root.join("original.gguf"), b"GGUFevil").unwrap();
+        assert!(lease.verify().unwrap_err().contains("SHA-256 mismatch"));
+        drop(lease);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -261,9 +347,8 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         let bytes = b"GGUFtest";
-        let digest = Box::leak(
-            format!("{:x}", Sha256::digest(bytes)).into_boxed_str(),
-        );
+        let digest =
+            Box::leak(format!("{:x}", Sha256::digest(bytes)).into_boxed_str());
         let artifact = ArtifactSpec {
             sha256: digest,
             size: bytes.len() as u64,
@@ -272,11 +357,13 @@ mod tests {
         fs::write(store.model_path(), bytes).unwrap();
         let first = store.lease_artifact(MODEL_ID, artifact).unwrap();
         let queued = store.lease_artifact(MODEL_ID, artifact).unwrap();
-        assert!(store.import_artifact(&store.model_path(), artifact)
+        assert!(store
+            .import_artifact(&store.model_path(), artifact)
             .unwrap_err()
             .contains("in use"));
         drop(first);
-        assert!(store.import_artifact(&store.model_path(), artifact)
+        assert!(store
+            .import_artifact(&store.model_path(), artifact)
             .unwrap_err()
             .contains("in use"));
         drop(queued);

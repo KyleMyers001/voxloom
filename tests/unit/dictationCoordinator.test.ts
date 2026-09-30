@@ -16,6 +16,20 @@ describe('DictationCoordinator', () => {
     expect(coordinator.reserve()).toBeNull();
   });
 
+  it('disposes all reservations without accidentally starting queued work', async () => {
+    const coordinator = new DictationCoordinator<string>();
+    const first = coordinator.reserve();
+    const queued = coordinator.reserve();
+    const execute = vi.fn(async () => 'unexpected');
+    const queuedResult = queued?.submit(execute);
+    coordinator.dispose();
+    await expect(queuedResult).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(first?.submit(execute)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(execute).not.toHaveBeenCalled();
+    expect(coordinator.reserve()).toBeNull();
+    coordinator.dispose();
+  });
+
   it('runs complete jobs FIFO', async () => {
     const coordinator = new DictationCoordinator<string>();
     const first = coordinator.reserve();

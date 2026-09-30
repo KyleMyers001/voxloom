@@ -32,6 +32,7 @@ function signalFor(controller: AbortController): ProcessingSignal {
 export class DictationCoordinator<Result> {
   private active: Entry<Result> | null = null;
   private nextId = 1;
+  private disposed = false;
   private readonly prefix: string;
   private readonly queue: Entry<Result>[] = [];
 
@@ -47,7 +48,7 @@ export class DictationCoordinator<Result> {
   }
 
   reserve(): ProcessingReservation<Result> | null {
-    if (this.queue.length >= this.capacity) return null;
+    if (this.disposed || this.queue.length >= this.capacity) return null;
     const controller = new AbortController();
     let entry: Entry<Result>;
     const promise = new Promise<Result>((resolve, reject) => {
@@ -73,6 +74,13 @@ export class DictationCoordinator<Result> {
         return promise;
       },
     };
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    // Remove queued entries first: cancelling an unsubmitted head must not
+    // pump another job into execution during teardown.
+    for (const entry of [...this.queue].reverse()) this.cancel(entry.id);
   }
 
   private cancel(id: string): void {

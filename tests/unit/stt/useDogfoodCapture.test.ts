@@ -12,7 +12,10 @@ import type { DeliveryPlatformAdapter, TargetSnapshot } from
 import type { CaptureState } from '../../../src/services/capture/types';
 import type { UseCaptureStateResult } from
   '../../../src/services/capture/useCaptureState';
-import type { DogfoodResult } from '../../../src/services/stt/dogfoodPath';
+import type {
+  DogfoodResult,
+  DogfoodTranscribeOptions,
+} from '../../../src/services/stt/dogfoodPath';
 import {
   createMockSttEngine,
   createMockSttModelStore,
@@ -748,6 +751,77 @@ describe('useDogfoodCapture', () => {
     expect(dogfood).toHaveBeenCalledOnce();
     expect(history).toHaveBeenCalledOnce();
     expect(history.mock.calls[0][0].id).toBe('dogfood-active-a');
+  });
+
+  it('disposes its native owner and prevents late capture start on unmount during acquire', async () => {
+    const store = createMockSttModelStore();
+    await store.download('whisper-tiny.en');
+    let finishAcquire!: () => void;
+    const cleanupEngine = {
+      acquire: vi.fn(() => new Promise<void>((resolve) => { finishAcquire = resolve; })),
+      cancel: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn().mockResolvedValue(undefined),
+      run: vi.fn(),
+    };
+    const captureApi = stubCapture({ kind: 'idle' });
+    const { result, unmount } = renderHook(() => useDogfoodCapture({
+      captureApi, cleanupEngine, cleanupEnabled: true,
+      cleanupModelId: 'qwen3-0.6b-q4-k-m', clipboard: clipboard(),
+      createModelStore: () => store, modelId: 'whisper-tiny.en',
+    }));
+    let starting!: Promise<void>;
+    act(() => { starting = result.current.start(); });
+    await waitFor(() => expect(cleanupEngine.acquire).toHaveBeenCalledOnce());
+    unmount();
+    expect(cleanupEngine.dispose).toHaveBeenCalledOnce();
+    await act(async () => { finishAcquire(); await starting; });
+    expect(captureApi.startFullCaptureSession).not.toHaveBeenCalled();
+    expect(cleanupEngine.release).toHaveBeenCalled();
+  });
+
+  it('aborts active and queued jobs on unmount without executing the queued job', async () => {
+    const store = createMockSttModelStore();
+    await store.download('whisper-tiny.en');
+    const cleanupEngine = {
+      acquire: vi.fn().mockResolvedValue(undefined),
+      cancel: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn().mockResolvedValue(undefined),
+      run: vi.fn(),
+    };
+    let rejectRun!: (error: Error) => void;
+    const dogfood = vi.fn<(input: DogfoodTranscribeOptions) => Promise<DogfoodResult>>(
+      () => new Promise<DogfoodResult>((_resolve, reject) => { rejectRun = reject; }),
+    );
+    const history = vi.fn();
+    const { result, rerender, unmount } = renderHook(
+      ({ state }: { state: CaptureState }) => useDogfoodCapture({
+        captureApi: stubCapture(state), cleanupEngine, cleanupEnabled: true,
+        cleanupModelId: 'qwen3-0.6b-q4-k-m', clipboard: clipboard(),
+        createModelStore: () => store, dogfood, modelId: 'whisper-tiny.en',
+        onHistoryRecord: history,
+      }),
+      { initialProps: { state: { kind: 'idle' } as CaptureState } },
+    );
+    const stopped = (id: string): CaptureState => ({
+      audio: { duration_ms: 100, id, sample_rate_hz: 16_000 }, kind: 'stopped',
+    });
+    await act(async () => { await result.current.start(); });
+    rerender({ state: stopped('active-unmount') });
+    await waitFor(() => expect(dogfood).toHaveBeenCalledOnce());
+    const signal = dogfood.mock.calls[0][0].cleanup?.signal;
+    rerender({ state: { kind: 'idle' } });
+    await act(async () => { await result.current.start(); });
+    const queuedId = cleanupEngine.acquire.mock.calls[1][0];
+    rerender({ state: stopped('queued-unmount') });
+    unmount();
+    expect(signal?.aborted).toBe(true);
+    expect(cleanupEngine.dispose).toHaveBeenCalledOnce();
+    await waitFor(() => expect(cleanupEngine.release).toHaveBeenCalledWith(queuedId));
+    await act(async () => { rejectRun(new DOMException('Cancelled', 'AbortError')); });
+    expect(dogfood).toHaveBeenCalledOnce();
+    expect(history).not.toHaveBeenCalled();
   });
 
   it('keeps active cleanup ownership until cancelled execution settles', async () => {

@@ -191,9 +191,6 @@ export function useDogfoodCapture(
   const cleanupEngineRef = useRef(
     options.cleanupEngine ?? createTauriCleanupEngine(),
   );
-  if (options.cleanupEngine) {
-    cleanupEngineRef.current = options.cleanupEngine;
-  }
 
   const dogfoodRef = useRef(options.dogfood ?? dogfoodTranscribeAndCopy);
   dogfoodRef.current = options.dogfood ?? dogfoodTranscribeAndCopy;
@@ -228,6 +225,25 @@ export function useDogfoodCapture(
    * record history, but must not overwrite the newer session's phase.
    */
   const sessionRef = useRef(0);
+
+  useEffect(() => {
+    // A fresh engine on effect setup also handles React StrictMode remounts.
+    // Unmount is an extra retirement path, not a substitute for native hooks.
+    const engine = options.cleanupEngine ?? createTauriCleanupEngine();
+    const coordinator = new DictationCoordinator<DogfoodResult>(2);
+    cleanupEngineRef.current = engine;
+    coordinatorRef.current = coordinator;
+    return () => {
+      sessionRef.current += 1;
+      coordinator.dispose();
+      if (admissionRef.current) cancelAdmission(admissionRef.current);
+      admissionRef.current = null;
+      processingRef.current = null;
+      void engine.dispose?.().catch(() => {
+        console.warn('Cleanup session disposal failed; native lifecycle reclamation remains active.');
+      });
+    };
+  }, [options.cleanupEngine]);
 
   const announce = useCallback((text: string) => {
     setMessage(text);

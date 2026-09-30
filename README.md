@@ -137,8 +137,10 @@ and `otool` output and verify the app's ad-hoc signature before native testing.
 The template/protocol smoke is weight-free and **not** real-Qwen evidence.
 Actual GGUF template/generation, fidelity, latency/RAM, packaged import,
 Whisper/microphone/AX/clipboard behavior, and compatibility remain live-validation
-gates. Native owner reclamation and other PR #24 safety fixes are still pending;
-keep the PR draft. Downloads, a persistent worker, and distribution certification
+gates. Native owner reclamation now has deterministic registry/adapter tests
+and synthetic-worker kill/reap coverage, but actual renderer reload/crash checks
+and other PR #24 safety fixes remain outstanding. Keep the PR draft.
+Downloads, a persistent worker, and distribution certification
 are deferred. See `docs/review/BUS-16-implementation.md` for the branch's prior
 implementation evidence and known limitations.
 

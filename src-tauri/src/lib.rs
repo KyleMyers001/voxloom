@@ -137,7 +137,7 @@ fn capture_list_devices(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
@@ -171,6 +171,8 @@ pub fn run() {
             cleanup::cleanup_model_status,
             cleanup::cleanup_release,
             cleanup::cleanup_run,
+            cleanup::cleanup_session_open,
+            cleanup::cleanup_session_dispose,
             delivery::delivery_insert_text,
             delivery::delivery_snapshot_target,
             delivery::delivery_validate_target,
@@ -191,7 +193,23 @@ pub fn run() {
             stt::stt_model_status,
             stt::stt_transcribe,
         ])
+        .on_page_load(|webview, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Started {
+                if let Some(cleanup) =
+                    webview.try_state::<cleanup::CleanupState>()
+                {
+                    cleanup.retire_main(webview.label());
+                }
+            }
+        })
         .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                if let Some(cleanup) =
+                    window.try_state::<cleanup::CleanupState>()
+                {
+                    cleanup.retire_main(window.label());
+                }
+            }
             if let tauri::WindowEvent::CloseRequested { .. } = event {
                 if let Some(coordinator) =
                     window.try_state::<CaptureCoordinator>()
@@ -199,7 +217,14 @@ pub fn run() {
                     coordinator.cancel_any();
                 }
             }
-        })
+        });
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    let builder = builder.on_web_content_process_terminate(|webview| {
+        if let Some(cleanup) = webview.try_state::<cleanup::CleanupState>() {
+            cleanup.retire_main(webview.label());
+        }
+    });
+    builder
         .run(tauri::generate_context!())
         .expect("failed to run Voxloom");
 }

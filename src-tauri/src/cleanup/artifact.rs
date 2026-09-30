@@ -4,7 +4,7 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct ArtifactSpec {
     pub sha256: &'static str,
     pub size: u64,
@@ -37,8 +37,7 @@ pub fn copy_private(source: &Path, destination: &Path) -> Result<(), String> {
 
 pub fn validate(path: &Path, spec: ArtifactSpec) -> Result<(), String> {
     validate_shape(path, spec)?;
-    let mut file = open_regular(path)?;
-    validate_file(&mut file, spec)
+    open_verified(path, spec).map(drop)
 }
 
 pub fn open_verified(path: &Path, spec: ArtifactSpec) -> Result<File, String> {
@@ -47,26 +46,41 @@ pub fn open_verified(path: &Path, spec: ArtifactSpec) -> Result<File, String> {
     Ok(file)
 }
 
-fn open_regular(path: &Path) -> Result<File, String> {
+pub fn open_regular(path: &Path) -> Result<File, String> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("read cleanup model metadata: {error}"))?;
     if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
         return Err("cleanup model must be a regular non-symlink file".into());
     }
     #[cfg(unix)]
-    {
+    let file = {
         use std::os::unix::fs::OpenOptionsExt;
-        return OpenOptions::new()
+        OpenOptions::new()
             .read(true)
-            .custom_flags(libc::O_NOFOLLOW)
+            // NONBLOCK also prevents a regular-file-to-FIFO swap from hanging
+            // admission between lstat and open. Check the opened descriptor.
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
             .open(path)
-            .map_err(|error| format!("open cleanup model: {error}"));
-    }
+    };
     #[cfg(not(unix))]
-    File::open(path).map_err(|error| format!("open cleanup model: {error}"))
+    let file = File::open(path);
+    let file = file.map_err(|error| format!("open cleanup model: {error}"))?;
+    if !file
+        .metadata()
+        .map_err(|error| error.to_string())?
+        .is_file()
+    {
+        return Err("cleanup model must be a regular file".into());
+    }
+    Ok(file)
 }
 
-fn validate_file(file: &mut File, spec: ArtifactSpec) -> Result<(), String> {
+pub fn validate_file(
+    file: &mut File,
+    spec: ArtifactSpec,
+) -> Result<(), String> {
+    file.seek(SeekFrom::Start(0))
+        .map_err(|error| format!("rewind cleanup model: {error}"))?;
     let metadata = file
         .metadata()
         .map_err(|error| format!("read cleanup model metadata: {error}"))?;

@@ -1,5 +1,44 @@
 # BUS-16 local cleanup implementation
 
+## Completion checkpoint — 2026-09-30
+
+Revision-1 completion work remains **partial**; keep PR #24 draft. The earlier
+review-pass results below are historical, not proof that the current checkout
+has a worker, real-model quality evidence, or a fully passing validation gate.
+
+Current ownership changes:
+
+- Every cleanup command checks the invoking native main webview/window. Request
+  commands additionally require a native-issued session. Navigation start,
+  renderer termination, window destruction, and explicit hook disposal retire
+  that owner; stale acquires cannot restore its pending leases.
+- Pending descriptors are reclaimed outside registry locks. Running tasks retain
+  their descriptors until kill/reap completes. Cancellation and release are
+  scoped to the owner/request; active/retired jobs still count toward admission.
+- Admission opens a no-follow regular descriptor without hashing the model.
+  Before inference, the same held descriptor is fully verified on a blocking
+  task outside state locks. No inode/mtime cache substitutes for integrity.
+- One supervisor transition lock reserves before spawn and preserves cancellation
+  during spawn. Cancellation waiters cannot advance FIFO before native settlement.
+  Hook teardown aborts queued/active jobs, disposes the session, and supports
+  StrictMode remounts. Settings/readiness fixes from the prior checkpoint remain.
+
+Current local checks: both Cargo checks passed; five sequential default/Whisper
+suite pairs passed under normal parallel execution (**168/167 tests per run**).
+The late-output recovery test now uses a 3-second success deadline and a 60-second
+intentional stall, preserving recovery through the same supervisor. Frontend
+suite: **376 passed, 4 failed**, all four due to the missing installed
+`@stylistic/eslint-plugin`; lint is blocked by that dependency. TypeScript and
+Vite build checks passed with isolated output. Native checks retain four known
+pre-existing warnings.
+
+These tests use synthetic workers/model fixtures. Actual Tauri lifecycle events,
+real GGUF inference, bundle/import, microphone/AX/clipboard behavior, signatures,
+and compatibility remain unverified. Silence/fidelity/delivery-evidence fixes,
+truthful error/provenance/history boundaries, remaining worker hardening/corpus,
+and macOS Rust CI are still pending. No new worker/app build or weight download
+was performed in this checkpoint.
+
 ## Candidate scope
 
 This candidate adds one opt-in, offline cleanup pass between Whisper and the
@@ -62,12 +101,18 @@ target validation, and clipboard fallback semantics remain unchanged.
 
 ## Build provisioning
 
-The normal app builds without the optional worker and reports it unavailable.
-For a developer build, stage the exact pinned llama.cpp tree next to the repo,
-then run:
+The normal bundle is workerless. Optional local dogfood cleanup targets
+Apple Silicon/macOS 11+; it is not a public-distribution or M1 compatibility
+certification. See the root README for source/build directory overrides and
+artifact-replacement safeguards. With a clean local checkout at the exact pin,
+run:
 
 ```sh
 ./scripts/build-cleanup-worker.sh
+CARGO_TARGET_DIR=/absolute/path/to/new/tauri-target \
+  npm run tauri -- build --debug --bundles app \
+  --target aarch64-apple-darwin --features whisper \
+  --config src-tauri/tauri.cleanup.conf.json
 ```
 
 The script verifies the immutable commit, builds static CPU/Accelerate/Metal

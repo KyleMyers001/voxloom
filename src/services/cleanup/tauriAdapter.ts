@@ -25,27 +25,84 @@ function runtimeError(error: unknown): CleanupEngineError {
 }
 
 export function createTauriCleanupEngine(): CleanupEngine {
+  let session: Promise<string> | null = null;
+  let disposed = false;
+  let disposal: Promise<void> | null = null;
+  const acquisitions = new Map<string, Promise<void>>();
+
+  async function sessionId(): Promise<string> {
+    if (disposed) throw new CleanupEngineError('cancelled', 'Cleanup session disposed');
+    const opening = session ??= invoke<string>('cleanup_session_open');
+    let id: string;
+    try {
+      id = await opening;
+    } catch (error: unknown) {
+      if (session === opening) session = null;
+      throw error;
+    }
+    if (disposed) throw new CleanupEngineError('cancelled', 'Cleanup session disposed');
+    return id;
+  }
+
+  async function ownedInvoke<T>(
+    command: string,
+    args: Record<string, unknown>,
+  ): Promise<T> {
+    try {
+      const owner = await sessionId();
+      return await invoke<T>(command, { ...args, sessionId: owner });
+    } catch (error: unknown) {
+      throw runtimeError(error);
+    }
+  }
+
+  async function settle(command: string, requestId: string): Promise<void> {
+    if (!session || disposed) return;
+    // Do not let release overtake an acquire still opening its descriptor.
+    // Native generations independently protect disposal/navigation races.
+    try {
+      await acquisitions.get(requestId);
+    } catch {
+      // Still settle failures if the session itself was established.
+    }
+    if (session !== null && !disposed) {
+      await ownedInvoke(command, { requestId });
+    }
+  }
+
   return {
     async acquire(requestId, modelId) {
+      const acquiring = ownedInvoke<void>(
+        'cleanup_acquire', { modelId, requestId },
+      );
+      acquisitions.set(requestId, acquiring);
       try {
-        await invoke('cleanup_acquire', { modelId, requestId });
-      } catch (error: unknown) {
-        throw runtimeError(error);
+        await acquiring;
+      } finally {
+        if (acquisitions.get(requestId) === acquiring) {
+          acquisitions.delete(requestId);
+        }
       }
     },
-    async cancel(requestId) {
-      await invoke('cleanup_cancel', { requestId });
+    cancel: (requestId) => settle('cleanup_cancel', requestId),
+    release: (requestId) => settle('cleanup_release', requestId),
+    dispose() {
+      if (disposal) return disposal;
+      disposed = true;
+      const opening = session;
+      disposal = (async () => {
+        if (!opening) return;
+        let owner: string;
+        try {
+          owner = await opening;
+        } catch {
+          return;
+        }
+        await invoke('cleanup_session_dispose', { sessionId: owner });
+      })();
+      return disposal;
     },
-    async release(requestId) {
-      await invoke('cleanup_release', { requestId });
-    },
-    async run(request) {
-      try {
-        return await invoke<string>('cleanup_run', { request });
-      } catch (error: unknown) {
-        throw runtimeError(error);
-      }
-    },
+    run: (request) => ownedInvoke<string>('cleanup_run', { request }),
   };
 }
 
