@@ -21,3 +21,42 @@ jobs:
       - run: npm run test:unit
       - run: npm run build
       - run: npm run test:e2e
+
+  # Native checks are weight-free and require no interactive macOS permissions.
+  # This does not certify the optional worker bundle or real-model quality.
+  native-macos:
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Ensure CMake is available for whisper.cpp
+        run: command -v cmake >/dev/null || brew install cmake
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+      - name: Check default and Whisper
+        run: |
+          cargo check --manifest-path src-tauri/Cargo.toml --locked
+          cargo check --manifest-path src-tauri/Cargo.toml --locked --features whisper
+      - name: Five normal-parallel suite pairs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for run in 1 2 3 4 5; do
+            echo "Native suite pair ${run}/5"
+            cargo test --manifest-path src-tauri/Cargo.toml --locked --lib
+            cargo test --manifest-path src-tauri/Cargo.toml --locked --lib --features whisper
+          done

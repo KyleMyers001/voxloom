@@ -101,6 +101,15 @@ cleanup checkbox are separate prerequisites. Use **Refresh cleanup status**
 to recheck them; returning focus to Settings also refreshes. Cleanup can always
 be turned off, even when the model or worker is unavailable.
 
+Blank STT bypasses cleanup and delivery. Cleanup candidates must preserve whole
+technical-token multisets (including repeated numbers, flags, paths, and hosts)
+and normalized content in order. Only bounded dictionary spelling/joining,
+fillers/articles, and narrowly marked spoken corrections are discounted.
+Ambiguous rewrites fall back to raw once. These conservative lexical checks are
+not semantic-equivalence or real-model quality proof. A cancelled failed insert
+retains attempted-write evidence without starting clipboard fallback. Unreadable
+cleanup metadata leaves valid History text intact with unavailable provenance.
+
 **Importing a GGUF does not install the worker.** A missing/non-executable
 worker requires a worker-equipped build; reimporting the model cannot fix it.
 The ordinary bundle contains no worker and retains its macOS 10.15 declaration.
@@ -148,7 +157,11 @@ implementation evidence and known limitations.
 
 Pull requests targeting `main` run GitHub Actions CI on Node 24 and Ubuntu:
 ESLint, Vitest unit tests, the TypeScript/Vite build, and Playwright Chromium
-browser tests. To run the same checks locally after `npm ci`:
+browser tests. The workflow also defines a separate macOS job for locked default
+and Whisper Cargo checks plus five sequential suite pairs with normal test
+parallelism. That job needs no model weights or interactive permissions and
+does not certify the optional worker bundle. Its first hosted run is still
+pending on this draft branch. To run the frontend checks locally after `npm ci`:
 
 ```sh
 PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers npx playwright install chromium

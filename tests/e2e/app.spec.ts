@@ -129,6 +129,21 @@ test('screens, settings, themes, and baselines stay synchronized', async (
     .toHaveAttribute('aria-pressed', 'true');
 });
 
+test('browser Settings do not promise native cleanup readiness', async ({ page }) => {
+  await page.goto('/');
+  await skipOnboarding(page);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await expect(page.getByText('Local cleanup is only available in the native app.'))
+    .toBeVisible();
+  await expect(page.getByRole('button', { name: 'Language-processing model import' }))
+    .toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Refresh cleanup status' }))
+    .toBeDisabled();
+  await expect(page.getByRole('checkbox', {
+    name: 'Clean transcripts with the imported local model',
+  })).toBeDisabled();
+});
+
 test('dialogs, reduced motion, narrow and coarse layouts work', async (
   { browser, page },
 ) => {

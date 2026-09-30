@@ -1,6 +1,46 @@
 # BUS-16 local cleanup implementation
 
-## Completion checkpoint — 2026-09-30
+## Text/evidence checkpoint — 2026-09-30
+
+The approved dependency reinstall succeeded without changing `package-lock.json`.
+Current checks now pass: **447 frontend tests**, lint, typecheck, isolated Vite
+build, and **6 Chromium browser tests** (including honest browser-only cleanup
+readiness). Both offline locked Cargo checks and five fresh default/Whisper suite
+pairs passed again: **168/167 tests each run**, normal parallelism. Four existing
+native warnings remain. The macOS CI job is configured and its YAML/configuration
+checks pass locally; **hosted execution is not established**. npm audit reports
+three existing locked dependency vulnerabilities (one moderate, two high); no
+unrequested dependency upgrades were made.
+
+Implemented since the ownership checkpoint:
+
+- Empty/whitespace STT exits before cleanup, target validation, or OS writes;
+  cancellation takes precedence. Reservations/leases settle; no history row or
+  fake success. Actual capture/path integration tests exercise these boundaries.
+- Whole technical lexemes and their multiplicities must match; substring/prefix
+  substitutions and added protected values are rejected. Content retention and
+  candidate coverage are both **100% after explicit normalization**, in order.
+  Negation and pronouns have additional multiset checks. Normalization permits
+  punctuation, paragraphing, selected fillers/articles/contractions, bounded
+  dictionary spelling/joining, and comma-marked single-word corrections. These
+  are intentionally restrictive heuristics, not semantic-equivalence proofs.
+- Deferred insertion failure after cancellation retains `writeStarted: true`,
+  the original failure, and history evidence, with no subsequent clipboard write.
+- Unknown native error codes map to `runtime-error`. Malformed/unknown cleanup
+  metadata degrades to `unavailable`, preserving valid v2 raw/final text and
+  delivery status across save/load and retention. Legacy migration bookkeeping
+  stays in data but is hidden from ordinary History presentation.
+
+**Still incomplete:** native serialized-frame preflight and structured startup
+errors; actual-attempt provenance, acquire-error preservation, and accurate
+cleaning phase; remaining worker UTF-8/error/log/template/import hardening; real
+corpus tooling and evaluation; actual packaged/lifecycle/native interactions and
+compatibility evidence. No model/source download, worker/app replacement, or
+microphone/AX/clipboard/renderer-crash interaction was performed. Chromium was
+installed for browser tests; its artifacts were isolated outside the checkout.
+Keep PR #24 draft. The older checkpoint below is historical where superseded.
+
+## Ownership checkpoint — 2026-09-30 (historical)
 
 Revision-1 completion work remains **partial**; keep PR #24 draft. The earlier
 review-pass results below are historical, not proof that the current checkout
