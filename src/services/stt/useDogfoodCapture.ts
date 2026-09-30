@@ -260,9 +260,11 @@ export function useDogfoodCapture(
     processingRef.current = processing;
     setPhase('queued');
     announce('Queued for processing…');
+    let executionStarted = false;
     try {
       const modelId = resolveTranscriptionModelId(admission.modelId);
       const result = await admission.reservation.submit(async (signal) => {
+        executionStarted = true;
         try {
           await ensureModelAvailable(admission.modelId);
           if (current()) {
@@ -335,6 +337,9 @@ export function useDogfoodCapture(
         toastRef.current?.(errorText(error));
       }
     } finally {
+      // Queued cancellation rejects submit without ever entering execute.
+      // Active runs retain their lease until execute's own finally settles.
+      if (!executionStarted) await releaseCleanupLease(admission);
       if (processingRef.current === processing) {
         processingRef.current = null;
       }

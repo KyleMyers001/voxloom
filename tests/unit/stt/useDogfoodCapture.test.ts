@@ -678,6 +678,120 @@ describe('useDogfoodCapture', () => {
     expect(events.at(-1)).toBe('history-dogfood-fifo-2');
   });
 
+  it('releases cancelled queued B without releasing active A or running B', async () => {
+    const store = createMockSttModelStore();
+    await store.download('whisper-tiny.en');
+    const cleanupEngine = {
+      acquire: vi.fn().mockResolvedValue(undefined),
+      cancel: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn().mockResolvedValue(undefined),
+      run: vi.fn(),
+    };
+    let finishA!: (result: DogfoodResult) => void;
+    const dogfood = vi.fn(() => new Promise<DogfoodResult>((resolve) => {
+      finishA = resolve;
+    }));
+    const history = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ state }: { state: CaptureState }) => useDogfoodCapture({
+        captureApi: stubCapture(state),
+        cleanupEnabled: true,
+        cleanupEngine,
+        cleanupModelId: 'qwen3-0.6b-q4-k-m',
+        clipboard: clipboard(),
+        createModelStore: () => store,
+        dogfood,
+        modelId: 'whisper-tiny.en',
+        onHistoryRecord: history,
+      }),
+      { initialProps: { state: { kind: 'idle' } as CaptureState } },
+    );
+    const stopped = (id: string): CaptureState => ({
+      audio: { duration_ms: 100, id, sample_rate_hz: 16_000 },
+      kind: 'stopped',
+    });
+
+    await act(async () => { await result.current.start(); });
+    const idA = cleanupEngine.acquire.mock.calls[0][0];
+    rerender({ state: stopped('active-a') });
+    await waitFor(() => expect(dogfood).toHaveBeenCalledOnce());
+    rerender({ state: { kind: 'idle' } });
+    await act(async () => { await result.current.start(); });
+    const idB = cleanupEngine.acquire.mock.calls[1][0];
+    rerender({ state: stopped('queued-b') });
+    expect(result.current.phase).toBe('queued');
+    act(() => { result.current.cancel(); });
+    await waitFor(() => {
+      expect(cleanupEngine.release).toHaveBeenCalledWith(idB);
+    });
+    expect(cleanupEngine.release).not.toHaveBeenCalledWith(idA);
+    expect(dogfood).toHaveBeenCalledOnce();
+    expect(history).not.toHaveBeenCalled();
+
+    // Cancellation frees B's reservation while A still owns its descriptor.
+    rerender({ state: { kind: 'idle' } });
+    await act(async () => { await result.current.start(); });
+    expect(cleanupEngine.acquire).toHaveBeenCalledTimes(3);
+    act(() => { result.current.cancel(); });
+    await act(async () => {
+      finishA(await mockDogfoodSuccess({
+        audio: { duration_ms: 100, id: 'active-a', sample_rate_hz: 16_000 },
+        modelId: 'whisper-tiny.en',
+      }));
+    });
+    await waitFor(() => {
+      expect(cleanupEngine.release.mock.calls.filter(([id]) => id === idA))
+        .toHaveLength(1);
+    });
+    expect(cleanupEngine.release.mock.calls.filter(([id]) => id === idB))
+      .toHaveLength(1);
+    expect(dogfood).toHaveBeenCalledOnce();
+    expect(history).toHaveBeenCalledOnce();
+    expect(history.mock.calls[0][0].id).toBe('dogfood-active-a');
+  });
+
+  it('keeps active cleanup ownership until cancelled execution settles', async () => {
+    const store = createMockSttModelStore();
+    await store.download('whisper-tiny.en');
+    const cleanupEngine = {
+      acquire: vi.fn().mockResolvedValue(undefined),
+      cancel: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn().mockResolvedValue(undefined),
+      run: vi.fn(),
+    };
+    let rejectRun!: (error: Error) => void;
+    const dogfood = vi.fn(() => new Promise<DogfoodResult>((_yes, no) => {
+      rejectRun = no;
+    }));
+    const { result, rerender } = renderHook(
+      ({ state }: { state: CaptureState }) => useDogfoodCapture({
+        captureApi: stubCapture(state),
+        cleanupEnabled: true,
+        cleanupEngine,
+        cleanupModelId: 'qwen3-0.6b-q4-k-m',
+        clipboard: clipboard(),
+        createModelStore: () => store,
+        dogfood,
+        modelId: 'whisper-tiny.en',
+      }),
+      { initialProps: { state: { kind: 'idle' } as CaptureState } },
+    );
+    await act(async () => { await result.current.start(); });
+    rerender({ state: {
+      audio: { duration_ms: 100, id: 'active', sample_rate_hz: 16_000 },
+      kind: 'stopped',
+    } });
+    await waitFor(() => expect(dogfood).toHaveBeenCalledOnce());
+    act(() => { result.current.cancel(); });
+    expect(cleanupEngine.release).not.toHaveBeenCalled();
+    await act(async () => {
+      rejectRun(new DOMException('Cancelled', 'AbortError'));
+    });
+    expect(cleanupEngine.release).toHaveBeenCalledExactlyOnceWith(
+      cleanupEngine.acquire.mock.calls[0][0],
+    );
+  });
+
   it('appends a copied history record after successful dogfood', async () => {
     const store = createMockSttModelStore();
     await store.download('whisper-tiny.en');
