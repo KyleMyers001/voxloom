@@ -16,9 +16,10 @@ focused-window shortcuts; state clears on reload. The Tauri shell persists
 **Settings**, **History** and the **Word dictionary** in app data
 (`settings.json`, `history.json`, `dictionary.json`). Native audio retry and
 saved audio retention are not implemented. Onboarding practice recognizes
-shortcut gestures but does not transcribe speech. Cleanup styles, the cleanup
-model and start-at-login are not functional desktop features yet. Development
-scenario controls are excluded from production builds. See
+shortcut gestures but does not transcribe speech. Optional local cleanup is
+experimental and not yet verified with real model generation; see the dogfood
+setup below. Start-at-login is not implemented. Development scenario controls
+are excluded from production builds. See
 `docs/review/BUS-14-insert-delivery.md` for native smoke checks and limitations.
 
 ## Browser
@@ -90,6 +91,56 @@ npm run tauri -- dev -- --features whisper
 ```
 
 Details: `docs/review/BUS-10-whisper.md`.
+
+## Optional local cleanup (BUS-16, draft)
+
+Cleanup is opt-in and offline, using an explicitly imported, allowlisted
+Qwen3 0.6B Q4_K_M GGUF. Import does **not** enable cleanup automatically.
+In Settings, the installed model, executable worker, selected model, and
+cleanup checkbox are separate prerequisites. Use **Refresh cleanup status**
+to recheck them; returning focus to Settings also refreshes. Cleanup can always
+be turned off, even when the model or worker is unavailable.
+
+**Importing a GGUF does not install the worker.** A missing/non-executable
+worker requires a worker-equipped build; reimporting the model cannot fix it.
+The ordinary bundle contains no worker and retains its macOS 10.15 declaration.
+The optional cleanup target is **Apple Silicon/macOS 11+**, for local developer
+use only—not a signed/notarized public release or a verified M1 compatibility
+claim. Intel/universal cleanup is outside the current scope.
+
+Provide a clean local llama.cpp checkout at the exact pin in
+`docs/third-party/llama.cpp.md`. The build script does not fetch source or
+weights. Then, from the repository root:
+
+```sh
+VOXLOOM_LLAMA_CPP_SOURCE=/absolute/path/to/clean/llama.cpp \
+VOXLOOM_CLEANUP_BUILD_DIR=/absolute/path/to/new/build-directory \
+  ./scripts/build-cleanup-worker.sh
+
+# Choose a fresh target directory to preserve existing app bundles.
+CARGO_TARGET_DIR=/absolute/path/to/new/tauri-target \
+  npm run tauri -- build --debug --bundles app \
+  --target aarch64-apple-darwin --features whisper \
+  --config src-tauri/tauri.cleanup.conf.json
+```
+
+The worker script refuses to replace an existing resource unless explicitly
+allowed with `VOXLOOM_CLEANUP_REPLACE_WORKER=1`. Do not opt in without approval
+to replace that artifact. A debug development run may also find the provisioned
+worker directly in `src-tauri/resources/cleanup`; this does not put it in an
+ordinary bundle. Import the exact local GGUF described in
+`docs/third-party/qwen3-0.6b.md`, then enable cleanup explicitly.
+
+The optional configuration bundles only the executable. Its build requests
+arm64, macOS 11.0, and `GGML_NATIVE=OFF`; inspect the resulting `file`, `lipo`,
+and `otool` output and verify the app's ad-hoc signature before native testing.
+The template/protocol smoke is weight-free and **not** real-Qwen evidence.
+Actual GGUF template/generation, fidelity, latency/RAM, packaged import,
+Whisper/microphone/AX/clipboard behavior, and compatibility remain live-validation
+gates. Native owner reclamation and other PR #24 safety fixes are still pending;
+keep the PR draft. Downloads, a persistent worker, and distribution certification
+are deferred. See `docs/review/BUS-16-implementation.md` for the branch's prior
+implementation evidence and known limitations.
 
 ## Verification
 

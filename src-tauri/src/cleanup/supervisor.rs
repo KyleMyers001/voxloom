@@ -53,7 +53,19 @@ impl WorkerSupervisor {
     }
 
     pub fn available(&self) -> bool {
-        self.worker_path.is_file()
+        let Ok(metadata) = self.worker_path.metadata() else {
+            return false;
+        };
+        if !metadata.is_file() {
+            return false;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            metadata.permissions().mode() & 0o111 != 0
+        }
+        #[cfg(not(unix))]
+        false
     }
 
     pub fn run(
@@ -67,7 +79,7 @@ impl WorkerSupervisor {
         }
         if !self.available() {
             return Err(SupervisorError::runtime(
-                "cleanup worker is not installed in this build",
+                "cleanup worker is not installed or not executable in this build",
             ));
         }
         let process = WorkerProcess::spawn(&self.worker_path, model)
@@ -419,6 +431,21 @@ write({{"error": None, "errorCode": None,
             "p".into(),
             "remount-request".into(),
         ).unwrap(), "cleaned");
+    }
+
+    #[test]
+    fn readiness_requires_an_executable_regular_file() {
+        let path = fake_worker("readiness", "raise RuntimeError('must not run')");
+        let supervisor = WorkerSupervisor::new(path.clone());
+        assert!(supervisor.available());
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(!supervisor.available());
+        assert!(!WorkerSupervisor::new(fake_root("readiness")).available());
+        let error = supervisor.run(
+            &model_file("not-executable"), "p".into(), "r".into(),
+        ).unwrap_err();
+        assert_eq!(error.code, "runtime-error");
+        assert!(error.message.contains("not executable"));
     }
 
     #[test]

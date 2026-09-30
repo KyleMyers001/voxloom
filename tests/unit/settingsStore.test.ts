@@ -23,6 +23,21 @@ describe('parseSettingsJson', () => {
     expect(parsed.file.settings.style).toBe('casual');
   });
 
+  it('preserves cleanup selection and opt-in across persistence', async () => {
+    const io = createMemorySettingsIo(null);
+    const settings = {
+      ...initialSettings,
+      cleanupEnabled: true,
+      cleanupModelId: 'qwen3-0.6b-q4-k-m',
+    };
+    await createSettingsStore(io).save(settings, true);
+    const loaded = await createSettingsStore(io).load();
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(loaded.file.settings.cleanupEnabled).toBe(true);
+    expect(loaded.file.settings.cleanupModelId).toBe(settings.cleanupModelId);
+  });
+
   it('migrates v1 simulated Alder to disabled and unselected', () => {
     const parsed = parseSettingsJson(JSON.stringify({
       onboardingComplete: true,

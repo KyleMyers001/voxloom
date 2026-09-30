@@ -8,11 +8,24 @@ default_build="$repo_root/../voxloom-build-cache/voxloom-cleanup-worker"
 source_root="${VOXLOOM_LLAMA_CPP_SOURCE:-$default_source}"
 build_root="${VOXLOOM_CLEANUP_BUILD_DIR:-$default_build}"
 worker_dir="$repo_root/src-tauri/resources/cleanup"
+worker_path="$worker_dir/voxloom-cleanup-worker"
+
+if [[ ( -e "$worker_path" || -L "$worker_path" ) &&
+      "${VOXLOOM_CLEANUP_REPLACE_WORKER:-0}" != 1 ]]; then
+  echo "Refusing to replace $worker_path." >&2
+  echo "After explicit approval, set VOXLOOM_CLEANUP_REPLACE_WORKER=1." >&2
+  exit 1
+fi
 
 actual_commit="$(git -C "$source_root" rev-parse HEAD)"
 if [[ "$actual_commit" != "$expected_commit" ]]; then
   echo "llama.cpp pin mismatch: expected $expected_commit," \
     "got $actual_commit" >&2
+  exit 1
+fi
+source_status="$(git -C "$source_root" status --porcelain --untracked-files=all)"
+if [[ -n "$source_status" ]]; then
+  echo "llama.cpp source must be clean at the reviewed pin." >&2
   exit 1
 fi
 
@@ -29,8 +42,9 @@ cmake --build "$build_root" --target \
   "$source_root/models/templates/Qwen-Qwen3-0.6B.jinja"
 
 mkdir -p "$worker_dir"
-cp "$build_root/voxloom-cleanup-worker" \
-  "$worker_dir/voxloom-cleanup-worker"
-chmod 0755 "$worker_dir/voxloom-cleanup-worker"
-python3 "$repo_root/scripts/smoke-cleanup-worker.py" \
-  "$worker_dir/voxloom-cleanup-worker"
+cp "$build_root/voxloom-cleanup-worker" "$worker_path"
+chmod 0755 "$worker_path"
+file "$worker_path"
+lipo -archs "$worker_path"
+otool -l "$worker_path"
+python3 "$repo_root/scripts/smoke-cleanup-worker.py" "$worker_path"

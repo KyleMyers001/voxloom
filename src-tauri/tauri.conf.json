@@ -30,9 +30,6 @@
   },
   "bundle": {
     "active": true,
-    "resources": {
-      "resources/cleanup/*": "cleanup/"
-    },
     "targets": [
       "app"
     ],

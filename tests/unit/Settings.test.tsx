@@ -105,7 +105,8 @@ describe('Settings', () => {
     };
     const cleanupModelStore = {
       importModel: vi.fn().mockResolvedValue(status),
-      status: vi.fn().mockResolvedValue({ ...status, available: false }),
+      status: vi.fn().mockResolvedValueOnce({ ...status, available: false })
+        .mockResolvedValue(status),
     };
     renderWithApp(
       <Settings

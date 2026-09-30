@@ -1,5 +1,13 @@
 cmake_minimum_required(VERSION 3.20)
+# Optional local cleanup currently targets Apple Silicon, not Intel/universal.
+# Set these before project() so compiler probes use the same deployment floor.
+set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "" FORCE)
+set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "" FORCE)
 project(voxloom_cleanup_worker LANGUAGES C CXX)
+
+if(NOT APPLE)
+  message(FATAL_ERROR "The cleanup worker currently supports macOS only")
+endif()
 
 if(NOT LLAMA_CPP_SOURCE)
   message(FATAL_ERROR "LLAMA_CPP_SOURCE is required")
@@ -9,6 +17,7 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(GGML_CPU_KLEIDIAI OFF CACHE BOOL "" FORCE)
 set(GGML_METAL ON CACHE BOOL "" FORCE)
 set(GGML_METAL_EMBED_LIBRARY ON CACHE BOOL "" FORCE)
+set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
 set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_APP OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_COMMON ON CACHE BOOL "" FORCE)
