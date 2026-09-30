@@ -1,6 +1,8 @@
 import type {
+  CleanupAttempt,
   CleanupModelStatus,
   CleanupRequest,
+  CleanupResult,
 } from './types';
 
 export interface CleanupEngine {
@@ -8,7 +10,12 @@ export interface CleanupEngine {
   cancel(requestId: string): Promise<void>;
   dispose?(): Promise<void>;
   release?(requestId: string): Promise<void>;
-  run(request: CleanupRequest): Promise<string>;
+  // Bare-string adapters provide no model-attempt evidence. Native returns
+  // verified identity on success/failure and signals launch for live UI state.
+  run(
+    request: CleanupRequest,
+    onStarted?: (attempt: CleanupAttempt) => void,
+  ): Promise<string | CleanupResult>;
 }
 
 export interface CleanupModelStore {

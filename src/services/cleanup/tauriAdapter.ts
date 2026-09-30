@@ -1,16 +1,29 @@
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import type {
   CleanupEngine,
   CleanupModelStore,
 } from './contracts';
 import type {
+  CleanupAttempt,
   CleanupModelStatus,
+  CleanupResult,
 } from './types';
-import { CLEANUP_REASONS, CleanupEngineError, type CleanupReason } from './types';
+import {
+  CLEANUP_MODEL_ID, CLEANUP_MODEL_SHA256, CLEANUP_REASONS,
+  CleanupEngineError, type CleanupReason,
+} from './types';
 
 interface NativeCleanupError {
+  attempt?: unknown;
   code?: unknown;
   message?: unknown;
+}
+
+function parseAttempt(value: unknown): CleanupAttempt | undefined {
+  const candidate = value as Partial<CleanupAttempt> | null;
+  return candidate?.modelId === CLEANUP_MODEL_ID
+    && candidate.modelDigest === CLEANUP_MODEL_SHA256
+    ? { modelId: candidate.modelId, modelDigest: candidate.modelDigest } : undefined;
 }
 
 function runtimeError(error: unknown): CleanupEngineError {
@@ -22,7 +35,7 @@ function runtimeError(error: unknown): CleanupEngineError {
   const message = typeof native?.message === 'string'
     ? native.message
     : String(error);
-  return new CleanupEngineError(code, message);
+  return new CleanupEngineError(code, message, parseAttempt(native?.attempt));
 }
 
 export function createTauriCleanupEngine(): CleanupEngine {
@@ -30,6 +43,7 @@ export function createTauriCleanupEngine(): CleanupEngine {
   let disposed = false;
   let disposal: Promise<void> | null = null;
   const acquisitions = new Map<string, Promise<void>>();
+  const runs = new Map<string, Promise<CleanupResult>>();
 
   async function sessionId(): Promise<string> {
     if (disposed) throw new CleanupEngineError('cancelled', 'Cleanup session disposed');
@@ -67,7 +81,11 @@ export function createTauriCleanupEngine(): CleanupEngine {
       // Still settle failures if the session itself was established.
     }
     if (session !== null && !disposed) {
+      const running = runs.get(requestId);
       await ownedInvoke(command, { requestId });
+      // Native cancellation waits for reaping. Also drain the result so a
+      // timeout cannot persist history before final attempt evidence arrives.
+      await running?.catch(() => {});
     }
   }
 
@@ -103,7 +121,43 @@ export function createTauriCleanupEngine(): CleanupEngine {
       })();
       return disposal;
     },
-    run: (request) => ownedInvoke<string>('cleanup_run', { request }),
+    run(request, onStarted) {
+      if (disposed) return Promise.reject(new CleanupEngineError('cancelled', 'Cleanup session disposed'));
+      if (runs.has(request.requestId)) {
+        return Promise.reject(new CleanupEngineError('runtime-error', 'Cleanup request already running'));
+      }
+      const running = (async (): Promise<CleanupResult> => {
+        // A channel registers a JS callback. Allocate only once a native owner
+        // exists, so a failed/retired handshake cannot strand that callback.
+        const owner = await sessionId();
+        let live = true;
+        let notified = false;
+        const channel = new Channel<unknown>();
+        channel.onmessage = (value) => {
+          const attempt = parseAttempt(value);
+          if (live && !disposed && !notified && attempt?.modelId === request.modelId) {
+            notified = true;
+            onStarted?.(attempt);
+          }
+        };
+        try {
+          const output = await invoke<{ attempt?: unknown; text?: unknown } | null>(
+            'cleanup_run', { onStarted: channel, request, sessionId: owner },
+          );
+          const attempt = parseAttempt(output?.attempt);
+          if (!attempt || attempt.modelId !== request.modelId || typeof output?.text !== 'string') {
+            throw new CleanupEngineError('runtime-error', 'Malformed cleanup result');
+          }
+          return { attempt, text: output.text };
+        } finally {
+          live = false;
+        }
+      })().catch((error: unknown) => { throw runtimeError(error); });
+      runs.set(request.requestId, running);
+      const settled = () => { runs.delete(request.requestId); };
+      void running.then(settled, settled);
+      return running;
+    },
   };
 }
 

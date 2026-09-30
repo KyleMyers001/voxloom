@@ -1,6 +1,51 @@
 # BUS-16 local cleanup implementation
 
-## Text/evidence checkpoint — 2026-09-30
+## Native boundary checkpoint — 2026-09-30
+
+Current local evidence: **479 frontend tests across 68 files**, lint, typecheck,
+isolated production build, and **6 Chromium browser tests** pass. Both offline
+locked Cargo checks pass. Five fresh default/Whisper suite pairs pass under normal
+parallelism: **177/176 tests per run**. The four existing native warnings remain;
+there is no hosted-CI, real-model, or packaged/live result from this continuation.
+
+Implemented:
+
+- Serialize the exact worker request before spawning, stopping serialization at
+  the **128 KiB JSON-body cap** rather than allocating an unbounded payload. Tests
+  cover escaping, UTF-8, the exact limit, no spawn on overflow, and slot recovery.
+- Concurrent pipe reads preserve early structured errors even if the child exits
+  without reading stdin. Empty IDs are permitted only on bounded `error` responses;
+  successful or nonempty mismatched IDs remain rejected. The parent validates
+  response shape, 64-byte codes, 1024-byte diagnostics, and 32000-byte output.
+- Native attempt evidence means **a successfully spawned child received the same
+  descriptor whose contents were verified**. It is not proof of model loading or
+  successful generation. Success and post-launch failures carry that model ID and
+  digest; preflight/missing-runtime/spawn failures do not invent attribution.
+  Synthetic tests cover tampering, failed exec, crash, cancellation, and recovery.
+- A scoped Tauri channel reports launch for live UI state; final IPC results carry
+  independent evidence if the notification is lost. Cancellation drains the native
+  result after reaping before timeout fallback/history proceeds. Invalid, duplicate,
+  late, and disposed notifications cannot manufacture a cleaning phase. Channels
+  are not allocated for failed session handshakes. Actual Tauri channel/lifecycle
+  behavior still needs live validation, beyond Rust callbacks and JS mocks.
+- Acquire failures retain their structured reason without modifying the model
+  snapshot. History attribution no longer derives from `fallback` status. Cleaning
+  follows actual launch, then switches to **Delivering**; keyboard/FIFO behavior
+  remains covered. Cancellation also wins while fallback teardown is pending.
+- Partials are created with mode 0600, before any bytes are copied. Copy sources
+  use no-follow regular descriptors; shape/magic/hash validation uses one descriptor.
+  Import syncs the parent directory after rename. A sync failure is reported while
+  retaining the valid renamed file, and retry syncs an already-valid installation.
+  This tests ordering/error handling, not recovery from a physical power failure.
+
+**Remaining:** C++ UTF-8/error/log handling, actual-GGUF template verification,
+real-model corpus tooling and evaluation, worker/app build and signature/compatibility
+checks, actual renderer lifecycle/channel behavior and permitted microphone/AX/
+clipboard scenarios, plus final PR dispositions. No weights/source downloads,
+real app/model replacements, or interactive native checks occurred. No push/merge
+or PR/Jira mutation. Keep PR #24 draft. Earlier checkpoints below are historical.
+
+## Text/evidence checkpoint — 2026-09-30 (historical)
 
 The approved dependency reinstall succeeded without changing `package-lock.json`.
 Current checks now pass: **447 frontend tests**, lint, typecheck, isolated Vite

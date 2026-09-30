@@ -10,6 +10,22 @@ beforeAll(() => {
 });
 
 describe('createCleanupProvenance', () => {
+  it.each(['context-overflow', 'model-missing', 'runtime-error'] as const)(
+    'does not infer an attempt from a preflight %s fallback', async (reason) => {
+      const provenance = await createCleanupProvenance({
+        dictionary: [], enabled: true, modelId: 'qwen3-0.6b-q4-k-m', style: 'formal',
+      }, { finalText: 'raw', reason, status: 'fallback' });
+      expect(provenance).toMatchObject({ modelId: null, modelDigest: null, reason });
+    },
+  );
+
+  it('does not pair a model digest with a missing snapshot identity', async () => {
+    const provenance = await createCleanupProvenance({
+      dictionary: [], enabled: true, modelId: null, style: 'formal',
+    }, { finalText: 'raw', reason: 'model-missing', status: 'fallback' });
+    expect(provenance.modelDigest).toBeNull();
+    expect(provenance.modelId).toBeNull();
+  });
   it('records model and dictionary evidence for cleaned text', async () => {
     const provenance = await createCleanupProvenance({
       dictionary: ['Voxloom'],
@@ -17,6 +33,7 @@ describe('createCleanupProvenance', () => {
       modelId: 'qwen3-0.6b-q4-k-m',
       style: 'formal',
     }, {
+      attempt: { modelId: 'qwen3-0.6b-q4-k-m', modelDigest: CLEANUP_MODEL_SHA256 },
       finalText: 'Voxloom.',
       status: 'cleaned',
     });
@@ -33,6 +50,7 @@ describe('createCleanupProvenance', () => {
       modelId: 'qwen3-0.6b-q4-k-m',
       style: 'casual',
     }, {
+      attempt: { modelId: 'qwen3-0.6b-q4-k-m', modelDigest: CLEANUP_MODEL_SHA256 },
       finalText: 'raw',
       reason: 'timeout',
       status: 'fallback',

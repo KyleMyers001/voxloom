@@ -16,11 +16,27 @@ use model_store::{CleanupModelStore, ModelStatus};
 use ownership::RequestRegistry;
 use supervisor::WorkerSupervisor;
 
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanupAttempt {
+    model_id: &'static str,
+    model_digest: &'static str,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanupRunOutput {
+    attempt: CleanupAttempt,
+    text: String,
+}
+
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CleanupCommandError {
     code: &'static str,
     message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    attempt: Option<CleanupAttempt>,
 }
 
 impl CleanupCommandError {
@@ -28,6 +44,7 @@ impl CleanupCommandError {
         Self {
             code: "runtime-error",
             message: message.into(),
+            attempt: None,
         }
     }
 
@@ -35,6 +52,7 @@ impl CleanupCommandError {
         Self {
             code: "cancelled",
             message: "cleanup session or request was retired".into(),
+            attempt: None,
         }
     }
 
@@ -42,6 +60,7 @@ impl CleanupCommandError {
         Self {
             code: "model-missing",
             message,
+            attempt: None,
         }
     }
 }
@@ -51,6 +70,7 @@ impl From<supervisor::SupervisorError> for CleanupCommandError {
         Self {
             code: error.code,
             message: error.message,
+            attempt: None,
         }
     }
 }
@@ -252,13 +272,15 @@ pub async fn cleanup_run<R: Runtime>(
     state: State<'_, CleanupState>,
     session_id: String,
     request: CleanupRequestDto,
-) -> Result<String, CleanupCommandError> {
+    on_started: tauri::ipc::Channel<CleanupAttempt>,
+) -> Result<CleanupRunOutput, CleanupCommandError> {
     require_main(&webview)?;
     validate_request_id(&request.request_id)?;
     if request.raw_text.len() > 16_000 {
         return Err(CleanupCommandError {
             code: "context-overflow",
             message: "cleanup input exceeds 16000 UTF-8 bytes".into(),
+            attempt: None,
         });
     }
     let running = state.requests.start_run(
@@ -266,13 +288,17 @@ pub async fn cleanup_run<R: Runtime>(
         &request.request_id,
         &request.model_id,
     )?;
-    tauri::async_runtime::spawn_blocking(move || running.run(request.prompt))
-        .await
-        .map_err(|error| {
-            CleanupCommandError::runtime(format!(
-                "cleanup task failed: {error}"
-            ))
-        })?
+    tauri::async_runtime::spawn_blocking(move || {
+        running.run_with_attempt(request.prompt, |attempt| {
+            // Failure to reach a retired renderer does not erase evidence in
+            // the final response; native cancellation owns process reclamation.
+            let _ = on_started.send(attempt);
+        })
+    })
+    .await
+    .map_err(|error| {
+        CleanupCommandError::runtime(format!("cleanup task failed: {error}"))
+    })?
 }
 
 #[tauri::command]

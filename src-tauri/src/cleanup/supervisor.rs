@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use super::protocol::WorkerRequest;
+use super::protocol::{encode_frame, WorkerRequest};
 use super::worker_process::{ProcessError, ProcessHandle, WorkerProcess};
 
 const WORKER_TIMEOUT: Duration = Duration::from_secs(30);
@@ -218,15 +218,30 @@ impl WorkerReservation {
         &mut self,
         model: &File,
         prompt: String,
+        on_started: impl FnOnce(),
     ) -> Result<String, SupervisorError> {
         let path = self.worker_path.clone();
-        self.run_with_spawn(prompt, || WorkerProcess::spawn(&path, model))
+        self.run_with_spawn_and_started(
+            prompt,
+            || WorkerProcess::spawn(&path, model),
+            on_started,
+        )
     }
 
+    #[cfg(test)]
     fn run_with_spawn(
         &mut self,
         prompt: String,
         spawn: impl FnOnce() -> Result<WorkerProcess, String>,
+    ) -> Result<String, SupervisorError> {
+        self.run_with_spawn_and_started(prompt, spawn, || {})
+    }
+
+    fn run_with_spawn_and_started(
+        &mut self,
+        prompt: String,
+        spawn: impl FnOnce() -> Result<WorkerProcess, String>,
+        on_started: impl FnOnce(),
     ) -> Result<String, SupervisorError> {
         if self.cancelled() {
             return Err(WorkerSupervisor::cancelled_error());
@@ -237,6 +252,16 @@ impl WorkerReservation {
             ));
         }
         self.started = true;
+        let request_id = self.request_id.clone();
+        let frame = encode_frame(&WorkerRequest {
+            model_path: "/dev/fd/3".into(),
+            prompt,
+            request_id: request_id.clone(),
+        })
+        .map_err(|_| SupervisorError {
+            code: "context-overflow",
+            message: "cleanup serialized request exceeds 128 KiB".into(),
+        })?;
         if !WorkerSupervisor::path_available(&self.worker_path) {
             return Err(SupervisorError::runtime(
                 "cleanup worker is not installed or not executable in this build",
@@ -250,18 +275,15 @@ impl WorkerReservation {
             active.process = Some(handle.clone());
             active.cancelled
         };
+        // An actual child received the verified descriptor. Notify outside
+        // locks, even if cancellation raced spawn: this is attempt evidence.
+        on_started();
         if cancelled {
             handle.cancel();
             return Err(WorkerSupervisor::cancelled_error());
         }
-        let request_id = self.request_id.clone();
         let deadline = Instant::now() + self.timeout;
-        let request = WorkerRequest {
-            model_path: "/dev/fd/3".into(),
-            prompt,
-            request_id: request_id.clone(),
-        };
-        let response = process.exchange(request, deadline);
+        let response = process.exchange(frame, deadline);
         handle.finish();
         if self.cancelled() || handle.cancelled() {
             return Err(WorkerSupervisor::cancelled_error());
@@ -281,25 +303,59 @@ impl WorkerReservation {
                 })
             }
         };
-        if response.request_id != request_id {
+        if response.request_id != request_id
+            && !(response.status == "error" && response.request_id.is_empty())
+        {
             return Err(SupervisorError::runtime(
                 "cleanup worker response request ID mismatch",
             ));
         }
-        if response.status != "ok" {
+        if response.status == "error" {
+            let (Some(code), Some(message)) =
+                (response.error_code, response.error)
+            else {
+                return Err(SupervisorError::runtime(
+                    "malformed cleanup worker error",
+                ));
+            };
+            if response.text.is_some()
+                || code.is_empty()
+                || code.len() > 64
+                || message.is_empty()
+                || message.len() > 1024
+            {
+                return Err(SupervisorError::runtime(
+                    "invalid cleanup worker error bounds",
+                ));
+            }
             return Err(SupervisorError {
-                code: match response.error_code.as_deref() {
-                    Some("context-overflow") => "context-overflow",
+                code: match code.as_str() {
+                    "context-overflow" => "context-overflow",
+                    "model-missing" => "model-missing",
+                    "invalid-output" => "invalid-output",
                     _ => "runtime-error",
                 },
-                message: response.error.unwrap_or_else(|| {
-                    "cleanup worker returned an unknown error".into()
-                }),
+                message,
             });
         }
-        response.text.ok_or_else(|| {
+        if response.status != "ok"
+            || response.error.is_some()
+            || response.error_code.is_some()
+        {
+            return Err(SupervisorError::runtime(
+                "malformed cleanup worker response",
+            ));
+        }
+        let text = response.text.ok_or_else(|| {
             SupervisorError::runtime("cleanup worker returned no text")
-        })
+        })?;
+        if text.len() > 32_000 {
+            return Err(SupervisorError {
+                code: "invalid-output",
+                message: "cleanup output exceeds 32000 UTF-8 bytes".into(),
+            });
+        }
+        Ok(text)
     }
 
     pub fn finish(&self) {
@@ -672,6 +728,184 @@ write({{"error": None, "errorCode": None,
                 .unwrap(),
             "cleaned"
         );
+    }
+
+    #[test]
+    fn serialized_oversize_is_rejected_before_spawn_and_slot_recovers() {
+        let supervisor = WorkerSupervisor::new(success_worker("frame-limit"));
+        for prompt in [
+            "x".repeat(super::super::protocol::MAX_FRAME_BYTES),
+            "\0".repeat(super::super::protocol::MAX_FRAME_BYTES / 6),
+            "é".repeat(super::super::protocol::MAX_FRAME_BYTES / 2),
+            "\\\"".repeat(super::super::protocol::MAX_FRAME_BYTES / 4),
+        ] {
+            let spawned = std::cell::Cell::new(false);
+            let error = supervisor
+                .run_with_spawn(prompt, "oversize".into(), || {
+                    spawned.set(true);
+                    Err("unexpected spawn".into())
+                })
+                .unwrap_err();
+            assert!(!spawned.get(), "oversize must fail before spawning");
+            assert_eq!(error.code, "context-overflow");
+        }
+        assert_eq!(
+            supervisor
+                .run(&model_file("frame-limit"), "p".into(), "next".into())
+                .unwrap(),
+            "cleaned"
+        );
+    }
+
+    #[test]
+    fn exact_serialized_frame_limit_is_accepted() {
+        let request = WorkerRequest {
+            model_path: "/dev/fd/3".into(),
+            prompt: String::new(),
+            request_id: "r".into(),
+        };
+        let overhead = serde_json::to_vec(&request).unwrap().len();
+        let prompt =
+            "x".repeat(super::super::protocol::MAX_FRAME_BYTES - overhead);
+        let supervisor = WorkerSupervisor::new(success_worker("frame-exact"));
+        assert_eq!(
+            supervisor
+                .run(&model_file("frame-exact"), prompt, "r".into())
+                .unwrap(),
+            "cleaned"
+        );
+    }
+
+    #[test]
+    fn startup_error_survives_empty_id_and_broken_stdin() {
+        let worker = fake_worker(
+            "startup-error",
+            &format!(
+                r#"{FRAMING}
+write({{"error": "model descriptor unavailable", "errorCode": "model-missing",
+       "requestId": "", "status": "error", "text": None}})
+"#
+            ),
+        );
+        let supervisor = WorkerSupervisor::new(worker);
+        // Larger than pipe capacity: child deliberately exits without reading.
+        let error = supervisor
+            .run(
+                &model_file("startup-error"),
+                "x".repeat(100_000),
+                "r".into(),
+            )
+            .unwrap_err();
+        assert_eq!(error.code, "model-missing");
+        assert_eq!(error.message, "model descriptor unavailable");
+    }
+
+    #[test]
+    fn worker_response_shapes_ids_and_diagnostics_are_bounded() {
+        let cases = [
+            (
+                "empty-success",
+                "ok",
+                "",
+                "None",
+                "None",
+                "'text'",
+                "runtime-error",
+            ),
+            (
+                "wrong-error",
+                "error",
+                "other",
+                "'context-overflow'",
+                "'full'",
+                "None",
+                "runtime-error",
+            ),
+            (
+                "unknown-status",
+                "future",
+                "r",
+                "'context-overflow'",
+                "'full'",
+                "None",
+                "runtime-error",
+            ),
+            (
+                "mixed-error",
+                "error",
+                "r",
+                "'context-overflow'",
+                "'full'",
+                "'text'",
+                "runtime-error",
+            ),
+            (
+                "long-error",
+                "error",
+                "r",
+                "'context-overflow'",
+                "'é' * 513",
+                "None",
+                "runtime-error",
+            ),
+            (
+                "long-code",
+                "error",
+                "r",
+                "'x' * 65",
+                "'full'",
+                "None",
+                "runtime-error",
+            ),
+            (
+                "unknown-code",
+                "error",
+                "",
+                "'future-code'",
+                "'diagnostic'",
+                "None",
+                "runtime-error",
+            ),
+            (
+                "invalid-output",
+                "error",
+                "r",
+                "'invalid-output'",
+                "'invalid UTF-8'",
+                "None",
+                "invalid-output",
+            ),
+            (
+                "long-output",
+                "ok",
+                "r",
+                "None",
+                "None",
+                "'é' * 16001",
+                "invalid-output",
+            ),
+        ];
+        for (name, status, id, code, message, text, expected) in cases {
+            let path = fake_worker(
+                name,
+                &format!(
+                    r#"{FRAMING}
+read()
+write({{"error": {message}, "errorCode": {code}, "requestId": "{id}",
+       "status": "{status}", "text": {text}}})
+"#
+                ),
+            );
+            let supervisor = WorkerSupervisor::new(path);
+            let error = supervisor
+                .run(&model_file(name), "p".into(), "r".into())
+                .unwrap_err();
+            assert_eq!(error.code, expected, "{name}");
+            assert!(error.message.len() <= 1024, "{name}");
+            if name == "unknown-code" {
+                assert_eq!(error.message, "diagnostic");
+            }
+        }
     }
 
     #[test]

@@ -7,6 +7,7 @@ import type {
   DictationRecord,
 } from '../../../src/domain/types';
 import type { ClipboardAdapter } from '../../../src/services/clipboard';
+import { CleanupEngineError } from '../../../src/services/cleanup';
 import type { DeliveryPlatformAdapter, TargetSnapshot } from
   '../../../src/services/delivery';
 import type { CaptureState } from '../../../src/services/capture/types';
@@ -962,6 +963,40 @@ describe('useDogfoodCapture', () => {
     );
   });
 
+  it('retains acquire failure and immutable model selection through raw delivery', async () => {
+    const store = createMockSttModelStore();
+    await store.download('whisper-tiny.en');
+    const onHistoryRecord = vi.fn();
+    const onToast = vi.fn();
+    const cleanupEngine = {
+      acquire: vi.fn().mockRejectedValue(new CleanupEngineError('runtime-error', 'descriptor capacity full')),
+      cancel: vi.fn(), release: vi.fn(), run: vi.fn(),
+    };
+    const dogfood = vi.fn((options: DogfoodTranscribeOptions) => dogfoodTranscribeAndCopy({
+      ...options, createEngine: (modelId) => createMockSttEngine({ modelId, transcriptText: 'raw' }),
+    }));
+    const { result, rerender } = renderHook(
+      ({ state }: { state: CaptureState }) => useDogfoodCapture({
+        captureApi: stubCapture(state), cleanupEnabled: true, cleanupEngine,
+        cleanupModelId: 'qwen3-0.6b-q4-k-m', clipboard: clipboard(),
+        createModelStore: () => store, dogfood, modelId: 'whisper-tiny.en',
+        onHistoryRecord, onToast,
+      }), { initialProps: { state: { kind: 'idle' } as CaptureState } },
+    );
+    await act(async () => { await result.current.start(); });
+    rerender({ state: { kind: 'stopped', audio: {
+      duration_ms: 100, id: 'acquire-failure', sample_rate_hz: 16_000,
+    } } });
+    await waitFor(() => expect(onHistoryRecord).toHaveBeenCalledOnce());
+    expect(dogfood.mock.calls[0][0].cleanup?.snapshot.modelId).toBe('qwen3-0.6b-q4-k-m');
+    expect(onHistoryRecord.mock.calls[0][0].cleanup).toMatchObject({
+      status: 'fallback', reason: 'runtime-error', modelId: null, modelDigest: null,
+    });
+    expect(cleanupEngine.run).not.toHaveBeenCalled();
+    expect(cleanupEngine.release).toHaveBeenCalledOnce();
+    expect(onToast).not.toHaveBeenCalledWith('Cleaning up locally…');
+  });
+
   it.each([true, false])('settles silent capture without writes, cleanup=%s', async (enabled) => {
     const store = createMockSttModelStore();
     await store.download('whisper-tiny.en');
@@ -1053,6 +1088,7 @@ describe('useDogfoodCapture', () => {
       duration_ms: 100, id: 'cancel-write', sample_rate_hz: 16_000,
     } } });
     await waitFor(() => expect(platform.insertText).toHaveBeenCalledOnce());
+    expect(result.current.phase).toBe('delivering');
     act(() => { result.current.cancel(); });
     await act(async () => { rejectInsert(new Error('AX original failure')); });
     await waitFor(() => expect(onHistoryRecord).toHaveBeenCalledOnce());

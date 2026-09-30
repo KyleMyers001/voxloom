@@ -806,13 +806,14 @@ describe('useShortcutGestures', () => {
       unmount();
     });
 
-    it('new hold while prior STT is transcribing does not cancel it and still finishes', async () => {
+    it.each(['transcribing', 'cleaning', 'delivering'] as const)(
+      'new hold while prior job is %s does not cancel it and still finishes', async (initialPhase) => {
       vi.mocked(isTauri).mockReturnValue(false);
       vi.useFakeTimers();
       let now = 0;
       const clock = () => now;
       let runSeq = 0;
-      let phase: DogfoodPhase = 'transcribing';
+      let phase: DogfoodPhase = initialPhase;
       const dictation = makeDictation();
       const dogfood = makeDogfood();
       const state: AppState = {

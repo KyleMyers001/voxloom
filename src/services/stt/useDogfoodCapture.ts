@@ -11,6 +11,7 @@ import { createDogfoodRecord } from '../../domain/records';
 import type { DictationRecord, WritingStyle } from '../../domain/types';
 import type { ClipboardAdapter } from '../clipboard';
 import {
+  CleanupEngineError,
   createCleanupProvenance,
   createTauriCleanupEngine,
   snapshotDictionary,
@@ -51,6 +52,7 @@ export type DogfoodPhase =
   | 'queued'
   | 'transcribing'
   | 'cleaning'
+  | 'delivering'
   | 'success'
   | 'error'
   | 'cancelled';
@@ -106,6 +108,7 @@ export interface UseDogfoodCaptureResult {
 interface Admission {
   clipboardFallback: boolean;
   cleanup: CleanupSnapshot;
+  cleanupError?: CleanupEngineError;
   cleanupEngine: CleanupEngine;
   clipboard: ClipboardAdapter;
   deliveryPlatform: DeliveryPlatformAdapter;
@@ -290,6 +293,7 @@ export function useDogfoodCapture(
           const result = await admission.dogfood({
             audio,
             cleanup: {
+              admissionError: admission.cleanupError,
               engine: admission.cleanupEngine,
               requestId: admission.reservation.id,
               signal,
@@ -304,6 +308,12 @@ export function useDogfoodCapture(
               if (current() && admission.cleanup.enabled) {
                 setPhase('cleaning');
                 announce('Cleaning up locally…');
+              }
+            },
+            onDeliveryStart: () => {
+              if (current()) {
+                setPhase('delivering');
+                announce('Delivering…');
               }
             },
           });
@@ -463,8 +473,9 @@ export function useDogfoodCapture(
           reservation.id,
           admission.cleanup.modelId,
         );
-      } catch {
-        admission.cleanup = { ...admission.cleanup, modelId: null };
+      } catch (error: unknown) {
+        admission.cleanupError = error instanceof CleanupEngineError
+          ? error : new CleanupEngineError('runtime-error', errorText(error));
       }
     }
     if (superseded()) {

@@ -167,6 +167,7 @@ fn tampering_after_admission_is_rejected_before_worker_spawn() {
         .run("synthetic prompt".into())
         .unwrap_err();
     assert_eq!(error.code, "model-missing");
+    assert!(error.attempt.is_none());
     assert!(error.message.contains("SHA-256 mismatch"));
     assert!(!marker.exists());
     assert!(store.import_artifact(&source, spec).is_ok());
@@ -209,7 +210,9 @@ sys.stdout.buffer.flush()
     }
     let started = marker.exists();
     registry.retire(None).finish();
-    assert_eq!(running.join().unwrap().unwrap_err().code, "cancelled");
+    let error = running.join().unwrap().unwrap_err();
+    assert_eq!(error.code, "cancelled");
+    assert_eq!(error.attempt.unwrap().model_digest, spec.sha256);
     assert!(started, "fixture worker did not start within five seconds");
     let pid: libc::pid_t =
         fs::read_to_string(&marker).unwrap().parse().unwrap();
@@ -225,7 +228,65 @@ sys.stdout.buffer.flush()
     let next = registry
         .start_run(next_owner, "after-retirement", MODEL_ID)
         .unwrap();
-    assert_eq!(next.run("synthetic prompt".into()).unwrap(), "Recovered.");
+    let mut emitted = None;
+    let result = next
+        .run_with_attempt("synthetic prompt".into(), |attempt| {
+            emitted = Some(attempt)
+        })
+        .unwrap();
+    assert_eq!(result.text, "Recovered.");
+    assert_eq!(result.attempt.model_id, MODEL_ID);
+    assert_eq!(result.attempt.model_digest, spec.sha256);
+    assert_eq!(emitted.unwrap().model_digest, spec.sha256);
+    assert!(store.import_artifact(&source, spec).is_ok());
+}
+
+#[test]
+fn attempt_identity_requires_verified_descriptor_and_successful_spawn() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_, store, source, spec) = fixture("attempt-evidence");
+    let path = source.parent().unwrap().join("worker.sh");
+    let registry =
+        RequestRegistry::new(Arc::new(WorkerSupervisor::new(path.clone())));
+    let (owner, _) = registry.open_session();
+    for (id, prompt, expected_code) in [
+        ("missing", "p".into(), "runtime-error"),
+        ("oversize", "x".repeat(128 * 1024), "context-overflow"),
+    ] {
+        acquire(&registry, &store, spec, owner, id);
+        let error = registry
+            .start_run(owner, id, MODEL_ID)
+            .unwrap()
+            .run_with_attempt(prompt, |_| panic!("preflight is not an attempt"))
+            .unwrap_err();
+        assert_eq!(error.code, expected_code);
+        assert!(error.attempt.is_none());
+    }
+    // Executable, but exec itself fails: still no attempt.
+    fs::write(&path, "#!/missing/interpreter\n").unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+    acquire(&registry, &store, spec, owner, "spawn-failure");
+    let error = registry
+        .start_run(owner, "spawn-failure", MODEL_ID)
+        .unwrap()
+        .run_with_attempt("p".into(), |_| {
+            panic!("failed spawn is not an attempt")
+        })
+        .unwrap_err();
+    assert!(error.attempt.is_none());
+    // A launched child that crashes is an actual attempt with verified identity.
+    fs::write(&path, "#!/bin/sh\nexit 7\n").unwrap();
+    acquire(&registry, &store, spec, owner, "crash");
+    let mut emitted = None;
+    let error = registry
+        .start_run(owner, "crash", MODEL_ID)
+        .unwrap()
+        .run_with_attempt("p".into(), |attempt| emitted = Some(attempt))
+        .unwrap_err();
+    let attempt = emitted.unwrap();
+    assert_eq!(attempt.model_id, MODEL_ID);
+    assert_eq!(attempt.model_digest, spec.sha256);
+    assert_eq!(error.attempt.unwrap().model_digest, spec.sha256);
     assert!(store.import_artifact(&source, spec).is_ok());
 }
 

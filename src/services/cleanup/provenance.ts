@@ -1,7 +1,6 @@
 import type { CleanupProvenance } from '../../domain/types';
 import { digestDictionary } from './prompt';
 import {
-  CLEANUP_MODEL_SHA256,
   type CleanupOutcome,
   type CleanupSnapshot,
 } from './types';
@@ -14,13 +13,13 @@ export async function createCleanupProvenance(
 ): Promise<CleanupProvenance> {
   const cleaned = outcome?.status === 'cleaned';
   const fallback = outcome?.status === 'fallback';
-  const modelAttempted = cleaned || fallback;
+  const attempt = outcome?.attempt;
   return {
     dictionaryDigest: await digestDictionary(snapshot.dictionary)
       .catch(() => null),
     dictionaryVersion: 1,
-    modelDigest: modelAttempted ? CLEANUP_MODEL_SHA256 : null,
-    modelId: modelAttempted ? snapshot.modelId : null,
+    modelDigest: attempt?.modelDigest ?? null,
+    modelId: attempt?.modelId ?? null,
     promptVersion: CLEANUP_PROMPT_VERSION,
     reason: fallback ? outcome.reason : null,
     status: fallback ? 'fallback' : cleaned ? 'cleaned' : 'skipped',

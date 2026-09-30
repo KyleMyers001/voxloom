@@ -6,7 +6,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use super::protocol::{read_frame, write_frame, WorkerRequest, WorkerResponse};
+use super::protocol::{read_frame, write_encoded_frame, WorkerResponse};
 
 #[derive(Clone)]
 pub struct ProcessHandle {
@@ -72,16 +72,40 @@ impl WorkerProcess {
 
     pub fn exchange(
         self,
-        request: WorkerRequest,
+        frame: Vec<u8>,
         deadline: Instant,
     ) -> Result<WorkerResponse, ProcessError> {
+        // Read concurrently: a startup error may arrive before stdin is read.
+        // Waiting for writes first can hide it behind EPIPE or a full pipe.
+        let (read_sender, read_receiver) = mpsc::channel();
+        let mut stdout = self.stdout;
+        std::thread::spawn(move || {
+            let _ = read_sender.send(read_frame::<WorkerResponse>(&mut stdout));
+        });
         let (write_sender, write_receiver) = mpsc::channel();
         let mut stdin = self.stdin;
         std::thread::spawn(move || {
-            let result = write_frame(&mut stdin, &request);
+            let result = write_encoded_frame(&mut stdin, &frame);
             drop(stdin);
             let _ = write_sender.send(result);
         });
+        let response = match read_receiver.recv_timeout(remaining(deadline)) {
+            Ok(Ok(response)) => response,
+            Ok(Err(error)) => return Err(ProcessError::Runtime(error)),
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                return Err(ProcessError::Timeout)
+            }
+            Err(error) => {
+                return Err(ProcessError::Runtime(format!(
+                    "cleanup worker response failed: {error}",
+                )))
+            }
+        };
+        // Only the dedicated error path can bypass completed input. The
+        // supervisor still validates status, IDs, fields, and diagnostic bounds.
+        if response.status == "error" {
+            return Ok(response);
+        }
         match write_receiver.recv_timeout(remaining(deadline)) {
             Ok(Ok(())) => {}
             Ok(Err(error)) => return Err(ProcessError::Runtime(error)),
@@ -95,19 +119,7 @@ impl WorkerProcess {
             }
         }
 
-        let (read_sender, read_receiver) = mpsc::channel();
-        let mut stdout = self.stdout;
-        std::thread::spawn(move || {
-            let _ = read_sender.send(read_frame::<WorkerResponse>(&mut stdout));
-        });
-        match read_receiver.recv_timeout(remaining(deadline)) {
-            Ok(Ok(response)) => Ok(response),
-            Ok(Err(error)) => Err(ProcessError::Runtime(error)),
-            Err(mpsc::RecvTimeoutError::Timeout) => Err(ProcessError::Timeout),
-            Err(error) => Err(ProcessError::Runtime(format!(
-                "cleanup worker response failed: {error}",
-            ))),
-        }
+        Ok(response)
     }
 }
 

@@ -110,6 +110,16 @@ not semantic-equivalence or real-model quality proof. A cancelled failed insert
 retains attempted-write evidence without starting clipboard fallback. Unreadable
 cleanup metadata leaves valid History text intact with unavailable provenance.
 
+New history attributes a model only when native code confirms a successfully
+spawned worker received that model's verified descriptor. Preflight fallback is
+not a model attempt; an attempt is not proof of successful generation. The live
+cleanup phase follows native launch, then switches to delivery. Worker JSON
+request bodies are capped at 128 KiB including escaping/UTF-8 overhead, before
+spawning (plus a four-byte frame header). That limit is distinct from the 16000-byte raw-input limit, 4096-token context,
+64-token minimum output reserve, 1024-token generation cap, and 32000-byte output
+limit. Imported partial files are private from creation; installation syncs the
+containing directory after rename.
+
 **Importing a GGUF does not install the worker.** A missing/non-executable
 worker requires a worker-equipped build; reimporting the model cannot fix it.
 The ordinary bundle contains no worker and retains its macOS 10.15 declaration.

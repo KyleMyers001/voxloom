@@ -8,6 +8,7 @@ import type { ClipboardAdapter } from '../clipboard';
 import {
   runCleanup,
   type CleanupEngine,
+  type CleanupEngineError,
   type CleanupOutcome,
   type CleanupSnapshot,
 } from '../cleanup';
@@ -43,12 +44,14 @@ export interface DogfoodTranscribeOptions {
    */
   clipboardFallback?: boolean;
   cleanup?: {
+    admissionError?: CleanupEngineError;
     engine: CleanupEngine;
     requestId: string;
     signal: ProcessingSignal;
     snapshot: CleanupSnapshot;
   };
   onCleanupStart?: () => void;
+  onDeliveryStart?: () => void;
   /**
    * Invocation-time intended target snapshot (ADR §4).
    * When omitted, delivery treats the target as unavailable → Copy/Fail.
@@ -110,20 +113,22 @@ export async function dogfoodTranscribeAndCopy(
   if (!transcript.text.trim()) {
     throw new SttError('no-speech', 'No speech detected — nothing delivered.');
   }
-  options.onCleanupStart?.();
   const cleanup = options.cleanup
     ? await runCleanup({
+        admissionError: options.cleanup.admissionError,
         engine: options.cleanup.engine,
+        onStarted: options.onCleanupStart,
         rawText: transcript.text,
         requestId: options.cleanup.requestId,
         signal: options.cleanup.signal,
         snapshot: options.cleanup.snapshot,
       })
     : { finalText: transcript.text, status: 'skipped' as const };
-  if (cleanup.status === 'cancelled') {
+  if (cleanup.status === 'cancelled' || options.cleanup?.signal.aborted) {
     throw new DOMException('Dictation cancelled', 'AbortError');
   }
   const finalTranscript = { ...transcript, text: cleanup.finalText };
+  options.onDeliveryStart?.();
 
   const platform = resolvePlatform(
     options.clipboard,

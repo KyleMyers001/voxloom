@@ -69,6 +69,7 @@ const browserScheduler = {
 
 function isDogfoodBusy(phase: DogfoodPhase): boolean {
   return phase === 'cleaning'
+    || phase === 'delivering'
     || phase === 'queued'
     || phase === 'recording'
     || phase === 'transcribing';

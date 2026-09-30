@@ -1,12 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
-vi.mock('@tauri-apps/api/core', () => ({ invoke }));
+const { invoke, channels } = vi.hoisted(() => ({
+  invoke: vi.fn(), channels: [] as { onmessage: (value: unknown) => void }[],
+}));
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke,
+  Channel: class {
+    onmessage: (value: unknown) => void = () => {};
+    constructor() { channels.push(this); }
+  },
+}));
+
+import { runCleanup } from '../../../src/services/cleanup/runCleanup';
 
 import {
   createTauriCleanupEngine,
   createTauriCleanupModelStore,
 } from '../../../src/services/cleanup/tauriAdapter';
+
+const attempt = {
+  modelId: 'qwen3-0.6b-q4-k-m',
+  modelDigest: 'ac2d97712095a558e31573f62f466a3f9d93990898b0ec79d7c974c1780d524a',
+};
 
 const request = {
   dictionary: [],
@@ -18,9 +33,10 @@ const request = {
 };
 
 beforeEach(() => {
+  channels.length = 0;
   invoke.mockReset().mockImplementation(async (command: string) => {
     if (command === 'cleanup_session_open') return 'native-owner-1';
-    if (command === 'cleanup_run') return 'Cleaned.';
+    if (command === 'cleanup_run') return { text: 'Cleaned.', attempt };
     return undefined;
   });
 });
@@ -37,10 +53,10 @@ describe('Tauri cleanup adapters', () => {
 
   it('uses native-issued ownership for requests and native-owned import', async () => {
     const engine = createTauriCleanupEngine();
-    await expect(engine.run(request)).resolves.toBe('Cleaned.');
+    await expect(engine.run(request)).resolves.toEqual({ text: 'Cleaned.', attempt });
     expect(invoke).toHaveBeenCalledWith('cleanup_session_open');
     expect(invoke).toHaveBeenCalledWith('cleanup_run', {
-      request, sessionId: 'native-owner-1',
+      onStarted: expect.anything(), request, sessionId: 'native-owner-1',
     });
     await createTauriCleanupModelStore().importModel();
     expect(invoke).toHaveBeenLastCalledWith('cleanup_pick_and_import_model');
@@ -136,8 +152,77 @@ describe('Tauri cleanup adapters', () => {
       await expect(createTauriCleanupEngine().run(request)).rejects.toMatchObject({
         code: 'runtime-error', message: 'native diagnostic',
       });
+      expect(channels).toHaveLength(0);
     },
   );
+
+  it('announces only live verified launch messages, retaining final evidence', async () => {
+    let finish!: (value: unknown) => void;
+    invoke.mockImplementation(async (command: string) => command === 'cleanup_session_open'
+      ? 'native-owner-1' : new Promise((resolve) => { finish = resolve; }));
+    const onStarted = vi.fn();
+    const running = createTauriCleanupEngine().run(request, onStarted);
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    expect(channels).toHaveLength(1);
+    channels[0].onmessage({ ...attempt, modelId: null });
+    expect(onStarted).not.toHaveBeenCalled();
+    channels[0].onmessage(attempt);
+    channels[0].onmessage(attempt);
+    expect(onStarted).toHaveBeenCalledExactlyOnceWith(attempt);
+    finish({ text: 'Cleaned.', attempt });
+    await expect(running).resolves.toEqual({ text: 'Cleaned.', attempt });
+    channels[0].onmessage(attempt);
+    expect(onStarted).toHaveBeenCalledOnce();
+  });
+
+  it.each([null, 'text', { text: 'text', attempt: null },
+    { text: 'text', attempt: { ...attempt, modelId: null } }])(
+    'rejects malformed success envelopes: %j', async (value) => {
+      invoke.mockImplementation(async (command: string) => command === 'cleanup_session_open'
+        ? 'native-owner-1' : value);
+      await expect(createTauriCleanupEngine().run(request)).rejects.toMatchObject({ code: 'runtime-error' });
+    },
+  );
+
+  it('drains a running result after cancellation before reporting settlement', async () => {
+    let reject!: (value: unknown) => void;
+    invoke.mockImplementation(async (command: string) => {
+      if (command === 'cleanup_session_open') return 'native-owner-1';
+      if (command === 'cleanup_run') return new Promise((_resolve, fail) => { reject = fail; });
+    });
+    const engine = createTauriCleanupEngine();
+    const running = engine.run(request);
+    const rejected = expect(running).rejects.toMatchObject({ code: 'cancelled', attempt });
+    await vi.waitFor(() => expect(reject).toBeTypeOf('function'));
+    let settled = false;
+    const cancelling = engine.cancel('r1').then(() => { settled = true; });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('cleanup_cancel', expect.anything()));
+    expect(settled).toBe(false);
+    reject({ code: 'cancelled', message: 'reaped', attempt });
+    await rejected;
+    await cancelling;
+    expect(settled).toBe(true);
+  });
+
+  it('keeps final attempt evidence on timeout even with a late launch channel', async () => {
+    let reject!: (value: unknown) => void;
+    invoke.mockImplementation(async (command: string) => {
+      if (command === 'cleanup_session_open') return 'native-owner-1';
+      if (command === 'cleanup_run') return new Promise((_resolve, fail) => { reject = fail; });
+      if (command === 'cleanup_cancel') {
+        channels[0].onmessage(attempt);
+        reject({ code: 'cancelled', message: 'reaped', attempt });
+      }
+    });
+    const onStarted = vi.fn();
+    const result = await runCleanup({
+      engine: createTauriCleanupEngine(), onStarted, rawText: 'raw', requestId: 'r1',
+      signal: { aborted: false, onAbort: vi.fn() }, timeoutMs: 5,
+      snapshot: { dictionary: [], enabled: true, modelId: request.modelId, style: 'formal' },
+    });
+    expect(result).toEqual({ attempt, finalText: 'raw', reason: 'timeout', status: 'fallback' });
+    expect(onStarted).not.toHaveBeenCalled();
+  });
 
   it('maps structured native failures without parsing messages', async () => {
     invoke.mockImplementation(async (command: string) => {

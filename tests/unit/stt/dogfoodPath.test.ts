@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ClipboardAdapter } from '../../../src/services/clipboard';
 import { dogfoodTranscribeAndCopy } from '../../../src/services/stt/dogfoodPath';
 import { createMockSttEngine } from '../../../src/services/stt/mockStt';
+import { CleanupEngineError } from '../../../src/services/cleanup';
 import type { ProcessingSignal } from
   '../../../src/services/dictation/coordinator';
 
@@ -189,6 +190,27 @@ describe('dogfoodTranscribeAndCopy cleanup integration', () => {
     modelId: 'qwen3-0.6b-q4-k-m',
     style: 'formal' as const,
   };
+
+  it.each(['disabled', 'missing', 'overflow', 'runtime'])(
+    'does not announce cleaning on %s preflight', async (kind) => {
+      const onCleanupStart = vi.fn();
+      const engine = { cancel: vi.fn(), run: vi.fn().mockRejectedValue(
+        new CleanupEngineError('runtime-error', 'worker unavailable'),
+      ) };
+      await dogfoodTranscribeAndCopy({
+        audio: { duration_ms: 100, id: kind, sample_rate_hz: 16_000 },
+        cleanup: {
+          engine, requestId: kind, signal: processingSignal(),
+          snapshot: { ...cleanupSnapshot,
+            enabled: kind !== 'disabled', modelId: kind === 'missing' ? null : cleanupSnapshot.modelId },
+        },
+        clipboard: clipboard(), modelId: 'whisper-tiny.en', onCleanupStart,
+        createEngine: (modelId) => createMockSttEngine({ modelId,
+          transcriptText: kind === 'overflow' ? 'x'.repeat(16_001) : 'raw' }),
+      });
+      expect(onCleanupStart).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(['', ' \n\t ', '\u2003'])(
     'rejects silence %j before cleanup or delivery', async (text) => {

@@ -17,9 +17,11 @@ export {
 } from './tauriAdapter';
 export { runCleanup } from './runCleanup';
 export type {
+  CleanupAttempt,
   CleanupModelStatus,
   CleanupOutcome,
   CleanupRequest,
+  CleanupResult,
   CleanupSnapshot,
 } from './types';
 export {

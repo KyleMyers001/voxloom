@@ -11,14 +11,26 @@ pub struct ArtifactSpec {
 }
 
 pub fn copy_private(source: &Path, destination: &Path) -> Result<(), String> {
-    let mut input = File::open(source)
-        .map_err(|error| format!("open imported model: {error}"))?;
-    let mut output = OpenOptions::new()
-        .create_new(true)
-        .write(true)
+    let mut input = open_regular(source)?;
+    copy_private_from(&mut input, destination)
+}
+
+fn copy_private_from(
+    input: &mut impl Read,
+    destination: &Path,
+) -> Result<(), String> {
+    let mut options = OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // Privacy applies while copying, not just after the file is complete.
+        options.mode(0o600);
+    }
+    let mut output = options
         .open(destination)
         .map_err(|error| format!("create partial model: {error}"))?;
-    std::io::copy(&mut input, &mut output)
+    std::io::copy(input, &mut output)
         .map_err(|error| format!("copy imported model: {error}"))?;
     output
         .flush()
@@ -26,17 +38,12 @@ pub fn copy_private(source: &Path, destination: &Path) -> Result<(), String> {
     output
         .sync_all()
         .map_err(|error| format!("sync imported model: {error}"))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(destination, fs::Permissions::from_mode(0o600))
-            .map_err(|error| format!("protect imported model: {error}"))?;
-    }
     Ok(())
 }
 
 pub fn validate(path: &Path, spec: ArtifactSpec) -> Result<(), String> {
-    validate_shape(path, spec)?;
+    // Shape, magic, and hash all use the same no-follow descriptor; an earlier
+    // pathname-only shape pass would add a racy, potentially blocking open.
     open_verified(path, spec).map(drop)
 }
 
@@ -118,30 +125,6 @@ pub fn validate_file(
     Ok(())
 }
 
-pub fn validate_shape(path: &Path, spec: ArtifactSpec) -> Result<(), String> {
-    let metadata = fs::symlink_metadata(path)
-        .map_err(|error| format!("read cleanup model metadata: {error}"))?;
-    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
-        return Err("cleanup model must be a regular non-symlink file".into());
-    }
-    if metadata.len() != spec.size {
-        return Err(format!(
-            "cleanup model size mismatch: expected {}, got {}",
-            spec.size,
-            metadata.len(),
-        ));
-    }
-    let mut file = File::open(path)
-        .map_err(|error| format!("open cleanup model: {error}"))?;
-    let mut magic = [0_u8; 4];
-    file.read_exact(&mut magic)
-        .map_err(|error| format!("read GGUF header: {error}"))?;
-    if &magic != b"GGUF" {
-        return Err("cleanup model is not a GGUF file".into());
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,6 +156,47 @@ mod tests {
         .unwrap_err()
         .contains("size mismatch"));
         let _ = fs::remove_file(path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn partial_is_private_before_the_first_byte_is_copied() {
+        use std::os::unix::fs::PermissionsExt;
+        struct Inspect<'a>(&'a Path);
+        impl Read for Inspect<'_> {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                assert_eq!(
+                    fs::metadata(self.0)?.permissions().mode() & 0o077,
+                    0,
+                    "partial must not grant group/other access during copying"
+                );
+                Ok(0)
+            }
+        }
+        let root = std::env::temp_dir()
+            .join(format!("voxloom-partial-private-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let destination = root.join("new.partial");
+        copy_private_from(&mut Inspect(&destination), &destination).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copying_rejects_symlink_sources_and_existing_destinations() {
+        use std::os::unix::fs::symlink;
+        let root = std::env::temp_dir()
+            .join(format!("voxloom-copy-private-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let source = root.join("source");
+        let link = root.join("link");
+        let destination = root.join("partial");
+        fs::write(&source, b"GGUFtest").unwrap();
+        symlink(&source, &link).unwrap();
+        assert!(copy_private(&link, &destination).is_err());
+        assert!(!destination.exists());
+        fs::write(&destination, b"keep existing").unwrap();
+        assert!(copy_private(&source, &destination).is_err());
+        assert_eq!(fs::read(destination).unwrap(), b"keep existing");
     }
 
     #[cfg(unix)]

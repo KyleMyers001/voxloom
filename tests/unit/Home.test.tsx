@@ -51,6 +51,14 @@ describe('Home', () => {
     expect(toast).toHaveBeenCalledWith('Copy failed');
   });
 
+  it.each([
+    ['cleaning', 'Cleaning up locally…'], ['delivering', 'Delivering…'],
+  ] as const)('shows %s as busy without offering another Home start', (phase, message) => {
+    renderWithApp(<Home dogfood={stubDogfood({ phase })} onToast={vi.fn()} />);
+    expect(screen.getByText(message)).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Start capture' })).not.toBeInTheDocument();
+  });
+
   it('shows the Dictate capture panel on Home', () => {
     renderWithApp(<Home dogfood={stubDogfood()} onToast={vi.fn()} />);
     expect(screen.getByRole('heading', { name: 'Dictate' })).toBeInTheDocument();

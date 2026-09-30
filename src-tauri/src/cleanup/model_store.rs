@@ -48,6 +48,13 @@ pub struct ModelLease {
 }
 
 impl ModelLease {
+    pub(super) fn identity(&self) -> super::CleanupAttempt {
+        super::CleanupAttempt {
+            model_id: MODEL_ID,
+            model_digest: self.artifact.sha256,
+        }
+    }
+
     /// Hash the already reserved descriptor, without holding the store lock.
     pub fn verify(&mut self) -> Result<(), String> {
         validate_file(&mut self.file, self.artifact)
@@ -110,6 +117,21 @@ impl CleanupModelStore {
         source: &Path,
         artifact: ArtifactSpec,
     ) -> Result<(), String> {
+        self.import_artifact_with_sync(source, artifact, |parent| {
+            File::open(parent)
+                .and_then(|directory| directory.sync_all())
+                .map_err(|error| {
+                    format!("sync cleanup model directory: {error}")
+                })
+        })
+    }
+
+    fn import_artifact_with_sync(
+        &self,
+        source: &Path,
+        artifact: ArtifactSpec,
+        sync_parent: impl FnOnce(&Path) -> Result<(), String>,
+    ) -> Result<(), String> {
         let _guard = self.begin_import()?;
         validate_artifact(source, artifact)?;
         fs::create_dir_all(&self.root).map_err(|error| {
@@ -117,7 +139,8 @@ impl CleanupModelStore {
         })?;
         let destination = self.model_path();
         if validate_artifact(&destination, artifact).is_ok() {
-            return Ok(());
+            // Also retry durability after a prior post-rename sync failure.
+            return sync_parent(&self.root);
         }
         let temporary = self.root.join(format!("{MODEL_FILE}.partial"));
         if temporary.exists() {
@@ -128,8 +151,10 @@ impl CleanupModelStore {
         let result = copy_private(source, &temporary)
             .and_then(|()| validate_artifact(&temporary, artifact))
             .and_then(|()| {
-                fs::rename(&temporary, &destination)
-                    .map_err(|error| format!("finalize cleanup model: {error}"))
+                fs::rename(&temporary, &destination).map_err(|error| {
+                    format!("finalize cleanup model: {error}")
+                })?;
+                sync_parent(&self.root)
             });
         if result.is_err() {
             let _ = fs::remove_file(&temporary);
@@ -225,6 +250,46 @@ mod tests {
             assert_eq!(mode & 0o777, 0o600);
         }
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn sync_failure_is_reported_after_rename_and_retry_syncs_existing_model() {
+        let root = temp_root("directory-sync");
+        fs::create_dir_all(&root).unwrap();
+        let source = root.join("source.gguf");
+        fs::write(&source, b"GGUFtest").unwrap();
+        let spec = ArtifactSpec {
+            sha256: Box::leak(
+                format!("{:x}", Sha256::digest(b"GGUFtest")).into_boxed_str(),
+            ),
+            size: 8,
+        };
+        let installed = root.join("installed");
+        let store = CleanupModelStore::new(installed.clone());
+        let error = store
+            .import_artifact_with_sync(&source, spec, |parent| {
+                assert_eq!(parent, installed);
+                assert_eq!(
+                    fs::read(parent.join(MODEL_FILE)).unwrap(),
+                    b"GGUFtest"
+                );
+                assert!(!parent.join(format!("{MODEL_FILE}.partial")).exists());
+                Err("directory sync failed".into())
+            })
+            .unwrap_err();
+        assert_eq!(error, "directory sync failed");
+        // The valid renamed file remains, but success is not claimed. Neither
+        // the import guard nor retry may suppress another directory sync.
+        let mut synced = false;
+        store
+            .import_artifact_with_sync(&source, spec, |parent| {
+                assert_eq!(parent, installed);
+                synced = true;
+                Ok(())
+            })
+            .unwrap();
+        assert!(synced);
+        assert!(store.lease_artifact(MODEL_ID, spec).is_ok());
     }
 
     #[test]

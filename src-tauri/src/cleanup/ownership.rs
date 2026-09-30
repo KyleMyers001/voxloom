@@ -276,7 +276,17 @@ impl OwnedRun {
         self.permit.as_ref().unwrap().cancelled()
     }
 
-    pub fn run(mut self, prompt: String) -> Result<String> {
+    #[cfg(test)]
+    pub fn run(self, prompt: String) -> Result<String> {
+        self.run_with_attempt(prompt, |_| {})
+            .map(|output| output.text)
+    }
+
+    pub fn run_with_attempt(
+        mut self,
+        prompt: String,
+        on_started: impl FnOnce(super::CleanupAttempt),
+    ) -> Result<super::CleanupRunOutput> {
         if self.cancelled() {
             return Err(CleanupCommandError::cancelled());
         }
@@ -285,11 +295,25 @@ impl OwnedRun {
             return Err(CleanupCommandError::cancelled());
         }
         verification.map_err(CleanupCommandError::model)?;
-        self.permit
-            .as_mut()
-            .unwrap()
-            .run(&self.lease.as_ref().unwrap().file, prompt)
-            .map_err(CleanupCommandError::from)
+        let lease = self.lease.as_ref().unwrap();
+        let identity = lease.identity();
+        let mut attempt = None;
+        let result =
+            self.permit.as_mut().unwrap().run(&lease.file, prompt, || {
+                attempt = Some(identity.clone());
+                on_started(identity);
+            });
+        match result {
+            Ok(text) => Ok(super::CleanupRunOutput {
+                text,
+                attempt: attempt.unwrap(),
+            }),
+            Err(error) => {
+                let mut error = CleanupCommandError::from(error);
+                error.attempt = attempt;
+                Err(error)
+            }
+        }
     }
 }
 

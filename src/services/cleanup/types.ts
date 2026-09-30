@@ -10,10 +10,21 @@ export const CLEANUP_REASONS = [
 ] as const;
 export type CleanupReason = typeof CLEANUP_REASONS[number];
 
+export interface CleanupAttempt {
+  modelDigest: string;
+  modelId: string;
+}
+
+export interface CleanupResult {
+  attempt: CleanupAttempt;
+  text: string;
+}
+
 export class CleanupEngineError extends Error {
   constructor(
     readonly code: CleanupReason,
     message: string,
+    readonly attempt?: CleanupAttempt,
   ) {
     super(message);
     this.name = 'CleanupEngineError';
@@ -27,11 +38,12 @@ export interface CleanupSnapshot {
   style: WritingStyle;
 }
 
-export type CleanupOutcome =
+export type CleanupOutcome = (
   | { finalText: string; status: 'cleaned' }
   | { finalText: string; reason: CleanupReason; status: 'fallback' }
   | { finalText: string; status: 'skipped' }
-  | { reason: 'cancelled'; status: 'cancelled' };
+  | { reason: 'cancelled'; status: 'cancelled' }
+) & { attempt?: CleanupAttempt };
 
 export interface CleanupRequest {
   dictionary: readonly string[];

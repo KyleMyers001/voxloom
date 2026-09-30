@@ -28,6 +28,7 @@ export function Home({ dogfood, onToast }: HomeProps) {
   const recording = dogfood.phase === 'recording'
     || dogfood.captureState.kind === 'active';
   const busy = dogfood.phase === 'cleaning'
+    || dogfood.phase === 'delivering'
     || dogfood.phase === 'queued'
     || dogfood.phase === 'transcribing';
 
@@ -121,7 +122,9 @@ export function Home({ dogfood, onToast }: HomeProps) {
                 ? 'Cleaning up locally…'
                 : dogfood.phase === 'queued'
                   ? 'Queued for processing…'
-                  : 'Transcribing…'}
+                  : dogfood.phase === 'delivering'
+                    ? 'Delivering…'
+                    : 'Transcribing…'}
             </span>
           )}
         </div>
