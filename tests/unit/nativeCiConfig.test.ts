@@ -16,5 +16,6 @@ describe('native CI coverage', () => {
     expect(nativeJob).not.toContain('--test-threads');
     expect(nativeJob).not.toContain('continue-on-error');
     expect(nativeJob).not.toContain('build-cleanup-worker');
+    expect(nativeJob).toContain('python3 -m unittest discover -s tests/native -v');
   });
 });

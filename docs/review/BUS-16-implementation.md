@@ -1,6 +1,56 @@
 # BUS-16 local cleanup implementation
 
-## Native boundary checkpoint — 2026-09-30
+## Worker safety/tooling checkpoint — 2026-09-30
+
+Current local checks: **489 frontend tests / 68 files**, lint, typecheck, isolated
+production build, **6 browser tests**, both offline locked Cargo checks, and five
+fresh default/Whisper pairs (**177/176 each**) pass. **11 new Python/C++ helper/tool
+tests** pass, compiling the dependency-free safety checker with C++17,
+`-Wall -Wextra -Werror -DNDEBUG`. The four existing Rust warnings remain.
+
+**Important boundary:** the full revised C++ worker and template checker have
+**not** been compiled against the pinned llama.cpp source. Their integration,
+real framed smoke, and actual-GGUF template/generation remain unverified. The
+new Python tests use synthetic files/fake executables; source-wiring assertions
+are not a substitute for compilation or model tests. Hosted CI has not run.
+
+Source changes and helper evidence:
+
+- Strict final-byte UTF-8 validation rejects overlong/truncated sequences,
+  surrogates and out-of-range code points. Token fragments are joined before
+  validation, allowing split emoji. Literal U+FFFD and unsafe ASCII controls also
+  fall back conservatively. The frontend independently rejects these and lone
+  UTF-16 surrogates while preserving valid Unicode and formatting whitespace.
+- Typed, fixed diagnostics bound error codes/messages and avoid reflecting JSON,
+  tokenizer, or template exceptions containing prompts. Missing/nonregular model
+  inputs use `model-missing`; output byte/truncation/encoding failures use
+  `invalid-output`. IDs are bounded before reflection. Token sizing checks also
+  avoid large allocations/negative-count overflow before context rejection.
+- Disposable-worker stderr is redirected to `/dev/null`; backend stdout is
+  suppressed during generation and restored for framing, including exception
+  unwinding. Tests exercise both C and C++ buffered writes. These trade useful
+  library debug logs for transcript privacy and protocol integrity.
+- Generation and template checks share `prompt_renderer.hpp`. Weight-free Jinja
+  smoke remains separate. The new `--model` checker loads GGUF vocabulary/metadata
+  and verifies the non-thinking suffix through the same user-message renderer.
+- `scripts/check-cleanup-template.py CHECKER GGUF` verifies the allowlisted size,
+  magic, and full hash using a no-follow regular descriptor, rewinds it, and
+  inherits it into the checker. Pin parity, path replacement, tampering, symlinks,
+  nonregular files, and result propagation are tested. No downloads or writes to
+  models. Direct low-level `--model` use is not allowlist verification.
+- Weight-free protocol smoke now checks four intentional error cases, bounded
+  diagnostics, quiet stderr, failure exit, and no reflected synthetic prompt.
+  Its harness is tested with fake executables; the real worker remains unbuilt.
+  macOS CI now includes `python3 -m unittest discover -s tests/native -v`.
+
+**Next:** obtain an approved clean upstream source path (or specific permission
+to fetch the pin) to compile/check the full worker. Corpus fixture/evaluator,
+real-model quality and latency/RAM, packaged/signature/compatibility, actual
+Tauri channel/lifecycle, and permitted microphone/AX/clipboard gates remain.
+No source/weight download, worker-resource/app replacement, live interaction,
+push, merge, or PR/Jira mutation occurred. Keep PR #24 draft.
+
+## Native boundary checkpoint — 2026-09-30 (historical)
 
 Current local evidence: **479 frontend tests across 68 files**, lint, typecheck,
 isolated production build, and **6 Chromium browser tests** pass. Both offline

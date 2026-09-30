@@ -60,6 +60,28 @@ describe('cleanup worker resources', () => {
     expect(build).toContain('VOXLOOM_CLEANUP_REPLACE_WORKER');
   });
 
+  it('wires tested safety boundaries without reflecting private exceptions', () => {
+    const main = read('native/cleanup-worker/main.cpp');
+    const framing = read('native/cleanup-worker/framing.hpp');
+    expect(main).not.toContain('error.what()');
+    expect(main).toContain('voxloom::silence_stderr()');
+    expect(main).toContain('voxloom::require_model(model_path)');
+    expect(framing).toContain('validate_output(');
+    expect(framing).not.toContain('error_handler_t::replace');
+    expect(read('scripts/build-cleanup-worker.sh')).toContain('voxloom-safety-check');
+  });
+
+  it('checks actual GGUF metadata through the generation renderer, separately from weight-free smoke', () => {
+    const main = read('native/cleanup-worker/main.cpp');
+    const check = read('native/cleanup-worker/template_check.cpp');
+    expect(main).toContain('voxloom::render_prompt(');
+    expect(check).toContain('voxloom::render_prompt(');
+    expect(check).toContain('--model');
+    expect(check).toContain('vocab_only = true');
+    expect(read('scripts/check-cleanup-template.py')).toContain('verified_model(');
+    expect(read('scripts/build-cleanup-worker.sh')).not.toContain('check-cleanup-template.py');
+  });
+
   it('runs the committed weight-free protocol smoke after building', () => {
     const build = read('scripts/build-cleanup-worker.sh');
     expect(build).toContain('scripts/smoke-cleanup-worker.py');

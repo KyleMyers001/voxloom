@@ -15,11 +15,24 @@ function protectedValues(text: string): string[] {
     .filter((value) => /[\p{N}_/@\\=]|[\p{L}]-[\p{L}]|^-+[\p{L}]|^[.~][\p{L}]|[\p{Ll}][\p{Lu}]|[\p{L}]\.[\p{L}]/u.test(value));
 }
 
+function hasUnsafeEncoding(text: string): boolean {
+  // Iterate code points: paired surrogates (emoji) are valid, lone UTF-16
+  // surrogates are not. Never silently repair or pass controls to OS delivery.
+  for (const character of text) {
+    const point = character.codePointAt(0)!;
+    if ((point < 32 && point !== 9 && point !== 10 && point !== 13)
+      || point === 127 || point === 0xfffd
+      || (point >= 0xd800 && point <= 0xdfff)) return true;
+  }
+  return false;
+}
+
 export function validateCleanupOutput(
   rawText: string,
   candidate: string,
   dictionary: readonly string[] = [],
 ): string | null {
+  if (hasUnsafeEncoding(candidate)) return null;
   const cleaned = candidate.trim();
   if (!cleaned) return null;
   if (encoder.encode(cleaned).byteLength > CLEANUP_OUTPUT_MAX_BYTES) {

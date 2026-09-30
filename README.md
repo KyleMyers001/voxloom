@@ -143,6 +143,22 @@ CARGO_TARGET_DIR=/absolute/path/to/new/tauri-target \
   --config src-tauri/tauri.cleanup.conf.json
 ```
 
+The build runs weight-free protocol, UTF-8/safety, token-state, and upstream
+Jinja checks. After separately providing the allowlisted GGUF, check its actual
+metadata with the same renderer as generation:
+
+```sh
+python3 scripts/check-cleanup-template.py \
+  /absolute/path/to/new/build-directory/voxloom-template-check \
+  /absolute/path/to/qwen3-0.6b-q4-k-m.gguf
+```
+
+This holds a fully verified descriptor and uses metadata/vocabulary only. It is
+not a generation/fidelity test. Source and model downloads are never automatic.
+The revised C++ worker/template integration remains unbuilt against the pin;
+standalone helper tests are not a substitute for that gate. See
+`src-tauri/resources/cleanup/README.md` for checks and current limitations.
+
 The worker script refuses to replace an existing resource unless explicitly
 allowed with `VOXLOOM_CLEANUP_REPLACE_WORKER=1`. Do not opt in without approval
 to replace that artifact. A debug development run may also find the provisioned

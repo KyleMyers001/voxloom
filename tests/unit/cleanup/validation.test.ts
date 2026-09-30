@@ -59,6 +59,17 @@ describe('validateCleanupOutput', () => {
     expect(validateCleanupOutput(raw, candidate)).toBe(candidate);
   });
 
+  it.each(['\uFFFD', '\uD800', '\uDC00', '\u0000', '\u001B', '\u007F', '\u000B'])(
+    'rejects corrupted or control-bearing output %#', (unsafe) => {
+      expect(validateCleanupOutput('hello world', `Hello${unsafe} world.`)).toBeNull();
+    },
+  );
+
+  it('preserves valid surrogate pairs and formatting whitespace', () => {
+    expect(validateCleanupOutput('hello 😀 world', 'Hello 😀\n\tworld.'))
+      .toBe('Hello 😀\n\tworld.');
+  });
+
   it('allows bounded dictionary spelling and joining corrections, not new content', () => {
     expect(validateCleanupOutput('send to Voxlom', 'Send to Voxloom.', ['Voxloom']))
       .toBe('Send to Voxloom.');

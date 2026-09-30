@@ -47,6 +47,8 @@ jobs:
             ~/.cargo/git
             src-tauri/target
           key: native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+      - name: Dependency-free worker safety and offline tool tests
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/native -v
       - name: Check default and Whisper
         run: |
           cargo check --manifest-path src-tauri/Cargo.toml --locked

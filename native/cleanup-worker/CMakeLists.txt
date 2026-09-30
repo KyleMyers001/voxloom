@@ -41,6 +41,9 @@ add_executable(voxloom-template-check template_check.cpp)
 target_compile_features(voxloom-template-check PRIVATE cxx_std_17)
 target_link_libraries(voxloom-template-check PRIVATE llama-common)
 
+add_executable(voxloom-safety-check safety_check.cpp)
+target_compile_features(voxloom-safety-check PRIVATE cxx_std_17)
+
 add_executable(voxloom-generation-state-check generation_state_check.cpp)
 target_compile_features(voxloom-generation-state-check PRIVATE cxx_std_17)
 target_link_libraries(voxloom-generation-state-check PRIVATE llama)

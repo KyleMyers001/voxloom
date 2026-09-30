@@ -1,6 +1,7 @@
-#include "chat.h"
+#include "prompt_renderer.hpp"
 #include "framing.hpp"
 #include "generation_state.hpp"
+#include "runtime_io.hpp"
 #include <nlohmann/json.hpp>
 #include "llama.h"
 
@@ -12,15 +13,11 @@
 #include <string>
 #include <vector>
 
-#include <fcntl.h>
-#include <unistd.h>
-
 using json = nlohmann::json;
 
 namespace {
 
 constexpr uint32_t CONTEXT_TOKENS = 4096;
-constexpr size_t OUTPUT_MAX_BYTES = 32'000;
 constexpr int OUTPUT_MAX_TOKENS = 1024;
 constexpr int OUTPUT_MIN_TOKENS = 64;
 
@@ -30,7 +27,7 @@ using llama_ptr = std::unique_ptr<T, void (*)(T *)>;
 std::vector<llama_token> tokenize(
     const llama_vocab * vocab,
     const std::string & prompt) {
-    const int count = -llama_tokenize(
+    const int required = llama_tokenize(
         vocab,
         prompt.data(),
         prompt.size(),
@@ -38,7 +35,11 @@ std::vector<llama_token> tokenize(
         0,
         true,
         true);
-    if (count <= 0) throw std::runtime_error("tokenize prompt size");
+    if (required >= 0) throw voxloom::WorkerError(voxloom::Failure::runtime);
+    if (required < -(static_cast<int>(CONTEXT_TOKENS) - OUTPUT_MIN_TOKENS)) {
+        throw voxloom::WorkerError(voxloom::Failure::context_overflow);
+    }
+    const int count = -required;
     std::vector<llama_token> tokens(static_cast<size_t>(count));
     const int written = llama_tokenize(
         vocab,
@@ -63,7 +64,13 @@ std::string token_piece(
         stack.size(),
         0,
         true);
+    if (count > static_cast<int>(stack.size())) {
+        throw voxloom::WorkerError(voxloom::Failure::runtime);
+    }
     if (count >= 0) return {stack.data(), static_cast<size_t>(count)};
+    if (count < -static_cast<int>(voxloom::OUTPUT_MAX_BYTES)) {
+        throw voxloom::WorkerError(voxloom::Failure::output_limit);
+    }
     std::vector<char> dynamic(static_cast<size_t>(-count));
     count = llama_token_to_piece(
         vocab,
@@ -72,36 +79,17 @@ std::string token_piece(
         dynamic.size(),
         0,
         true);
-    if (count < 0) throw std::runtime_error("decode token piece");
-    return {dynamic.data(), static_cast<size_t>(count)};
-}
-
-std::string render_prompt(
-    const llama_model * model,
-    const std::string & content) {
-    auto templates = common_chat_templates_init(model, "");
-    if (!common_chat_templates_support_enable_thinking(templates.get())) {
-        throw std::runtime_error(
-            "model template does not support enable_thinking");
+    if (count < 0 || count > static_cast<int>(dynamic.size())) {
+        throw voxloom::WorkerError(voxloom::Failure::runtime);
     }
-    common_chat_templates_inputs inputs;
-    inputs.enable_thinking = false;
-    inputs.messages = {{"user", content}};
-    return common_chat_templates_apply(templates.get(), inputs).prompt;
+    return {dynamic.data(), static_cast<size_t>(count)};
 }
 
 std::string generate(
     const std::string & model_path,
     const std::string & content) {
-    const int model_fd = open(model_path.c_str(), O_RDONLY | O_CLOEXEC);
-    if (model_fd < 0) throw std::runtime_error("model-unavailable");
-    std::array<char, 4> magic{};
-    const ssize_t read_count = pread(model_fd, magic.data(), magic.size(), 0);
-    close(model_fd);
-    if (read_count != static_cast<ssize_t>(magic.size())
-        || magic != std::array<char, 4>{'G', 'G', 'U', 'F'}) {
-        throw std::runtime_error("model-unavailable");
-    }
+    const voxloom::QuietStdout quiet;
+    voxloom::require_model(model_path);
     ggml_backend_load_all();
     auto model_params = llama_model_default_params();
     model_params.n_gpu_layers = 99;
@@ -111,13 +99,13 @@ std::string generate(
     if (!model) throw std::runtime_error("load model");
 
     const llama_vocab * vocab = llama_model_get_vocab(model.get());
-    const std::string prompt = render_prompt(model.get(), content);
+    const std::string prompt = voxloom::render_prompt(model.get(), content);
     auto tokens = tokenize(vocab, prompt);
     const int available =
         static_cast<int>(CONTEXT_TOKENS) - static_cast<int>(tokens.size());
     const int output_tokens = std::min(OUTPUT_MAX_TOKENS, available);
     if (output_tokens < OUTPUT_MIN_TOKENS) {
-        throw std::runtime_error("context-overflow");
+        throw voxloom::WorkerError(voxloom::Failure::context_overflow);
     }
 
     auto context_params = llama_context_default_params();
@@ -150,12 +138,28 @@ std::string generate(
             llama_sampler_sample(sampler.get(), context.get(), -1);
         if (llama_vocab_is_eog(vocab, token)) return output;
         output += token_piece(vocab, token);
-        if (output.size() > OUTPUT_MAX_BYTES) {
-            throw std::runtime_error("output-byte-limit");
+        if (output.size() > voxloom::OUTPUT_MAX_BYTES) {
+            throw voxloom::WorkerError(voxloom::Failure::output_limit);
         }
         batch = generated_token.batch(token);
     }
-    throw std::runtime_error("output-truncated");
+    throw voxloom::WorkerError(voxloom::Failure::output_truncated);
+}
+
+int report_failure(const std::string & request_id, voxloom::Failure reason) {
+    const voxloom::WorkerError failure(reason);
+    try {
+        voxloom::write_frame({
+            {"error", failure.what()},
+            {"errorCode", failure.code()},
+            {"requestId", request_id},
+            {"status", "error"},
+            {"text", nullptr},
+        });
+    } catch (...) {
+        // A broken protocol pipe cannot carry another diagnostic safely.
+    }
+    return 1;
 }
 
 }  // namespace
@@ -163,8 +167,13 @@ std::string generate(
 int main() {
     std::string request_id;
     try {
+        voxloom::silence_stderr();
         const json request = json::parse(voxloom::read_frame());
-        request_id = request.at("requestId").get<std::string>();
+        const auto id = request.at("requestId").get<std::string>();
+        if (id.empty() || id.size() > 128) {
+            throw voxloom::WorkerError(voxloom::Failure::invalid_request);
+        }
+        request_id = id;
         const std::string model_path =
             request.at("modelPath").get<std::string>();
         const std::string prompt = request.at("prompt").get<std::string>();
@@ -177,22 +186,11 @@ int main() {
             {"text", text},
         });
         return 0;
-    } catch (const std::exception & error) {
-        std::cerr << "cleanup worker: " << error.what() << "\n";
-        try {
-            const std::string code =
-                std::string(error.what()) == "context-overflow"
-                ? "context-overflow"
-                : "runtime-error";
-            voxloom::write_frame({
-                {"error", error.what()},
-                {"errorCode", code},
-                {"requestId", request_id},
-                {"status", "error"},
-                {"text", nullptr},
-            });
-        } catch (...) {
-        }
-        return 1;
+    } catch (const voxloom::WorkerError & error) {
+        return report_failure(request_id, error.failure());
+    } catch (const json::exception &) {
+        return report_failure(request_id, voxloom::Failure::invalid_request);
+    } catch (...) {
+        return report_failure(request_id, voxloom::Failure::runtime);
     }
 }
