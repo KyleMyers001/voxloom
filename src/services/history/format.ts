@@ -37,6 +37,18 @@ function legacyCleanup(): NonNullable<DictationRecord['cleanup']> {
   };
 }
 
+function unavailableCleanup(): NonNullable<DictationRecord['cleanup']> {
+  return {
+    dictionaryDigest: null,
+    dictionaryVersion: 1,
+    modelDigest: null,
+    modelId: null,
+    promptVersion: 'unavailable',
+    reason: 'cleanup metadata could not be understood',
+    status: 'unavailable',
+  };
+}
+
 function parseCleanup(value: unknown): DictationRecord['cleanup'] | null {
   if (!isObject(value)) return null;
   const {
@@ -55,7 +67,9 @@ function parseCleanup(value: unknown): DictationRecord['cleanup'] | null {
     || !(modelId === null || typeof modelId === 'string')
     || typeof promptVersion !== 'string'
     || !(reason === null || typeof reason === 'string')
-    || !['cleaned', 'fallback', 'skipped'].includes(String(status))
+    || (modelId === null && modelDigest !== null)
+    || typeof status !== 'string'
+    || !['cleaned', 'fallback', 'skipped', 'unavailable'].includes(status)
   ) return null;
   return {
     dictionaryDigest,
@@ -64,7 +78,7 @@ function parseCleanup(value: unknown): DictationRecord['cleanup'] | null {
     modelId,
     promptVersion,
     reason,
-    status: status as 'cleaned' | 'fallback' | 'skipped',
+    status: status as NonNullable<DictationRecord['cleanup']>['status'],
   };
 }
 
@@ -101,9 +115,11 @@ function parseRecord(
     return null;
   }
   if (typeof text !== 'string') return null;
-  const cleanup = legacy ? legacyCleanup() : parseCleanup(rawCleanup);
+  // Optional provenance must never erase otherwise valid transcript evidence.
+  const cleanup = legacy ? legacyCleanup()
+    : parseCleanup(rawCleanup) ?? unavailableCleanup();
   const parsedRawText = legacy ? text : rawText;
-  if (!cleanup || typeof parsedRawText !== 'string') return null;
+  if (typeof parsedRawText !== 'string') return null;
   return {
     cleanup,
     createdAt,
@@ -158,7 +174,7 @@ export function serializeHistoryFile(records: DictationRecord[]): string {
   const file: HistoryFile = {
     records: records.map((record) => ({
       ...record,
-      cleanup: record.cleanup ?? legacyCleanup(),
+      cleanup: record.cleanup ?? unavailableCleanup(),
       rawText: record.rawText ?? record.text,
     })),
     version: HISTORY_FILE_VERSION,

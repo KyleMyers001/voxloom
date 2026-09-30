@@ -47,6 +47,37 @@ describe('parseHistoryJson', () => {
     });
   });
 
+  it.each([
+    undefined, null, 'unknown', [],
+    { status: 'future-status' },
+    { dictionaryVersion: 2 },
+    { status: ['cleaned'] },
+    { modelId: null, modelDigest: 'digest-without-model' },
+  ])('preserves v2 text across unreadable cleanup metadata %#', async (metadata) => {
+    const valid = {
+      dictionaryDigest: null, dictionaryVersion: 1,
+      modelDigest: null, modelId: null, promptVersion: 'cleanup-v1',
+      reason: null, status: 'skipped',
+    };
+    const cleanup = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+      ? { ...valid, ...metadata } : metadata;
+    const row = { ...sample(), rawText: 'original words', text: 'Final words.', cleanup };
+    const io = createMemoryHistoryIo(JSON.stringify({ version: 2, records: [row] }));
+    const store = createHistoryStore(io);
+    const loaded = await store.load('forever', 1);
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(loaded.records).toHaveLength(1);
+    expect(loaded.records[0]).toMatchObject({
+      rawText: 'original words', text: 'Final words.', status: 'copied',
+      cleanup: { status: 'unavailable', modelId: null, modelDigest: null },
+    });
+    await store.save(loaded.records, 'forever', 1);
+    expect(await store.load('forever', 1)).toEqual(loaded);
+    await store.save(loaded.records, 'off', 1);
+    expect(await store.load('forever', 1)).toEqual({ ok: true, records: [] });
+  });
+
   it('rejects corrupt JSON without inventing an empty store', () => {
     const parsed = parseHistoryJson('{not-json');
     expect(parsed.ok).toBe(false);

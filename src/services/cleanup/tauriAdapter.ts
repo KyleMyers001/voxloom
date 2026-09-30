@@ -6,7 +6,7 @@ import type {
 import type {
   CleanupModelStatus,
 } from './types';
-import { CleanupEngineError, type CleanupReason } from './types';
+import { CLEANUP_REASONS, CleanupEngineError, type CleanupReason } from './types';
 
 interface NativeCleanupError {
   code?: unknown;
@@ -16,6 +16,7 @@ interface NativeCleanupError {
 function runtimeError(error: unknown): CleanupEngineError {
   const native = error as NativeCleanupError | null;
   const code = typeof native?.code === 'string'
+    && CLEANUP_REASONS.includes(native.code as CleanupReason)
     ? native.code as CleanupReason
     : 'runtime-error';
   const message = typeof native?.message === 'string'

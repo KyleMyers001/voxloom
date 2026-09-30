@@ -10,7 +10,7 @@ export interface CleanupProvenance {
   modelId: string | null;
   promptVersion: string;
   reason: string | null;
-  status: 'cleaned' | 'fallback' | 'skipped';
+  status: 'cleaned' | 'fallback' | 'skipped' | 'unavailable';
 }
 
 export interface DictationRecord {

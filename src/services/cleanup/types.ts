@@ -4,13 +4,11 @@ export const CLEANUP_MODEL_ID = 'qwen3-0.6b-q4-k-m' as const;
 export const CLEANUP_MODEL_SHA256 =
   'ac2d97712095a558e31573f62f466a3f9d93990898b0ec79d7c974c1780d524a';
 
-export type CleanupReason =
-  | 'cancelled'
-  | 'context-overflow'
-  | 'invalid-output'
-  | 'model-missing'
-  | 'runtime-error'
-  | 'timeout';
+export const CLEANUP_REASONS = [
+  'cancelled', 'context-overflow', 'invalid-output', 'model-missing',
+  'runtime-error', 'timeout',
+] as const;
+export type CleanupReason = typeof CLEANUP_REASONS[number];
 
 export class CleanupEngineError extends Error {
   constructor(

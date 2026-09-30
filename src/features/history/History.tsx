@@ -99,7 +99,7 @@ export function History({ onToast }: HistoryProps) {
                       `${record.style[0].toUpperCase()}${record.style.slice(1)}`
                   }
                 </p>
-                {record.cleanup && (
+                {record.cleanup && record.cleanup.promptVersion !== 'legacy-v1' && (
                   <p className="empty-note">
                     Cleanup: {record.cleanup.status}
                     {record.cleanup.reason

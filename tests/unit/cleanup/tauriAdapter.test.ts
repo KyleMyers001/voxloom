@@ -130,6 +130,15 @@ describe('Tauri cleanup adapters', () => {
     });
   });
 
+  it.each(['unknown-future-code', 'constructor', ['timeout'], 4, null])(
+    'maps unknown native codes to a safe runtime error: %j', async (code) => {
+      invoke.mockRejectedValueOnce({ code, message: 'native diagnostic' });
+      await expect(createTauriCleanupEngine().run(request)).rejects.toMatchObject({
+        code: 'runtime-error', message: 'native diagnostic',
+      });
+    },
+  );
+
   it('maps structured native failures without parsing messages', async () => {
     invoke.mockImplementation(async (command: string) => {
       if (command === 'cleanup_session_open') return 'native-owner-1';
