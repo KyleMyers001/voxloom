@@ -25,7 +25,7 @@ import type { SttEngine } from './contracts';
 import { audioHandleFromCapture } from './fromCapture';
 import { createSttEngine } from './factory';
 import { resolveTranscriptionModelId } from './resolveModelId';
-import type { Transcript } from './types';
+import { SttError, type Transcript } from './types';
 
 export interface CaptureAudioMeta {
   duration_ms: number;
@@ -104,6 +104,12 @@ export async function dogfoodTranscribeAndCopy(
   const engine = (options.createEngine ?? createSttEngine)(modelId);
   const handle = audioHandleFromCapture(options.audio);
   const transcript = await engine.transcribe(handle);
+  if (options.cleanup?.signal.aborted) {
+    throw new DOMException('Dictation cancelled', 'AbortError');
+  }
+  if (!transcript.text.trim()) {
+    throw new SttError('no-speech', 'No speech detected — nothing delivered.');
+  }
   options.onCleanupStart?.();
   const cleanup = options.cleanup
     ? await runCleanup({

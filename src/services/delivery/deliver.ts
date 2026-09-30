@@ -105,7 +105,8 @@ export async function deliverTranscript(
         ? error.message
         : String(error);
       // Insert API failed after a valid-looking target → Copy + toast if enabled.
-      if (!options.clipboardFallback) {
+      // Cancellation forbids a new write, not evidence of the attempted insert.
+      if (!options.clipboardFallback || options.canWrite?.() === false) {
         return failOutcome(text, `insert failed: ${insertFail}`, {
           writeStarted: true,
         });

@@ -339,6 +339,13 @@ export function useDogfoodCapture(
       if (current()) announce(result.delivery.message);
       else toastRef.current?.(result.delivery.message);
     } catch (error: unknown) {
+      if (error instanceof SttError && error.code === 'no-speech') {
+        if (current()) {
+          setPhase('idle');
+          announce(error.message);
+        }
+        return;
+      }
       if (error instanceof DOMException && error.name === 'AbortError') {
         if (current()) {
           setPhase('cancelled');

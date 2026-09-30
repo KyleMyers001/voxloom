@@ -122,7 +122,7 @@ export async function runCleanup(input: {
       status: 'fallback',
     };
   }
-  const finalText = validateCleanupOutput(input.rawText, result.text);
+  const finalText = validateCleanupOutput(input.rawText, result.text, dictionary);
   return finalText
     ? { finalText, status: 'cleaned' }
     : {

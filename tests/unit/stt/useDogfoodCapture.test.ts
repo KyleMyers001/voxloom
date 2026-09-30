@@ -12,9 +12,10 @@ import type { DeliveryPlatformAdapter, TargetSnapshot } from
 import type { CaptureState } from '../../../src/services/capture/types';
 import type { UseCaptureStateResult } from
   '../../../src/services/capture/useCaptureState';
-import type {
-  DogfoodResult,
-  DogfoodTranscribeOptions,
+import {
+  dogfoodTranscribeAndCopy,
+  type DogfoodResult,
+  type DogfoodTranscribeOptions,
 } from '../../../src/services/stt/dogfoodPath';
 import {
   createMockSttEngine,
@@ -959,6 +960,107 @@ describe('useDogfoodCapture', () => {
         text: 'soft fail text',
       }),
     );
+  });
+
+  it.each([true, false])('settles silent capture without writes, cleanup=%s', async (enabled) => {
+    const store = createMockSttModelStore();
+    await store.download('whisper-tiny.en');
+    const onHistoryRecord = vi.fn();
+    const clip = clipboard();
+    const cleanupEngine = {
+      acquire: vi.fn(), cancel: vi.fn(), release: vi.fn(),
+      run: vi.fn().mockResolvedValue('Invented speech.'),
+    };
+    const platform: DeliveryPlatformAdapter = {
+      clipboardRead: vi.fn(), clipboardRestore: vi.fn(),
+      clipboardWrite: vi.fn(), insertText: vi.fn(),
+      snapshotTarget: vi.fn().mockResolvedValue(null), validateTarget: vi.fn(),
+    };
+    const { rerender, result } = renderHook(
+      ({ state }: { state: CaptureState }) => useDogfoodCapture({
+        captureApi: stubCapture(state),
+        cleanupEnabled: enabled,
+        cleanupEngine,
+        cleanupModelId: 'qwen3-0.6b-q4-k-m',
+        clipboard: clip,
+        createModelStore: () => store,
+        deliveryPlatform: platform,
+        dogfood: (options) => dogfoodTranscribeAndCopy({
+          ...options,
+          createEngine: (modelId) => createMockSttEngine({
+            modelId, transcriptText: ' \n\t ',
+          }),
+        }),
+        modelId: 'whisper-tiny.en',
+        onHistoryRecord,
+      }),
+      { initialProps: { state: { kind: 'idle' } as CaptureState } },
+    );
+    await act(async () => { await result.current.start(); });
+    rerender({ state: { kind: 'stopped', audio: {
+      duration_ms: 100, id: 'silent-integration', sample_rate_hz: 16_000,
+    } } });
+    await waitFor(() => expect(result.current.message).toMatch(/no speech/i));
+    expect(result.current.phase).toBe('idle');
+    expect(cleanupEngine.release).toHaveBeenCalledOnce();
+    expect(cleanupEngine.run).not.toHaveBeenCalled();
+    expect(platform.validateTarget).not.toHaveBeenCalled();
+    expect(platform.insertText).not.toHaveBeenCalled();
+    expect(platform.clipboardWrite).not.toHaveBeenCalled();
+    expect(clip.copy).not.toHaveBeenCalled();
+    expect(onHistoryRecord).not.toHaveBeenCalled();
+    await act(async () => { await result.current.start(); });
+    expect(result.current.phase).toBe('recording');
+  });
+
+  it.each([true, false])('keeps cancelled failed-write history, fallback=%s', async (fallback) => {
+    const store = createMockSttModelStore();
+    await store.download('whisper-tiny.en');
+    const onHistoryRecord = vi.fn();
+    const onToast = vi.fn();
+    let rejectInsert!: (error: Error) => void;
+    const intended: TargetSnapshot = {
+      appName: 'Test', appPid: 42, capturedAt: 1,
+      elementId: 'test', elementRole: 'AXTextArea',
+      insertable: true, kind: 'insertable', reason: null,
+    };
+    const platform: DeliveryPlatformAdapter = {
+      clipboardRead: vi.fn(), clipboardRestore: vi.fn(), clipboardWrite: vi.fn(),
+      insertText: vi.fn(() => new Promise<void>((_resolve, reject) => {
+        rejectInsert = reject;
+      })),
+      snapshotTarget: vi.fn().mockResolvedValue(intended),
+      validateTarget: vi.fn().mockResolvedValue(intended),
+    };
+    const { rerender, result } = renderHook(
+      ({ state }: { state: CaptureState }) => useDogfoodCapture({
+        captureApi: stubCapture(state),
+        clipboard: clipboard(), clipboardFallback: fallback,
+        createModelStore: () => store,
+        deliveryPlatform: platform,
+        dogfood: (options) => dogfoodTranscribeAndCopy({
+          ...options,
+          createEngine: (modelId) => createMockSttEngine({
+            modelId, transcriptText: 'recover this',
+          }),
+        }),
+        modelId: 'whisper-tiny.en', onHistoryRecord, onToast,
+      }),
+      { initialProps: { state: { kind: 'idle' } as CaptureState } },
+    );
+    await act(async () => { await result.current.start(); });
+    rerender({ state: { kind: 'stopped', audio: {
+      duration_ms: 100, id: 'cancel-write', sample_rate_hz: 16_000,
+    } } });
+    await waitFor(() => expect(platform.insertText).toHaveBeenCalledOnce());
+    act(() => { result.current.cancel(); });
+    await act(async () => { rejectInsert(new Error('AX original failure')); });
+    await waitFor(() => expect(onHistoryRecord).toHaveBeenCalledOnce());
+    expect(onHistoryRecord).toHaveBeenCalledWith(expect.objectContaining({
+      text: 'recover this', rawText: 'recover this', status: 'failed',
+    }));
+    expect(onToast).toHaveBeenCalledWith(expect.stringContaining('AX original failure'));
+    expect(platform.clipboardWrite).not.toHaveBeenCalled();
   });
 
   it('does not append history for blank transcripts', async () => {

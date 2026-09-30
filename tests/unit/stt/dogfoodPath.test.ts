@@ -190,6 +190,47 @@ describe('dogfoodTranscribeAndCopy cleanup integration', () => {
     style: 'formal' as const,
   };
 
+  it.each(['', ' \n\t ', '\u2003'])(
+    'rejects silence %j before cleanup or delivery', async (text) => {
+      const clip = clipboard();
+      const cleanupRun = vi.fn().mockResolvedValue('Invented speech.');
+      const onCleanupStart = vi.fn();
+      await expect(dogfoodTranscribeAndCopy({
+        audio: { duration_ms: 100, id: 'silence', sample_rate_hz: 16_000 },
+        cleanup: {
+          engine: { cancel: vi.fn(), run: cleanupRun },
+          requestId: 'silent',
+          signal: processingSignal(),
+          snapshot: cleanupSnapshot,
+        },
+        clipboard: clip,
+        createEngine: (modelId) => createMockSttEngine({
+          modelId, transcriptText: text,
+        }),
+        modelId: 'whisper-tiny.en',
+        onCleanupStart,
+      })).rejects.toMatchObject({ code: 'no-speech' });
+      expect(cleanupRun).not.toHaveBeenCalled();
+      expect(onCleanupStart).not.toHaveBeenCalled();
+      expect(clip.copy).not.toHaveBeenCalled();
+    },
+  );
+
+  it('preserves cancellation precedence over silence with cleanup disabled', async () => {
+    await expect(dogfoodTranscribeAndCopy({
+      audio: { duration_ms: 100, id: 'cancel-silence', sample_rate_hz: 16_000 },
+      cleanup: {
+        engine: { cancel: vi.fn(), run: vi.fn() },
+        requestId: 'silent',
+        signal: processingSignal(true),
+        snapshot: { ...cleanupSnapshot, enabled: false },
+      },
+      clipboard: clipboard(),
+      createEngine: (modelId) => createMockSttEngine({ modelId, transcriptText: '' }),
+      modelId: 'whisper-tiny.en',
+    })).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
   it('delivers exactly one cleaned transcript after STT', async () => {
     const clip = clipboard();
     const cleanupRun = vi.fn().mockResolvedValue('Cleaned transcript.');

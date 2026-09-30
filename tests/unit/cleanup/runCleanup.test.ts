@@ -29,6 +29,24 @@ describe('runCleanup', () => {
     expect(engine.run).not.toHaveBeenCalled();
   });
 
+  it.each(['formal', 'casual', 'very-casual'] as const)(
+    'applies dictionary and fidelity guards for %s', async (style) => {
+      const engine = {
+        cancel: vi.fn(),
+        run: vi.fn().mockResolvedValueOnce('Send to Voxloom.')
+          .mockResolvedValueOnce('Keep 50 items.'),
+      };
+      const common = { engine, requestId: 'r1', signal: signal(),
+        snapshot: { ...snapshot, style } };
+      await expect(runCleanup({ ...common, rawText: 'send to Voxlom' }))
+        .resolves.toMatchObject({ status: 'cleaned', finalText: 'Send to Voxloom.' });
+      await expect(runCleanup({ ...common, rawText: 'Keep 5 items' }))
+        .resolves.toMatchObject({
+          status: 'fallback', reason: 'invalid-output', finalText: 'Keep 5 items',
+        });
+    },
+  );
+
   it('falls back once when output is invalid', async () => {
     const engine = {
       cancel: vi.fn(),

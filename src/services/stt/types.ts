@@ -39,6 +39,7 @@ export type SttErrorCode =
   | 'download-failed'
   | 'model-missing'
   | 'transcribe-failed'
+  | 'no-speech'
   | 'unsupported-audio'
   | 'engine-unavailable';
 

@@ -1,24 +1,24 @@
+import { preservesContent, sameMultiset } from './contentGuard';
+
 export const CLEANUP_OUTPUT_MAX_BYTES = 32_000;
 export const CLEANUP_OUTPUT_EXTRA_CHARS = 256;
 export const CLEANUP_OUTPUT_EXPANSION = 2;
 
 const encoder = new TextEncoder();
-const PROTECTED = [
-  /https?:\/\/\S+/giu,
-  /(?:^|\s)--?[a-z][\w-]*/giu,
-  /(?:^|\s)(?:[./~][\w./~-]+)/gu,
-  /\b\d+(?:[.,:]\d+)*\b/gu,
-];
-
+// Keep entire technical lexemes rather than matching their safe-looking
+// substrings. Quotes/brackets and trailing sentence punctuation are wrappers;
+// signs, internal punctuation, URL suffixes, and multiplicity are significant.
 function protectedValues(text: string): string[] {
-  return PROTECTED.flatMap((pattern) =>
-    Array.from(text.matchAll(pattern), (match) => match[0].trim())
-  );
+  const lexemes = text.normalize('NFC')
+    .match(/[^\s"'“”‘’`<>(){}[\]]+/gu) ?? [];
+  return lexemes.map((value) => value.replace(/[.,!?;:。！？、，；：]+$/gu, ''))
+    .filter((value) => /[\p{N}_/@\\=]|[\p{L}]-[\p{L}]|^-+[\p{L}]|^[.~][\p{L}]|[\p{Ll}][\p{Lu}]|[\p{L}]\.[\p{L}]/u.test(value));
 }
 
 export function validateCleanupOutput(
   rawText: string,
   candidate: string,
+  dictionary: readonly string[] = [],
 ): string | null {
   const cleaned = candidate.trim();
   if (!cleaned) return null;
@@ -29,7 +29,7 @@ export function validateCleanupOutput(
     + CLEANUP_OUTPUT_EXTRA_CHARS;
   if (cleaned.length > maxChars) return null;
   if (/<\/?think>|reasoning:/iu.test(cleaned)) return null;
-  const protectedRaw = protectedValues(rawText);
-  if (protectedRaw.some((value) => !cleaned.includes(value))) return null;
+  if (!sameMultiset(protectedValues(rawText), protectedValues(cleaned))) return null;
+  if (!preservesContent(rawText, cleaned, dictionary)) return null;
   return cleaned;
 }

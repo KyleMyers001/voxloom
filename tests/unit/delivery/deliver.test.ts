@@ -299,6 +299,37 @@ describe('deliverTranscript', () => {
     expect(outcome.writeStarted).toBe(true);
   });
 
+  it.each([true, false])(
+    'retains failed insertion evidence after cancellation, fallback=%s',
+    async (clipboardFallback) => {
+      let canWrite = true;
+      let rejectInsert!: (error: Error) => void;
+      const platform = adapter({
+        insertText: vi.fn(() => new Promise<void>((_resolve, reject) => {
+          rejectInsert = reject;
+        })),
+      });
+      const delivery = deliverTranscript({
+        canWrite: () => canWrite,
+        clipboardFallback,
+        intended: snap(),
+        platform,
+        text: 'recover this dictation',
+      });
+      await vi.waitFor(() => expect(platform.insertText).toHaveBeenCalledOnce());
+      canWrite = false;
+      rejectInsert(new Error('AXSelectedText rejected after dispatch'));
+      await expect(delivery).resolves.toMatchObject({
+        detail: expect.stringContaining('AXSelectedText rejected after dispatch'),
+        status: 'failed',
+        text: 'recover this dictation',
+        writeCommitted: false,
+        writeStarted: true,
+      });
+      expect(platform.clipboardWrite).not.toHaveBeenCalled();
+    },
+  );
+
   it('rechecks cancellation at the write boundary', async () => {
     let canWrite = true;
     const platform = adapter({
