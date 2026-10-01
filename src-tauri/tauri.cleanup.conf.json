@@ -5,7 +5,7 @@
       "resources/cleanup/voxloom-cleanup-worker": "cleanup/voxloom-cleanup-worker"
     },
     "macOS": {
-      "minimumSystemVersion": "11.0"
+      "minimumSystemVersion": "13.3"
     }
   }
 }

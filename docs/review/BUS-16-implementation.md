@@ -1,6 +1,31 @@
 # BUS-16 local cleanup implementation
 
-## Pinned worker build checkpoint — 2026-09-30
+## Approved optional-floor checkpoint — 2026-09-30
+
+Kyle explicitly approved raising **only optional cleanup to macOS 13.3** while
+preserving the ordinary workerless **10.15** declaration. Both the worker CMake
+floor (before compiler detection) and `tauri.cleanup.conf.json` are now 13.3.
+The default config, upstream pin, architecture and backends are unchanged.
+
+Regression-first: the revised config tests initially had **2 failures / 5 passes**,
+then all **7 passed**. Fresh verification also passes **489 frontend tests across
+68 files**, lint/typecheck, and **11 Python/C++ helper/tool tests**.
+
+A new, separate scratch build against the clean pin compiled all four C++ targets
+on macOS 26.6.2/arm64. **None of the three diagnosed availability warnings recur**;
+the configure notice about missing optional ccache remains. Safety, token lifetime,
+upstream Jinja, and all four real framed-error smoke cases pass. `file`/`lipo`
+confirm arm64, `otool` reports **minos 13.3**, and strict signature verification
+passes. The old 11.0 scratch build and evidence remain intact; no resource or app
+was installed/replaced. This is not a packaged-app or older-OS test.
+
+The narrow floor decision is resolved. Actual GGUF metadata/generation, corpus
+quality and latency/RAM, supported-OS/hardware validation, packaged builds and
+permitted Tauri/microphone/AX/clipboard checks remain. Browser/Rust suites were
+not rerun for this config-only change; their earlier results below are historical.
+No weights, upstream modification, push/merge, or PR/Jira mutation. Keep PR #24 draft.
+
+## Pinned worker build checkpoint — 2026-09-30 (historical)
 
 Kyle explicitly approved fetching the pinned upstream source for scratch
 compilation/testing, without weights or artifact replacement. A fresh checkout
@@ -273,7 +298,7 @@ target validation, and clipboard fallback semantics remain unchanged.
 ## Build provisioning
 
 The normal bundle is workerless. Optional local dogfood cleanup targets
-Apple Silicon/macOS 11+; it is not a public-distribution or M1 compatibility
+Apple Silicon/macOS 13.3+; it is not a public-distribution or M1 compatibility
 certification. See the root README for source/build directory overrides and
 artifact-replacement safeguards. With a clean local checkout at the exact pin,
 run:

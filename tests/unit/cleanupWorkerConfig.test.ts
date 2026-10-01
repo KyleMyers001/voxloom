@@ -21,14 +21,14 @@ describe('cleanup worker resources', () => {
     expect(config.bundle.macOS.minimumSystemVersion).toBe('10.15');
   });
 
-  it('bundles only the executable in the optional macOS 11+ build', () => {
+  it('bundles only the executable in the optional macOS 13.3+ build', () => {
     const config = JSON.parse(read('src-tauri/tauri.cleanup.conf.json')) as {
       bundle: {
         macOS: { minimumSystemVersion: string };
         resources: Record<string, string>;
       };
     };
-    expect(config.bundle.macOS.minimumSystemVersion).toBe('11.0');
+    expect(config.bundle.macOS.minimumSystemVersion).toBe('13.3');
     expect(config.bundle.resources).toEqual({
       'resources/cleanup/voxloom-cleanup-worker':
         'cleanup/voxloom-cleanup-worker',
@@ -41,14 +41,14 @@ describe('cleanup worker resources', () => {
     );
   });
 
-  it('pins portable arm64 and macOS 11 before compiler detection', () => {
+  it('pins portable arm64 and macOS 13.3 before compiler detection', () => {
     const cmake = read('native/cleanup-worker/CMakeLists.txt');
     expect(cmake).toContain('set(GGML_NATIVE OFF CACHE BOOL "" FORCE)');
     expect(cmake).toContain(
       'set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "" FORCE)',
     );
     expect(cmake).toContain(
-      'set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "" FORCE)',
+      'set(CMAKE_OSX_DEPLOYMENT_TARGET "13.3" CACHE STRING "" FORCE)',
     );
     expect(cmake.indexOf('CMAKE_OSX_DEPLOYMENT_TARGET'))
       .toBeLessThan(cmake.indexOf('\nproject('));

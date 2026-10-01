@@ -123,7 +123,7 @@ containing directory after rename.
 **Importing a GGUF does not install the worker.** A missing/non-executable
 worker requires a worker-equipped build; reimporting the model cannot fix it.
 The ordinary bundle contains no worker and retains its macOS 10.15 declaration.
-The optional cleanup target is **Apple Silicon/macOS 11+**, for local developer
+The optional cleanup target is **Apple Silicon/macOS 13.3+**, for local developer
 use only—not a signed/notarized public release or a verified M1 compatibility
 claim. Intel/universal cleanup is outside the current scope.
 
@@ -155,12 +155,12 @@ python3 scripts/check-cleanup-template.py \
 
 This holds a fully verified descriptor and uses metadata/vocabulary only. It is
 not a generation/fidelity test. Source and model downloads are never automatic.
-The revised C++ worker/template checker now builds against the clean pin and
-passes weight-free checks on macOS 26.6.2 (arm64). **Compatibility remains blocked:**
-upstream calls unguarded macOS 12 Metal and 13.3 Accelerate APIs despite the
-currently declared 11.0 floor. That declaration is not proof of support; a revised
-compatibility decision is required before completion. No floor was raised or
-upstream source patched. Actual GGUF/template/inference checks remain unrun. See
+The C++ worker/template checker builds against the clean pin and passes
+weight-free checks on macOS 26.6.2 (arm64). The approved optional 13.3 floor aligns
+with upstream's macOS 12 Metal and 13.3 Accelerate APIs; a fresh build no longer
+emits the diagnosed availability warnings. No upstream patch or backend change
+was needed. This is not older-system compatibility proof: actual GGUF/template/
+inference and supported-OS testing remain unrun. See
 `src-tauri/resources/cleanup/README.md` for details.
 
 The worker script refuses to replace an existing resource unless explicitly
@@ -171,7 +171,7 @@ ordinary bundle. Import the exact local GGUF described in
 `docs/third-party/qwen3-0.6b.md`, then enable cleanup explicitly.
 
 The optional configuration bundles only the executable. Its build requests
-arm64, macOS 11.0, and `GGML_NATIVE=OFF`; inspect the resulting `file`, `lipo`,
+arm64, macOS 13.3, and `GGML_NATIVE=OFF`; inspect the resulting `file`, `lipo`,
 and `otool` output and verify the app's ad-hoc signature before native testing.
 The template/protocol smoke is weight-free and **not** real-Qwen evidence.
 Actual GGUF template/generation, fidelity, latency/RAM, packaged import,

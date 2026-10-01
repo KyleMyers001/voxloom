@@ -2,7 +2,8 @@ cmake_minimum_required(VERSION 3.20)
 # Optional local cleanup currently targets Apple Silicon, not Intel/universal.
 # Set these before project() so compiler probes use the same deployment floor.
 set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "" FORCE)
-set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "" FORCE)
+# Pinned Metal/Accelerate code calls APIs introduced in macOS 12/13.3.
+set(CMAKE_OSX_DEPLOYMENT_TARGET "13.3" CACHE STRING "" FORCE)
 project(voxloom_cleanup_worker LANGUAGES C CXX)
 
 if(NOT APPLE)
