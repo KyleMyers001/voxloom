@@ -120,8 +120,9 @@ def exchange(argv, payload, *, timeout, stdout_limit, pass_fds=(), framed=False)
                 reap()
                 if reaped and not selector.get_map():
                     break
-    except OSError:
-        fault = fault or 'process-io'
+    except OSError as error:
+        # Preserve a safe numeric diagnostic without leaking child/prompt text.
+        fault = fault or f'process-io-errno-{error.errno}'
     finally:
         # Also covers KeyboardInterrupt and unexpected parent I/O failures.
         # Kill the disposable process group to release inherited pipe handles.

@@ -133,6 +133,13 @@ influence. Neither matching these fixtures nor accepting everything unchanged
 establishes semantic equivalence. Record human findings separately; do not turn
 a transport success into a quality certification.
 
+A 2026-10-02 synthetic full-corpus run encountered one unexpected parent I/O
+failure (child exit 0). It fell back safely and was reported as a supported-case
+failure, not success. Root cause is unknown: 2400 instrumented attempts and three
+later full-corpus runs did not reproduce it. Subsequent parent I/O failures now
+carry `process-io-errno-N` in `detail` (numeric errno only, no exception text).
+These later passes are not evidence that the intermittent issue was fixed.
+
 Real Qwen quality/performance, packaged import, Tauri lifecycle, speech/delivery,
 history integration, older-system compatibility and hosted CI remain separate
 gates for PR #24.

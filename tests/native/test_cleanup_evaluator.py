@@ -1,5 +1,6 @@
 """Offline evaluator contracts: tiny fixtures and disposable fake processes only."""
 
+import errno
 import hashlib
 import importlib.util
 import json
@@ -172,6 +173,17 @@ class EvaluatorTests(unittest.TestCase):
                                  'context-overflow' if setup == 'overflow' else
                                  'model-missing' if setup in ('tamper', 'missing-model') else
                                  'runtime-error')
+
+    def test_parent_io_error_keeps_safe_errno_and_reaps_child(self):
+        import cleanup_process
+        self.fake('time.sleep(60)', read_request=False)
+        with patch.object(cleanup_process.selectors.DefaultSelector, 'select',
+                          side_effect=OSError(errno.EIO, 'synthetic-private-marker')):
+            result = self.run_attempt()
+        self.assertEqual(result['reason'], 'runtime-error')
+        self.assertEqual(result['detail'], f'process-io-errno-{errno.EIO}')
+        self.assertIsNotNone(result['attempt'])
+        self.assertNotIn('synthetic-private-marker', json.dumps(result))
 
     def test_unexpected_harness_failure_is_not_labelled_model_missing(self):
         self.success()

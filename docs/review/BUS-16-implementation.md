@@ -17,8 +17,9 @@ Node overhead are not labelled inference. Meaning review always remains pending.
 
 Fresh checks: **628 frontend tests / 69 files**, lint/typecheck, isolated frontend
 build, **6 Chromium tests**, both offline locked Cargo checks, and five sequential
-default/Whisper suite pairs (**177/176 each**) pass. **32 Python/C++ tool tests**
-pass in three consecutive full runs, including **21 new evaluator tests** with
+default/Whisper suite pairs (**177/176 each**) pass. **33 Python/C++ tool tests**
+pass (the preceding 32-test suite also passed three consecutive runs), including
+**22 new evaluator tests** with
 fake workers, tiny synthetic files, the real TS bridge, rejection/recovery,
 descriptor closure, child reclamation and non-cumulative RSS. The four existing
 Rust warnings remain. No revised C++ build was needed; worker source is unchanged.
@@ -30,6 +31,14 @@ regressions captured missing evaluator, malformed bridge result acceptance and
 misclassified parent failures before repair; a Python 3.9 hash compatibility
 failure and a test-fixture URL setup error were also fixed without weakening
 assertions.
+
+**Open evaluator observation:** a later full-corpus synthetic run recorded one
+unexpected `process-io` runtime fallback (child exit 0), correctly retaining raw
+text and reporting a supported-case failure. Root cause is not established.
+Instrumentation probes (400 + 2000 attempts) and three subsequent complete corpus
+runs did not reproduce it; those passes do not prove a fix. The helper now retains
+safe numeric errno diagnostics, with a regression proving actual-attempt evidence,
+child reaping, and no exception-text leakage. Keep this visible in follow-up.
 
 Actual GGUF template/generation, model fidelity/latency/RAM, packaged/live Tauri
 and speech/delivery checks, older-system compatibility and hosted CI remain.
