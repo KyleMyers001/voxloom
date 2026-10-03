@@ -183,6 +183,13 @@ Downloads, a persistent worker, and distribution certification
 are deferred. See `docs/review/BUS-16-implementation.md` for the branch's prior
 implementation evidence and known limitations.
 
+An offline [cleanup evaluation kit](docs/review/BUS-16-evaluator.md) now covers
+23 synthetic cases across all three styles and dictionary modes, using the
+production TypeScript prompt and output guards. Its Python runner records
+per-attempt output, fallback, timing and memory evidence from an explicitly
+supplied worker/GGUF. Weight-free tests exercise fake workers; actual-model
+quality/performance and human meaning review remain pending.
+
 ## Verification
 
 Pull requests targeting `main` run GitHub Actions CI on Node 24 and Ubuntu:

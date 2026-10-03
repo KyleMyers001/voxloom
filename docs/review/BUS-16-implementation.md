@@ -1,6 +1,42 @@
 # BUS-16 local cleanup implementation
 
-## Approved optional-floor checkpoint — 2026-09-30
+## Offline evaluator checkpoint — 2026-10-02
+
+The [cleanup evaluation kit](BUS-16-evaluator.md) is implemented. The versioned
+synthetic corpus has **23 cases / 138 style-and-dictionary variants**. Tests use
+the production TypeScript dictionary snapshot, prompt and output guards; the
+Python runner calls those same functions through an offline Node/Vite bridge.
+No production prompt, guard, runtime, dependency or platform policy changed.
+
+Worker attempts reverify/inherit a held allowlisted descriptor, enforce framing,
+encoding/envelope/output/deadline bounds, drain early errors concurrently with
+stdin and kill/reap before continuing. Evidence separates actual launches,
+changed/unchanged acceptance, guard fallback, worker/preflight fallback, and
+harness failure. Per-child `wait4` RSS is normalized to bytes; verification and
+Node overhead are not labelled inference. Meaning review always remains pending.
+
+Fresh checks: **628 frontend tests / 69 files**, lint/typecheck, isolated frontend
+build, **6 Chromium tests**, both offline locked Cargo checks, and five sequential
+default/Whisper suite pairs (**177/176 each**) pass. **32 Python/C++ tool tests**
+pass in three consecutive full runs, including **21 new evaluator tests** with
+fake workers, tiny synthetic files, the real TS bridge, rejection/recovery,
+descriptor closure, child reclamation and non-cumulative RSS. The four existing
+Rust warnings remain. No revised C++ build was needed; worker source is unchanged.
+
+A full-corpus synthetic echo-worker smoke records all 138 variants and explicitly
+claims no quality pass. Six byte-limit cases reject before launch; whitespace
+trimming counts as changed acceptance, not demonstrated usefulness. Initial
+regressions captured missing evaluator, malformed bridge result acceptance and
+misclassified parent failures before repair; a Python 3.9 hash compatibility
+failure and a test-fixture URL setup error were also fixed without weakening
+assertions.
+
+Actual GGUF template/generation, model fidelity/latency/RAM, packaged/live Tauri
+and speech/delivery checks, older-system compatibility and hosted CI remain.
+No weights, worker/app installation, live permissions, push, merge or PR/Jira
+mutation occurred. Keep PR #24 draft. Earlier checkpoints below are historical.
+
+## Approved optional-floor checkpoint — 2026-09-30 (historical)
 
 Kyle explicitly approved raising **only optional cleanup to macOS 13.3** while
 preserving the ordinary workerless **10.15** declaration. Both the worker CMake
