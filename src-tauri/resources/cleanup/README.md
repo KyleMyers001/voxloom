@@ -37,7 +37,8 @@ file verification. The worker's source now rejects invalid UTF-8, literal U+FFFD
 and unsafe ASCII controls, returns fixed bounded diagnostics, and suppresses
 backend stdout during execution and stderr throughout the worker process.
 
-Dependency-free checks (no upstream source or model needed):
+Weight-free checks (installed Node/Vite dependencies required; no upstream
+source or model needed):
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/native -v
@@ -53,6 +54,8 @@ bundled. This is not packaged signing or older-system compatibility evidence.
 in macOS 12 and Accelerate NEWLAPACK calls introduced in 13.3. Raising only the
 optional worker/app configuration to 13.3 removes the diagnosed availability
 warnings in a fresh build. The pin and backends are unchanged; no upstream patch
-was made. The actual-GGUF check, real inference/corpus, packaged smoke/signatures,
-and live compatibility remain separate gates. The optional build is for local
-dogfooding, not certified public distribution.
+was made. The actual-GGUF check and real inference/corpus measurements are now
+recorded in [model evaluation](../../../docs/review/BUS-16-model-evaluation.md).
+Human quality review, packaged smoke/signatures and live compatibility remain
+separate gates. The optional build is for local dogfooding, not certified public
+distribution.
