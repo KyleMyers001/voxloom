@@ -5,7 +5,7 @@ import {
   type CleanupSnapshot,
 } from './types';
 
-export const CLEANUP_PROMPT_VERSION = 'cleanup-v1';
+export const CLEANUP_PROMPT_VERSION = 'cleanup-v2';
 
 export async function createCleanupProvenance(
   snapshot: CleanupSnapshot,

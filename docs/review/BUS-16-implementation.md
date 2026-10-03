@@ -1,6 +1,35 @@
 # BUS-16 local cleanup implementation
 
-## Offline evaluator checkpoint — 2026-10-02
+## Real-model checkpoint — 2026-10-02
+
+Kyle supplied the local allowlisted GGUF and authorized continuation. Actual
+metadata/template verification and three full 138-variant model runs are now
+recorded in [real-model evaluation](BUS-16-model-evaluation.md). No weights,
+worker/app resources or personal data were installed/replaced.
+
+The `cleanup-v1` model returned JSON for all 126 supported variants, so every
+one fell back. Regression-backed `cleanup-v2` instructions now explicitly request
+plain transcript text. Real generation also exposed emoji deletion, name
+lowercasing and added quotation wrappers accepted by the older guards; these
+now reject to raw, with recorded candidates and safe contrast tests. No existing
+guard was relaxed; model pin, sampler, timeout, process isolation and platform
+floors are unchanged. Historical v1 provenance remains intact.
+
+Final fixed-corpus result: **17 useful edits, 72 unchanged, 49 exact raw
+fallbacks**, no timeouts. All 17 changes were inspected by the coding agent;
+human sign-off and general quality certification remain pending. Usefulness and
+style differentiation are limited. Final-run first worker latency was **11.726 s**,
+supported median/p95 **0.256/0.310 s**, separate verification median **0.137 s**,
+max worker RSS **963.34 MiB**, on M5/24 GiB/macOS 26.6.2—not an M1/13.3 guarantee.
+
+Fresh gates pass: **653 frontend tests / 69 files**, **33 Python/C++ tools**,
+lint/types/build, **6 Chromium checks**, both Cargo checks and five normal-parallel
+suite pairs (**177/176 each**). Four prior Rust warnings remain. The earlier
+synthetic I/O observation is still open; 660 additional synthetic probes and the
+real-model runs did not reproduce it, not proof of a fix. Packaged/live checks,
+older-system support, hosted CI and final PR dispositions remain. Keep PR #24 draft.
+
+## Offline evaluator checkpoint — 2026-10-02 (historical)
 
 The [cleanup evaluation kit](BUS-16-evaluator.md) is implemented. The versioned
 synthetic corpus has **23 cases / 138 style-and-dictionary variants**. Tests use

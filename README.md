@@ -17,8 +17,8 @@ focused-window shortcuts; state clears on reload. The Tauri shell persists
 (`settings.json`, `history.json`, `dictionary.json`). Native audio retry and
 saved audio retention are not implemented. Onboarding practice recognizes
 shortcut gestures but does not transcribe speech. Optional local cleanup is
-experimental and not yet verified with real model generation; see the dogfood
-setup below. Start-at-login is not implemented. Development scenario controls
+experimental: real-model corpus runs show limited useful cleanup, while packaged
+integration and human quality review remain pending; see the dogfood setup below. Start-at-login is not implemented. Development scenario controls
 are excluded from production builds. See
 `docs/review/BUS-14-insert-delivery.md` for native smoke checks and limitations.
 
@@ -159,8 +159,8 @@ The C++ worker/template checker builds against the clean pin and passes
 weight-free checks on macOS 26.6.2 (arm64). The approved optional 13.3 floor aligns
 with upstream's macOS 12 Metal and 13.3 Accelerate APIs; a fresh build no longer
 emits the diagnosed availability warnings. No upstream patch or backend change
-was needed. This is not older-system compatibility proof: actual GGUF/template/
-inference and supported-OS testing remain unrun. See
+was needed. Actual GGUF template/generation has now been exercised on the M5
+host, not a supported older OS/hardware target; this is not compatibility proof. See
 `src-tauri/resources/cleanup/README.md` for details.
 
 The worker script refuses to replace an existing resource unless explicitly
@@ -174,9 +174,9 @@ The optional configuration bundles only the executable. Its build requests
 arm64, macOS 13.3, and `GGML_NATIVE=OFF`; inspect the resulting `file`, `lipo`,
 and `otool` output and verify the app's ad-hoc signature before native testing.
 The template/protocol smoke is weight-free and **not** real-Qwen evidence.
-Actual GGUF template/generation, fidelity, latency/RAM, packaged import,
-Whisper/microphone/AX/clipboard behavior, and compatibility remain live-validation
-gates. Native owner reclamation now has deterministic registry/adapter tests
+Actual GGUF template/generation and fixed-corpus latency/RSS are measured below.
+Human quality review, packaged import, Whisper/microphone/AX/clipboard behavior
+and older-system compatibility remain live-validation gates. Native owner reclamation now has deterministic registry/adapter tests
 and synthetic-worker kill/reap coverage, but actual renderer reload/crash checks
 and other PR #24 safety fixes remain outstanding. Keep the PR draft.
 Downloads, a persistent worker, and distribution certification
@@ -187,8 +187,15 @@ An offline [cleanup evaluation kit](docs/review/BUS-16-evaluator.md) now covers
 23 synthetic cases across all three styles and dictionary modes, using the
 production TypeScript prompt and output guards. Its Python runner records
 per-attempt output, fallback, timing and memory evidence from an explicitly
-supplied worker/GGUF. Weight-free tests exercise fake workers; actual-model
-quality/performance and human meaning review remain pending.
+supplied worker/GGUF. Weight-free tests exercise fake workers. The first actual
+model run echoed JSON for every supported case; `cleanup-v2` now explicitly asks
+for plain text. Regressions also reject observed emoji loss, added quotation
+wrappers and name lowercasing without relaxing existing guards.
+
+The final [real-model evaluation](docs/review/BUS-16-model-evaluation.md) recorded
+17 useful changes, 72 unchanged outputs and 49 raw fallbacks across 138 variants,
+with zero timeouts. This is limited usefulness, not complete style quality or a
+semantic safety guarantee. Human review and packaged/live checks remain pending.
 
 ## Verification
 

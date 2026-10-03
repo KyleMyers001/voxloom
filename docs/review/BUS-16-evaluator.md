@@ -140,6 +140,10 @@ later full-corpus runs did not reproduce it. Subsequent parent I/O failures now
 carry `process-io-errno-N` in `detail` (numeric errno only, no exception text).
 These later passes are not evidence that the intermittent issue was fixed.
 
-Real Qwen quality/performance, packaged import, Tauri lifecycle, speech/delivery,
-history integration, older-system compatibility and hosted CI remain separate
-gates for PR #24.
+Actual GGUF template verification and baseline/repaired corpus measurements are
+now recorded in [real-model evaluation](BUS-16-model-evaluation.md). Prompt v2 and
+additional symbol/quotation/capitalization checks address defects reproduced by
+those runs; the corpus keeps their unsafe candidates as regressions. Human
+quality review, packaged import, Tauri lifecycle, speech/delivery, history
+integration, older-system compatibility and hosted CI remain separate gates
+for PR #24.
