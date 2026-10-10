@@ -205,6 +205,57 @@ describe('completion-time delivery side effects', () => {
 });
 
 describe('completion snapshot failures', () => {
+  it.each([true, false])('honors fallback=%s when an asynchronous snapshot rejects', async (fallback) => {
+    const clip = clipboard();
+    const snapshotTarget = vi.fn().mockRejectedValue(new Error('AX worker rejected'));
+    const result = await dogfoodTranscribeAndCopy({
+      audio: { duration_ms: 100, id: 'pcm-snapshot-reject', sample_rate_hz: 16_000 },
+      clipboard: clip,
+      clipboardFallback: fallback,
+      modelId: 'whisper-tiny.en',
+      createEngine: (modelId) => createMockSttEngine({ modelId, transcriptText: 'recoverable transcript' }),
+      snapshotTarget,
+    });
+    expect(snapshotTarget).toHaveBeenCalledOnce();
+    expect(result.transcript.text).toBe('recoverable transcript');
+    expect(result.delivery.status).toBe(fallback ? 'copied' : 'failed');
+    expect(clip.copy).toHaveBeenCalledTimes(fallback ? 1 : 0);
+    if (fallback) expect(clip.copy).toHaveBeenCalledWith('recoverable transcript');
+  });
+
+  it('cancellation during a rejecting snapshot prevents fallback and all later platform calls', async () => {
+    let reject!: (error: Error) => void;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const snapshot = new Promise<never>((_, fail) => { reject = fail; });
+    let current = true;
+    const clip = clipboard();
+    const platform = {
+      snapshotTarget: vi.fn(() => { entered(); return snapshot; }),
+      validateTarget: vi.fn(), insertText: vi.fn(),
+      clipboardWrite: vi.fn(), clipboardRead: vi.fn(), clipboardRestore: vi.fn(),
+    };
+    const pending = dogfoodTranscribeAndCopy({
+      audio: { duration_ms: 100, id: 'pcm-cancelled-snapshot', sample_rate_hz: 16_000 },
+      clipboard: clip, clipboardFallback: true,
+      modelId: 'whisper-tiny.en',
+      createEngine: (modelId) => createMockSttEngine({ modelId, transcriptText: 'old transcript' }),
+      deliveryPlatform: platform, isCurrent: () => current,
+    });
+    await started;
+    current = false;
+    reject(new Error('late AX failure'));
+    const result = await pending;
+    expect(result.delivery.status).toBe('failed');
+    expect(result.delivery.message).toContain('cancelled or superseded');
+    expect(result.transcript.text).toBe('old transcript');
+    expect(platform.snapshotTarget).toHaveBeenCalledOnce();
+    for (const effect of [platform.validateTarget, platform.insertText, platform.clipboardWrite,
+      platform.clipboardRead, platform.clipboardRestore, clip.copy]) {
+      expect(effect).not.toHaveBeenCalled();
+    }
+  });
+
   it.each([true, false])('honors fallback=%s when snapshot throws synchronously', async (fallback) => {
     const clip = clipboard();
     const result = await dogfoodTranscribeAndCopy({

@@ -36,6 +36,33 @@ function adapter(
 }
 
 describe('deliverTranscript', () => {
+  it.each(['validation', 'insert'] as const)('late %s rejection after supersession cannot trigger Copy fallback', async (stage) => {
+    let reject!: (error: Error) => void;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const gate = new Promise<never>((_, fail) => { reject = fail; });
+    let current = true;
+    const deferredFailure = vi.fn(() => { entered(); return gate; });
+    const platform = adapter(stage === 'validation'
+      ? { validateTarget: deferredFailure } : { insertText: deferredFailure });
+    const pending = deliverTranscript({
+      clipboardFallback: true, intended: snap(), platform, text: 'old transcript',
+      isCurrent: () => current,
+    });
+    await started;
+    current = false;
+    reject(new Error('late native failure'));
+    const result = await pending;
+    expect(result.status).toBe('failed');
+    expect(result.message).toContain('cancelled or superseded');
+    expect(result.text).toBe('old transcript');
+    expect(platform.validateTarget).toHaveBeenCalledOnce();
+    expect(platform.insertText).toHaveBeenCalledTimes(stage === 'insert' ? 1 : 0);
+    expect(platform.clipboardWrite).not.toHaveBeenCalled();
+    expect(platform.clipboardRead).not.toHaveBeenCalled();
+    expect(platform.clipboardRestore).not.toHaveBeenCalled();
+  });
+
   it.each(['complete', 'partial'])('Terminal %s dispatch is unverified, never copied or retried', async (terminalDispatch) => {
     const platform = adapter({
       insertText: vi.fn().mockResolvedValue({

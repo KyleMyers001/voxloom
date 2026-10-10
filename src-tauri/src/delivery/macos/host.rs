@@ -12,6 +12,34 @@ extern "C" {
 
 const PROC_PIDPATHINFO_MAXSIZE: usize = 4096;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unavailable_process_identity_never_authorizes_any_transport() {
+        for pid in [-1, i32::MAX] {
+            assert_eq!(executable_path(pid), None);
+            assert_eq!(apple_terminal_identity(pid), None);
+            assert!(!apple_terminal(pid));
+            assert!(!unicode_typing_ok(pid));
+            assert_eq!(web_ax_activation(pid), None);
+        }
+    }
+
+    #[test]
+    fn resolved_non_allowlisted_process_is_known_non_terminal_not_unknown() {
+        // Query only this test process: no app launch, foreground read or GUI.
+        let pid = std::process::id() as i32;
+        let expected = std::env::current_exe().unwrap();
+        assert_eq!(executable_path(pid).as_deref(), expected.to_str());
+        assert_eq!(apple_terminal_identity(pid), Some(false));
+        assert!(!apple_terminal(pid));
+        assert!(!unicode_typing_ok(pid));
+        assert_eq!(web_ax_activation(pid), None);
+    }
+}
+
 fn executable_path(pid: i32) -> Option<String> {
     let mut buf = vec![0u8; PROC_PIDPATHINFO_MAXSIZE];
     let len = unsafe { proc_pidpath(pid, buf.as_mut_ptr() as *mut c_void, buf.len() as u32) };
