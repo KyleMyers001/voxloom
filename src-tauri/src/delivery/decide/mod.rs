@@ -1,12 +1,14 @@
 //! Platform-independent delivery decisions (pure; unit-tested on any OS).
 //! The macOS adapter gathers AX facts and delegates every policy choice here.
 
+pub mod host;
 pub mod report;
 pub mod target;
 pub mod text;
 pub mod verify;
 pub mod web;
 
+pub use host::unicode_typing_supported;
 pub use report::InsertReport;
 pub use target::{classify_role, effective_role, element_token, validate_snapshots};
 pub use text::{check_insert_text, utf16_chunks, KEY_EVENT_UTF16_MAX};

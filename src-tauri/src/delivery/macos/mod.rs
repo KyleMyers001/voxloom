@@ -7,6 +7,7 @@
 
 mod ax;
 mod focus;
+mod host;
 mod registry;
 mod typing;
 
@@ -113,8 +114,10 @@ pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<InsertRep
             } else {
                 ancestor_roles(element)
             };
-            let is_web = is_web_content_field(&role, has_dom_id, &ancestors);
-            match after_ax(is_web, ax, &before, after.as_deref(), text) {
+            // Type only into web fields of hosts known to honor Unicode events.
+            let may_type = is_web_content_field(&role, has_dom_id, &ancestors)
+                && validated.app_pid.is_some_and(host::unicode_typing_ok);
+            match after_ax(may_type, ax, &before, after.as_deref(), text) {
                 AfterAx::Inserted => Ok(InsertReport::default()),
                 AfterAx::Failed(err) => Err(err),
                 AfterAx::Unverified => unverified(
@@ -122,18 +125,18 @@ pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<InsertRep
                     "AX write changed the field but could not be verified".into(),
                 ),
                 AfterAx::TypeFallback => {
-                    let (posted, typed) =
-                        typing::type_text(text, || focus_still_matches(&validated));
+                    let (posted, typed) = typing::type_text(
+                        text,
+                        || focus_still_matches(&validated),
+                        |so_far| wait_for_insert(element, &before, so_far),
+                    );
                     match typed {
                         Err(err) if posted == 0 => Err(err),
                         Err(err) => unverified(true, format!("{err} (partially typed)")),
-                        Ok(()) if wait_for_insert(element, &before, text) => Ok(InsertReport {
+                        Ok(()) => Ok(InsertReport {
                             typed: true,
                             ..Default::default()
                         }),
-                        Ok(()) => {
-                            unverified(true, "typed but could not be verified via AXValue".into())
-                        }
                     }
                 }
             }

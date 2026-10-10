@@ -37,7 +37,8 @@ fn after_ax_decisions() {
         after_ax(true, Err("e".into()), "a", Some("a"), "b"),
         AfterAx::TypeFallback
     );
-    // Native fields keep main's fail-closed: no second mutation.
+    // Native fields, or web fields in hosts not known to honor Unicode key
+    // events, keep main's fail-closed: no second mutation.
     assert!(matches!(
         after_ax(false, Err("e".into()), "a", Some("a"), "b"),
         AfterAx::Failed(_)

@@ -33,8 +33,9 @@ pub enum AfterAx {
     Unverified,
 }
 
+/// `may_type`: web field in a host known to honor Unicode key events.
 pub fn after_ax(
-    is_web: bool,
+    may_type: bool,
     ax_result: Result<(), String>,
     before: &str,
     after: Option<&str>,
@@ -44,7 +45,7 @@ pub fn after_ax(
         Some(after) if value_confirms_insert(before, after, text) => AfterAx::Inserted,
         // Chromium web content often reports AX success (or an error) while
         // leaving the DOM untouched; only then is typing safe.
-        Some(after) if after == before && is_web => AfterAx::TypeFallback,
+        Some(after) if after == before && may_type => AfterAx::TypeFallback,
         Some(after) if after == before => match ax_result {
             Err(err) => AfterAx::Failed(err),
             Ok(()) => AfterAx::Failed("AXSelectedText reported success but nothing changed".into()),

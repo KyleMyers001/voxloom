@@ -38,16 +38,21 @@ fn post_chunk(source: CFTypeRef, units: &[u16]) -> Result<(), String> {
     Ok(())
 }
 
-/// Type `text`, re-checking focus before every chunk. CGEventPost targets
-/// whatever is focused, so a focus change between a check and its post (a few
-/// ms) is a documented, unclosable window; nothing else runs in between.
+/// Type `text`, re-checking focus before every chunk and confirming each
+/// chunk via read-back (`confirm(typed_so_far)`) before sending the next.
+/// If a host ignored the Unicode string and typed the carrier key instead,
+/// we stop after that one event rather than corrupting the field per chunk.
+/// CGEventPost targets whatever is focused, so a focus change between a check
+/// and its post (a few ms) is a documented, unclosable window.
 /// Returns how many chunks were posted (for honest partial reporting).
 pub fn type_text(
     text: &str,
     still_target: impl Fn() -> Result<(), String>,
+    confirm: impl Fn(&str) -> bool,
 ) -> (usize, Result<(), String>) {
     let source = unsafe { CGEventSourceCreate(SOURCE_PRIVATE_STATE) };
     let mut posted = 0;
+    let mut sent: Vec<u16> = Vec::new();
     let mut result = Ok(());
     for chunk in utf16_chunks(text, KEY_EVENT_UTF16_MAX) {
         if let Err(e) = still_target().and_then(|()| post_chunk(source, &chunk)) {
@@ -55,7 +60,11 @@ pub fn type_text(
             break;
         }
         posted += 1;
-        std::thread::sleep(std::time::Duration::from_millis(4));
+        sent.extend_from_slice(&chunk);
+        if !confirm(&String::from_utf16_lossy(&sent)) {
+            result = Err("typed text not confirmed by read-back — stopped".into());
+            break;
+        }
     }
     release(source);
     (posted, result)
