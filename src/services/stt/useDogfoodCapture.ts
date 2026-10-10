@@ -162,6 +162,8 @@ export function useDogfoodCapture(
   const intendedRef = useRef<TargetSnapshot | null>(null);
   /** Set by stop/cancel so a finish that races start still terminates. */
   const stopRequestedRef = useRef(false);
+  /** Bumped on cancel/new session so stale transcription runs are ignored. */
+  const runGenerationRef = useRef(0);
 
   const announce = useCallback((text: string) => {
     setMessage(text);
@@ -181,6 +183,8 @@ export function useDogfoodCapture(
   }, []);
 
   const runDogfood = useCallback(async (audio: CaptureAudioMeta) => {
+    const generation = runGenerationRef.current;
+    const isStale = () => generation !== runGenerationRef.current;
     setPhase("transcribing");
     announce("Transcribing…");
     try {
@@ -193,6 +197,7 @@ export function useDogfoodCapture(
         intended: intendedRef.current,
         modelId,
       });
+      if (isStale()) return;
       setTranscript(result.transcript);
       setPhase("success");
       const record = createDogfoodRecord({
@@ -209,6 +214,7 @@ export function useDogfoodCapture(
       }
       announce(result.delivery.message);
     } catch (error: unknown) {
+      if (isStale()) return;
       setPhase("error");
       announce(errorText(error));
     }
@@ -274,6 +280,7 @@ export function useDogfoodCapture(
       ? options.preferredDeviceId
       : undefined;
 
+    runGenerationRef.current += 1;
     setPhase("recording");
     announce("Listening…");
     try {
@@ -309,6 +316,7 @@ export function useDogfoodCapture(
   }, [announce, capture]);
 
   const cancel = useCallback(() => {
+    runGenerationRef.current += 1;
     stopRequestedRef.current = true;
     handledAudioIdRef.current = null;
     intendedRef.current = null;

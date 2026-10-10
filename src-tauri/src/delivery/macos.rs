@@ -158,16 +158,68 @@ fn classify_role(role: &str) -> (&'static str, bool, Option<&'static str>) {
     }
 }
 
+#[repr(C)]
+#[derive(Default)]
+struct CGPoint {
+    x: f64,
+    y: f64,
+}
+
+const K_AX_VALUE_CG_POINT_TYPE: u32 = 1;
+
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    fn AXValueGetValue(value: CFTypeRef, the_type: u32, value_ptr: *mut c_void) -> u8;
+}
+
+fn copy_point_attr(element: AXUIElementRef, attr: &str) -> Option<(i64, i64)> {
+    let name = cfstr(attr);
+    let value = AxAttr { element, name }.copy().ok();
+    release(name);
+    let value = value?;
+    let mut pt = CGPoint::default();
+    let ok = unsafe {
+        AXValueGetValue(
+            value,
+            K_AX_VALUE_CG_POINT_TYPE,
+            &mut pt as *mut CGPoint as *mut c_void,
+        )
+    };
+    release(value);
+    (ok != 0).then(|| (pt.x.round() as i64, pt.y.round() as i64))
+}
+
+/// Identity distinguishing sibling fields that share role/description:
+/// explicit identifiers plus on-screen position. Position shifts (scroll,
+/// window move) make validation refuse, which is the fail-closed direction.
+fn element_identity(element: AXUIElementRef, pid: Option<i32>, role: &str) -> String {
+    let pos = copy_point_attr(element, "AXPosition")
+        .map(|(x, y)| format!("{x},{y}"))
+        .unwrap_or_default();
+    format!(
+        "{}:{}:{}:{}:{}:{}:{}",
+        pid.unwrap_or(-1),
+        role,
+        copy_string_attr(element, "AXIdentifier").unwrap_or_default(),
+        copy_string_attr(element, "AXDOMIdentifier").unwrap_or_default(),
+        copy_string_attr(element, "AXTitle").unwrap_or_default(),
+        copy_string_attr(element, "AXDescription").unwrap_or_default(),
+        pos
+    )
+}
+
 fn build_snapshot(element: AXUIElementRef, app_name: Option<String>) -> TargetSnapshotDto {
     let role = copy_string_attr(element, "AXRole").unwrap_or_else(|| "unknown".into());
     let pid = element_pid(element);
-    let (kind, insertable, reason) = classify_role(&role);
-    let element_id = Some(format!(
-        "{}:{}:{}",
-        pid.unwrap_or(-1),
-        role,
-        copy_string_attr(element, "AXDescription").unwrap_or_default()
-    ));
+    let subrole = copy_string_attr(element, "AXSubrole");
+    // Password fields keep role AXTextField; the subrole marks them secure.
+    let effective_role = if subrole.as_deref() == Some("AXSecureTextField") {
+        "AXSecureTextField"
+    } else {
+        role.as_str()
+    };
+    let (kind, insertable, reason) = classify_role(effective_role);
+    let element_id = Some(element_identity(element, pid, &role));
 
     // Trusted process check — if Accessibility is denied, refuse insert.
     let trusted = unsafe { AXIsProcessTrusted() } != 0;
@@ -376,8 +428,14 @@ fn paste_text(text: &str) -> Result<(), String> {
     let result = post_cmd_v();
     // Give the target app time to read the pasteboard before restoring.
     std::thread::sleep(std::time::Duration::from_millis(250));
+    // Restore only if the clipboard still holds our transcript; if the user
+    // copied something during the delay, keep their newer content.
     if let Some(prev) = previous {
-        let _ = run_pb("pbcopy", Some(&prev));
+        if run_pb("pbpaste", None).as_deref() == Some(text) {
+            let _ = run_pb("pbcopy", Some(&prev));
+        } else {
+            eprintln!("[delivery] clipboard changed during paste — restore skipped");
+        }
     }
     result
 }
