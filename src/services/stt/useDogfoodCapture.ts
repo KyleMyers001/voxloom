@@ -267,17 +267,8 @@ export function useDogfoodCapture(
     setMessage(null);
     handledAudioIdRef.current = null;
     stopRequestedRef.current = false;
-    try {
-      await ensureModelAvailable(modelIdRef.current);
-    } catch (error: unknown) {
-      if (superseded()) return;
-      setPhase('error');
-      announce(errorText(error));
-      return;
-    }
-    if (superseded()) return;
-
-    // ADR §4: snapshot intended target at invocation (capture start).
+    // ADR §4: snapshot intended target at invocation (hotkey time), before
+    // any await — a focus change during model validation must not retarget.
     try {
       const snap = await platformRef.current.snapshotTarget();
       if (superseded()) return;
@@ -288,6 +279,16 @@ export function useDogfoodCapture(
       intendedRef.current = null;
       setIntendedTarget(null);
     }
+
+    try {
+      await ensureModelAvailable(modelIdRef.current);
+    } catch (error: unknown) {
+      if (superseded()) return;
+      setPhase('error');
+      announce(errorText(error));
+      return;
+    }
+    if (superseded()) return;
 
     // Hold release may have already requested stop while we were snapshotting.
     if (stopRequestedRef.current) {

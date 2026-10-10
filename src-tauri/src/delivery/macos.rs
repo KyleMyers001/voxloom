@@ -7,6 +7,11 @@ use std::ffi::c_void;
 use std::ptr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use super::decide::{
+    choose_insert_path, classify_role, effective_role, element_identity as identity_string,
+    is_web_content_field, restore_decision, validate_snapshots, value_confirms_insert,
+    IdentityParts, InsertPath, InsertReport, RestoreDecision,
+};
 use super::types::TargetSnapshotDto;
 
 type CFTypeRef = *const c_void;
@@ -142,25 +147,6 @@ fn element_pid(element: AXUIElementRef) -> Option<i32> {
     }
 }
 
-fn classify_role(role: &str) -> (&'static str, bool, Option<&'static str>) {
-    match role {
-        "AXSecureTextField" => ("secure", false, Some("secure field — insert skipped")),
-        "AXTextField" | "AXTextArea" | "AXComboBox" | "AXSearchField" => ("insertable", true, None),
-        // Containers do not establish an editable caret. AXSelectedText may
-        // return success here without changing the actual editor.
-        "AXWebArea" | "AXScrollArea" | "AXGroup" => (
-            "unsupported",
-            false,
-            Some("generic web/container role — insert unverified"),
-        ),
-        // Terminals often expose AXTextArea already; unknown custom roles refuse.
-        "AXStaticText" | "AXButton" | "AXImage" | "AXToolbar" | "AXMenu" => {
-            ("unsupported", false, Some("unsupported control role"))
-        }
-        _ => ("unsupported", false, Some("unsupported or unknown AX role")),
-    }
-}
-
 #[repr(C)]
 #[derive(Default)]
 struct CGPoint {
@@ -192,35 +178,27 @@ fn copy_point_attr(element: AXUIElementRef, attr: &str) -> Option<(i64, i64)> {
     (ok != 0).then(|| (pt.x.round() as i64, pt.y.round() as i64))
 }
 
-/// Identity distinguishing sibling fields that share role/description:
-/// explicit identifiers plus on-screen position. Position shifts (scroll,
-/// window move) make validation refuse, which is the fail-closed direction.
 fn element_identity(element: AXUIElementRef, pid: Option<i32>, role: &str) -> String {
-    let pos = copy_point_attr(element, "AXPosition")
-        .map(|(x, y)| format!("{x},{y}"))
-        .unwrap_or_default();
-    format!(
-        "{}:{}:{}:{}:{}:{}:{}",
-        pid.unwrap_or(-1),
+    let identifier = copy_string_attr(element, "AXIdentifier");
+    let dom_identifier = copy_string_attr(element, "AXDOMIdentifier");
+    let title = copy_string_attr(element, "AXTitle");
+    let description = copy_string_attr(element, "AXDescription");
+    identity_string(&IdentityParts {
+        pid,
         role,
-        copy_string_attr(element, "AXIdentifier").unwrap_or_default(),
-        copy_string_attr(element, "AXDOMIdentifier").unwrap_or_default(),
-        copy_string_attr(element, "AXTitle").unwrap_or_default(),
-        copy_string_attr(element, "AXDescription").unwrap_or_default(),
-        pos
-    )
+        identifier: identifier.as_deref(),
+        dom_identifier: dom_identifier.as_deref(),
+        title: title.as_deref(),
+        description: description.as_deref(),
+        position: copy_point_attr(element, "AXPosition"),
+    })
 }
 
 fn build_snapshot(element: AXUIElementRef, app_name: Option<String>) -> TargetSnapshotDto {
     let role = copy_string_attr(element, "AXRole").unwrap_or_else(|| "unknown".into());
     let pid = element_pid(element);
     let subrole = copy_string_attr(element, "AXSubrole");
-    // Password fields keep role AXTextField; the subrole marks them secure.
-    let effective_role = if subrole.as_deref() == Some("AXSecureTextField") {
-        "AXSecureTextField"
-    } else {
-        role.as_str()
-    };
+    let effective_role = effective_role(&role, subrole.as_deref());
     let (kind, insertable, reason) = classify_role(effective_role);
     let element_id = Some(element_identity(element, pid, &role));
 
@@ -337,54 +315,6 @@ pub fn validate_target(intended: TargetSnapshotDto) -> Result<TargetSnapshotDto,
     ))
 }
 
-fn validate_snapshots(
-    intended: &TargetSnapshotDto,
-    current: TargetSnapshotDto,
-) -> TargetSnapshotDto {
-    // Missing AX focus is not evidence that the original application closed.
-    if current.kind == "unavailable" || current.kind == "secure" || !current.insertable {
-        return current;
-    }
-    if intended.kind != "insertable" || !intended.insertable {
-        return intended.clone();
-    }
-
-    match (intended.app_pid, current.app_pid) {
-        (Some(want), Some(have)) if want != have => {
-            return TargetSnapshotDto {
-                insertable: false,
-                kind: "changed".into(),
-                reason: Some("target changed (different app)".into()),
-                ..current
-            };
-        }
-        (Some(_), Some(_)) => {}
-        _ => {
-            return TargetSnapshotDto {
-                insertable: false,
-                kind: "unavailable".into(),
-                reason: Some("target identity unavailable — insert skipped".into()),
-                ..current
-            };
-        }
-    }
-    match (intended.element_id.as_ref(), current.element_id.as_ref()) {
-        (Some(want), Some(have)) if want != have => TargetSnapshotDto {
-            insertable: false,
-            kind: "changed".into(),
-            reason: Some("target changed (different field)".into()),
-            ..current
-        },
-        (Some(_), Some(_)) => current,
-        _ => TargetSnapshotDto {
-            insertable: false,
-            kind: "unavailable".into(),
-            reason: Some("target identity unavailable — insert skipped".into()),
-            ..current
-        },
-    }
-}
-
 fn set_ax_string(element: AXUIElementRef, attr: &str, text: &str) -> Result<(), String> {
     let name = cfstr(attr);
     let value = cfstr(text);
@@ -395,10 +325,6 @@ fn set_ax_string(element: AXUIElementRef, attr: &str, text: &str) -> Result<(), 
         return Err(format!("AX set {attr} failed (error {err})"));
     }
     Ok(())
-}
-
-fn value_confirms_insert(before: &str, after: &str, text: &str) -> bool {
-    !text.is_empty() && before != after && after.contains(text)
 }
 
 fn insert_selected_text_with(
@@ -462,31 +388,50 @@ fn post_cmd_v() -> Result<(), String> {
     Ok(())
 }
 
-/// Paste (⌘V only — no Enter/Tab) with best-effort plain-text clipboard restore.
-fn paste_text(text: &str) -> Result<(), String> {
+/// Paste (⌘V only — no Enter/Tab) into the validated element, then restore
+/// the prior plain-text clipboard only if it still holds our transcript.
+/// `still_target` re-checks focus immediately before the key events are posted
+/// (CGEventPost goes to whatever is focused, not to a specific element).
+fn paste_text(
+    text: &str,
+    still_target: impl Fn() -> Result<(), String>,
+) -> (Result<(), String>, InsertReport) {
+    let mut report = InsertReport {
+        pasted: true,
+        ..Default::default()
+    };
     let previous = run_pb("pbpaste", None);
-    run_pb("pbcopy", Some(text)).ok_or("clipboard write failed")?;
-    std::thread::sleep(std::time::Duration::from_millis(40));
-    let result = post_cmd_v();
-    // Give the target app time to read the pasteboard before restoring.
-    std::thread::sleep(std::time::Duration::from_millis(250));
-    // Restore only if the clipboard still holds our transcript; if the user
-    // copied something during the delay, keep their newer content.
-    if let Some(prev) = previous {
-        if run_pb("pbpaste", None).as_deref() == Some(text) {
-            let _ = run_pb("pbcopy", Some(&prev));
-        } else {
-            eprintln!("[delivery] clipboard changed during paste — restore skipped");
-        }
+    if run_pb("pbcopy", Some(text)).is_none() {
+        report.pasted = false;
+        return (Err("clipboard write failed — paste skipped".into()), report);
     }
-    result
+    std::thread::sleep(std::time::Duration::from_millis(40));
+    let result = still_target().and_then(|()| post_cmd_v());
+    if result.is_err() {
+        report.pasted = false;
+    } else {
+        // Give the target app time to read the pasteboard before restoring.
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    let now = run_pb("pbpaste", None);
+    match restore_decision(previous.as_deref(), now.as_deref(), text) {
+        RestoreDecision::Restore(prev) => {
+            if run_pb("pbcopy", Some(&prev)).is_some() {
+                report.clipboard_restored = true;
+            } else {
+                report.restore_skipped_reason = Some("restore write failed".into());
+            }
+        }
+        RestoreDecision::Skip(reason) => report.restore_skipped_reason = Some(reason.into()),
+    }
+    (result, report)
 }
 
-fn role_has_web_ancestor(element: AXUIElementRef) -> bool {
+fn ancestor_roles(element: AXUIElementRef) -> Vec<String> {
     let parent_attr = cfstr("AXParent");
+    let mut roles = Vec::new();
     let mut current: CFTypeRef = ptr::null();
     let mut cursor = element;
-    let mut found = false;
     for _ in 0..32 {
         let mut parent: CFTypeRef = ptr::null();
         let err = unsafe { AXUIElementCopyAttributeValue(cursor, parent_attr, &mut parent) };
@@ -496,23 +441,35 @@ fn role_has_web_ancestor(element: AXUIElementRef) -> bool {
         release(current);
         current = parent;
         cursor = parent as AXUIElementRef;
-        if copy_string_attr(cursor, "AXRole").as_deref() == Some("AXWebArea") {
-            found = true;
+        let role = copy_string_attr(cursor, "AXRole").unwrap_or_default();
+        let stop = role == "AXWebArea";
+        roles.push(role);
+        if stop {
             break;
         }
     }
     release(current);
     release(parent_attr);
-    found
+    roles
 }
 
-/// Editable fields hosted in web content: AX writes report success without
-/// reaching the DOM, so these use ⌘V paste instead of AXSelectedText.
-fn is_web_content_field(element: AXUIElementRef) -> bool {
-    copy_string_attr(element, "AXDOMIdentifier").is_some() || role_has_web_ancestor(element)
+/// Re-read focus and require it to still be the validated, insertable field.
+fn focus_still_matches(intended: &TargetSnapshotDto) -> Result<(), String> {
+    let (element, app_name) =
+        focused_ui_element("paste dispatch").map_err(|e| format!("paste aborted — {e}"))?;
+    let checked = validate_snapshots(intended, build_snapshot(element, app_name));
+    release(element as CFTypeRef);
+    if checked.insertable && checked.kind == "insertable" {
+        Ok(())
+    } else {
+        Err(format!(
+            "paste aborted — focus changed: {}",
+            checked.reason.unwrap_or(checked.kind)
+        ))
+    }
 }
 
-pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<(), String> {
+pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<InsertReport, String> {
     if !intended.insertable || intended.kind != "insertable" {
         return Err(format!(
             "refusing insert into non-insertable target ({})",
@@ -527,23 +484,53 @@ pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<(), Strin
     let (element, app_name) =
         focused_ui_element("insert").map_err(|e| format!("insert aborted — {e}"))?;
     let validated = validate_snapshots(intended, build_snapshot(element, app_name));
-    let result = if !validated.insertable || validated.kind != "insertable" {
-        Err(format!(
-            "refusing insert: {}",
-            validated.reason.unwrap_or(validated.kind)
-        ))
-    } else if is_web_content_field(element) {
-        paste_text(text)
-    } else if let Some(before) = copy_string_attr(element, "AXValue") {
-        match insert_selected_text_with(text, |attr, text| set_ax_string(element, attr, text)) {
-            Ok(()) => match copy_string_attr(element, "AXValue") {
-                Some(after) if value_confirms_insert(&before, &after, text) => Ok(()),
-                _ => Err("AXSelectedText returned success but insertion could not be verified via AXValue".into()),
-            },
-            Err(err) => Err(err),
+    let role = validated.element_role.clone().unwrap_or_default();
+    let is_web = validated.insertable
+        && is_web_content_field(
+            &role,
+            copy_string_attr(element, "AXDOMIdentifier").is_some(),
+            &ancestor_roles(element),
+        );
+    let before = copy_string_attr(element, "AXValue");
+    let unverified = || -> Result<InsertReport, String> {
+        Err("insertion could not be verified via AXValue read-back".into())
+    };
+
+    let result = match choose_insert_path(&validated, is_web, before.is_some()) {
+        InsertPath::Refuse(reason) => Err(reason),
+        InsertPath::WebPaste => {
+            let before = before.unwrap_or_default();
+            let (pasted, report) = paste_text(text, || focus_still_matches(&validated));
+            match pasted {
+                Err(err) => Err(match &report.restore_skipped_reason {
+                    Some(r) => format!("{err} (clipboard not restored: {r})"),
+                    None => err,
+                }),
+                Ok(()) => match copy_string_attr(element, "AXValue") {
+                    Some(after) if value_confirms_insert(&before, &after, text) => Ok(report),
+                    _ => Err(format!(
+                        "⌘V sent but insertion could not be verified via AXValue{}",
+                        report
+                            .restore_skipped_reason
+                            .as_deref()
+                            .map(|r| format!(" (clipboard not restored: {r})"))
+                            .unwrap_or_default()
+                    )),
+                },
+            }
         }
-    } else {
-        Err("AXValue unreadable before insert — insert skipped".into())
+        InsertPath::AxSelectedText => {
+            let before = before.unwrap_or_default();
+            match insert_selected_text_with(text, |attr, text| set_ax_string(element, attr, text)) {
+                Ok(()) => match copy_string_attr(element, "AXValue") {
+                    Some(after) if value_confirms_insert(&before, &after, text) => {
+                        Ok(InsertReport::default())
+                    }
+                    _ => unverified(),
+                },
+                Err(err) => Err(err),
+            }
+        }
     };
 
     release(element as CFTypeRef);
@@ -553,79 +540,6 @@ pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<(), Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn target(kind: &str, pid: Option<i32>, id: Option<&str>) -> TargetSnapshotDto {
-        TargetSnapshotDto {
-            app_name: Some("Notes".into()),
-            app_pid: pid,
-            captured_at: 1,
-            element_id: id.map(str::to_string),
-            element_role: Some("AXTextArea".into()),
-            insertable: kind == "insertable",
-            kind: kind.into(),
-            reason: if kind == "unavailable" {
-                Some("Accessibility permission denied — insert skipped".into())
-            } else {
-                None
-            },
-        }
-    }
-
-    #[test]
-    fn unavailable_focus_is_not_evidence_of_app_closure() {
-        let checked = validate_snapshots(
-            &target("insertable", Some(42), Some("42:AXTextArea:")),
-            target("unavailable", None, None),
-        );
-        assert_eq!(checked.kind, "unavailable");
-        assert_eq!(
-            checked.reason.as_deref(),
-            Some("Accessibility permission denied — insert skipped")
-        );
-    }
-
-    #[test]
-    fn changed_or_unidentifiable_target_is_not_insertable() {
-        let intended = target("insertable", Some(42), Some("42:AXTextArea:"));
-        for (current, expected) in [
-            (
-                target("insertable", Some(43), Some("43:AXTextArea:")),
-                "changed",
-            ),
-            (
-                target("insertable", Some(42), Some("42:AXTextArea:other")),
-                "changed",
-            ),
-            (
-                target("insertable", None, Some("-1:AXTextArea:")),
-                "unavailable",
-            ),
-        ] {
-            let checked = validate_snapshots(&intended, current);
-            assert!(!checked.insertable);
-            assert_eq!(checked.kind, expected);
-        }
-        assert!(validate_snapshots(&intended, intended.clone()).insertable);
-    }
-
-    #[test]
-    fn generic_web_containers_never_claim_insertability() {
-        for role in ["AXWebArea", "AXScrollArea", "AXGroup"] {
-            let (kind, insertable, _) = classify_role(role);
-            assert_eq!(kind, "unsupported");
-            assert!(!insertable);
-        }
-        assert!(classify_role("AXTextArea").1);
-    }
-
-    #[test]
-    fn insertion_requires_readback_change_containing_transcript() {
-        assert!(value_confirms_insert("hello", "hello world", " world"));
-        assert!(value_confirms_insert("old line", "new line", "new line"));
-        assert!(!value_confirms_insert("hello", "hello", " world"));
-        assert!(!value_confirms_insert("hello", "hello!", " world"));
-        assert!(!value_confirms_insert("hello", "hello!", ""));
-    }
 
     #[test]
     fn ax_focus_failure_reports_stage_trust_and_codes_without_target_data() {

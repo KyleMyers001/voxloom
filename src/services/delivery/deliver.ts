@@ -79,12 +79,14 @@ export async function deliverTranscript(
 
   if (plan.action === 'insert') {
     try {
-      await platform.insertText(text, plan.target);
+      const report = await platform.insertText(text, plan.target);
+      const skipReason = report?.restoreSkippedReason ?? null;
       return {
-        clipboardRestored: false,
+        clipboardRestored: report?.clipboardRestored ?? false,
         detail: null,
-        message: deliveryMessage('inserted', null),
-        restoreSkippedReason: null,
+        message: deliveryMessage('inserted', null)
+          + restoreSkippedSuffix(skipReason),
+        restoreSkippedReason: skipReason,
         status: 'inserted',
         text,
       };

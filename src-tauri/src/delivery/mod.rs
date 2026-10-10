@@ -3,6 +3,8 @@
 //! Never synthesizes Enter / Tab / command chords as product submit.
 //! macOS inserts via AXSelectedText only; failures use the TS Copy policy.
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod decide;
 mod types;
 
 #[cfg(target_os = "macos")]
@@ -27,9 +29,7 @@ pub fn delivery_snapshot_target() -> Result<TargetSnapshotDto, String> {
 
 /// Re-validate intended target at completion time.
 #[tauri::command]
-pub fn delivery_validate_target(
-    intended: TargetSnapshotDto,
-) -> Result<TargetSnapshotDto, String> {
+pub fn delivery_validate_target(intended: TargetSnapshotDto) -> Result<TargetSnapshotDto, String> {
     platform::validate_target(intended)
 }
 
@@ -38,6 +38,6 @@ pub fn delivery_validate_target(
 pub fn delivery_insert_text(
     text: String,
     intended: TargetSnapshotDto,
-) -> Result<(), String> {
+) -> Result<decide::InsertReport, String> {
     platform::insert_text(&text, &intended)
 }

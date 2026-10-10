@@ -51,6 +51,16 @@ export interface DeliveryOutcome {
   text: string;
 }
 
+/** Native insert result (macOS web-content paste reports clipboard restore). */
+export interface InsertReport {
+  /** Delivered via temporary clipboard paste. */
+  pasted: boolean;
+  /** Prior clipboard was restored after the paste. */
+  clipboardRestored: boolean;
+  /** Why restore was skipped (conflict, unreadable, write failure). */
+  restoreSkippedReason: string | null;
+}
+
 export interface ClipboardSnapshot {
   /** Plain text when read succeeded; null when unavailable / non-text. */
   text: string | null;
@@ -74,7 +84,10 @@ export interface DeliveryPlatformAdapter {
    * no full-field value replacement).
    * Must refuse rather than insert into a different app.
    */
-  insertText(text: string, intended: TargetSnapshot): Promise<void>;
+  insertText(
+    text: string,
+    intended: TargetSnapshot,
+  ): Promise<InsertReport | void>;
   /** Snapshot frontmost app + focused element insertability. */
   snapshotTarget(): Promise<TargetSnapshot>;
   /**

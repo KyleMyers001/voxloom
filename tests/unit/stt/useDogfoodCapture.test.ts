@@ -275,6 +275,51 @@ describe('useDogfoodCapture', () => {
     expect(dogfood).not.toHaveBeenCalled();
   });
 
+  it('snapshots the target before awaiting model validation', async () => {
+    const store = createMockSttModelStore();
+    await store.download('whisper-tiny.en');
+    const order: string[] = [];
+    const status = store.status.bind(store);
+    store.status = vi.fn(async (id: string) => {
+      order.push('model');
+      return status(id);
+    }) as typeof store.status;
+    const intended: TargetSnapshot = {
+      appName: 'Brave',
+      appPid: 7,
+      capturedAt: 1,
+      elementId: '7:AXTextField:',
+      elementRole: 'AXTextField',
+      insertable: true,
+      kind: 'insertable',
+      reason: null,
+    };
+    const platform: DeliveryPlatformAdapter = {
+      clipboardRead: vi.fn().mockResolvedValue({ ok: true, text: '' }),
+      clipboardRestore: vi.fn(),
+      clipboardWrite: vi.fn(),
+      insertText: vi.fn(),
+      snapshotTarget: vi.fn(async () => {
+        order.push('snapshot');
+        return intended;
+      }),
+      validateTarget: vi.fn().mockResolvedValue(intended),
+    };
+    const { result } = renderHook(() => useDogfoodCapture({
+      captureApi: stubCapture({ kind: 'idle' }),
+      clipboard: clipboard(),
+      createModelStore: () => store,
+      deliveryPlatform: platform,
+      dogfood: vi.fn() as never,
+      modelId: 'whisper-tiny.en',
+    }));
+    await act(async () => {
+      await result.current.start();
+    });
+    expect(order.slice(0, 2)).toEqual(['snapshot', 'model']);
+    expect(result.current.intendedTarget).toEqual(intended);
+  });
+
   it('cancel discards without calling dogfood STT', async () => {
     const store = createMockSttModelStore();
     await store.download('whisper-tiny.en');

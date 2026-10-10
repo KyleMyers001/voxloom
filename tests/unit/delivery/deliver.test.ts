@@ -50,6 +50,66 @@ describe('deliverTranscript', () => {
     expect(platform.clipboardWrite).not.toHaveBeenCalled();
   });
 
+  it('surfaces native paste clipboard-restore skips on Inserted', async () => {
+    const platform = adapter({
+      insertText: vi.fn().mockResolvedValue({
+        clipboardRestored: false,
+        pasted: true,
+        restoreSkippedReason: 'clipboard changed after our write',
+      }),
+    });
+    const outcome = await deliverTranscript({
+      clipboardFallback: true,
+      intended: snap(),
+      platform,
+      text: 'hello',
+    });
+    expect(outcome.status).toBe('inserted');
+    expect(outcome.restoreSkippedReason).toBe(
+      'clipboard changed after our write',
+    );
+    expect(outcome.message).toBe(
+      'Inserted (clipboard not restored: clipboard changed after our write)',
+    );
+    expect(outcome.clipboardRestored).toBe(false);
+  });
+
+  it('reports clipboardRestored after a restored native paste', async () => {
+    const platform = adapter({
+      insertText: vi.fn().mockResolvedValue({
+        clipboardRestored: true,
+        pasted: true,
+        restoreSkippedReason: null,
+      }),
+    });
+    const outcome = await deliverTranscript({
+      clipboardFallback: true,
+      intended: snap(),
+      platform,
+      text: 'hello',
+    });
+    expect(outcome.message).toBe('Inserted');
+    expect(outcome.clipboardRestored).toBe(true);
+    expect(outcome.restoreSkippedReason).toBeNull();
+  });
+
+  it('unverified native paste falls back to Copy', async () => {
+    const platform = adapter({
+      insertText: vi.fn().mockRejectedValue(
+        new Error('⌘V sent but insertion could not be verified via AXValue'),
+      ),
+      clipboardRead: vi.fn().mockResolvedValue({ ok: true, text: 'hello' }),
+    });
+    const outcome = await deliverTranscript({
+      clipboardFallback: true,
+      intended: snap(),
+      platform,
+      text: 'hello',
+    });
+    expect(outcome.status).toBe('copied');
+    expect(platform.clipboardWrite).toHaveBeenCalledWith('hello');
+  });
+
   it('refuses secure target → Copied with truthful reason', async () => {
     const secure = snap({
       insertable: false,
