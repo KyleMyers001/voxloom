@@ -98,7 +98,17 @@ export async function deliverTranscript(
       if (!options.clipboardFallback) {
         return failOutcome(text, `insert failed: ${insertFail}`);
       }
-      return copyFallback(platform, text, `insert failed: ${insertFail}`);
+      const copied = await copyFallback(
+        platform,
+        text,
+        `insert failed: ${insertFail}`,
+      );
+      // Native paste ran but read-back could not confirm it: the text may
+      // already be in the page, so do not imply nothing happened.
+      if (copied.status === 'copied' && MAY_HAVE_PASTED.test(insertFail)) {
+        return { ...copied, message: 'May have been pasted — also copied' };
+      }
+      return copied;
     }
   }
 
@@ -108,6 +118,9 @@ export async function deliverTranscript(
 
   return failOutcome(text, plan.reason);
 }
+
+/** Marker from the native adapter for an unverifiable ⌘V paste. */
+const MAY_HAVE_PASTED = /may have been pasted/i;
 
 /**
  * Copy fallback: leave transcript on clipboard (intentional — not a temp paste).

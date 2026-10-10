@@ -96,7 +96,7 @@ describe('deliverTranscript', () => {
   it('unverified native paste falls back to Copy', async () => {
     const platform = adapter({
       insertText: vi.fn().mockRejectedValue(
-        new Error('⌘V sent but insertion could not be verified via AXValue'),
+        new Error('⌘V sent but could not be verified — may have been pasted'),
       ),
       clipboardRead: vi.fn().mockResolvedValue({ ok: true, text: 'hello' }),
     });
@@ -107,7 +107,37 @@ describe('deliverTranscript', () => {
       text: 'hello',
     });
     expect(outcome.status).toBe('copied');
+    expect(outcome.message).toBe('May have been pasted — also copied');
     expect(platform.clipboardWrite).toHaveBeenCalledWith('hello');
+  });
+
+  it('plain insert failures keep the regular Copied message', async () => {
+    const platform = adapter({
+      insertText: vi.fn().mockRejectedValue(new Error('AX set failed')),
+      clipboardRead: vi.fn().mockResolvedValue({ ok: true, text: 'hello' }),
+    });
+    const outcome = await deliverTranscript({
+      clipboardFallback: true,
+      intended: snap(),
+      platform,
+      text: 'hello',
+    });
+    expect(outcome.status).toBe('copied');
+    expect(outcome.message).toMatch(/^Copied — insert failed: AX set failed/);
+  });
+
+  it('passes non-ASCII transcripts through unchanged', async () => {
+    const text = 'café 👋 你好';
+    const platform = adapter();
+    const outcome = await deliverTranscript({
+      clipboardFallback: true,
+      intended: snap(),
+      platform,
+      text,
+    });
+    expect(outcome.status).toBe('inserted');
+    expect(platform.insertText).toHaveBeenCalledWith(text, snap());
+    expect(outcome.text).toBe(text);
   });
 
   it('refuses secure target → Copied with truthful reason', async () => {

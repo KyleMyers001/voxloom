@@ -8,9 +8,10 @@ use std::ptr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::decide::{
-    choose_insert_path, classify_role, effective_role, element_identity as identity_string,
-    is_web_content_field, restore_decision, validate_snapshots, value_confirms_insert,
-    IdentityParts, InsertPath, InsertReport, RestoreDecision,
+    check_insert_text, choose_insert_path, classify_clipboard, classify_role, effective_role,
+    element_identity as identity_string, is_web_content_field, restore_decision,
+    validate_snapshots, value_confirms_insert, IdentityParts, InsertPath, InsertReport,
+    RestoreDecision, UNVERIFIED_PASTE,
 };
 use super::types::TargetSnapshotDto;
 
@@ -259,7 +260,7 @@ fn focused_ui_element(stage: &str) -> Result<(AXUIElementRef, Option<String>), S
     let app_name = if app_err == AX_OK && !focused_app.is_null() {
         // Chromium/Electron only expose web-content fields to AX once a client
         // requests it; without this the focus is an opaque AXWebArea/AXGroup.
-        enable_manual_accessibility(focused_app as AXUIElementRef);
+        enable_manual_accessibility_once(focused_app as AXUIElementRef);
         let name = copy_string_attr(focused_app as AXUIElementRef, "AXTitle");
         name
     } else {
@@ -336,7 +337,23 @@ fn insert_selected_text_with(
     set("AXSelectedText", text)
 }
 
-fn enable_manual_accessibility(app: AXUIElementRef) {
+/// Set AXManualAccessibility once per app pid. It is intentionally never
+/// reverted: Chromium/Electron keep their full AX tree for the app lifetime
+/// (CPU/memory cost). The tree builds asynchronously, so the very first
+/// dictation into a freshly-enabled browser may still see AXWebArea/AXGroup
+/// and fall back to Copy; later ones insert.
+fn enable_manual_accessibility_once(app: AXUIElementRef) {
+    use std::collections::HashSet;
+    use std::sync::{Mutex, OnceLock};
+    static ENABLED: OnceLock<Mutex<HashSet<i32>>> = OnceLock::new();
+    let Some(pid) = element_pid(app) else {
+        return;
+    };
+    let set = ENABLED.get_or_init(|| Mutex::new(HashSet::new()));
+    let first_time = set.lock().map(|mut seen| seen.insert(pid)).unwrap_or(false);
+    if !first_time {
+        return;
+    }
     let name = cfstr("AXManualAccessibility");
     // Errors are expected for non-Chromium apps; ignore.
     unsafe {
@@ -348,7 +365,11 @@ fn enable_manual_accessibility(app: AXUIElementRef) {
 fn run_pb(cmd: &str, input: Option<&str>) -> Option<String> {
     use std::io::Write;
     use std::process::{Command, Stdio};
+    // GUI-launched apps often have no LANG/LC_CTYPE; without it pbcopy/pbpaste
+    // use a legacy encoding and garble non-ASCII (é, emoji, CJK).
     let mut child = Command::new(cmd)
+        .env("LC_CTYPE", "UTF-8")
+        .env("LANG", "en_US.UTF-8")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -364,6 +385,22 @@ fn run_pb(cmd: &str, input: Option<&str>) -> Option<String> {
         return None;
     }
     Some(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Pasteboard flavors via AppleScript `clipboard info` (e.g.
+/// `«class PNGf», 1234, string, 5`). Lets us tell image/file/rich clipboards
+/// apart from plain text, which pbpaste alone cannot (it prints "" for them).
+fn clipboard_info() -> Option<String> {
+    let out = std::process::Command::new("osascript")
+        .args(["-e", "clipboard info"])
+        .env("LC_CTYPE", "UTF-8")
+        .env("LANG", "en_US.UTF-8")
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
 fn post_cmd_v() -> Result<(), String> {
@@ -389,9 +426,14 @@ fn post_cmd_v() -> Result<(), String> {
 }
 
 /// Paste (⌘V only — no Enter/Tab) into the validated element, then restore
-/// the prior plain-text clipboard only if it still holds our transcript.
-/// `still_target` re-checks focus immediately before the key events are posted
-/// (CGEventPost goes to whatever is focused, not to a specific element).
+/// the prior clipboard only if it was plain text and still holds our transcript.
+/// Non-text priors (image/file/rich) are detected up front and never "restored"
+/// as an empty/lossy string; the skip is reported instead.
+///
+/// Known limit (documented TOCTOU): `still_target` re-checks focus immediately
+/// before CGEventPost, which targets whatever is focused rather than a specific
+/// element. A focus change in the few ms between the check and the post is not
+/// caught. Keep nothing between the check and the post.
 fn paste_text(
     text: &str,
     still_target: impl Fn() -> Result<(), String>,
@@ -400,7 +442,10 @@ fn paste_text(
         pasted: true,
         ..Default::default()
     };
-    let previous = run_pb("pbpaste", None);
+    let prior = classify_clipboard(
+        clipboard_info().as_deref(),
+        run_pb("pbpaste", None).as_deref(),
+    );
     if run_pb("pbcopy", Some(text)).is_none() {
         report.pasted = false;
         return (Err("clipboard write failed — paste skipped".into()), report);
@@ -414,7 +459,7 @@ fn paste_text(
         std::thread::sleep(std::time::Duration::from_millis(250));
     }
     let now = run_pb("pbpaste", None);
-    match restore_decision(previous.as_deref(), now.as_deref(), text) {
+    match restore_decision(&prior, now.as_deref(), text) {
         RestoreDecision::Restore(prev) => {
             if run_pb("pbcopy", Some(&prev)).is_some() {
                 report.clipboard_restored = true;
@@ -470,6 +515,7 @@ fn focus_still_matches(intended: &TargetSnapshotDto) -> Result<(), String> {
 }
 
 pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<InsertReport, String> {
+    check_insert_text(text)?;
     if !intended.insertable || intended.kind != "insertable" {
         return Err(format!(
             "refusing insert into non-insertable target ({})",
@@ -509,7 +555,7 @@ pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<InsertRep
                 Ok(()) => match copy_string_attr(element, "AXValue") {
                     Some(after) if value_confirms_insert(&before, &after, text) => Ok(report),
                     _ => Err(format!(
-                        "⌘V sent but insertion could not be verified via AXValue{}",
+                        "{UNVERIFIED_PASTE}{}",
                         report
                             .restore_skipped_reason
                             .as_deref()

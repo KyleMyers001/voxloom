@@ -164,6 +164,60 @@ pub fn value_confirms_insert(before: &str, after: &str, text: &str) -> bool {
     !text.is_empty() && before != after && after.contains(text)
 }
 
+/// What the clipboard held before our temporary paste.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ClipboardPrior {
+    /// Only plain-text flavors: safe to restore byte-for-byte via pbcopy.
+    PlainText(String),
+    /// Image / file / rich (RTF, HTML) or any non-text flavor: pbpaste cannot
+    /// capture it, so restoring would overwrite it with a lossy/empty string.
+    NonText,
+    /// Nothing on the clipboard (no flavors).
+    Empty,
+    /// Could not inspect the clipboard.
+    Unreadable,
+}
+
+/// Plain-text pasteboard flavors as reported by AppleScript `clipboard info`.
+const PLAIN_TEXT_FLAVORS: &[&str] = &[
+    "string",
+    "unicode text",
+    "text",
+    "«class utf8»",
+    "«class ut16»",
+    "utf8",
+    "ut16",
+];
+
+/// Classify the prior clipboard from AppleScript `clipboard info` output
+/// (e.g. `«class PNGf», 1234, string, 5`) plus the `pbpaste` text.
+/// Any non-plain-text flavor → NonText (we cannot restore it faithfully).
+pub fn classify_clipboard(info: Option<&str>, text: Option<&str>) -> ClipboardPrior {
+    let Some(info) = info else {
+        return ClipboardPrior::Unreadable;
+    };
+    let flavors: Vec<String> = info
+        .split(',')
+        .map(|p| p.trim().to_lowercase())
+        .filter(|p| !p.is_empty() && p.parse::<i64>().is_err())
+        .collect();
+    if flavors.is_empty() {
+        return ClipboardPrior::Empty;
+    }
+    if flavors
+        .iter()
+        .any(|f| !PLAIN_TEXT_FLAVORS.contains(&f.as_str()))
+    {
+        return ClipboardPrior::NonText;
+    }
+    match text {
+        // Text flavors present but pbpaste returned nothing: do not trust it.
+        Some(t) if !t.is_empty() => ClipboardPrior::PlainText(t.to_string()),
+        Some(_) => ClipboardPrior::NonText,
+        None => ClipboardPrior::Unreadable,
+    }
+}
+
 /// Clipboard restore decision after a temporary paste.
 #[derive(Debug, PartialEq, Eq)]
 pub enum RestoreDecision {
@@ -171,16 +225,41 @@ pub enum RestoreDecision {
     Skip(&'static str),
 }
 
-pub fn restore_decision(previous: Option<&str>, now: Option<&str>, text: &str) -> RestoreDecision {
-    match (previous, now) {
-        (None, _) => RestoreDecision::Skip("original clipboard could not be read"),
-        (Some(_), Some(now)) if now != text => {
-            RestoreDecision::Skip("clipboard changed after our write")
+pub fn restore_decision(prior: &ClipboardPrior, now: Option<&str>, text: &str) -> RestoreDecision {
+    let prev = match prior {
+        ClipboardPrior::PlainText(p) => p,
+        ClipboardPrior::NonText => {
+            return RestoreDecision::Skip(
+                "clipboard held non-text data (image, file or rich text) that cannot be restored",
+            )
         }
-        (Some(_), None) => RestoreDecision::Skip("clipboard could not be re-read"),
-        (Some(prev), Some(_)) => RestoreDecision::Restore(prev.to_string()),
+        ClipboardPrior::Empty => return RestoreDecision::Skip("clipboard was empty before paste"),
+        ClipboardPrior::Unreadable => {
+            return RestoreDecision::Skip("original clipboard could not be read")
+        }
+    };
+    match now {
+        Some(now) if now == text => RestoreDecision::Restore(prev.clone()),
+        Some(_) => RestoreDecision::Skip("clipboard changed after our write"),
+        None => RestoreDecision::Skip("clipboard could not be re-read"),
     }
 }
+
+/// Refuse text that would be silently mangled: an empty AXSelectedText write
+/// deletes the user's selection, and interior NULs truncate CFStrings.
+pub fn check_insert_text(text: &str) -> Result<(), String> {
+    if text.is_empty() {
+        return Err("empty transcript — insert skipped".into());
+    }
+    if text.contains('\0') {
+        return Err("transcript contains NUL — insert skipped".into());
+    }
+    Ok(())
+}
+
+/// Error text for a ⌘V whose effect could not be read back. The text may be
+/// in the page already; TS shows "May have been pasted — also copied".
+pub const UNVERIFIED_PASTE: &str = "⌘V sent but could not be verified — may have been pasted";
 
 /// Native insert result surfaced to TypeScript.
 #[derive(Debug, Default, Serialize, PartialEq, Eq)]
@@ -374,22 +453,87 @@ mod tests {
 
     #[test]
     fn clipboard_restore_only_when_still_ours() {
+        let prior = ClipboardPrior::PlainText("prior".into());
         assert_eq!(
-            restore_decision(Some("prior"), Some("dictated"), "dictated"),
+            restore_decision(&prior, Some("dictated"), "dictated"),
             RestoreDecision::Restore("prior".into())
         );
         assert_eq!(
-            restore_decision(Some("prior"), Some("user copied"), "dictated"),
+            restore_decision(&prior, Some("user copied"), "dictated"),
             RestoreDecision::Skip("clipboard changed after our write")
         );
         assert!(matches!(
-            restore_decision(None, Some("dictated"), "dictated"),
+            restore_decision(&prior, None, "d"),
             RestoreDecision::Skip(_)
         ));
-        assert!(matches!(
-            restore_decision(Some("p"), None, "dictated"),
-            RestoreDecision::Skip(_)
-        ));
+        for p in [
+            ClipboardPrior::NonText,
+            ClipboardPrior::Empty,
+            ClipboardPrior::Unreadable,
+        ] {
+            assert!(matches!(
+                restore_decision(&p, Some("d"), "d"),
+                RestoreDecision::Skip(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn clipboard_classification_never_restores_empty_or_non_text() {
+        // Image on clipboard: pbpaste returns "" — must not become Restore("").
+        assert_eq!(
+            classify_clipboard(Some("«class PNGf», 5120, «class TIFF», 9000"), Some("")),
+            ClipboardPrior::NonText
+        );
+        // Rich text copy from a browser: has HTML/RTF alongside string.
+        assert_eq!(
+            classify_clipboard(
+                Some("«class HTML», 40, «class utf8», 5, string, 5"),
+                Some("hello")
+            ),
+            ClipboardPrior::NonText
+        );
+        // File copy from Finder.
+        assert_eq!(
+            classify_clipboard(Some("«class furl», 30, string, 9"), Some("a.txt")),
+            ClipboardPrior::NonText
+        );
+        assert_eq!(
+            classify_clipboard(
+                Some("«class utf8», 6, «class ut16», 14, string, 6"),
+                Some("héllo")
+            ),
+            ClipboardPrior::PlainText("héllo".into())
+        );
+        assert_eq!(
+            classify_clipboard(Some("string, 0"), Some("")),
+            ClipboardPrior::NonText
+        );
+        assert_eq!(
+            classify_clipboard(Some(""), Some("")),
+            ClipboardPrior::Empty
+        );
+        assert_eq!(
+            classify_clipboard(None, Some("x")),
+            ClipboardPrior::Unreadable
+        );
+        assert_eq!(
+            restore_decision(
+                &classify_clipboard(Some("«class PNGf», 1"), Some("")),
+                Some("d"),
+                "d"
+            ),
+            RestoreDecision::Skip(
+                "clipboard held non-text data (image, file or rich text) that cannot be restored"
+            )
+        );
+    }
+
+    #[test]
+    fn refuses_empty_or_nul_text() {
+        assert!(check_insert_text("").is_err());
+        assert!(check_insert_text("a\0b").is_err());
+        assert!(check_insert_text("héllo 👋 你好").is_ok());
     }
 
     #[test]
