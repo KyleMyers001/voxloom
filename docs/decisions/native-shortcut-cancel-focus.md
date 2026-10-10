@@ -6,7 +6,17 @@
 - **Feature IDs:** CAP-01, CAP-02, CAP-03, CAP-04, CAP-07, INS-02, INS-05, ONB-03, ONB-06
 - **Enables:** BUS-13 (overlay / native gesture wiring), BUS-14 (insert polish)
 
-## Context
+## Current implementation note
+
+The original planning context and feasibility notes below are historical. Native
+capture, global gestures and insertion are now implemented. The current focus
+policy is **completion-time selection** (§4), superseding invocation/release-time
+selection. Apple Terminal uses the separately documented guarded, unverified
+dispatch route (`apple-terminal-delivery.md`); posted events never trigger an
+automatic Copy or retry. Native/browser uncertain writes retain their prior
+Copy policy. Build tests are not fresh native acceptance evidence.
+
+## Context (original planning)
 
 Voxloom needs one global dictation shortcut with hold and latch gestures, clear
 cancellation, an intended insertion target across app focus changes, and a
@@ -27,7 +37,7 @@ prototype behavior is **not** native proof.
 | Collision | Hard-coded / simulated in Settings UI | Real register-or-revert + last-known-good |
 | Cancel | Dialog Escape (UI-scoped); DEV / capture cancel paths | Scoped cancel only — **no** global Escape grab |
 | Delivery | Copy sink (`src/services/stt/copySink.ts`) | Prefer insert when feasible; else Copy + toast |
-| Focus | App must be focused for gestures | Capture intended target at invocation |
+| Focus | App must be focused for gestures | Capture intended target after transcription completes (§4) |
 
 The mock controller remains valid for browser tests and practice until BUS-13
 wires a native adapter behind the same gesture contract
@@ -43,9 +53,9 @@ wires a native adapter behind the same gesture contract
 3. **Cancellation:** Escape only inside Voxloom UI, practice, or an **active
    capture session owned by Voxloom** — **recommend against** a global Escape
    hotkey.
-4. **Target policy:** Snapshot the frontmost insertable target at **invocation**;
-   at **completion**, insert there if still valid; otherwise Copy + truthful
-   toast (aligns with the existing Copy sink).
+4. **Target policy:** After transcription completes, snapshot the currently
+   focused field; validate and insert only into that exact field. Switching
+   while recording/processing is allowed. See §4 for fallback and cancellation.
 5. **Clipboard:** Prefer insert; fall back to Copy; restore prior clipboard only
    when we successfully snapshotted it and no intervening user copy is detected —
    otherwise skip restore and say so.
@@ -149,33 +159,50 @@ Escape grab.
 **Ordinary other-app focus** (user alt-tabs to Mail, etc.):
 
 - Does **not** by itself cancel an in-flight hold/latch session.
-- Does **not** change the **invocation-time intended target** (see §4).
+- Before transcription completes, determines the **completion-time intended target** (see §4).
 - Does **not** imply Escape is globally available.
 - Opening a Voxloom modal still forces context `null` and resets the state
   machine when Voxloom UI takes over.
 
 Distinguish **context reset** (Voxloom UI / practice gates) from **target
-validity** (whether the invocation-time app can still receive insert).
+validity** (whether the exact completion-time field can still receive insert).
 
 ---
 
-## 4. Invocation-time vs completion-time target policy (AC4)
+## 4. Transcription-completion target policy (AC4)
 
 ### Policy
 
-1. **Invocation time** (`hold-start` / `latch-start`): Snapshot **intended
-   target** — frontmost app + focused AX element (or equivalent), including
-   whether it looks insertable (text field vs secure field vs unknown).
-2. **During capture:** User may change focus freely; we do **not** retarget
-   mid-utterance by default (predictable “dictate into where I started”).
-3. **Completion time** (transcript ready to deliver):
-   - If intended target still exists, is focused-or-restorable, and is
-     **insertable** → attempt insert.
-   - If target **closed**, **replaced**, became a **secure field**, or is
-     **unsupported** → **do not** insert; fall back to **Copy** + truthful toast
-     (e.g. “Copied — original app closed” / “Copied — secure field”).
-   - If insert API fails after a valid-looking target → Copy + toast naming the
-     failure class when known.
+1. **Start / recording / processing:** No target is selected. Moving from A
+   during recording to B at release and C during STT is allowed.
+2. **Hold release / latch finish / Home Stop:** Stop audio immediately, before
+   the pending React/overlay gate. No AX lookup or target-acquisition wait.
+   A stop during microphone acquisition still latches stop; a stop before model
+   validation completes prevents capture from starting. No focus restoration.
+3. **Final transcript ready:** After `engine.transcribe()` resolves (including
+   its cleanup), snapshot the currently focused field once, immediately before
+   delivery checks. Automatic duration/capacity stops follow the same policy.
+   Blank/error transcripts do not look up a target or touch the clipboard.
+4. **Delivery:** Validate that exact new snapshot immediately before insert.
+   Native insertion rechecks retained element identity and focus before mutation
+   and during Unicode chunks. Never choose a different field after snapshot.
+   Changed/closed/secure/unsupported targets refuse insert, using Copy if enabled
+   or Failed/manual recovery if disabled. Never steal focus or synthesize Enter.
+5. **Session ownership:** Start/cancel invalidates the earlier session lease.
+   Check it before snapshot, after snapshot/validation, and before dispatching
+   delivery writes. Older completed transcripts can retain Failed history/toast
+   evidence but cannot overwrite a newer phase or select its field. An already
+   dispatched native insertion cannot be recalled; its existing retained-target
+   and per-chunk focus checks remain authoritative. No new Copy is dispatched
+   after supersession, including native failure/unverified-result fallback.
+
+The completion snapshot has event/IPC latency, not an atomic STT timestamp.
+Its **first native focus observation** fixes identity before any web AX bootstrap
+wait. If unavailable/unsupported, Chromium/Electron activation and requery still
+warm the host but cannot authorize a later-discovered field. A first cold-host
+utterance may Copy/Fail; retry after AX initialization. The retained-element
+registry stays single-slot with CFEqual plus generation identity: a newer
+snapshot invalidates the older token rather than redirecting insertion.
 
 ### Secure / unsupported targets
 
@@ -252,7 +279,7 @@ Be truthful: never claim “inserted” when only Copy succeeded; never claim
 |-------------|-------------------|
 | CGEvent tap as the default shortcut path | Heavier TCC; harder conflict messaging; keep as escalation |
 | Global Escape to cancel | Steals Escape from every app; rejected in §2 |
-| Always retarget to frontmost app at completion | Surprising inserts into the wrong window; rejected in favor of invocation snapshot |
+| Invocation/release-time target | Superseded: completion-time selection is intentional; subsequent focus changes still refuse insertion |
 | Always restore clipboard | Lies when snapshot fails or user copied mid-flight |
 | Insert via Enter-terminated keystrokes | Violates AC6; triggers commands/popups |
 
@@ -261,8 +288,8 @@ Be truthful: never claim “inserted” when only Copy succeeded; never claim
 - BUS-13 may add `plugin-global-shortcut`, capabilities, and a native bridge
   that emits the existing `ShortcutGesture` events — without redesigning hold /
   latch semantics.
-- BUS-14 implements insert against the invocation-target policy and keeps Copy
-  as the truthful fallback.
+- Insertion follows the completion-time policy (§4). Copy is the configured
+  fallback, except after Terminal events have been posted (explicit Unverified).
 - Onboarding copy (ONB-03 / ONB-06) should eventually mention Accessibility
   when insert ships, and must not promise global Escape.
 - Desktop shell ADR remains valid: shell can gain capabilities incrementally;

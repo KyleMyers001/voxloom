@@ -30,19 +30,46 @@ pub fn app_bundle_root(exe_path: &str) -> Option<&str> {
 /// `exe_path` is the target process's executable; `exists` checks a path
 /// (injected so this stays pure and testable).
 pub fn unicode_typing_supported(exe_path: &str, exists: impl Fn(&str) -> bool) -> bool {
-    let Some(bundle) = app_bundle_root(exe_path) else {
-        return false;
-    };
+    web_ax_activation(exe_path, exists).is_some()
+}
+
+/// Chromium handles AXEnhancedUserInterface; Electron explicitly exposes
+/// AXManualAccessibility. Never probe unknown hosts or try alternate attributes.
+/// Sources: chrome/browser/chrome_browser_application_mac.mm and
+/// electron/shell/browser/mac/electron_application.mm (upstream main).
+pub fn web_ax_activation(exe_path: &str, exists: impl Fn(&str) -> bool) -> Option<WebAxActivation> {
+    let bundle = app_bundle_root(exe_path)?;
     let name = bundle
         .rsplit('/')
         .next()
         .unwrap_or_default()
         .trim_end_matches(".app")
         .to_lowercase();
-    CHROMIUM_BROWSERS.contains(&name.as_str())
-        || exists(&format!(
-            "{bundle}/Contents/Frameworks/Electron Framework.framework"
-        ))
+    if CHROMIUM_BROWSERS.contains(&name.as_str()) {
+        Some(WebAxActivation::Chromium)
+    } else if exists(&format!(
+        "{bundle}/Contents/Frameworks/Electron Framework.framework"
+    )) {
+        Some(WebAxActivation::Electron)
+    } else {
+        None
+    }
+}
+
+/// Only these fixed activation attributes can reach AX.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WebAxActivation {
+    Chromium,
+    Electron,
+}
+
+impl WebAxActivation {
+    pub fn attribute(self) -> &'static str {
+        match self {
+            Self::Chromium => "AXEnhancedUserInterface",
+            Self::Electron => "AXManualAccessibility",
+        }
+    }
 }
 
 #[cfg(test)]
@@ -50,6 +77,32 @@ mod tests {
     use super::*;
 
     const NONE: fn(&str) -> bool = |_| false;
+
+    #[test]
+    fn bootstrap_uses_host_specific_activation_and_preserves_allowlist() {
+        for name in CHROMIUM_BROWSERS {
+            let exe = format!("/Applications/{name}.app/Contents/MacOS/browser");
+            let activation = web_ax_activation(&exe, NONE).unwrap();
+            assert_eq!(activation.attribute(), "AXEnhancedUserInterface", "{name}");
+        }
+        let slack = "/Applications/Slack.app/Contents/MacOS/Slack";
+        assert_eq!(
+            web_ax_activation(slack, |p| {
+                p == "/Applications/Slack.app/Contents/Frameworks/Electron Framework.framework"
+            })
+            .unwrap()
+            .attribute(),
+            "AXManualAccessibility"
+        );
+        for exe in [
+            slack,
+            "/Applications/Safari.app/Contents/MacOS/Safari",
+            "/usr/bin/unknown",
+            "",
+        ] {
+            assert_eq!(web_ax_activation(exe, NONE), None, "{exe}");
+        }
+    }
 
     #[test]
     fn chromium_browsers_are_supported() {

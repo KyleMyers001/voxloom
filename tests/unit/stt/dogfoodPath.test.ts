@@ -126,7 +126,6 @@ describe('dogfoodTranscribeAndCopy delivery (BUS-14)', () => {
       createEngine: (modelId) =>
         createMockSttEngine({ modelId, transcriptText: 'into notes' }),
       deliveryPlatform,
-      intended,
       modelId: 'whisper-tiny.en',
     });
 
@@ -165,7 +164,6 @@ describe('dogfoodTranscribeAndCopy delivery (BUS-14)', () => {
       createEngine: (modelId) =>
         createMockSttEngine({ modelId, transcriptText: 'password' }),
       deliveryPlatform,
-      intended: secure,
       modelId: 'whisper-tiny.en',
     });
 
@@ -173,5 +171,51 @@ describe('dogfoodTranscribeAndCopy delivery (BUS-14)', () => {
     expect(result.delivery.message).toMatch(/secure/i);
     expect(clip.copy).not.toHaveBeenCalled();
     expect(result.delivery.text).toBe('password');
+  });
+});
+
+describe('completion-time delivery side effects', () => {
+  it.each(['empty', 'error', 'cancelled'] as const)('avoids target and clipboard work for %s STT', async (mode) => {
+    const clip = clipboard();
+    const snapshotTarget = vi.fn();
+    const validateTarget = vi.fn();
+    const insertText = vi.fn();
+    const clipboardWrite = vi.fn();
+    const clipboardRead = vi.fn();
+    const pending = dogfoodTranscribeAndCopy({
+      audio: { duration_ms: 100, id: 'pcm-side-effects', sample_rate_hz: 16_000 },
+      clipboard: clip,
+      modelId: 'whisper-tiny.en',
+      isCurrent: () => mode !== 'cancelled',
+      createEngine: (modelId) => ({
+        ...createMockSttEngine({ modelId }),
+        transcribe: async () => {
+          if (mode === 'error') throw new Error('STT failed');
+          return { text: mode === 'empty' ? '  ' : 'cancelled text', language: 'en' };
+        },
+      }),
+      deliveryPlatform: { snapshotTarget, validateTarget, insertText, clipboardWrite, clipboardRead, clipboardRestore: vi.fn() },
+    });
+    if (mode === 'error') await expect(pending).rejects.toThrow('STT failed');
+    else expect((await pending).delivery.status).toBe('failed');
+    for (const effect of [snapshotTarget, validateTarget, insertText, clipboardWrite, clipboardRead, clip.copy]) {
+      expect(effect).not.toHaveBeenCalled();
+    }
+  });
+});
+
+describe('completion snapshot failures', () => {
+  it.each([true, false])('honors fallback=%s when snapshot throws synchronously', async (fallback) => {
+    const clip = clipboard();
+    const result = await dogfoodTranscribeAndCopy({
+      audio: { duration_ms: 100, id: 'pcm-snapshot-fail', sample_rate_hz: 16_000 },
+      clipboard: clip,
+      clipboardFallback: fallback,
+      modelId: 'whisper-tiny.en',
+      createEngine: (modelId) => createMockSttEngine({ modelId }),
+      snapshotTarget: () => { throw new Error('AX unavailable'); },
+    });
+    expect(result.delivery.status).toBe(fallback ? 'copied' : 'failed');
+    expect(clip.copy).toHaveBeenCalledTimes(fallback ? 1 : 0);
   });
 });

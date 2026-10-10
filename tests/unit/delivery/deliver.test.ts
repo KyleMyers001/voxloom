@@ -36,6 +36,51 @@ function adapter(
 }
 
 describe('deliverTranscript', () => {
+  it.each(['complete', 'partial'])('Terminal %s dispatch is unverified, never copied or retried', async (terminalDispatch) => {
+    const platform = adapter({
+      insertText: vi.fn().mockResolvedValue({
+        detail: 'input buffer not verified',
+        terminalDispatch,
+        typed: true,
+        unverified: true,
+      }),
+    });
+    const outcome = await deliverTranscript({
+      clipboardFallback: true,
+      intended: snap(),
+      platform,
+      text: 'café 日本語 🙂',
+    });
+    expect(outcome.status).toBe('unverified');
+    expect(outcome.message).toContain('input not verified');
+    expect(outcome.message).toContain('Inspect before retrying');
+    expect(outcome.message).not.toContain('Inserted');
+    expect(platform.insertText).toHaveBeenCalledTimes(1);
+    expect(platform.clipboardWrite).not.toHaveBeenCalled();
+    expect(platform.clipboardRead).not.toHaveBeenCalled();
+  });
+
+  it('keeps uncertain Terminal evidence after cancellation and does not copy', async () => {
+    let current = true;
+    const platform = adapter({
+      insertText: vi.fn().mockImplementation(async () => {
+        current = false;
+        return { detail: null, terminalDispatch: 'partial', typed: true, unverified: true };
+      }),
+    });
+    const outcome = await deliverTranscript({
+      clipboardFallback: true,
+      intended: snap(),
+      isCurrent: () => current,
+      platform,
+      text: 'hello',
+    });
+    expect(outcome.status).toBe('unverified');
+    expect(outcome.message).toContain('partly sent');
+    expect(platform.clipboardWrite).not.toHaveBeenCalled();
+    expect(platform.insertText).toHaveBeenCalledTimes(1);
+  });
+
   it('emits Inserted only when insert completes', async () => {
     const platform = adapter();
     const outcome = await deliverTranscript({

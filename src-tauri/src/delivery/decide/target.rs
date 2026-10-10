@@ -32,7 +32,7 @@ pub fn effective_role<'a>(role: &'a str, subrole: Option<&str>) -> &'a str {
     }
 }
 
-/// Field identity token. Identity is held natively: the capture-start
+/// Field identity token. Identity is held natively: the completion-time
 /// element is retained and later focus is compared with `CFEqual` (stable
 /// across scroll/reflow/resize, distinct for sibling fields with identical
 /// attributes). `generation` is the registry slot the element matched, or
@@ -42,7 +42,7 @@ pub fn element_token(pid: Option<i32>, role: &str, generation: Option<u64>) -> S
     format!("{}:{}:{}", pid.unwrap_or(-1), role, slot)
 }
 
-/// Compare the invocation snapshot with the element we are about to mutate.
+/// Compare the completion-time snapshot with the element we are about to mutate.
 pub fn validate_snapshots(
     intended: &TargetSnapshotDto,
     current: TargetSnapshotDto,

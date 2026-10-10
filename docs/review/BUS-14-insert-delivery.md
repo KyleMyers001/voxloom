@@ -6,11 +6,28 @@ Jira: [BUS-14](https://kylemyers001.atlassian.net/browse/BUS-14)
 
 **ADR:** [`docs/decisions/native-shortcut-cancel-focus.md`](../decisions/native-shortcut-cancel-focus.md) (BUS-12) §§4–6
 
+## Current follow-up
+
+The original AC map and dated evidence below are historical, not a claim of
+fresh native acceptance. Current targeting selects the field after final STT,
+then retains and validates that exact identity; recording/processing focus
+changes are allowed. The dedicated Apple Terminal route reports **Unverified**
+after complete/partial event posting and never automatically copies or retries
+posted text. See `../decisions/apple-terminal-delivery.md` for its guards and
+limitations, including the remaining global-event focus race and the fact that
+printable terminal input can trigger actions without Enter.
+
+Temporary focus logs, transport probes, startup switches and developer-local
+build dependencies have been removed. User-facing AX error reasons remain.
+Prior user-reported Hermes, TextEdit and Terminal successes are not a live
+regression pass of the cleaned bundle; installation and native acceptance remain
+separate from the automated build/test checks.
+
 ## What this slice is
 
 First **implementation** of insert-preferring delivery behind a replaceable
-platform adapter. macOS AX adapter snapshots the intended target at capture
-start, validates at completion, inserts text-only when safe, otherwise Copy
+platform adapter. After final STT and engine cleanup, the macOS AX adapter
+snapshots the focused target, validates it, inserts text-only when safe, otherwise Copy
 (+ Settings toggle) with truthful Inserted / Copied / Failed messaging.
 
 Copy sink remains the reliable floor. No Enter / command chords. No cloud STT.
@@ -52,10 +69,10 @@ Documented expectations for Clara Mac dogfood (not CI-provable on Linux):
 
 | # | Step | Expected |
 |---|------|----------|
-| C1 | Notes focused → **global hold/latch** (do not click Home Start) → speak → release/finish | **Inserted** (or Copied if AX denied). Home Start focuses Voxloom first → often honest **Copy** |
-| C2 | Password / secure field focused at start | No insert; **Copied** (fallback on) or **Failed** (off) naming secure field |
-| C3 | Start in Notes, close Notes before Stop completes | **Copied — target changed** when another identifiable app is focused, or **Copied — target unavailable** when AX focus is missing (Failed if fallback off); never claim closure without evidence or insert elsewhere |
-| C4 | Start in Notes, focus Safari mid-capture | Still targets Notes identity; if changed at completion → Copy, not Safari insert |
+| C1 | Notes focused → **global hold/latch** → speak → release/finish | **Inserted** (or Copied if AX denied/cold). Home Stop left focused until completion → often honest **Copy** |
+| C2 | Password / secure field focused at transcription completion | No insert; **Copied** (fallback on) or **Failed** (off) naming secure field |
+| C3 | Snapshot Notes at completion, then close or leave Notes before insertion | **Copied — target changed/unavailable** (Failed if fallback off); never insert elsewhere |
+| C4 | Start in Notes A, release in B, move to C during STT | Snapshot C after final STT; insert C if still focused. Moving again after snapshot → Copy/Failed |
 | C5 | Clipboard fallback off + refused target | **Failed** + last transcript Copy button works with History retention **off** |
 | C6 | Confirm no trailing Enter / accidental send in chat | Text only appears; message not submitted |
 | C7 | Accessibility denied for the actual test host/app | Snapshot/validate unavailable → Copied — Accessibility permission denied (or Failed with fallback off); never "original app closed or focus lost"; no crash |
@@ -66,10 +83,9 @@ Documented expectations for Clara Mac dogfood (not CI-provable on Linux):
 
 ### Clara note — C1 Inserted via global gesture
 
-Home **Start capture** activates/focuses Voxloom, so `snapshotTarget()` at Start
-often sees Voxloom → insert refused → **Copied** (honest). True Notes
-**Inserted** requires snapshot while Notes (or another insertable app) remains
-frontmost:
+Home **Stop** usually focuses Voxloom. Switch to Notes before STT completes
+to target Notes; otherwise the completion snapshot may see Voxloom and Copy.
+For global dictation:
 
 1. Focus Notes (or TextEdit).
 2. Use the configured **global hold** (or latch) — do **not** click Home Start.
@@ -77,7 +93,9 @@ frontmost:
 4. Expect **Inserted** when AX succeeds; otherwise truthful **Copied** / **Failed**.
 
 Gesture path runs the same dogfood STT → `deliverTranscript` delivery as Home
-Stop (invocation-time snapshot inside `dogfood.start()`). Overlay remains
+Stop (audio stop before the pending overlay commit gate; target snapshot only
+after final STT). Automatic bound stops use the same completion-time policy.
+Overlay remains
 non-focus-stealing (BUS-13).
 
 ### Clara failure — stuck waveform after hold release (a161e1f)
@@ -199,7 +217,7 @@ Do **not** treat browser unit tests as proof of native AX insert.
 | `src/services/delivery/*` | Policy, messages, orchestrator, stub + Tauri adapters |
 | `src-tauri/src/delivery/*` | macOS AX snapshot/validate/insert; non-macOS stubs |
 | `src/services/stt/dogfoodPath.ts` | STT → `deliverTranscript` |
-| `src/services/stt/useDogfoodCapture.ts` | Snapshot at start; toast from delivery evidence |
+| `src/services/stt/useDogfoodCapture.ts` | Completion snapshot callback + session lease; toast from delivery evidence |
 | `src/app/useShortcutGestures.ts` | Product hold/latch → dogfood start/stop (shared with Home) |
 | `src/app/App.tsx` | Lifts shared `useDogfoodCapture` for Home + gesture |
 | `src/domain/records.ts` | History status from delivery evidence |
@@ -212,7 +230,7 @@ Do **not** treat browser unit tests as proof of native AX insert.
 | AXSelectedText may be unsupported or fail for some apps | No AXValue fallback; use Copy/Failed per Settings. Verify caret/selection behavior in Notes/TextEdit on Mac |
 | Browser / Electron / game overlays | Unsupported → Copy; may need later heuristics |
 | Paste-via-⌘V path not used (AX first; web fields that ignore AXSelectedText get Unicode key events per ADR §6 — no clipboard, no chords) | PR #25; unverifiable typing → "May have been inserted — also copied" |
-| Home Start while Voxloom focused | Expected **Copied**; use global hold for Notes Inserted smoke |
+| Home Stop while Voxloom focused | Expected **Copied**; use global hold for Notes Inserted smoke |
 | Stuck overlay after release (pre-fix) | Fixed: unconditional tear-down on finish/cancel/error (try/finally) |
 | 2nd/3rd hold stuck (6f1ada8) | Serialized arm/disarm alone insufficient (c9e0df5 still failed R1) |
 | 2nd hold no overlay + Home Stop (c9e0df5) | Fixed: Carbon Released backup after grace + force-stop leftover busy on hold-start |
@@ -250,7 +268,7 @@ so the copy was not a reliable diagnosis of a closed app. The safe AX delivery
 slice classifies denied permission as unavailable instead; a separately
 launched current-code app still needs native verification.
 
-### Packaged AX diagnostic follow-up (native QA pending)
+### Historical packaged AX diagnostic follow-up (native QA pending)
 
 On the safe-AX branch, focus-query failures now report **which stage** failed
 (`capture start`, `delivery validation`, or `insert`), the process's AX trust

@@ -1,6 +1,6 @@
 //! Unicode key-event typing (ADR §6): no clipboard, no layout-dependent
-//! keycodes, no modifier flags. Used only for web fields that ignored
-//! AXSelectedText with their value unchanged.
+//! keycodes, no modifier flags. Web fallback verifies read-back; the separate
+//! Apple Terminal path only reports events posted, never input confirmation.
 
 use super::ax::{release, CFTypeRef};
 use crate::delivery::decide::{utf16_chunks, KEY_EVENT_UTF16_MAX};
@@ -8,6 +8,7 @@ use crate::delivery::decide::{utf16_chunks, KEY_EVENT_UTF16_MAX};
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {
     fn CGEventSourceCreate(state_id: i32) -> CFTypeRef;
+    fn CGPreflightPostEventAccess() -> bool;
     fn CGEventCreateKeyboardEvent(source: CFTypeRef, keycode: u16, keydown: bool) -> CFTypeRef;
     fn CGEventKeyboardSetUnicodeString(event: CFTypeRef, len: usize, chars: *const u16);
     fn CGEventSetFlags(event: CFTypeRef, flags: u64);
@@ -36,6 +37,36 @@ fn post_chunk(source: CFTypeRef, units: &[u16]) -> Result<(), String> {
         release(up);
     }
     Ok(())
+}
+
+/// Terminal has no trustworthy AX input-buffer oracle. Share exactly the
+/// proven Unicode event transport, but report dispatch separately from proof.
+/// The pure dispatcher preflights the ENTIRE payload before invoking `post`.
+pub fn type_terminal(
+    text: &str,
+    still_target: impl Fn() -> Result<(), String>,
+) -> Result<crate::delivery::decide::InsertReport, String> {
+    let source = unsafe { CGEventSourceCreate(SOURCE_PRIVATE_STATE) };
+    if source.is_null() {
+        return Err("could not create private event source".into());
+    }
+    let result = crate::delivery::decide::terminal::dispatch(
+        text,
+        || {
+            if !unsafe { CGPreflightPostEventAccess() } {
+                return Err("Terminal event-posting permission denied".into());
+            }
+            still_target()
+        },
+        |chunk| {
+            post_chunk(source, chunk)?;
+            // Pacing only, NOT a verifier. Never poll display/scrollback as proof.
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            Ok(())
+        },
+    );
+    release(source);
+    result
 }
 
 /// Type `text`, re-checking focus before every chunk and confirming each

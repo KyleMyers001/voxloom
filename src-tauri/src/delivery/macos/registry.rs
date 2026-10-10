@@ -1,4 +1,4 @@
-//! Native identity of the capture-start target: the AX element is retained
+//! Native identity of the completion-time target: the AX element is retained
 //! and later focus is compared with CFEqual. Stable across scroll, reflow and
 //! resize; distinct for sibling fields that share every attribute.
 

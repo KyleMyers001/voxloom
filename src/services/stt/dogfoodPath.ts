@@ -35,10 +35,12 @@ export interface DogfoodTranscribeOptions {
    */
   clipboardFallback?: boolean;
   /**
-   * Invocation-time intended target snapshot (ADR §4).
-   * When omitted, delivery treats the target as unavailable → Copy/Fail.
+   * Called after final STT (including engine cleanup), never during capture.
+   * Defaults to the platform snapshot. Null means unavailable → Copy/Fail.
    */
-  intended?: TargetSnapshot | null;
+  snapshotTarget?: () => Promise<TargetSnapshot | null>;
+  /** False after cancel/supersession: no new target lookup or delivery writes. */
+  isCurrent?: () => boolean;
   /**
    * Explicit selected model id (Settings `transcriptionModel`).
    * Resolved via `resolveTranscriptionModelId` — never auto-downloaded.
@@ -95,9 +97,18 @@ export async function dogfoodTranscribeAndCopy(
   const clipboardFallback = options.clipboardFallback !== false;
 
   try {
+    let intended: TargetSnapshot | null = null;
+    if (transcript.text.trim() && (options.isCurrent?.() ?? true)) {
+      try {
+        intended = await (options.snapshotTarget ?? (() => platform.snapshotTarget()))();
+      } catch {
+        // Unavailable AX must still honor the user's Copy fallback setting.
+      }
+    }
     const delivery = await deliverTranscript({
       clipboardFallback,
-      intended: options.intended ?? null,
+      isCurrent: options.isCurrent,
+      intended,
       platform,
       text: transcript.text,
     });

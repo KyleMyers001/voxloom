@@ -59,6 +59,8 @@ export async function deliverTranscript(
   const text = options.text;
   const now = options.now ?? Date.now;
   const platform = options.platform;
+  const current = () => options.isCurrent?.() ?? true;
+  const stale = () => failOutcome(text, 'session cancelled or superseded; delivery skipped');
 
   // Nothing to deliver: never insert, and never overwrite the clipboard.
   if (text.trim() === '') {
@@ -72,8 +74,10 @@ export async function deliverTranscript(
     };
   }
 
+  if (!current()) return stale();
+
   const intended: TargetSnapshot = options.intended
-    ?? unavailableSnapshot(now(), 'no intended target snapshot at invocation');
+    ?? unavailableSnapshot(now(), 'no intended target snapshot at transcription completion');
 
   let validated: TargetSnapshot;
   try {
@@ -88,6 +92,7 @@ export async function deliverTranscript(
     };
   }
 
+  if (!current()) return stale();
   const plan = planDelivery(validated, options.clipboardFallback);
 
   if (plan.action === 'insert') {
@@ -98,13 +103,29 @@ export async function deliverTranscript(
       const insertFail = error instanceof Error
         ? error.message
         : String(error);
+      if (!current()) return stale();
       // Insert API failed after a valid-looking target → Copy + toast if enabled.
       if (!options.clipboardFallback) {
         return failOutcome(text, `insert failed: ${insertFail}`);
       }
       return copyFallback(platform, text, `insert failed: ${insertFail}`);
     }
+    if (report?.terminalDispatch) {
+      // Posting is not input-buffer confirmation. Never copy or retry after
+      // any Terminal dispatch, even if the session was cancelled in flight.
+      const sent = report.terminalDispatch === 'complete' ? 'Text sent' : 'Text partly sent';
+      return {
+        clipboardRestored: false,
+        detail: report.detail,
+        message: `${sent} to Terminal — input not verified. Inspect before retrying.`,
+        restoreSkippedReason: null,
+        status: 'unverified',
+        text,
+      };
+    }
     if (report?.unverified) {
+      // An in-flight native write cannot be undone; preserve its uncertainty.
+      if (!current()) return mayHaveInserted(platform, text, false, report);
       return mayHaveInserted(platform, text, options.clipboardFallback, report);
     }
     return {

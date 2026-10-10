@@ -23,6 +23,7 @@ pub fn is_web_content_field<S: AsRef<str>>(
 #[derive(Debug, PartialEq, Eq)]
 pub enum InsertPath {
     AxSelectedText,
+    TerminalUnicode,
     Refuse(String),
 }
 

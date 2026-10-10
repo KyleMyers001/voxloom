@@ -17,6 +17,7 @@ const K_CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
 #[link(name = "CoreFoundation", kind = "framework")]
 extern "C" {
     fn AXUIElementCreateSystemWide() -> AXUIElementRef;
+    pub fn AXUIElementCreateApplication(pid: i32) -> AXUIElementRef;
     pub fn AXUIElementCopyAttributeValue(
         element: AXUIElementRef,
         attribute: CFStringRef,
@@ -116,12 +117,15 @@ pub fn set_ax_string(element: AXUIElementRef, attr: &str, text: &str) -> Result<
     Ok(())
 }
 
-/// Ask Chromium/Electron to expose web content to AX. Returns AX success.
-pub fn set_manual_accessibility(app: AXUIElementRef) -> bool {
-    let name = cfstr("AXManualAccessibility");
+/// Request the host-specific activation; preserve errors, including unsupported.
+pub fn set_web_accessibility(
+    app: AXUIElementRef,
+    activation: crate::delivery::decide::host::WebAxActivation,
+) -> AXError {
+    let name = cfstr(activation.attribute());
     let err = unsafe { AXUIElementSetAttributeValue(app, name, kCFBooleanTrue) };
     release(name);
-    err == AX_OK
+    err
 }
 
 /// System-wide element; caller releases.

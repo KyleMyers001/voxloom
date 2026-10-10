@@ -2,9 +2,10 @@
 
 The Tauri desktop shell captures real microphone audio, can transcribe it
 locally using an explicitly downloaded Whisper model (`--features whisper`),
-and attempts to insert text into the invocation-time macOS target. When
+and attempts to insert text into the transcription-completion-time macOS target. When
 insertion is unsafe or unavailable it can Copy instead, if clipboard fallback
-is enabled; results report Inserted, Copied or Failed. The configured global
+is enabled; results report Inserted, Copied, Failed, or Unverified (Terminal
+events posted without input-buffer verification). The configured global
 shortcut supports hold/release and double-tap latch. Native recording shows
 one bottom floating waveform driven by rate-limited microphone levels (no PCM
 sent to the webview); the main app no longer duplicates it. macOS permission
@@ -20,6 +21,40 @@ shortcut gestures but does not transcribe speech. Cleanup styles, the cleanup
 model and start-at-login are not functional desktop features yet. Development
 scenario controls are excluded from production builds. See
 `docs/review/BUS-14-insert-delivery.md` for native smoke checks and limitations.
+
+### Dictation target selection
+
+Focus the desired field **when transcription completes**. You can start in A,
+release/Stop in B, then move to C while processing: C becomes the intended
+field after the final text is ready. Release/Stop stops audio immediately,
+without acquiring a target or waiting for AX. Automatic 120-second/capacity
+stops use the same completion-time policy.
+
+After that snapshot, the exact field must remain focused and insertable.
+Further focus changes refuse insertion, with Copy (if enabled) or Failed/manual
+recovery. Password/secure fields never receive insertion. Voxloom never
+restores/steals focus or submits a message. Clicking Home Stop may leave focus
+in Voxloom; switch to your desired field before transcription finishes.
+
+The first native AX observation after final STT (and engine cleanup) fixes the
+target; event/IPC scheduling means this is not an atomic timestamp. If a cold
+Chromium/Electron AX tree is unavailable, host bootstrap still initializes it,
+but that utterance falls back rather than selecting a later-discovered field.
+Retry after AX initializes. Cancelled/superseded work does not acquire a new
+target or dispatch new delivery writes; any already-dispatched native insertion
+cannot be retracted and retains native exact-target checks.
+
+### Apple Terminal
+
+The exact system Apple Terminal app has a separate guarded Unicode-event route
+for validated text areas. It rejects control characters and line separators,
+never sends Enter or uses clipboard transport, and never automatically copies
+or retries after any events are posted. Complete/partial dispatch stays
+**Unverified** in the result and History; inspect the prompt before using Copy.
+Printable text can still trigger actions in terminal modes or TUIs: no Enter
+is not a universal no-execution guarantee. Other terminal apps are not enabled
+by this route. See `docs/decisions/apple-terminal-delivery.md` for guards,
+evidence and remaining live checks.
 
 ## Browser
 
@@ -52,7 +87,7 @@ npm run tauri -- build --bundles app
 
 # Full local STT (requires cmake)
 brew install cmake   # once
-npm run tauri -- build --bundles app -- --features whisper
+npm run tauri -- build --bundles app -- --locked --features whisper
 ```
 
 App path:

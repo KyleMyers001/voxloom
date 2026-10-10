@@ -11,7 +11,7 @@ export interface HistoryFile {
   version: typeof HISTORY_FILE_VERSION;
 }
 
-const STATUSES: readonly HistoryStatus[] = ['copied', 'failed', 'inserted'];
+const STATUSES: readonly HistoryStatus[] = ['copied', 'failed', 'inserted', 'unverified'];
 const STYLES: readonly WritingStyle[] = ['casual', 'formal', 'very-casual'];
 
 const DAY_MS = 24 * 60 * 60 * 1000;

@@ -1,6 +1,6 @@
 /// Wire full capture stop → dogfoodTranscribeAndCopy on the main UI.
 /// Automatic STT + delivery after a clean stop; cancel discards with no STT.
-/// Snapshots intended target at capture start (ADR §4 invocation policy).
+/// Snapshots intended target after final transcription (ADR §4).
 /// Shared by Home Start and global hold/latch — start() must not activate
 /// Voxloom; gesture callers rely on the other app still being frontmost.
 /// Never silent-downloads missing models — surfaces a clear UI error instead.
@@ -73,7 +73,7 @@ export interface UseDogfoodCaptureOptions {
 export interface UseDogfoodCaptureResult {
   cancel: () => void;
   captureState: CaptureState;
-  /** Invocation-time intended target (null until start snapshots). */
+  /** Completion-time target (null until final transcription / if unavailable). */
   intendedTarget: TargetSnapshot | null;
   message: string | null;
   origin: 'home' | 'gesture' | null;
@@ -161,13 +161,12 @@ export function useDogfoodCapture(
     options.clipboard,
     options.deliveryPlatform,
   );
-  const intendedRef = useRef<TargetSnapshot | null>(null);
   /** Set by stop/cancel so a finish that races start still terminates. */
   const stopRequestedRef = useRef(false);
   /**
    * Bumped by start/cancel. A prior session's STT/delivery may still be in
-   * flight when the next hold starts; its completion must still deliver and
-   * record history, but must not overwrite the newer session's phase.
+   * flight when the next hold starts; retain its transcript in history but
+   * suppress new delivery side effects and preserve the newer session's phase.
    */
   const sessionRef = useRef(0);
 
@@ -191,8 +190,7 @@ export function useDogfoodCapture(
   const runDogfood = useCallback(async (audio: CaptureAudioMeta) => {
     const session = sessionRef.current;
     const current = () => session === sessionRef.current;
-    // Bind this session's target now: a newer start() may re-snapshot.
-    const intended = intendedRef.current;
+    const platform = platformRef.current;
     setPhase('transcribing');
     announce('Transcribing…');
     try {
@@ -201,8 +199,13 @@ export function useDogfoodCapture(
         audio,
         clipboard: clipboardRef.current,
         clipboardFallback: clipboardFallbackRef.current,
-        deliveryPlatform: platformRef.current,
-        intended,
+        deliveryPlatform: platform,
+        isCurrent: current,
+        snapshotTarget: async () => {
+          const target = await platform.snapshotTarget();
+          if (current()) setIntendedTarget(target);
+          return target;
+        },
         modelId,
       });
       if (current()) {
@@ -235,6 +238,7 @@ export function useDogfoodCapture(
   }, [announce, ensureModelAvailable]);
 
   // Auto dogfood on clean stop (user stop or 120s/capacity bound).
+  // Automatic bounds use the same completion-time target policy.
   const handledAudioIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (capture.captureState.kind === 'cancelled') {
@@ -267,18 +271,7 @@ export function useDogfoodCapture(
     setMessage(null);
     handledAudioIdRef.current = null;
     stopRequestedRef.current = false;
-    // ADR §4: snapshot intended target at invocation (hotkey time), before
-    // any await — a focus change during model validation must not retarget.
-    try {
-      const snap = await platformRef.current.snapshotTarget();
-      if (superseded()) return;
-      intendedRef.current = snap;
-      setIntendedTarget(snap);
-    } catch {
-      if (superseded()) return;
-      intendedRef.current = null;
-      setIntendedTarget(null);
-    }
+    setIntendedTarget(null);
 
     try {
       await ensureModelAvailable(modelIdRef.current);
@@ -290,7 +283,7 @@ export function useDogfoodCapture(
     }
     if (superseded()) return;
 
-    // Hold release may have already requested stop while we were snapshotting.
+    // Hold release may have already requested stop during model validation.
     if (stopRequestedRef.current) {
       setPhase('cancelled');
       setMessage('Capture cancelled — nothing transcribed.');
@@ -328,10 +321,12 @@ export function useDogfoodCapture(
   ]);
 
   const stop = useCallback(async () => {
+    const session = sessionRef.current;
     stopRequestedRef.current = true;
     try {
       await capture.stopFullCapture();
     } catch (error: unknown) {
+      if (session !== sessionRef.current) return;
       setPhase('error');
       announce(errorText(error));
     }
@@ -341,7 +336,6 @@ export function useDogfoodCapture(
     sessionRef.current += 1;
     stopRequestedRef.current = true;
     handledAudioIdRef.current = null;
-    intendedRef.current = null;
     setIntendedTarget(null);
     try {
       capture.cancelActiveCapture();
