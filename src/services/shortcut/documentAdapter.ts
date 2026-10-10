@@ -1,9 +1,9 @@
-import type { ShortcutController, ShortcutGesture } from "../contracts";
-import type { Scheduler } from "../contracts";
-import { DOUBLE_TAP_MS, HOLD_MS } from "./constants";
-import { matchesShortcut } from "./formatHotkey";
-import { shouldResetGesturesOnDocumentHidden } from "./focusPolicy";
-import { createGestureMachine } from "./gestureMachine";
+import type { ShortcutController, ShortcutGesture } from '../contracts';
+import type { Scheduler } from '../contracts';
+import { DOUBLE_TAP_MS, HOLD_MS } from './constants';
+import { matchesShortcut } from './formatHotkey';
+import { shouldResetGesturesOnDocumentHidden } from './focusPolicy';
+import { createGestureMachine } from './gestureMachine';
 
 const browserScheduler: Scheduler = {
   clear: (timer) => window.clearTimeout(timer),
@@ -17,7 +17,7 @@ export interface DocumentAdapterOptions {
   onGesture: (gesture: ShortcutGesture) => void;
   scheduler?: Scheduler;
   shortcut: string;
-  target: Pick<Document, "addEventListener" | "removeEventListener">;
+  target: Pick<Document, 'addEventListener' | 'removeEventListener'>;
 }
 
 /**
@@ -45,20 +45,20 @@ export function createDocumentShortcutController({
     const key = event as KeyboardEvent;
     if (key.repeat || !matchesShortcut(key, shortcut)) return;
     key.preventDefault();
-    machine.handle("pressed");
+    machine.handle('pressed');
   }
 
   function keyUp(event: Event) {
     const key = event as KeyboardEvent;
     if (!matchesShortcut(key, shortcut)) return;
     key.preventDefault();
-    machine.handle("released");
+    machine.handle('released');
   }
 
   function onVisibility() {
     if (
-      document.visibilityState === "hidden" &&
-      shouldResetGesturesOnDocumentHidden("document-focused")
+      document.visibilityState === 'hidden' &&
+      shouldResetGesturesOnDocumentHidden('document-focused')
     ) {
       machine.resetPartial();
     }
@@ -68,18 +68,18 @@ export function createDocumentShortcutController({
     machine.resetPartial();
   }
 
-  target.addEventListener("keydown", keyDown);
-  target.addEventListener("keyup", keyUp);
-  document.addEventListener("visibilitychange", onVisibility);
-  window.addEventListener("pagehide", onPageHide);
+  target.addEventListener('keydown', keyDown);
+  target.addEventListener('keyup', keyUp);
+  document.addEventListener('visibilitychange', onVisibility);
+  window.addEventListener('pagehide', onPageHide);
 
   return {
     dispose() {
       machine.dispose();
-      target.removeEventListener("keydown", keyDown);
-      target.removeEventListener("keyup", keyUp);
-      document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("pagehide", onPageHide);
+      target.removeEventListener('keydown', keyDown);
+      target.removeEventListener('keyup', keyUp);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', onPageHide);
     },
     setContext(value) {
       machine.setContext(value);

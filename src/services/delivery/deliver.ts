@@ -8,21 +8,21 @@ import {
   MANUAL_RECOVERY_HINT,
   reasonForKind,
   restoreSkippedSuffix,
-} from "./messages";
+} from './messages';
 import {
   planDelivery,
   shouldRestoreClipboard,
   unavailableSnapshot,
-} from "./policy";
+} from './policy';
 import type {
   DeliverOptions,
   DeliveryOutcome,
   TargetSnapshot,
-} from "./types";
+} from './types';
 
 
 async function readClipboardText(
-  platform: DeliverOptions["platform"],
+  platform: DeliverOptions['platform'],
 ): Promise<string | null> {
   try {
     const snap = await platform.clipboardRead();
@@ -40,9 +40,9 @@ function failOutcome(
   return {
     clipboardRestored: false,
     detail,
-    message: deliveryMessage("failed", `${detail}. ${MANUAL_RECOVERY_HINT}`),
+    message: deliveryMessage('failed', `${detail}. ${MANUAL_RECOVERY_HINT}`),
     restoreSkippedReason: extras?.restoreSkippedReason ?? null,
-    status: "failed",
+    status: 'failed',
     text,
     ...extras,
   };
@@ -60,7 +60,7 @@ export async function deliverTranscript(
   const platform = options.platform;
 
   const intended: TargetSnapshot = options.intended
-    ?? unavailableSnapshot(now(), "no intended target snapshot at invocation");
+    ?? unavailableSnapshot(now(), 'no intended target snapshot at invocation');
 
   let validated: TargetSnapshot;
   try {
@@ -70,22 +70,22 @@ export async function deliverTranscript(
     validated = {
       ...intended,
       insertable: false,
-      kind: "unavailable",
+      kind: 'unavailable',
       reason: `validate failed: ${detail}`,
     };
   }
 
   const plan = planDelivery(validated, options.clipboardFallback);
 
-  if (plan.action === "insert") {
+  if (plan.action === 'insert') {
     try {
       await platform.insertText(text, plan.target);
       return {
         clipboardRestored: false,
         detail: null,
-        message: deliveryMessage("inserted", null),
+        message: deliveryMessage('inserted', null),
         restoreSkippedReason: null,
-        status: "inserted",
+        status: 'inserted',
         text,
       };
     } catch (error: unknown) {
@@ -100,7 +100,7 @@ export async function deliverTranscript(
     }
   }
 
-  if (plan.action === "copy") {
+  if (plan.action === 'copy') {
     return copyFallback(platform, text, plan.reason);
   }
 
@@ -114,7 +114,7 @@ export async function deliverTranscript(
  * which lives inside the platform insertText implementation when needed.
  */
 async function copyFallback(
-  platform: DeliverOptions["platform"],
+  platform: DeliverOptions['platform'],
   text: string,
   reason: string,
 ): Promise<DeliveryOutcome> {
@@ -144,11 +144,11 @@ async function copyFallback(
       clipboardRestored: false,
       detail: reason,
       message: deliveryMessage(
-        "failed",
+        'failed',
         `clipboard changed after write — ${MANUAL_RECOVERY_HINT}`,
       ),
-      restoreSkippedReason: "clipboard changed after our write",
-      status: "failed",
+      restoreSkippedReason: 'clipboard changed after our write',
+      status: 'failed',
       text,
     };
   }
@@ -156,9 +156,9 @@ async function copyFallback(
   return {
     clipboardRestored: false,
     detail: reason,
-    message: deliveryMessage("copied", reason),
+    message: deliveryMessage('copied', reason),
     restoreSkippedReason: null,
-    status: "copied",
+    status: 'copied',
     text,
   };
 }
@@ -168,7 +168,7 @@ async function copyFallback(
  * Exported for unit tests and macOS paste fallback.
  */
 export async function restoreAfterPaste(input: {
-  platform: DeliverOptions["platform"];
+  platform: DeliverOptions['platform'];
   priorOk: boolean;
   priorText: string | null;
   ourText: string;
@@ -203,7 +203,7 @@ export function withRestoreHonesty(
   restored: boolean,
   skipReason: string | null,
 ): DeliveryOutcome {
-  if (outcome.status !== "inserted") return outcome;
+  if (outcome.status !== 'inserted') return outcome;
   if (restored) {
     return { ...outcome, clipboardRestored: true };
   }

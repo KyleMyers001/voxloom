@@ -1,12 +1,12 @@
-import type { OnboardingState, SettingUpdate } from "../domain/types";
+import type { OnboardingState, SettingUpdate } from '../domain/types';
 
 export type ShortcutGesture =
-  | "hold-finish"
-  | "hold-start"
-  | "latch-finish"
-  | "latch-start";
+  | 'hold-finish'
+  | 'hold-start'
+  | 'latch-finish'
+  | 'latch-start';
 
-export type ShortcutContext = "practice" | "product" | null;
+export type ShortcutContext = 'practice' | 'product' | null;
 
 export interface DictationLifecycle {
   cancel(runId: number): void;
@@ -15,7 +15,7 @@ export interface DictationLifecycle {
   finish(runId: number): void;
   holdProcessing(runId: number): void;
   retry(recordId: string): void;
-  speech(waveform: "silent" | "speaking"): void;
+  speech(waveform: 'silent' | 'speaking'): void;
   start(): void;
 }
 

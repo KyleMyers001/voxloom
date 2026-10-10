@@ -1,33 +1,33 @@
-import { useApp } from "../app/AppContext";
+import type { CSSProperties } from 'react';
+import type { OverlayWaveform } from '../services/shortcut/overlayVisibility';
 
-const heights = [3, 7, 10, 5, 9, 4, 6, 11, 6, 9, 4, 8,
-  5, 10, 4, 8, 11, 5, 7, 3, 9, 6, 8, 4];
+export const WAVEFORM_BARS = 24;
 
-export function Waveform() {
-  const { state } = useApp();
-  const visible = state.dictation.kind === "listening" ||
-    state.dictation.kind === "processing";
-  if (!visible) return null;
-  const waveform = state.dictation.kind === "listening"
-    ? state.dictation.waveform
-    : "speaking";
+/** Per-frame RMS is metadata only; map speech into a legible display range. */
+export function toDisplayLevel(level: number): number {
+  if (!Number.isFinite(level) || level <= 0) return 0;
+  return Math.min(1, Math.max(0, (Math.sqrt(level) - 0.04) / 0.4));
+}
+
+interface Props {
+  levels: readonly number[];
+  waveform: OverlayWaveform;
+}
+
+export function Waveform({ levels, waveform }: Props) {
   return (
-    <div className="recording" data-waveform={waveform}>
-      <div
-        aria-label={`${waveform} mock waveform`}
-        className="wave"
-        role="img"
-      >
-        {heights.map((height, index) => (
-          <i
-            key={`${height}-${index}`}
-            style={{
-              "--delay": `${-20 - index * 29}ms`,
-              "--h": `${height}px`,
-            } as React.CSSProperties}
-          />
-        ))}
-      </div>
+    <div
+      aria-label={waveform === 'processing' ? 'Transcribing' : 'Microphone level'}
+      className="wave"
+      role="img"
+    >
+      {Array.from({ length: WAVEFORM_BARS }, (_, index) => {
+        const level = levels[index] ?? 0;
+        return <i
+          key={index}
+          style={{ '--h': `${1 + Math.round(level * 12)}px` } as CSSProperties}
+        />;
+      })}
     </div>
   );
 }

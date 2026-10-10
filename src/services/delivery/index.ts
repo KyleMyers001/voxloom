@@ -2,23 +2,23 @@ export {
   deliverTranscript,
   restoreAfterPaste,
   withRestoreHonesty,
-} from "./deliver";
+} from './deliver';
 export {
   deliveryMessage,
   MANUAL_RECOVERY_HINT,
   reasonForKind,
   restoreSkippedSuffix,
   statusLabel,
-} from "./messages";
+} from './messages';
 export {
   mayInsert,
   planDelivery,
   shouldRestoreClipboard,
   unavailableSnapshot,
-} from "./policy";
-export { createStubDeliveryAdapter } from "./stubAdapter";
-export type { StubAdapterOptions } from "./stubAdapter";
-export { createTauriDeliveryAdapter } from "./tauriAdapter";
+} from './policy';
+export { createStubDeliveryAdapter } from './stubAdapter';
+export type { StubAdapterOptions } from './stubAdapter';
+export { createTauriDeliveryAdapter } from './tauriAdapter';
 export type {
   ClipboardSnapshot,
   DeliverOptions,
@@ -27,4 +27,4 @@ export type {
   DeliveryStatus,
   TargetKind,
   TargetSnapshot,
-} from "./types";
+} from './types';

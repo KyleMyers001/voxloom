@@ -1,27 +1,29 @@
-import { useEffect, useState } from "react";
-import { useApp } from "../../app/AppContext";
-import { canStartDictation } from "../../app/state";
-import { canRetry } from "../../domain/records";
-import type { HistoryStatus } from "../../domain/types";
+import { useEffect, useState } from 'react';
+import { useApp } from '../../app/AppContext';
+import { canStartDictation } from '../../app/state';
+import { canRetry } from '../../domain/records';
+import { isTauriEnv } from '../../services/capture/captureService';
+import type { HistoryStatus } from '../../domain/types';
 
 interface HistoryProps {
   onToast: (message: string) => void;
 }
 
 function formatTime(timestamp: number): string {
-  return new Intl.DateTimeFormat("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
+  return new Intl.DateTimeFormat('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
   }).format(timestamp);
 }
 
 export function History({ onToast }: HistoryProps) {
   const { clipboard, dictation, history, now, state } = useApp();
+  const isNative = isTauriEnv();
   const [currentTime, setCurrentTime] = useState(now);
-  const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<HistoryStatus | "all">("all");
+  const [query, setQuery] = useState('');
+  const [status, setStatus] = useState<HistoryStatus | 'all'>('all');
   const records = [...state.records]
-    .filter((record) => status === "all" || record.status === status)
+    .filter((record) => status === 'all' || record.status === status)
     .filter((record) => record.text.toLowerCase().includes(query.toLowerCase()))
     .sort((a, b) => b.createdAt - a.createdAt);
 
@@ -33,20 +35,20 @@ export function History({ onToast }: HistoryProps) {
   async function copy(text: string) {
     try {
       await clipboard.copy(text);
-      onToast("Copied to clipboard");
+      onToast('Copied to clipboard');
     } catch {
-      onToast("Copy failed");
+      onToast('Copy failed');
     }
   }
 
   function retry(record: (typeof records)[number]) {
     if (!canStartDictation(state.dictation)) {
-      onToast("Finish the current dictation before retrying");
+      onToast('Finish the current dictation before retrying');
       return;
     }
     if (!canRetry(record, now())) {
       setCurrentTime(now());
-      onToast("Recovery buffer expired");
+      onToast('Recovery buffer expired');
       return;
     }
     dictation.retry(record.id);
@@ -57,7 +59,7 @@ export function History({ onToast }: HistoryProps) {
       <div className="hero">
         <div>
           <h1 id="history-title">History</h1>
-          <p>Transcripts persist on this device (Settings → retention). Audio retention is separate.</p>
+          <p>Transcript storage follows Settings → retention. Audio retry is not available in the desktop app.</p>
         </div>
       </div>
       <div className="card">
@@ -72,7 +74,7 @@ export function History({ onToast }: HistoryProps) {
           <select
             aria-label="History status"
             onChange={(event) => setStatus(
-              event.target.value as HistoryStatus | "all"
+              event.target.value as HistoryStatus | 'all'
             )}
             value={status}
           >
@@ -91,23 +93,25 @@ export function History({ onToast }: HistoryProps) {
                 <p className="empty-note">
                   {record.durationSeconds}s · {record.status[0].toUpperCase()}
                   {record.status.slice(1)} · {
-                    record.model ?? "Local STT"
+                    record.model ?? 'Local STT'
                   } · {
-                    record.style === "very-casual" ? "Very Casual" :
+                    record.style === 'very-casual' ? 'Very Casual' :
                       `${record.style[0].toUpperCase()}${record.style.slice(1)}`
                   }
                 </p>
-                {record.status === "failed" && (
+                {record.status === 'failed' && (
                   <p className="recovery-state">
-                    {canRetry(record, currentTime) && record.recoveryExpiresAt
-                      ? `Temporary recovery buffer · expires ${
-                        formatTime(record.recoveryExpiresAt)}`
-                      : "Temporary recovery buffer expired"}
+                    {isNative
+                      ? 'No audio retry available; copy the text to recover it.'
+                      : canRetry(record, currentTime) && record.recoveryExpiresAt
+                        ? `Temporary recovery buffer · expires ${
+                          formatTime(record.recoveryExpiresAt)}`
+                        : 'Temporary recovery buffer expired'}
                   </p>
                 )}
               </div>
               <div className="action-group">
-                {record.status !== "failed" && (
+                {record.text.trim() && (
                   <button
                     aria-label="Copy transcript"
                     className="action-btn icon-btn"
@@ -115,7 +119,7 @@ export function History({ onToast }: HistoryProps) {
                     title="Copy transcript"
                   >⧉</button>
                 )}
-                {canRetry(record, currentTime) && (
+                {!isNative && canRetry(record, currentTime) && (
                   <button
                     aria-label="Retry transcription"
                     className="action-btn icon-btn"

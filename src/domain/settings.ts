@@ -7,6 +7,6 @@ export function parseChoice<const Choices extends readonly string[]>(
   return selected;
 }
 
-export const audioRetentions = ["off", "24-hours", "7-days"] as const;
-export const transcriptRetentions = ["30-days", "forever", "off"] as const;
-export const writingStyles = ["formal", "casual", "very-casual"] as const;
+export const audioRetentions = ['off', '24-hours', '7-days'] as const;
+export const transcriptRetentions = ['30-days', 'forever', 'off'] as const;
+export const writingStyles = ['formal', 'casual', 'very-casual'] as const;

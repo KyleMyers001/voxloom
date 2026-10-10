@@ -53,10 +53,10 @@ export async function registerOrRevert({
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
     const message =
-      `Could not bind “${next}” (${detail || "conflict or permission"}). ` +
+      `Could not bind “${next}” (${detail || 'conflict or permission'}). ` +
       (lastKnownGood
         ? `Kept prior shortcut “${lastKnownGood}”.`
-        : "No shortcut is active until a free combo is chosen.");
+        : 'No shortcut is active until a free combo is chosen.');
 
     if (lastKnownGood && lastKnownGood !== next) {
       try {
@@ -75,7 +75,7 @@ export async function registerOrRevert({
           lastKnownGood,
           message:
             message +
-            " Re-bind of the prior shortcut also failed — gestures unbound.",
+            ' Re-bind of the prior shortcut also failed — gestures unbound.',
           ok: false,
         };
       }

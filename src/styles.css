@@ -28,6 +28,11 @@ body {
   min-height: 100vh;
 }
 
+.overlay-document body {
+  background: transparent;
+  min-height: 0;
+}
+
 button,
 input,
 select,
@@ -491,35 +496,19 @@ textarea {
   min-height: 44px;
 }
 
-.recording {
-  align-items: center;
-  background: var(--panel);
-  border: 1px solid var(--accent);
-  border-radius: 8px;
-  bottom: 20px;
-  box-shadow: 0 10px 28px rgb(0 0 0 / 30%);
-  display: flex;
-  left: 50%;
-  padding: 5px 7px;
-  position: fixed;
-  transform: translateX(-50%);
-  z-index: 10;
-}
-
 .recording--overlay {
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
-  bottom: auto;
+  align-items: center;
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--border));
+  border-radius: 999px;
+  display: flex;
+  height: 22px;
+  justify-content: center;
   left: 50%;
   position: absolute;
   top: 50%;
   transform: translate(-50%, -50%);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .recording--overlay .wave i {
-    animation: none;
-    opacity: 0.85;
-  }
+  width: 78px;
 }
 
 
@@ -717,27 +706,25 @@ textarea {
   gap: 1px;
   height: 14px;
   justify-content: center;
-  width: 72px;
+  width: 60px;
 }
 
 .wave i {
-  animation: waveform 760ms ease-in-out infinite alternate;
-  animation-delay: var(--delay);
   background: var(--accent);
   border-radius: 2px;
+  flex: 0 0 1.5px;
   height: var(--h);
-  width: 2px;
+  opacity: .9;
+  transition: height 85ms ease-out;
 }
 
-[data-waveform="silent"] .wave i {
-  animation: none;
-  height: 2px;
-  opacity: .62;
+[data-waveform="processing"] .wave i {
+  animation: waveform-processing 850ms ease-in-out infinite alternate;
 }
 
-@keyframes waveform {
-  from { transform: scaleY(.62); }
-  to { transform: scaleY(1); }
+@keyframes waveform-processing {
+  from { opacity: .35; }
+  to { opacity: .9; }
 }
 
 @media (max-width: 780px) {
@@ -770,7 +757,7 @@ textarea {
     transition-duration: .01ms !important;
   }
 
-  .wave i { animation: none; }
+  .wave i { animation: none; transition: none; }
 }
 
 .stt-model-list {

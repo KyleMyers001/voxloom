@@ -5,12 +5,12 @@
 
 /** Why a target is or is not insertable. */
 export type TargetKind =
-  | "insertable"
-  | "secure"
-  | "unsupported"
-  | "changed"
-  | "closed"
-  | "unavailable";
+  | 'insertable'
+  | 'secure'
+  | 'unsupported'
+  | 'changed'
+  | 'closed'
+  | 'unavailable';
 
 /**
  * Invocation-time snapshot of the intended insertion target
@@ -35,7 +35,7 @@ export interface TargetSnapshot {
 }
 
 /** Evidence-backed delivery result — never claim Inserted/Copied/Failed without it. */
-export type DeliveryStatus = "inserted" | "copied" | "failed";
+export type DeliveryStatus = 'inserted' | 'copied' | 'failed';
 
 export interface DeliveryOutcome {
   /** Clipboard restore ran successfully after a temporary paste path. */
@@ -70,8 +70,8 @@ export interface DeliveryPlatformAdapter {
   /** Write plain text to the clipboard. */
   clipboardWrite(text: string): Promise<void>;
   /**
-   * Insert plain text into the intended target (AX setValue / selected-text
-   * preferred; paste-only without trailing Enter if required).
+   * Insert plain text into the intended target (macOS: AX selected-text only;
+   * no full-field value replacement).
    * Must refuse rather than insert into a different app.
    */
   insertText(text: string, intended: TargetSnapshot): Promise<void>;
@@ -79,7 +79,8 @@ export interface DeliveryPlatformAdapter {
   snapshotTarget(): Promise<TargetSnapshot>;
   /**
    * Re-check intended target at completion: still present, same identity,
-   * still insertable — or classify closed / secure / changed / unsupported.
+   * still insertable — or classify unavailable / secure / changed / unsupported.
+   * Closure must not be inferred from unavailable AX focus alone.
    */
   validateTarget(intended: TargetSnapshot): Promise<TargetSnapshot>;
 }

@@ -1,6 +1,6 @@
 //! macOS Accessibility (AX) target snapshot + text insert.
-//! Native fields: AXSelectedText/AXValue set (verified). Web content: ⌘V paste
-//! with clipboard restore. Never trailing Enter / Tab chords.
+//! Native fields: caret-aware AXSelectedText, verified; failures fall back to Copy in TS.
+//! Text fields inside web content (Chromium/Electron): ⌘V paste with clipboard restore.
 //! Secure fields and identity mismatches refuse insert (Copy is TS-side).
 
 use std::ffi::c_void;
@@ -114,6 +114,7 @@ impl AxAttr {
         let mut value: CFTypeRef = ptr::null();
         let err = unsafe { AXUIElementCopyAttributeValue(self.element, self.name, &mut value) };
         if err != AX_OK {
+            release(value);
             return Err(err);
         }
         Ok(value)
@@ -122,11 +123,12 @@ impl AxAttr {
 
 fn copy_string_attr(element: AXUIElementRef, attr: &str) -> Option<String> {
     let name = cfstr(attr);
-    let result = AxAttr { element, name }
-        .copy()
-        .ok()
-        .and_then(cfstring_to_rust);
+    let copied = AxAttr { element, name }.copy();
     release(name);
+    let value = copied.ok()?;
+    // CopyAttributeValue transfers ownership even if conversion returns None.
+    let result = cfstring_to_rust(value);
+    release(value);
     result
 }
 
@@ -144,11 +146,12 @@ fn classify_role(role: &str) -> (&'static str, bool, Option<&'static str>) {
     match role {
         "AXSecureTextField" => ("secure", false, Some("secure field — insert skipped")),
         "AXTextField" | "AXTextArea" | "AXComboBox" | "AXSearchField" => ("insertable", true, None),
-        // Browser / chat / editor surfaces — attempt insert; limitations documented.
+        // Containers do not establish an editable caret. AXSelectedText may
+        // return success here without changing the actual editor.
         "AXWebArea" | "AXScrollArea" | "AXGroup" => (
-            "insertable",
-            true,
-            Some("browser/chat surface — insert best-effort via AX"),
+            "unsupported",
+            false,
+            Some("generic web/container role — insert unverified"),
         ),
         // Terminals often expose AXTextArea already; unknown custom roles refuse.
         "AXStaticText" | "AXButton" | "AXImage" | "AXToolbar" | "AXMenu" => {
@@ -248,10 +251,25 @@ fn build_snapshot(element: AXUIElementRef, app_name: Option<String>) -> TargetSn
     }
 }
 
-fn focused_ui_element() -> Result<(AXUIElementRef, Option<String>), String> {
+fn focus_unavailable_reason(
+    stage: &str,
+    app_err: AXError,
+    focus_err: AXError,
+    focus_null: bool,
+) -> String {
+    let null_suffix = if focus_null { " (null)" } else { "" };
+    format!(
+        "Accessibility focus unavailable at {stage} (AX trusted=yes; \
+         AXFocusedApplication={app_err}; AXFocusedUIElement={focus_err}{null_suffix})"
+    )
+}
+
+fn focused_ui_element(stage: &str) -> Result<(AXUIElementRef, Option<String>), String> {
     let system = unsafe { AXUIElementCreateSystemWide() };
     if system.is_null() {
-        return Err("AXUIElementCreateSystemWide returned null".into());
+        return Err(format!(
+            "Accessibility focus unavailable at {stage} (AX trusted=yes; system element null)"
+        ));
     }
 
     let focused_app_attr = cfstr("AXFocusedApplication");
@@ -261,9 +279,8 @@ fn focused_ui_element() -> Result<(AXUIElementRef, Option<String>), String> {
     release(focused_app_attr);
 
     let app_name = if app_err == AX_OK && !focused_app.is_null() {
-        // Chromium/Electron only build their web-content AX tree once an
-        // assistive client asks for it. Without this, the focused element in a
-        // page is an opaque AXWebArea/AXGroup and AX writes silently no-op.
+        // Chromium/Electron only expose web-content fields to AX once a client
+        // requests it; without this the focus is an opaque AXWebArea/AXGroup.
         enable_manual_accessibility(focused_app as AXUIElementRef);
         let name = copy_string_attr(focused_app as AXUIElementRef, "AXTitle");
         name
@@ -281,16 +298,29 @@ fn focused_ui_element() -> Result<(AXUIElementRef, Option<String>), String> {
     }
 
     if focus_err != AX_OK || focused.is_null() {
-        return Err(format!(
-            "no focused UI element (AX error {focus_err}) — unsupported or empty AX tree"
-        ));
+        let reason = focus_unavailable_reason(stage, app_err, focus_err, focused.is_null());
+        if !focused.is_null() {
+            release(focused);
+        }
+        return Err(reason);
     }
 
     Ok((focused as AXUIElementRef, app_name))
 }
 
 pub fn snapshot_target() -> Result<TargetSnapshotDto, String> {
-    match focused_ui_element() {
+    snapshot_target_at("capture start")
+}
+
+fn snapshot_target_at(stage: &str) -> Result<TargetSnapshotDto, String> {
+    if unsafe { AXIsProcessTrusted() } == 0 {
+        return Ok(TargetSnapshotDto::unavailable(
+            &format!("Accessibility permission denied at {stage} — insert skipped"),
+            now_ms(),
+        ));
+    }
+
+    match focused_ui_element(stage) {
         Ok((element, app_name)) => {
             let snap = build_snapshot(element, app_name);
             release(element as CFTypeRef);
@@ -301,53 +331,58 @@ pub fn snapshot_target() -> Result<TargetSnapshotDto, String> {
 }
 
 pub fn validate_target(intended: TargetSnapshotDto) -> Result<TargetSnapshotDto, String> {
-    let current = snapshot_target()?;
+    Ok(validate_snapshots(
+        &intended,
+        snapshot_target_at("delivery validation")?,
+    ))
+}
 
-    // Closed / gone: current unavailable with no pid match.
-    if current.kind == "unavailable" && current.app_pid.is_none() {
-        return Ok(TargetSnapshotDto {
-            app_name: intended.app_name.clone(),
-            app_pid: intended.app_pid,
-            captured_at: now_ms(),
-            element_id: intended.element_id.clone(),
-            element_role: intended.element_role.clone(),
-            insertable: false,
-            kind: "closed".into(),
-            reason: Some("original app closed or focus lost".into()),
-        });
+fn validate_snapshots(
+    intended: &TargetSnapshotDto,
+    current: TargetSnapshotDto,
+) -> TargetSnapshotDto {
+    // Missing AX focus is not evidence that the original application closed.
+    if current.kind == "unavailable" || current.kind == "secure" || !current.insertable {
+        return current;
+    }
+    if intended.kind != "insertable" || !intended.insertable {
+        return intended.clone();
     }
 
-    // Identity: same pid + element id when both known.
-    if let (Some(want_pid), Some(have_pid)) = (intended.app_pid, current.app_pid) {
-        if want_pid != have_pid {
-            return Ok(TargetSnapshotDto {
+    match (intended.app_pid, current.app_pid) {
+        (Some(want), Some(have)) if want != have => {
+            return TargetSnapshotDto {
                 insertable: false,
                 kind: "changed".into(),
                 reason: Some("target changed (different app)".into()),
                 ..current
-            });
+            };
         }
-    }
-    if let (Some(want_el), Some(have_el)) =
-        (intended.element_id.as_ref(), current.element_id.as_ref())
-    {
-        if want_el != have_el {
-            // Same app, different element — still refuse retarget mid-flight.
-            return Ok(TargetSnapshotDto {
+        (Some(_), Some(_)) => {}
+        _ => {
+            return TargetSnapshotDto {
                 insertable: false,
-                kind: "changed".into(),
-                reason: Some("target changed (different field)".into()),
+                kind: "unavailable".into(),
+                reason: Some("target identity unavailable — insert skipped".into()),
                 ..current
-            });
+            };
         }
     }
-
-    // Secure / unsupported on current wins.
-    if current.kind == "secure" || !current.insertable {
-        return Ok(current);
+    match (intended.element_id.as_ref(), current.element_id.as_ref()) {
+        (Some(want), Some(have)) if want != have => TargetSnapshotDto {
+            insertable: false,
+            kind: "changed".into(),
+            reason: Some("target changed (different field)".into()),
+            ..current
+        },
+        (Some(_), Some(_)) => current,
+        _ => TargetSnapshotDto {
+            insertable: false,
+            kind: "unavailable".into(),
+            reason: Some("target identity unavailable — insert skipped".into()),
+            ..current
+        },
     }
-
-    Ok(current)
 }
 
 fn set_ax_string(element: AXUIElementRef, attr: &str, text: &str) -> Result<(), String> {
@@ -362,6 +397,19 @@ fn set_ax_string(element: AXUIElementRef, attr: &str, text: &str) -> Result<(), 
     Ok(())
 }
 
+fn value_confirms_insert(before: &str, after: &str, text: &str) -> bool {
+    !text.is_empty() && before != after && after.contains(text)
+}
+
+fn insert_selected_text_with(
+    text: &str,
+    set: impl FnOnce(&str, &str) -> Result<(), String>,
+) -> Result<(), String> {
+    // AXValue replaces the entire field; a failed selected-text set must not
+    // try another AX mutation. The caller will use the Copy/Failed policy.
+    set("AXSelectedText", text)
+}
+
 fn enable_manual_accessibility(app: AXUIElementRef) {
     let name = cfstr("AXManualAccessibility");
     // Errors are expected for non-Chromium apps; ignore.
@@ -369,12 +417,6 @@ fn enable_manual_accessibility(app: AXUIElementRef) {
         let _ = AXUIElementSetAttributeValue(app, name, kCFBooleanTrue);
     }
     release(name);
-}
-
-/// Roles where AX text writes are known to be unreliable (Chromium web content
-/// reports AX success for AXSelectedText/AXValue without changing the DOM).
-fn is_web_surface(role: &str) -> bool {
-    matches!(role, "AXWebArea" | "AXScrollArea" | "AXGroup")
 }
 
 fn run_pb(cmd: &str, input: Option<&str>) -> Option<String> {
@@ -440,57 +482,6 @@ fn paste_text(text: &str) -> Result<(), String> {
     result
 }
 
-/// AX "success" is not proof of insertion in web content: confirm the value
-/// actually changed when the element exposes a readable AXValue.
-fn ax_insert_verified(element: AXUIElementRef, text: &str) -> bool {
-    let before = copy_string_attr(element, "AXValue");
-    let wrote = set_ax_string(element, "AXSelectedText", text).is_ok()
-        || set_ax_string(element, "AXValue", text).is_ok();
-    if !wrote {
-        return false;
-    }
-    match (before, copy_string_attr(element, "AXValue")) {
-        (Some(b), Some(a)) => a != b && (text.is_empty() || a.contains(text)),
-        // Value unreadable: trust AX only for native (non-web) controls.
-        _ => true,
-    }
-}
-
-pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<(), String> {
-    if !intended.insertable || intended.kind != "insertable" {
-        return Err(format!(
-            "refusing insert into non-insertable target ({})",
-            intended.kind
-        ));
-    }
-
-    let validated = validate_target(intended.clone())?;
-    if !validated.insertable || validated.kind != "insertable" {
-        return Err(format!(
-            "refusing insert: {}",
-            validated.reason.unwrap_or_else(|| validated.kind.clone())
-        ));
-    }
-
-    let (element, _) = focused_ui_element().map_err(|e| format!("insert aborted — {e}"))?;
-
-    // Native controls: AX selected-text/value set, verified by read-back.
-    // Web content (Chromium/Electron) or unverified AX writes: ⌘V paste with
-    // clipboard restore. Never Enter / Tab as product submit from this path.
-    let role = copy_string_attr(element, "AXRole").unwrap_or_default();
-    let in_web = is_web_surface(&role)
-        || copy_string_attr(element, "AXDOMIdentifier").is_some()
-        || role_has_web_ancestor(element);
-    let result = if !in_web && ax_insert_verified(element, text) {
-        Ok(())
-    } else {
-        paste_text(text)
-    };
-
-    release(element as CFTypeRef);
-    result
-}
-
 fn role_has_web_ancestor(element: AXUIElementRef) -> bool {
     let parent_attr = cfstr("AXParent");
     let mut current: CFTypeRef = ptr::null();
@@ -513,4 +504,154 @@ fn role_has_web_ancestor(element: AXUIElementRef) -> bool {
     release(current);
     release(parent_attr);
     found
+}
+
+/// Editable fields hosted in web content: AX writes report success without
+/// reaching the DOM, so these use ⌘V paste instead of AXSelectedText.
+fn is_web_content_field(element: AXUIElementRef) -> bool {
+    copy_string_attr(element, "AXDOMIdentifier").is_some() || role_has_web_ancestor(element)
+}
+
+pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<(), String> {
+    if !intended.insertable || intended.kind != "insertable" {
+        return Err(format!(
+            "refusing insert into non-insertable target ({})",
+            intended.kind
+        ));
+    }
+
+    // Validate the same element handle we will mutate, not a prior focus read.
+    if unsafe { AXIsProcessTrusted() } == 0 {
+        return Err("Accessibility permission denied at insert — insert skipped".into());
+    }
+    let (element, app_name) =
+        focused_ui_element("insert").map_err(|e| format!("insert aborted — {e}"))?;
+    let validated = validate_snapshots(intended, build_snapshot(element, app_name));
+    let result = if !validated.insertable || validated.kind != "insertable" {
+        Err(format!(
+            "refusing insert: {}",
+            validated.reason.unwrap_or(validated.kind)
+        ))
+    } else if is_web_content_field(element) {
+        paste_text(text)
+    } else if let Some(before) = copy_string_attr(element, "AXValue") {
+        match insert_selected_text_with(text, |attr, text| set_ax_string(element, attr, text)) {
+            Ok(()) => match copy_string_attr(element, "AXValue") {
+                Some(after) if value_confirms_insert(&before, &after, text) => Ok(()),
+                _ => Err("AXSelectedText returned success but insertion could not be verified via AXValue".into()),
+            },
+            Err(err) => Err(err),
+        }
+    } else {
+        Err("AXValue unreadable before insert — insert skipped".into())
+    };
+
+    release(element as CFTypeRef);
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn target(kind: &str, pid: Option<i32>, id: Option<&str>) -> TargetSnapshotDto {
+        TargetSnapshotDto {
+            app_name: Some("Notes".into()),
+            app_pid: pid,
+            captured_at: 1,
+            element_id: id.map(str::to_string),
+            element_role: Some("AXTextArea".into()),
+            insertable: kind == "insertable",
+            kind: kind.into(),
+            reason: if kind == "unavailable" {
+                Some("Accessibility permission denied — insert skipped".into())
+            } else {
+                None
+            },
+        }
+    }
+
+    #[test]
+    fn unavailable_focus_is_not_evidence_of_app_closure() {
+        let checked = validate_snapshots(
+            &target("insertable", Some(42), Some("42:AXTextArea:")),
+            target("unavailable", None, None),
+        );
+        assert_eq!(checked.kind, "unavailable");
+        assert_eq!(
+            checked.reason.as_deref(),
+            Some("Accessibility permission denied — insert skipped")
+        );
+    }
+
+    #[test]
+    fn changed_or_unidentifiable_target_is_not_insertable() {
+        let intended = target("insertable", Some(42), Some("42:AXTextArea:"));
+        for (current, expected) in [
+            (
+                target("insertable", Some(43), Some("43:AXTextArea:")),
+                "changed",
+            ),
+            (
+                target("insertable", Some(42), Some("42:AXTextArea:other")),
+                "changed",
+            ),
+            (
+                target("insertable", None, Some("-1:AXTextArea:")),
+                "unavailable",
+            ),
+        ] {
+            let checked = validate_snapshots(&intended, current);
+            assert!(!checked.insertable);
+            assert_eq!(checked.kind, expected);
+        }
+        assert!(validate_snapshots(&intended, intended.clone()).insertable);
+    }
+
+    #[test]
+    fn generic_web_containers_never_claim_insertability() {
+        for role in ["AXWebArea", "AXScrollArea", "AXGroup"] {
+            let (kind, insertable, _) = classify_role(role);
+            assert_eq!(kind, "unsupported");
+            assert!(!insertable);
+        }
+        assert!(classify_role("AXTextArea").1);
+    }
+
+    #[test]
+    fn insertion_requires_readback_change_containing_transcript() {
+        assert!(value_confirms_insert("hello", "hello world", " world"));
+        assert!(value_confirms_insert("old line", "new line", "new line"));
+        assert!(!value_confirms_insert("hello", "hello", " world"));
+        assert!(!value_confirms_insert("hello", "hello!", " world"));
+        assert!(!value_confirms_insert("hello", "hello!", ""));
+    }
+
+    #[test]
+    fn ax_focus_failure_reports_stage_trust_and_codes_without_target_data() {
+        let reason = focus_unavailable_reason("delivery validation", -25205, -25204, true);
+        assert!(reason.contains("delivery validation"));
+        assert!(reason.contains("AX trusted=yes"));
+        assert!(reason.contains("AXFocusedApplication=-25205"));
+        assert!(reason.contains("AXFocusedUIElement=-25204"));
+        assert!(!reason.contains("Notes"));
+    }
+
+    #[test]
+    fn missing_focused_element_with_success_code_is_diagnostic() {
+        let reason = focus_unavailable_reason("capture start", 0, 0, true);
+        assert!(reason.contains("capture start"));
+        assert!(reason.contains("AXFocusedUIElement=0 (null)"));
+    }
+
+    #[test]
+    fn selected_text_failure_never_attempts_value_write() {
+        let mut attrs = Vec::new();
+        let result = insert_selected_text_with("dictation", |attr, text| {
+            attrs.push((attr.to_string(), text.to_string()));
+            Err("AX set failed".into())
+        });
+        assert!(result.is_err());
+        assert_eq!(attrs, [("AXSelectedText".into(), "dictation".into())]);
+    }
 }

@@ -1,5 +1,5 @@
-import type { AppAction } from "../../app/state";
-import type { DictationLifecycle } from "../contracts";
+import type { AppAction } from '../../app/state';
+import type { DictationLifecycle } from '../contracts';
 
 interface ServiceDependencies {
   dispatch: (action: AppAction) => void;
@@ -11,36 +11,36 @@ export function createMockDictationService({
   now,
 }: ServiceDependencies): DictationLifecycle {
   return {
-    cancel: (runId) => dispatch({ runId, type: "cancel-dictation" }),
+    cancel: (runId) => dispatch({ runId, type: 'cancel-dictation' }),
     complete: (runId) => dispatch({
       now: now(),
       runId,
-      type: "complete-dictation",
+      type: 'complete-dictation',
     }),
     fail: (runId) => dispatch({
       now: now(),
       runId,
-      type: "fail-dictation",
+      type: 'fail-dictation',
     }),
     finish: (runId) => dispatch({
-      completion: "automatic",
+      completion: 'automatic',
       runId,
-      type: "process-dictation",
+      type: 'process-dictation',
     }),
     holdProcessing: (runId) => dispatch({
-      completion: "held",
+      completion: 'held',
       runId,
-      type: "process-dictation",
+      type: 'process-dictation',
     }),
     retry: (recordId) => dispatch({
       id: recordId,
       now: now(),
-      type: "retry",
+      type: 'retry',
     }),
     speech: (waveform) => dispatch({
-      type: "set-waveform",
+      type: 'set-waveform',
       value: waveform,
     }),
-    start: () => dispatch({ type: "start-dictation" }),
+    start: () => dispatch({ type: 'start-dictation' }),
   };
 }

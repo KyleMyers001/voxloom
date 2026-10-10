@@ -3,15 +3,15 @@
  * Falls back to stub behavior when invoke is unavailable.
  */
 
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import { invoke, isTauri } from '@tauri-apps/api/core';
 
-import type { ClipboardAdapter } from "../clipboard";
-import { createStubDeliveryAdapter } from "./stubAdapter";
+import type { ClipboardAdapter } from '../clipboard';
+import { createStubDeliveryAdapter } from './stubAdapter';
 import type {
   ClipboardSnapshot,
   DeliveryPlatformAdapter,
   TargetSnapshot,
-} from "./types";
+} from './types';
 
 interface NativeTargetDto {
   appName: string | null;
@@ -20,7 +20,7 @@ interface NativeTargetDto {
   elementId: string | null;
   elementRole: string | null;
   insertable: boolean;
-  kind: TargetSnapshot["kind"];
+  kind: TargetSnapshot['kind'];
   reason: string | null;
 }
 
@@ -39,9 +39,9 @@ function fromDto(dto: NativeTargetDto): TargetSnapshot {
 
 async function tauriClipboardRead(): Promise<ClipboardSnapshot> {
   try {
-    const { readText } = await import("@tauri-apps/plugin-clipboard-manager");
+    const { readText } = await import('@tauri-apps/plugin-clipboard-manager');
     const text = await readText();
-    return { ok: true, text: text ?? "" };
+    return { ok: true, text: text ?? '' };
   } catch {
     return { ok: false, text: null };
   }
@@ -67,14 +67,14 @@ export function createTauriDeliveryAdapter(
     clipboardRestore: (prior) => stub.clipboardRestore(prior),
     clipboardWrite: (text) => stub.clipboardWrite(text),
     async insertText(text, intended) {
-      await invoke("delivery_insert_text", {
+      await invoke('delivery_insert_text', {
         text,
         intended,
       });
     },
     async snapshotTarget() {
       try {
-        const dto = await invoke<NativeTargetDto>("delivery_snapshot_target");
+        const dto = await invoke<NativeTargetDto>('delivery_snapshot_target');
         return fromDto(dto);
       } catch (error: unknown) {
         const detail = error instanceof Error ? error.message : String(error);
@@ -86,7 +86,7 @@ export function createTauriDeliveryAdapter(
     },
     async validateTarget(intended) {
       try {
-        const dto = await invoke<NativeTargetDto>("delivery_validate_target", {
+        const dto = await invoke<NativeTargetDto>('delivery_validate_target', {
           intended,
         });
         return fromDto(dto);
@@ -95,7 +95,7 @@ export function createTauriDeliveryAdapter(
         return {
           ...intended,
           insertable: false,
-          kind: "unavailable",
+          kind: 'unavailable',
           reason: `native validate failed: ${detail}`,
         };
       }

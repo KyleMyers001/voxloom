@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from 'vitest';
 import { createPendingFinishGate } from
-  "../../src/services/shortcut/pendingFinish";
+  '../../src/services/shortcut/pendingFinish';
 
-describe("createPendingFinishGate", () => {
-  it("finishes immediately when already listening", () => {
+describe('createPendingFinishGate', () => {
+  it('finishes immediately when already listening', () => {
     const finished: number[] = [];
     const gate = createPendingFinishGate({
       finish: (runId) => finished.push(runId),
@@ -14,7 +14,7 @@ describe("createPendingFinishGate", () => {
     expect(gate.isPending()).toBe(false);
   });
 
-  it("defers finish until listening commits (race)", () => {
+  it('defers finish until listening commits (race)', () => {
     let runId: number | null = null;
     const finished: number[] = [];
     const gate = createPendingFinishGate({
@@ -31,7 +31,7 @@ describe("createPendingFinishGate", () => {
     expect(gate.isPending()).toBe(false);
   });
 
-  it("clear drops a pending finish (cancel / error)", () => {
+  it('clear drops a pending finish (cancel / error)', () => {
     const finished: number[] = [];
     const gate = createPendingFinishGate({
       finish: (runId) => finished.push(runId),
@@ -43,7 +43,7 @@ describe("createPendingFinishGate", () => {
     expect(finished).toEqual([]);
   });
 
-  it("resetForStart clears stale pending before a new hold", () => {
+  it('resetForStart clears stale pending before a new hold', () => {
     const finished: number[] = [];
     let runId: number | null = null;
     const gate = createPendingFinishGate({

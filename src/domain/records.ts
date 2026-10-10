@@ -1,4 +1,4 @@
-import type { DictationRecord, HistoryStatus, WritingStyle } from "./types";
+import type { DictationRecord, HistoryStatus, WritingStyle } from './types';
 
 interface RecordInput {
   id: string;
@@ -26,7 +26,7 @@ export interface DogfoodRecordInput {
 }
 
 export function canRetry(record: DictationRecord, now: number): boolean {
-  return record.status === "failed" && record.recoveryExpiresAt !== null &&
+  return record.status === 'failed' && record.recoveryExpiresAt !== null &&
     record.recoveryExpiresAt > now;
 }
 
@@ -41,9 +41,9 @@ export function createFailedRecord({
     id,
     model: null,
     recoveryExpiresAt: now + 10 * 60_000,
-    status: "failed",
+    status: 'failed',
     style,
-    text: "Transcription failed before insertion.",
+    text: 'Transcription failed before insertion.',
   };
 }
 
@@ -58,9 +58,9 @@ export function createSuccessfulRecord({
     id,
     model: null,
     recoveryExpiresAt: null,
-    status: "inserted",
+    status: 'inserted',
     style,
-    text: "Keep the TypeScript boundary small and explicit.",
+    text: 'Keep the TypeScript boundary small and explicit.',
   };
 }
 
@@ -84,9 +84,9 @@ export function createDogfoodRecord(
   if (input.status) {
     status = input.status;
   } else if (input.copied === true) {
-    status = "copied";
+    status = 'copied';
   } else {
-    status = "failed";
+    status = 'failed';
   }
 
   const durationSeconds = Math.max(0, Math.round(input.durationMs / 1_000));
@@ -96,7 +96,8 @@ export function createDogfoodRecord(
     durationSeconds,
     id: input.id,
     model: input.model ?? null,
-    recoveryExpiresAt: status === "failed" ? input.now + 10 * 60_000 : null,
+    // STT/delivery failures retain text, never a replayable audio buffer.
+    recoveryExpiresAt: null,
     status,
     style: input.style,
     text,

@@ -8,41 +8,41 @@ import {
   useReducer,
   useRef,
   useState,
-} from "react";
-import { initialSettings } from "../domain/fixtures";
+} from 'react';
+import { initialSettings } from '../domain/fixtures';
 import { createClipboardAdapter, type ClipboardAdapter } from
-  "../services/clipboard";
+  '../services/clipboard';
 import type {
   DictationLifecycle,
   DictionaryCrud,
   HistoryDeletion,
   SettingsStore,
   SetupLifecycle,
-} from "../services/contracts";
+} from '../services/contracts';
 import {
   createDefaultDictionaryStore,
   type DurableDictionaryStore,
-} from "../services/dictionary";
+} from '../services/dictionary';
 import {
   createDefaultHistoryStore,
   type HistoryStore,
-} from "../services/history";
+} from '../services/history';
 import {
   SETTINGS_FILE_VERSION,
   createDefaultSettingsStore,
   type DurableSettingsStore,
   type SettingsFile,
-} from "../services/settings";
+} from '../services/settings';
 import {
   createDictionaryService,
   createHistoryService,
   createSettingsService,
   createSetupService,
-} from "../services/mock/appServices";
+} from '../services/mock/appServices';
 import { createMockDictationService } from
-  "../services/mock/dictationService";
+  '../services/mock/dictationService';
 import { appReducer, createInitialState, type AppAction, type AppState } from
-  "./state";
+  './state';
 
 interface AppContextValue {
   /**
@@ -174,7 +174,7 @@ export function AppProvider({
           dispatch({
             onboardingComplete: result.file.onboardingComplete,
             settings: result.file.settings,
-            type: "hydrate-settings",
+            type: 'hydrate-settings',
           });
           lastSavedSettingsRef.current = result.file;
           allowSettingsPersistRef.current = true;
@@ -186,7 +186,7 @@ export function AppProvider({
           lastSavedSettingsRef.current = result.file;
           dispatch({
             message: result.error,
-            type: "set-settings-error",
+            type: 'set-settings-error',
           });
         }
         settingsHydratedRef.current = true;
@@ -200,7 +200,7 @@ export function AppProvider({
         const dictResult = await dictionaryPers.store.load();
         if (cancelled) return;
         if (dictResult.ok) {
-          dispatch({ type: "hydrate-words", words: dictResult.file.words });
+          dispatch({ type: 'hydrate-words', words: dictResult.file.words });
           lastSavedWordsRef.current = dictResult.file.words;
           allowDictionaryPersistRef.current = true;
         } else {
@@ -211,7 +211,7 @@ export function AppProvider({
           lastSavedWordsRef.current = dictResult.file.words;
           dispatch({
             message: dictResult.error,
-            type: "set-dictionary-error",
+            type: 'set-dictionary-error',
           });
         }
         dictionaryHydratedRef.current = true;
@@ -231,13 +231,13 @@ export function AppProvider({
       const historyResult = await historyPers.store.load(retention, clock());
       if (cancelled) return;
       if (historyResult.ok) {
-        dispatch({ records: historyResult.records, type: "hydrate-records" });
+        dispatch({ records: historyResult.records, type: 'hydrate-records' });
         allowHistoryPersistRef.current = true;
       } else {
         allowHistoryPersistRef.current = false;
         dispatch({
           message: historyResult.error,
-          type: "set-history-error",
+          type: 'set-history-error',
         });
       }
       historyHydratedRef.current = true;
@@ -284,7 +284,7 @@ export function AppProvider({
         );
         if (gen !== settingsPersistGenRef.current) return;
         lastSavedSettingsRef.current = snapshot;
-        dispatch({ message: null, type: "set-settings-error" });
+        dispatch({ message: null, type: 'set-settings-error' });
       } catch (error: unknown) {
         if (gen !== settingsPersistGenRef.current) return;
         const message = error instanceof Error ? error.message : String(error);
@@ -293,12 +293,12 @@ export function AppProvider({
           dispatch({
             onboardingComplete: rollback.onboardingComplete,
             settings: rollback.settings,
-            type: "hydrate-settings",
+            type: 'hydrate-settings',
           });
         }
         dispatch({
           message: `Failed to save settings: ${message}`,
-          type: "set-settings-error",
+          type: 'set-settings-error',
         });
       }
     })();
@@ -329,17 +329,17 @@ export function AppProvider({
         await dictionaryPers.store.save(snapshot);
         if (gen !== dictionaryPersistGenRef.current) return;
         lastSavedWordsRef.current = snapshot;
-        dispatch({ message: null, type: "set-dictionary-error" });
+        dispatch({ message: null, type: 'set-dictionary-error' });
       } catch (error: unknown) {
         if (gen !== dictionaryPersistGenRef.current) return;
         const message = error instanceof Error ? error.message : String(error);
         const rollback = lastSavedWordsRef.current;
         if (rollback) {
-          dispatch({ type: "hydrate-words", words: rollback });
+          dispatch({ type: 'hydrate-words', words: rollback });
         }
         dispatch({
           message: `Failed to save dictionary: ${message}`,
-          type: "set-dictionary-error",
+          type: 'set-dictionary-error',
         });
       }
     })();
@@ -364,13 +364,13 @@ export function AppProvider({
           clock(),
         );
         if (gen !== historyPersistGenRef.current) return;
-        dispatch({ message: null, type: "set-history-error" });
+        dispatch({ message: null, type: 'set-history-error' });
       } catch (error: unknown) {
         if (gen !== historyPersistGenRef.current) return;
         const message = error instanceof Error ? error.message : String(error);
         dispatch({
           message: `Failed to save history: ${message}`,
-          type: "set-history-error",
+          type: 'set-history-error',
         });
       }
     })();
@@ -401,6 +401,6 @@ export function AppProvider({
 
 export function useApp(): AppContextValue {
   const context = useContext(AppContext);
-  if (!context) throw new Error("useApp must be used inside AppProvider");
+  if (!context) throw new Error('useApp must be used inside AppProvider');
   return context;
 }

@@ -1,20 +1,20 @@
-import { isTauri } from "@tauri-apps/api/core";
-import type { DictationState } from "../../domain/types";
+import { isTauri } from '@tauri-apps/api/core';
+import type { DictationState } from '../../domain/types';
 import {
   OVERLAY_BOTTOM_MARGIN,
   OVERLAY_HEIGHT,
   OVERLAY_WINDOW_LABEL,
   OVERLAY_WIDTH,
-} from "./constants";
+} from './constants';
 import {
   isOverlayVisible,
   overlayWaveformFromDictation,
   type OverlayWaveform,
-} from "./overlayVisibility";
+} from './overlayVisibility';
 
 export interface OverlayBridge {
   dispose(): Promise<void>;
-  sync(dictation: DictationState): Promise<void>;
+  sync(dictation: DictationState, homeRecording?: boolean): Promise<void>;
 }
 
 export interface OverlayWindowApi {
@@ -26,14 +26,17 @@ export interface OverlayWindowApi {
 }
 
 /** Pure sync decision used by tests and the live bridge. */
-export function overlaySyncPlan(dictation: DictationState): {
+export function overlaySyncPlan(
+  dictation: DictationState,
+  homeRecording = false,
+): {
   visible: boolean;
   waveform: OverlayWaveform | null;
 } {
   const waveform = overlayWaveformFromDictation(dictation);
   return {
-    visible: isOverlayVisible(dictation.kind),
-    waveform,
+    visible: isOverlayVisible(dictation.kind) || homeRecording,
+    waveform: waveform ?? (homeRecording ? 'silent' : null),
   };
 }
 
@@ -62,9 +65,9 @@ export function createOverlayBridge(
         // ignore
       }
     },
-    async sync(dictation) {
+    async sync(dictation, homeRecording = false) {
       if (disposed || !windowApi.isAvailable()) return;
-      const plan = overlaySyncPlan(dictation);
+      const plan = overlaySyncPlan(dictation, homeRecording);
       const gen = ++syncGeneration;
       const run = async () => {
         if (disposed || gen !== syncGeneration) return;
@@ -107,8 +110,8 @@ function createTauriOverlayApi(): OverlayWindowApi {
     async ensureCreated() {
       if (created) return;
       if (!isTauri()) return;
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("overlay_ensure", {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('overlay_ensure', {
         height: OVERLAY_HEIGHT,
         label: OVERLAY_WINDOW_LABEL,
         marginBottom: OVERLAY_BOTTOM_MARGIN,
@@ -118,18 +121,18 @@ function createTauriOverlayApi(): OverlayWindowApi {
     },
     async hide() {
       if (!isTauri()) return;
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("overlay_hide", { label: OVERLAY_WINDOW_LABEL });
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('overlay_hide', { label: OVERLAY_WINDOW_LABEL });
     },
     async setWaveform(waveform) {
       if (!isTauri()) return;
-      const { emit } = await import("@tauri-apps/api/event");
-      await emit("overlay:waveform", { waveform });
+      const { emit } = await import('@tauri-apps/api/event');
+      await emit('overlay:waveform', { waveform });
     },
     async showBottomCenter() {
       if (!isTauri()) return;
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("overlay_show", {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('overlay_show', {
         height: OVERLAY_HEIGHT,
         label: OVERLAY_WINDOW_LABEL,
         marginBottom: OVERLAY_BOTTOM_MARGIN,

@@ -1,30 +1,29 @@
-import { useEffect, useRef, useState } from "react";
-import { Dialog } from "../components/Dialog";
-import { Toast } from "../components/Toast";
-import { Waveform } from "../components/Waveform";
+import { useEffect, useRef, useState } from 'react';
+import { Dialog } from '../components/Dialog';
+import { Toast } from '../components/Toast';
 import { ScenarioPanel, type OnboardingScenario } from
-  "../dev/ScenarioPanel";
-import { initialOnboarding } from "../domain/fixtures";
-import type { Screen } from "../domain/types";
-import { Dictionary } from "../features/dictionary/Dictionary";
-import { History } from "../features/history/History";
-import { Home } from "../features/home/Home";
-import { Onboarding } from "../features/onboarding/Onboarding";
-import { Settings } from "../features/settings/Settings";
-import { useDogfoodCapture } from "../services/stt/useDogfoodCapture";
-import { useApp } from "./AppContext";
-import { hasOpenModal } from "./modalState";
+  '../dev/ScenarioPanel';
+import { initialOnboarding } from '../domain/fixtures';
+import type { Screen } from '../domain/types';
+import { Dictionary } from '../features/dictionary/Dictionary';
+import { History } from '../features/history/History';
+import { Home } from '../features/home/Home';
+import { Onboarding } from '../features/onboarding/Onboarding';
+import { Settings } from '../features/settings/Settings';
+import { useDogfoodCapture } from '../services/stt/useDogfoodCapture';
+import { useApp } from './AppContext';
+import { hasOpenModal } from './modalState';
 import {
   toGestureDogfoodBridge,
   useShortcutGestures,
-} from "./useShortcutGestures";
-import { useTheme } from "./useTheme";
+} from './useShortcutGestures';
+import { useTheme } from './useTheme';
 
 const screens: { glyph: string; label: string; value: Screen }[] = [
-  { glyph: "⌂", label: "Home", value: "home" },
-  { glyph: "↶", label: "History", value: "history" },
-  { glyph: "Aa", label: "Dictionary", value: "dictionary" },
-  { glyph: "⌘", label: "Settings", value: "settings" },
+  { glyph: '⌂', label: 'Home', value: 'home' },
+  { glyph: '↶', label: 'History', value: 'history' },
+  { glyph: 'Aa', label: 'Dictionary', value: 'dictionary' },
+  { glyph: '⌘', label: 'Settings', value: 'settings' },
 ];
 
 
@@ -53,14 +52,14 @@ export function App() {
     !state.onboarding.complete,
   );
   const [shortcutOpen, setShortcutOpen] = useState(false);
-  const [toast, setToast] = useState("");
+  const [toast, setToast] = useState('');
   const [resetPromptOpen, setResetPromptOpen] = useState(false);
   const modalOpener = useRef<HTMLElement | null>(null);
   useTheme(state.settings.appearance);
 
   function announce(message: string) {
     setToast(message);
-    window.setTimeout(() => setToast(""), 1_800);
+    window.setTimeout(() => setToast(''), 1_800);
   }
 
   // Shared dogfood path: Home Start + global gesture (BUS-14).
@@ -71,7 +70,7 @@ export function App() {
     modelId: state.settings.transcriptionModel,
     now,
     onHistoryRecord: (record) => {
-      dispatch({ record, type: "append-record" });
+      dispatch({ record, type: 'append-record' });
     },
     onToast: announce,
     preferredDeviceId: state.settings.microphone,
@@ -86,21 +85,21 @@ export function App() {
   useEffect(() => {
     if (!state.historyError) return;
     setToast(state.historyError);
-    const timer = window.setTimeout(() => setToast(""), 4_000);
+    const timer = window.setTimeout(() => setToast(''), 4_000);
     return () => window.clearTimeout(timer);
   }, [state.historyError]);
 
   useEffect(() => {
     if (!state.settingsError) return;
     setToast(state.settingsError);
-    const timer = window.setTimeout(() => setToast(""), 4_000);
+    const timer = window.setTimeout(() => setToast(''), 4_000);
     return () => window.clearTimeout(timer);
   }, [state.settingsError]);
 
   useEffect(() => {
     if (!state.dictionaryError) return;
     setToast(state.dictionaryError);
-    const timer = window.setTimeout(() => setToast(""), 4_000);
+    const timer = window.setTimeout(() => setToast(''), 4_000);
     return () => window.clearTimeout(timer);
   }, [state.dictionaryError]);
 
@@ -111,7 +110,7 @@ export function App() {
     onboardingOpen,
     onShortcutError: (message) => {
       setToast(message);
-      window.setTimeout(() => setToast(""), 4_000);
+      window.setTimeout(() => setToast(''), 4_000);
     },
     setup,
     shortcutOpen,
@@ -122,19 +121,19 @@ export function App() {
     const handleKey = (event: KeyboardEvent) => {
       if (onboardingOpen || shortcutOpen || hasOpenModal()) return;
       const target = event.target as HTMLElement;
-      if (event.key === "?" && !target.matches("input, select, textarea")) {
+      if (event.key === '?' && !target.matches('input, select, textarea')) {
         modalOpener.current = target;
         setShortcutOpen(true);
       }
       if (event.altKey && /^[1-4]$/.test(event.key)) {
         dispatch({
           screen: screens[Number(event.key) - 1].value,
-          type: "set-screen",
+          type: 'set-screen',
         });
       }
     };
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
   }, [dispatch, onboardingOpen, shortcutOpen]);
 
   function openSetup(opener: HTMLElement) {
@@ -151,7 +150,7 @@ export function App() {
       persistDictionary: dictionaryDurable,
       persistHistory: historyDurable,
       persistSettings: settingsDurable,
-      type: "reset",
+      type: 'reset',
       wipeHistory,
     });
     setOnboardingOpen(true);
@@ -166,17 +165,17 @@ export function App() {
   }
 
   function openScenario(scenario: OnboardingScenario) {
-    const collision = scenario === "collision";
+    const collision = scenario === 'collision';
     setup.replace({
       ...initialOnboarding,
       microphoneGranted: collision,
-      permissionDenied: scenario === "permission-denied",
+      permissionDenied: scenario === 'permission-denied',
       shortcutCollision: collision,
       step: collision ? 2 : 1,
     });
     if (collision) settings.update({
-      key: "shortcut",
-      value: "Ctrl + Space",
+      key: 'shortcut',
+      value: 'Ctrl + Space',
     });
     setOnboardingOpen(true);
   }
@@ -195,10 +194,10 @@ export function App() {
         <nav aria-label="Voxloom screens">
           {screens.map(({ glyph, label, value }) => <button
             aria-label={label}
-            aria-current={state.screen === value ? "page" : undefined}
+            aria-current={state.screen === value ? 'page' : undefined}
             className="nav-button" key={value} onClick={() => dispatch({
               screen: value,
-              type: "set-screen",
+              type: 'set-screen',
             })}><span className="nav-glyph">{glyph}</span>{label}</button>)}
         </nav>
         {import.meta.env.DEV && <ScenarioPanel
@@ -211,26 +210,25 @@ export function App() {
         </p>
       </aside>
       <main className="main">
-        {state.screen === "home" && (
+        {state.screen === 'home' && (
           <Home dogfood={dogfood} onToast={announce} />
         )}
-        {state.screen === "history" && (
+        {state.screen === 'history' && (
           bootReady
             ? <History onToast={announce} />
             : <BootHydratePlaceholder title="History" />
         )}
-        {state.screen === "dictionary" && (
+        {state.screen === 'dictionary' && (
           bootReady
             ? <Dictionary />
             : <BootHydratePlaceholder title="Dictionary" />
         )}
-        {state.screen === "settings" && (
+        {state.screen === 'settings' && (
           bootReady
             ? <Settings onSetup={openSetup} />
             : <BootHydratePlaceholder title="Settings" />
         )}
       </main>
-      <Waveform />
     </div>
     {onboardingOpen && <Onboarding onClose={() => setOnboardingOpen(false)}
       opener={modalOpener.current} />}

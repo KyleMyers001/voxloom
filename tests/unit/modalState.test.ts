@@ -1,12 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from 'vitest';
 import {
   beginModal,
   hasOpenModal,
   subscribeModal,
-} from "../../src/app/modalState";
+} from '../../src/app/modalState';
 
-describe("modal state", () => {
-  it("tracks nested modals and notifies subscribers", () => {
+describe('modal state', () => {
+  it('tracks nested modals and notifies subscribers', () => {
     const listener = vi.fn();
     const unsubscribe = subscribeModal(listener);
     const closeFirst = beginModal();
