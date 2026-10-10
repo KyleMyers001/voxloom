@@ -211,7 +211,7 @@ Do **not** treat browser unit tests as proof of native AX insert.
 |----------|-------|
 | AXSelectedText may be unsupported or fail for some apps | No AXValue fallback; use Copy/Failed per Settings. Verify caret/selection behavior in Notes/TextEdit on Mac |
 | Browser / Electron / game overlays | Unsupported → Copy; may need later heuristics |
-| Paste-via-⌘V path not used in v1 (AX only) | ADR allows paste without Enter; deferred if AX set fails broadly |
+| Paste-via-⌘V path not used (AX first; web fields that ignore AXSelectedText get Unicode key events per ADR §6 — no clipboard, no chords) | PR #25; unverifiable typing → "May have been inserted — also copied" |
 | Home Start while Voxloom focused | Expected **Copied**; use global hold for Notes Inserted smoke |
 | Stuck overlay after release (pre-fix) | Fixed: unconditional tear-down on finish/cancel/error (try/finally) |
 | 2nd/3rd hold stuck (6f1ada8) | Serialized arm/disarm alone insufficient (c9e0df5 still failed R1) |

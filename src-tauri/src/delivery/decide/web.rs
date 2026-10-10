@@ -17,21 +17,16 @@ pub fn is_web_content_field<S: AsRef<str>>(
     has_dom_identifier || ancestor_roles.iter().any(|r| r.as_ref() == "AXWebArea")
 }
 
-/// How to deliver into a validated target. `Refuse` → TS Copy/Failed policy.
+/// Whether to attempt insertion at all. `Refuse` → TS Copy/Failed policy.
+/// Every insertable target tries caret-aware AXSelectedText first (main #22);
+/// web fields may then fall back to Unicode typing (see `verify::after_ax`).
 #[derive(Debug, PartialEq, Eq)]
 pub enum InsertPath {
-    /// ⌘V into a web-content field, verified by AXValue read-back.
-    WebPaste,
-    /// Caret-aware AXSelectedText, verified by AXValue read-back.
     AxSelectedText,
     Refuse(String),
 }
 
-pub fn choose_insert_path(
-    validated: &TargetSnapshotDto,
-    is_web_field: bool,
-    value_readable: bool,
-) -> InsertPath {
+pub fn choose_insert_path(validated: &TargetSnapshotDto, value_readable: bool) -> InsertPath {
     if !validated.insertable || validated.kind != "insertable" {
         return InsertPath::Refuse(format!(
             "refusing insert: {}",
@@ -41,21 +36,12 @@ pub fn choose_insert_path(
                 .unwrap_or_else(|| validated.kind.clone())
         ));
     }
-    // Both paths need a readable value to prove the text actually landed;
-    // without it we refuse before mutating anything (no double insert).
+    // A readable value is needed to prove the text actually landed; without
+    // it we refuse before mutating anything (no double insert).
     if !value_readable {
         return InsertPath::Refuse("AXValue unreadable before insert — insert skipped".into());
     }
-    if is_web_field {
-        InsertPath::WebPaste
-    } else {
-        InsertPath::AxSelectedText
-    }
-}
-
-/// Read-back proof that our text landed in the field.
-pub fn value_confirms_insert(before: &str, after: &str, text: &str) -> bool {
-    !text.is_empty() && before != after && after.contains(text)
+    InsertPath::AxSelectedText
 }
 
 #[cfg(test)]

@@ -17,6 +17,7 @@ import {
 import type {
   DeliverOptions,
   DeliveryOutcome,
+  InsertReport,
   TargetSnapshot,
 } from './types';
 
@@ -59,6 +60,18 @@ export async function deliverTranscript(
   const now = options.now ?? Date.now;
   const platform = options.platform;
 
+  // Nothing to deliver: never insert, and never overwrite the clipboard.
+  if (text.trim() === '') {
+    return {
+      clipboardRestored: false,
+      detail: 'empty transcript',
+      message: deliveryMessage('failed', 'nothing to insert (empty transcript)'),
+      restoreSkippedReason: null,
+      status: 'failed',
+      text,
+    };
+  }
+
   const intended: TargetSnapshot = options.intended
     ?? unavailableSnapshot(now(), 'no intended target snapshot at invocation');
 
@@ -78,18 +91,9 @@ export async function deliverTranscript(
   const plan = planDelivery(validated, options.clipboardFallback);
 
   if (plan.action === 'insert') {
+    let report: InsertReport | void;
     try {
-      const report = await platform.insertText(text, plan.target);
-      const skipReason = report?.restoreSkippedReason ?? null;
-      return {
-        clipboardRestored: report?.clipboardRestored ?? false,
-        detail: null,
-        message: deliveryMessage('inserted', null)
-          + restoreSkippedSuffix(skipReason),
-        restoreSkippedReason: skipReason,
-        status: 'inserted',
-        text,
-      };
+      report = await platform.insertText(text, plan.target);
     } catch (error: unknown) {
       const insertFail = error instanceof Error
         ? error.message
@@ -98,18 +102,19 @@ export async function deliverTranscript(
       if (!options.clipboardFallback) {
         return failOutcome(text, `insert failed: ${insertFail}`);
       }
-      const copied = await copyFallback(
-        platform,
-        text,
-        `insert failed: ${insertFail}`,
-      );
-      // Native paste ran but read-back could not confirm it: the text may
-      // already be in the page, so do not imply nothing happened.
-      if (copied.status === 'copied' && MAY_HAVE_PASTED.test(insertFail)) {
-        return { ...copied, message: 'May have been pasted — also copied' };
-      }
-      return copied;
+      return copyFallback(platform, text, `insert failed: ${insertFail}`);
     }
+    if (report?.unverified) {
+      return mayHaveInserted(platform, text, options.clipboardFallback, report);
+    }
+    return {
+      clipboardRestored: false,
+      detail: report?.typed ? 'typed' : null,
+      message: deliveryMessage('inserted', null),
+      restoreSkippedReason: null,
+      status: 'inserted',
+      text,
+    };
   }
 
   if (plan.action === 'copy') {
@@ -119,8 +124,28 @@ export async function deliverTranscript(
   return failOutcome(text, plan.reason);
 }
 
-/** Marker from the native adapter for an unverifiable ⌘V paste. */
-const MAY_HAVE_PASTED = /may have been pasted/i;
+/**
+ * Native write happened but could not be proven complete: the text may already
+ * be (partly) in the field. Never claim Inserted, never imply nothing happened
+ * — including when the Copy fallback itself fails or is disabled.
+ */
+async function mayHaveInserted(
+  platform: DeliverOptions['platform'],
+  text: string,
+  clipboardFallback: boolean,
+  report: InsertReport,
+): Promise<DeliveryOutcome> {
+  const detail = `unverified insert: ${report.detail ?? 'read-back failed'}`;
+  if (!clipboardFallback) {
+    const failed = failOutcome(text, detail);
+    return { ...failed, message: `May have been inserted — ${failed.message}` };
+  }
+  const copied = await copyFallback(platform, text, detail);
+  if (copied.status === 'copied') {
+    return { ...copied, message: 'May have been inserted — also copied' };
+  }
+  return { ...copied, message: `May have been inserted — ${copied.message}` };
+}
 
 /**
  * Copy fallback: leave transcript on clipboard (intentional — not a temp paste).

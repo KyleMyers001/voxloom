@@ -62,36 +62,17 @@ fn secure_subrole_is_refused_even_with_text_field_role() {
 }
 
 #[test]
-fn identity_distinguishes_sibling_fields() {
-    let base = IdentityParts {
-        pid: Some(7),
-        role: "AXTextField",
-        ..Default::default()
-    };
-    let a = element_identity(&IdentityParts {
-        position: Some((10, 20)),
-        ..base
-    });
-    let b = element_identity(&IdentityParts {
-        pid: Some(7),
-        role: "AXTextField",
-        position: Some((10, 60)),
-        ..Default::default()
-    });
-    let c = element_identity(&IdentityParts {
-        pid: Some(7),
-        role: "AXTextField",
-        dom_identifier: Some("email"),
-        position: Some((10, 20)),
-        ..Default::default()
-    });
-    assert_ne!(a, b);
-    assert_ne!(a, c);
-    let a2 = element_identity(&IdentityParts {
-        pid: Some(7),
-        role: "AXTextField",
-        position: Some((10, 20)),
-        ..Default::default()
-    });
-    assert_eq!(a, a2);
+fn token_distinguishes_registered_element_from_any_other() {
+    let intended = element_token(Some(7), "AXTextField", Some(3));
+    assert_eq!(intended, element_token(Some(7), "AXTextField", Some(3)));
+    // Sibling with identical attributes is not the registered element.
+    assert_ne!(intended, element_token(Some(7), "AXTextField", None));
+    // A newer capture's element never matches an older intended snapshot.
+    assert_ne!(intended, element_token(Some(7), "AXTextField", Some(4)));
+    // Two unmatched elements are never accepted as the intended one.
+    let mut want = crate::delivery::decide::test_support::target("insertable", Some(7), None);
+    want.element_id = Some(element_token(Some(7), "AXTextField", Some(3)));
+    let mut have = want.clone();
+    have.element_id = Some(element_token(Some(7), "AXTextField", None));
+    assert_eq!(validate_snapshots(&want, have).kind, "changed");
 }

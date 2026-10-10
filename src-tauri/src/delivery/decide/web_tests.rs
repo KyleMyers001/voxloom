@@ -34,33 +34,16 @@ fn web_content_detection() {
 
 #[test]
 fn path_choice() {
-    let ok = target("insertable", Some(1), Some("1:AXTextField:"));
-    assert_eq!(choose_insert_path(&ok, true, true), InsertPath::WebPaste);
-    assert_eq!(
-        choose_insert_path(&ok, false, true),
-        InsertPath::AxSelectedText
-    );
+    let ok = target("insertable", Some(1), Some("1:AXTextField:#1"));
+    assert_eq!(choose_insert_path(&ok, true), InsertPath::AxSelectedText);
     assert!(matches!(
-        choose_insert_path(&ok, true, false),
-        InsertPath::Refuse(_)
-    ));
-    assert!(matches!(
-        choose_insert_path(&ok, false, false),
+        choose_insert_path(&ok, false),
         InsertPath::Refuse(_)
     ));
     for kind in ["secure", "changed", "unavailable", "unsupported"] {
         assert!(matches!(
-            choose_insert_path(&target(kind, Some(1), Some("x")), true, true),
+            choose_insert_path(&target(kind, Some(1), Some("x")), true),
             InsertPath::Refuse(_)
         ));
     }
-}
-
-#[test]
-fn insertion_requires_readback_change_containing_transcript() {
-    assert!(value_confirms_insert("hello", "hello world", " world"));
-    assert!(value_confirms_insert("old line", "new line", "new line"));
-    assert!(!value_confirms_insert("hello", "hello", " world"));
-    assert!(!value_confirms_insert("hello", "hello!", " world"));
-    assert!(!value_confirms_insert("hello", "hello!", ""));
 }

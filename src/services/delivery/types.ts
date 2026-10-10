@@ -51,14 +51,17 @@ export interface DeliveryOutcome {
   text: string;
 }
 
-/** Native insert result (macOS web-content paste reports clipboard restore). */
+/** Structured native insert result (macOS). */
 export interface InsertReport {
-  /** Delivered via temporary clipboard paste. */
-  pasted: boolean;
-  /** Prior clipboard was restored after the paste. */
-  clipboardRestored: boolean;
-  /** Why restore was skipped (conflict, unreadable, write failure). */
-  restoreSkippedReason: string | null;
+  /** Delivered by Unicode key events (web field ignored AXSelectedText). */
+  typed: boolean;
+  /**
+   * A mutation happened but read-back could not prove the full transcript
+   * landed — text may be (partially) in the field. Treated as not inserted.
+   */
+  unverified: boolean;
+  /** Diagnostic detail. */
+  detail: string | null;
 }
 
 export interface ClipboardSnapshot {

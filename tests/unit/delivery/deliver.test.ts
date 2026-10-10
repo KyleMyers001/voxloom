@@ -50,12 +50,12 @@ describe('deliverTranscript', () => {
     expect(platform.clipboardWrite).not.toHaveBeenCalled();
   });
 
-  it('surfaces native paste clipboard-restore skips on Inserted', async () => {
+  it('reports typed web inserts as Inserted without touching the clipboard', async () => {
     const platform = adapter({
       insertText: vi.fn().mockResolvedValue({
-        clipboardRestored: false,
-        pasted: true,
-        restoreSkippedReason: 'clipboard changed after our write',
+        detail: null,
+        typed: true,
+        unverified: false,
       }),
     });
     const outcome = await deliverTranscript({
@@ -65,21 +65,17 @@ describe('deliverTranscript', () => {
       text: 'hello',
     });
     expect(outcome.status).toBe('inserted');
-    expect(outcome.restoreSkippedReason).toBe(
-      'clipboard changed after our write',
-    );
-    expect(outcome.message).toBe(
-      'Inserted (clipboard not restored: clipboard changed after our write)',
-    );
-    expect(outcome.clipboardRestored).toBe(false);
+    expect(outcome.message).toBe('Inserted');
+    expect(platform.clipboardWrite).not.toHaveBeenCalled();
   });
 
-  it('reports clipboardRestored after a restored native paste', async () => {
+  it('unverified native insert → may have been inserted, also copied', async () => {
     const platform = adapter({
+      clipboardRead: vi.fn().mockResolvedValue({ ok: true, text: 'hello' }),
       insertText: vi.fn().mockResolvedValue({
-        clipboardRestored: true,
-        pasted: true,
-        restoreSkippedReason: null,
+        detail: 'typed but could not be verified via AXValue',
+        typed: true,
+        unverified: true,
       }),
     });
     const outcome = await deliverTranscript({
@@ -88,17 +84,19 @@ describe('deliverTranscript', () => {
       platform,
       text: 'hello',
     });
-    expect(outcome.message).toBe('Inserted');
-    expect(outcome.clipboardRestored).toBe(true);
-    expect(outcome.restoreSkippedReason).toBeNull();
+    expect(outcome.status).toBe('copied');
+    expect(outcome.message).toBe('May have been inserted — also copied');
+    expect(platform.clipboardWrite).toHaveBeenCalledWith('hello');
   });
 
-  it('unverified native paste falls back to Copy', async () => {
+  it('keeps the may-have-been-inserted warning when Copy fails', async () => {
     const platform = adapter({
-      insertText: vi.fn().mockRejectedValue(
-        new Error('⌘V sent but could not be verified — may have been pasted'),
-      ),
-      clipboardRead: vi.fn().mockResolvedValue({ ok: true, text: 'hello' }),
+      clipboardWrite: vi.fn().mockRejectedValue(new Error('denied')),
+      insertText: vi.fn().mockResolvedValue({
+        detail: null,
+        typed: true,
+        unverified: true,
+      }),
     });
     const outcome = await deliverTranscript({
       clipboardFallback: true,
@@ -106,9 +104,43 @@ describe('deliverTranscript', () => {
       platform,
       text: 'hello',
     });
-    expect(outcome.status).toBe('copied');
-    expect(outcome.message).toBe('May have been pasted — also copied');
-    expect(platform.clipboardWrite).toHaveBeenCalledWith('hello');
+    expect(outcome.status).toBe('failed');
+    expect(outcome.message).toMatch(/^May have been inserted — Failed/);
+  });
+
+  it('keeps the warning when Copy fallback is disabled', async () => {
+    const platform = adapter({
+      insertText: vi.fn().mockResolvedValue({
+        detail: null,
+        typed: false,
+        unverified: true,
+      }),
+    });
+    const outcome = await deliverTranscript({
+      clipboardFallback: false,
+      intended: snap(),
+      platform,
+      text: 'hello',
+    });
+    expect(outcome.status).toBe('failed');
+    expect(outcome.message).toMatch(/^May have been inserted — Failed/);
+    expect(platform.clipboardWrite).not.toHaveBeenCalled();
+  });
+
+  it('empty transcript never inserts or overwrites the clipboard', async () => {
+    const platform = adapter();
+    for (const text of ['', '   ']) {
+      const outcome = await deliverTranscript({
+        clipboardFallback: true,
+        intended: snap(),
+        platform,
+        text,
+      });
+      expect(outcome.status).toBe('failed');
+      expect(outcome.message).toMatch(/nothing to insert/);
+    }
+    expect(platform.insertText).not.toHaveBeenCalled();
+    expect(platform.clipboardWrite).not.toHaveBeenCalled();
   });
 
   it('plain insert failures keep the regular Copied message', async () => {

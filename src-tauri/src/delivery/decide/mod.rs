@@ -1,19 +1,17 @@
 //! Platform-independent delivery decisions (pure; unit-tested on any OS).
 //! The macOS adapter gathers AX facts and delegates every policy choice here.
 
-pub mod clipboard;
+pub mod report;
 pub mod target;
 pub mod text;
+pub mod verify;
 pub mod web;
 
-pub use clipboard::{
-    classify_clipboard, restore_decision, ClipboardPrior, InsertReport, RestoreDecision,
-};
-pub use target::{
-    classify_role, effective_role, element_identity, validate_snapshots, IdentityParts,
-};
-pub use text::{check_insert_text, UNVERIFIED_PASTE};
-pub use web::{choose_insert_path, is_web_content_field, value_confirms_insert, InsertPath};
+pub use report::InsertReport;
+pub use target::{classify_role, effective_role, element_token, validate_snapshots};
+pub use text::{check_insert_text, utf16_chunks, KEY_EVENT_UTF16_MAX};
+pub use verify::{after_ax, value_confirms_insert, AfterAx};
+pub use web::{choose_insert_path, is_web_content_field, InsertPath};
 
 #[cfg(test)]
 pub(crate) mod test_support {

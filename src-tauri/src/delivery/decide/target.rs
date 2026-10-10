@@ -32,36 +32,14 @@ pub fn effective_role<'a>(role: &'a str, subrole: Option<&str>) -> &'a str {
     }
 }
 
-/// AX facts that identify one focused field.
-#[derive(Default)]
-pub struct IdentityParts<'a> {
-    pub pid: Option<i32>,
-    pub role: &'a str,
-    pub identifier: Option<&'a str>,
-    pub dom_identifier: Option<&'a str>,
-    pub title: Option<&'a str>,
-    pub description: Option<&'a str>,
-    pub position: Option<(i64, i64)>,
-}
-
-/// Identity distinguishing sibling fields that share role/description:
-/// explicit identifiers plus on-screen position. Position shifts (scroll,
-/// window move) make validation refuse, which is the fail-closed direction.
-pub fn element_identity(p: &IdentityParts) -> String {
-    let pos = p
-        .position
-        .map(|(x, y)| format!("{x},{y}"))
-        .unwrap_or_default();
-    format!(
-        "{}:{}:{}:{}:{}:{}:{}",
-        p.pid.unwrap_or(-1),
-        p.role,
-        p.identifier.unwrap_or_default(),
-        p.dom_identifier.unwrap_or_default(),
-        p.title.unwrap_or_default(),
-        p.description.unwrap_or_default(),
-        pos
-    )
+/// Field identity token. Identity is held natively: the capture-start
+/// element is retained and later focus is compared with `CFEqual` (stable
+/// across scroll/reflow/resize, distinct for sibling fields with identical
+/// attributes). `generation` is the registry slot the element matched, or
+/// None when it is not the registered element — which never compares equal.
+pub fn element_token(pid: Option<i32>, role: &str, generation: Option<u64>) -> String {
+    let slot = generation.map_or_else(|| "unmatched".to_string(), |g| format!("#{g}"));
+    format!("{}:{}:{}", pid.unwrap_or(-1), role, slot)
 }
 
 /// Compare the invocation snapshot with the element we are about to mutate.
