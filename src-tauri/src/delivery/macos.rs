@@ -1,5 +1,6 @@
 //! macOS Accessibility (AX) target snapshot + text insert.
-//! Prefer AXValue / AXSelectedText set — never trailing Enter / Tab chords.
+//! Native fields: AXSelectedText/AXValue set (verified). Web content: ⌘V paste
+//! with clipboard restore. Never trailing Enter / Tab chords.
 //! Secure fields and identity mismatches refuse insert (Copy is TS-side).
 
 use std::ffi::c_void;
@@ -34,11 +35,7 @@ extern "C" {
     fn AXUIElementGetPid(element: AXUIElementRef, pid: *mut pid_t) -> AXError;
     fn AXIsProcessTrusted() -> u8;
 
-    fn CFStringCreateWithCString(
-        alloc: CFTypeRef,
-        c_str: *const i8,
-        encoding: u32,
-    ) -> CFStringRef;
+    fn CFStringCreateWithCString(alloc: CFTypeRef, c_str: *const i8, encoding: u32) -> CFStringRef;
     fn CFStringGetCString(
         the_string: CFStringRef,
         buffer: *mut i8,
@@ -50,7 +47,21 @@ extern "C" {
     fn CFGetTypeID(cf: CFTypeRef) -> usize;
     fn CFStringGetTypeID() -> usize;
     fn CFRelease(cf: CFTypeRef);
+    static kCFBooleanTrue: CFTypeRef;
 }
+
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGEventSourceCreate(state_id: i32) -> CFTypeRef;
+    fn CGEventCreateKeyboardEvent(source: CFTypeRef, keycode: u16, keydown: bool) -> CFTypeRef;
+    fn CGEventSetFlags(event: CFTypeRef, flags: u64);
+    fn CGEventPost(tap: u32, event: CFTypeRef);
+}
+
+const KEYCODE_V: u16 = 9;
+const FLAG_COMMAND: u64 = 0x0010_0000;
+const HID_EVENT_TAP: u32 = 0;
+const SOURCE_HID_SYSTEM_STATE: i32 = 1;
 
 fn now_ms() -> i64 {
     SystemTime::now()
@@ -101,9 +112,7 @@ struct AxAttr {
 impl AxAttr {
     fn copy(&self) -> Result<CFTypeRef, AXError> {
         let mut value: CFTypeRef = ptr::null();
-        let err = unsafe {
-            AXUIElementCopyAttributeValue(self.element, self.name, &mut value)
-        };
+        let err = unsafe { AXUIElementCopyAttributeValue(self.element, self.name, &mut value) };
         if err != AX_OK {
             return Err(err);
         }
@@ -113,7 +122,10 @@ impl AxAttr {
 
 fn copy_string_attr(element: AXUIElementRef, attr: &str) -> Option<String> {
     let name = cfstr(attr);
-    let result = AxAttr { element, name }.copy().ok().and_then(cfstring_to_rust);
+    let result = AxAttr { element, name }
+        .copy()
+        .ok()
+        .and_then(cfstring_to_rust);
     release(name);
     result
 }
@@ -131,9 +143,7 @@ fn element_pid(element: AXUIElementRef) -> Option<i32> {
 fn classify_role(role: &str) -> (&'static str, bool, Option<&'static str>) {
     match role {
         "AXSecureTextField" => ("secure", false, Some("secure field — insert skipped")),
-        "AXTextField" | "AXTextArea" | "AXComboBox" | "AXSearchField" => {
-            ("insertable", true, None)
-        }
+        "AXTextField" | "AXTextArea" | "AXComboBox" | "AXSearchField" => ("insertable", true, None),
         // Browser / chat / editor surfaces — attempt insert; limitations documented.
         "AXWebArea" | "AXScrollArea" | "AXGroup" => (
             "insertable",
@@ -141,16 +151,10 @@ fn classify_role(role: &str) -> (&'static str, bool, Option<&'static str>) {
             Some("browser/chat surface — insert best-effort via AX"),
         ),
         // Terminals often expose AXTextArea already; unknown custom roles refuse.
-        "AXStaticText" | "AXButton" | "AXImage" | "AXToolbar" | "AXMenu" => (
-            "unsupported",
-            false,
-            Some("unsupported control role"),
-        ),
-        _ => (
-            "unsupported",
-            false,
-            Some("unsupported or unknown AX role"),
-        ),
+        "AXStaticText" | "AXButton" | "AXImage" | "AXToolbar" | "AXMenu" => {
+            ("unsupported", false, Some("unsupported control role"))
+        }
+        _ => ("unsupported", false, Some("unsupported or unknown AX role")),
     }
 }
 
@@ -176,9 +180,7 @@ fn build_snapshot(element: AXUIElementRef, app_name: Option<String>) -> TargetSn
             element_role: Some(role),
             insertable: false,
             kind: "unavailable".into(),
-            reason: Some(
-                "Accessibility permission denied — insert skipped".into(),
-            ),
+            reason: Some("Accessibility permission denied — insert skipped".into()),
         };
     }
 
@@ -202,12 +204,15 @@ fn focused_ui_element() -> Result<(AXUIElementRef, Option<String>), String> {
 
     let focused_app_attr = cfstr("AXFocusedApplication");
     let mut focused_app: CFTypeRef = ptr::null();
-    let app_err = unsafe {
-        AXUIElementCopyAttributeValue(system, focused_app_attr, &mut focused_app)
-    };
+    let app_err =
+        unsafe { AXUIElementCopyAttributeValue(system, focused_app_attr, &mut focused_app) };
     release(focused_app_attr);
 
     let app_name = if app_err == AX_OK && !focused_app.is_null() {
+        // Chromium/Electron only build their web-content AX tree once an
+        // assistive client asks for it. Without this, the focused element in a
+        // page is an opaque AXWebArea/AXGroup and AX writes silently no-op.
+        enable_manual_accessibility(focused_app as AXUIElementRef);
         let name = copy_string_attr(focused_app as AXUIElementRef, "AXTitle");
         name
     } else {
@@ -216,9 +221,7 @@ fn focused_ui_element() -> Result<(AXUIElementRef, Option<String>), String> {
 
     let focused_attr = cfstr("AXFocusedUIElement");
     let mut focused: CFTypeRef = ptr::null();
-    let focus_err = unsafe {
-        AXUIElementCopyAttributeValue(system, focused_attr, &mut focused)
-    };
+    let focus_err = unsafe { AXUIElementCopyAttributeValue(system, focused_attr, &mut focused) };
     release(focused_attr);
     release(system);
     if !focused_app.is_null() {
@@ -245,9 +248,7 @@ pub fn snapshot_target() -> Result<TargetSnapshotDto, String> {
     }
 }
 
-pub fn validate_target(
-    intended: TargetSnapshotDto,
-) -> Result<TargetSnapshotDto, String> {
+pub fn validate_target(intended: TargetSnapshotDto) -> Result<TargetSnapshotDto, String> {
     let current = snapshot_target()?;
 
     // Closed / gone: current unavailable with no pid match.
@@ -297,11 +298,7 @@ pub fn validate_target(
     Ok(current)
 }
 
-fn set_ax_string(
-    element: AXUIElementRef,
-    attr: &str,
-    text: &str,
-) -> Result<(), String> {
+fn set_ax_string(element: AXUIElementRef, attr: &str, text: &str) -> Result<(), String> {
     let name = cfstr(attr);
     let value = cfstr(text);
     let err = unsafe { AXUIElementSetAttributeValue(element, name, value) };
@@ -311,6 +308,94 @@ fn set_ax_string(
         return Err(format!("AX set {attr} failed (error {err})"));
     }
     Ok(())
+}
+
+fn enable_manual_accessibility(app: AXUIElementRef) {
+    let name = cfstr("AXManualAccessibility");
+    // Errors are expected for non-Chromium apps; ignore.
+    unsafe {
+        let _ = AXUIElementSetAttributeValue(app, name, kCFBooleanTrue);
+    }
+    release(name);
+}
+
+/// Roles where AX text writes are known to be unreliable (Chromium web content
+/// reports AX success for AXSelectedText/AXValue without changing the DOM).
+fn is_web_surface(role: &str) -> bool {
+    matches!(role, "AXWebArea" | "AXScrollArea" | "AXGroup")
+}
+
+fn run_pb(cmd: &str, input: Option<&str>) -> Option<String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let mut child = Command::new(cmd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    if let Some(text) = input {
+        child.stdin.take()?.write_all(text.as_bytes()).ok()?;
+    } else {
+        drop(child.stdin.take());
+    }
+    let out = child.wait_with_output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+fn post_cmd_v() -> Result<(), String> {
+    unsafe {
+        let source = CGEventSourceCreate(SOURCE_HID_SYSTEM_STATE);
+        let down = CGEventCreateKeyboardEvent(source, KEYCODE_V, true);
+        let up = CGEventCreateKeyboardEvent(source, KEYCODE_V, false);
+        if down.is_null() || up.is_null() {
+            release(down);
+            release(up);
+            release(source);
+            return Err("could not create paste key events".into());
+        }
+        CGEventSetFlags(down, FLAG_COMMAND);
+        CGEventSetFlags(up, FLAG_COMMAND);
+        CGEventPost(HID_EVENT_TAP, down);
+        CGEventPost(HID_EVENT_TAP, up);
+        release(down);
+        release(up);
+        release(source);
+    }
+    Ok(())
+}
+
+/// Paste (⌘V only — no Enter/Tab) with best-effort plain-text clipboard restore.
+fn paste_text(text: &str) -> Result<(), String> {
+    let previous = run_pb("pbpaste", None);
+    run_pb("pbcopy", Some(text)).ok_or("clipboard write failed")?;
+    std::thread::sleep(std::time::Duration::from_millis(40));
+    let result = post_cmd_v();
+    // Give the target app time to read the pasteboard before restoring.
+    std::thread::sleep(std::time::Duration::from_millis(250));
+    if let Some(prev) = previous {
+        let _ = run_pb("pbcopy", Some(&prev));
+    }
+    result
+}
+
+/// AX "success" is not proof of insertion in web content: confirm the value
+/// actually changed when the element exposes a readable AXValue.
+fn ax_insert_verified(element: AXUIElementRef, text: &str) -> bool {
+    let before = copy_string_attr(element, "AXValue");
+    let wrote = set_ax_string(element, "AXSelectedText", text).is_ok()
+        || set_ax_string(element, "AXValue", text).is_ok();
+    if !wrote {
+        return false;
+    }
+    match (before, copy_string_attr(element, "AXValue")) {
+        (Some(b), Some(a)) => a != b && (text.is_empty() || a.contains(text)),
+        // Value unreadable: trust AX only for native (non-web) controls.
+        _ => true,
+    }
 }
 
 pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<(), String> {
@@ -325,23 +410,49 @@ pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<(), Strin
     if !validated.insertable || validated.kind != "insertable" {
         return Err(format!(
             "refusing insert: {}",
-            validated
-                .reason
-                .unwrap_or_else(|| validated.kind.clone())
+            validated.reason.unwrap_or_else(|| validated.kind.clone())
         ));
     }
 
-    let (element, _) = focused_ui_element()
-        .map_err(|e| format!("insert aborted — {e}"))?;
+    let (element, _) = focused_ui_element().map_err(|e| format!("insert aborted — {e}"))?;
 
-    // Prefer selected-text replace (caret-aware); fall back to AXValue set.
-    // Never send Enter / Tab / ⌘V as product submit from this path.
-    let selected = set_ax_string(element, "AXSelectedText", text);
-    let result = match selected {
-        Ok(()) => Ok(()),
-        Err(_) => set_ax_string(element, "AXValue", text),
+    // Native controls: AX selected-text/value set, verified by read-back.
+    // Web content (Chromium/Electron) or unverified AX writes: ⌘V paste with
+    // clipboard restore. Never Enter / Tab as product submit from this path.
+    let role = copy_string_attr(element, "AXRole").unwrap_or_default();
+    let in_web = is_web_surface(&role)
+        || copy_string_attr(element, "AXDOMIdentifier").is_some()
+        || role_has_web_ancestor(element);
+    let result = if !in_web && ax_insert_verified(element, text) {
+        Ok(())
+    } else {
+        paste_text(text)
     };
 
     release(element as CFTypeRef);
     result
+}
+
+fn role_has_web_ancestor(element: AXUIElementRef) -> bool {
+    let parent_attr = cfstr("AXParent");
+    let mut current: CFTypeRef = ptr::null();
+    let mut cursor = element;
+    let mut found = false;
+    for _ in 0..32 {
+        let mut parent: CFTypeRef = ptr::null();
+        let err = unsafe { AXUIElementCopyAttributeValue(cursor, parent_attr, &mut parent) };
+        if err != AX_OK || parent.is_null() {
+            break;
+        }
+        release(current);
+        current = parent;
+        cursor = parent as AXUIElementRef;
+        if copy_string_attr(cursor, "AXRole").as_deref() == Some("AXWebArea") {
+            found = true;
+            break;
+        }
+    }
+    release(current);
+    release(parent_attr);
+    found
 }
