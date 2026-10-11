@@ -1,0 +1,116 @@
+/* Console design tokens (SPEC.md § Design tokens). Dark is the default;
+   useTheme.ts sets [data-appearance-resolved] on <body>. */
+:root {
+  color-scheme: dark;
+  --bg: #0b0b10;
+  --side: #0e0e14;
+  --panel: #121219;
+  --sheet: #14141c;
+  --field: #1a1a23;
+  --seg: #1c1c26;
+  --segon: #2c2c3a;
+  --line: #23232e;
+  --winline: rgba(255, 255, 255, .1);
+  --fg: #ececf1;
+  --mut: #8b8b99;
+  --navon: #1a1a24;
+  --accfg: #b6ff3c;
+  --ok: #7ff07a;
+  --info: #3cf0ff;
+  --warn: #ffc04d;
+  --err: #ff6b6b;
+  --brand: linear-gradient(90deg, #b6ff3c, #3cf0ff);
+  --on-brand: #08080c;
+
+  --r-kbd: 5px;
+  --r-ctl: 7px;
+  --r-tile: 9px;
+  --r-win: 12px;
+  --r-card: 14px;
+  --r-hero: 18px;
+  --r-pill: 99px;
+
+  --s-1: 2px; --s-2: 4px; --s-3: 6px; --s-4: 8px; --s-5: 10px; --s-6: 12px;
+  --s-7: 14px; --s-8: 16px; --s-9: 18px; --s-10: 22px; --s-11: 32px;
+  --pad-x: 32px;
+  --titlebar-inset: 52px;
+
+  --font: -apple-system, BlinkMacSystemFont, system-ui, "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --fs-body: 13px;
+  --lh-body: 1.45;
+  --fs-caption: 11.5px;
+  --fs-section: 13px;
+  --fs-page: 30px;
+  --fs-hero: 26px;
+
+  --shadow-win: 0 0 0 .5px var(--winline), 0 30px 80px rgba(0, 0, 0, .35);
+  --shadow-dialog: 0 24px 60px rgba(0, 0, 0, .4);
+  /* Dark-tile outline fix (QA): keeps dark tiles visible on dark backgrounds. */
+  --tile-bg: linear-gradient(#24242f, #07070b);
+  --tile-shadow: inset 0 0 0 1px rgba(255, 255, 255, .16),
+    inset 0 1px 0 rgba(255, 255, 255, .12), 0 0 0 .5px rgba(0, 0, 0, .6),
+    0 2px 6px rgba(0, 0, 0, .35);
+  --hud-shadow: var(--tile-shadow), inset 0 0 0 1px rgba(182, 255, 60, .35),
+    0 0 18px rgba(60, 240, 255, .18);
+}
+
+[data-appearance-resolved="light"] {
+  color-scheme: light;
+  --bg: #fbfbf8;
+  --side: #f2f3ee;
+  --panel: #ffffff;
+  --sheet: #ffffff;
+  --field: #f3f4ef;
+  --seg: #e7e9e1;
+  --segon: #ffffff;
+  --line: #e1e3dc;
+  --winline: rgba(0, 0, 0, .12);
+  --fg: #0b0b10;
+  --mut: #5d6068;
+  --navon: #e7eadf;
+  --accfg: #3f7a00;
+  --ok: #1f8a3a;
+  --info: #007f8f;
+  --warn: #9a5a00;
+  --err: #c62f35;
+  --accent-text: #ffffff;
+}
+
+/* Kept until Kyle confirms removal (SPEC.md § Sodium Rain, PR 10). */
+[data-appearance-resolved="sodium-rain"] {
+  color-scheme: dark;
+  --bg: #0a0d10;
+  --side: #10161b;
+  --panel: #182127;
+  --sheet: #182127;
+  --field: #223039;
+  --seg: #223039;
+  --segon: #34464f;
+  --line: #34464f;
+  --fg: #eaf1f3;
+  --mut: #9fb1b8;
+  --navon: #332b16;
+  --accfg: #ffb000;
+  --info: #79b8c9;
+  --err: #ff9b9b;
+  --action: #8a6500;
+  --accent-text: #ffffff;
+}
+
+/* Legacy names used by existing component rules, mapped onto the tokens.
+   Declared on body too so they re-resolve where the theme attribute lives. */
+:root,
+body {
+  --accent: var(--accfg);
+  --accent-soft: var(--navon);
+  --accent-text: var(--on-brand);
+  --action: var(--accfg);
+  --border: var(--line);
+  --danger: var(--err);
+  --identity: var(--info);
+  --muted: var(--mut);
+  --panel-2: var(--field);
+  --rail: var(--side);
+  --text: var(--fg);
+}

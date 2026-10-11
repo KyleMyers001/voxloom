@@ -1,0 +1,139 @@
+/* Feature rules: appearance picker, onboarding, recording overlay. */
+.appearance-option {
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto 1fr;
+  letter-spacing: 0;
+  padding: 9px;
+  text-transform: none;
+}
+
+.appearance-option:has(input:checked) {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.appearance-options {
+  border: 0;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+}
+
+.appearance-swatch {
+  background: var(--preview-bg);
+  border: 1px solid var(--preview-border);
+  border-radius: 4px;
+  display: flex;
+  gap: 3px;
+  grid-column: 1 / -1;
+  height: 24px;
+  padding: 5px;
+}
+
+.appearance-swatch i {
+  background: var(--preview-accent);
+  border-radius: 50%;
+  height: 7px;
+  width: 7px;
+}
+
+.appearance-swatch i:first-child {
+  background: var(--preview-surface);
+  border-radius: 2px;
+  flex: 1;
+  height: 12px;
+}
+
+.appearance-swatch[data-preview="dark"] {
+  --preview-accent: #5f8fff;
+  --preview-bg: #0b111b;
+  --preview-border: #263448;
+  --preview-surface: #162130;
+}
+
+.appearance-swatch[data-preview="light"] {
+  --preview-accent: #2f62a6;
+  --preview-bg: #f4f5f6;
+  --preview-border: #cbd2da;
+  --preview-surface: #ffffff;
+}
+
+.appearance-swatch[data-preview="sodium-rain"] {
+  --preview-accent: #ffb000;
+  --preview-bg: #0a0d10;
+  --preview-border: #223039;
+  --preview-surface: #182127;
+}
+
+.appearance-swatch[data-preview="system"] {
+  --preview-accent: #79b8c9;
+  --preview-bg: #e7ebed;
+  --preview-border: #73858c;
+  --preview-surface: #182127;
+}
+
+.onboarding-actions {
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 20px;
+  padding-top: 16px;
+}
+
+.onboarding-actions .skip {
+  margin-right: auto;
+}
+
+.onboarding-progress {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 12px;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.onboarding-progress progress {
+  accent-color: var(--accent);
+  flex: 1;
+}
+
+.onboarding-status,
+.onboarding-test {
+  align-items: center;
+  background: var(--panel-2);
+  border-radius: 9px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-top: 10px;
+  padding: 12px;
+}
+
+.onboarding-step > p {
+  color: var(--muted);
+}
+
+.recording--overlay {
+  align-items: center;
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--border));
+  border-radius: 999px;
+  display: flex;
+  height: 22px;
+  justify-content: center;
+  left: 50%;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 78px;
+}
+

@@ -1,0 +1,106 @@
+/* List rows: history, recent, recovery, dictionary terms, search. */
+.history-list,
+.recent-list,
+.recovery-list,
+.term-list {
+  display: grid;
+  gap: 10px;
+}
+
+.history-list .action-group {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.history-list .recent-row:focus-within .action-group,
+.history-list .recent-row:hover .action-group {
+  opacity: 1;
+  visibility: visible;
+}
+
+.icon-btn {
+  border: 0;
+  color: var(--muted);
+  min-height: 44px;
+  min-width: 44px;
+  padding: 6px;
+}
+
+.icon-btn:focus-visible,
+.icon-btn:hover {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.recent-row {
+  align-items: center;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 76px minmax(0, 1fr) auto;
+  padding-top: 12px;
+}
+
+.recent-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.recent-row p {
+  font-size: 13px;
+  line-height: 1.55;
+  margin-bottom: 0;
+}
+
+.recovery-item {
+  border-left: 2px solid var(--danger);
+  padding: 2px 0 2px 12px;
+}
+
+.recovery-state {
+  color: var(--danger);
+  font-size: 12px;
+  margin: 5px 0 0;
+}
+
+.search-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.search-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-section + .settings-section {
+  margin-top: 16px;
+}
+
+.term-row {
+  align-items: center;
+  border-top: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 48px;
+  padding: 12px 0;
+}
+
+.term-row__actions {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.term-row:focus-within .term-row__actions,
+.term-row:hover .term-row__actions {
+  opacity: 1;
+  visibility: visible;
+}
+
+.timestamp {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+

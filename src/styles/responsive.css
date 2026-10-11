@@ -1,0 +1,34 @@
+/* Responsive and reduced-motion overrides; imported last. */
+@media (max-width: 780px) {
+  .appearance-options { grid-template-columns: repeat(2, 1fr); }
+  .app { grid-template-columns: 148px minmax(0, 1fr); }
+  .form-grid { grid-template-columns: 1fr; }
+  .history-list .action-group,
+  .term-row__actions {
+    opacity: 1;
+    visibility: visible;
+  }
+  .main { padding: 24px 18px 60px; }
+  .recent-row { grid-template-columns: 58px minmax(0, 1fr); }
+  .recent-row > :last-child { grid-column: 2; }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .history-list .action-group,
+  .term-row__actions {
+    opacity: 1;
+    visibility: visible;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+  }
+
+  .wave i { animation: none; transition: none; }
+}
+

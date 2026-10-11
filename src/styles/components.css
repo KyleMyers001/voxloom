@@ -1,0 +1,120 @@
+/* Shared component rules: buttons, cards, fields, forms, style switch. */
+.accent {
+  background: var(--action);
+  border-color: var(--action);
+  color: var(--accent-text);
+  font-weight: 750;
+}
+
+.action-btn {
+  align-items: center;
+  display: inline-flex;
+  height: 44px;
+  justify-content: center;
+  padding: 0;
+  width: 44px;
+}
+
+.action-group {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.btn {
+  min-height: 36px;
+  padding: 6px 11px;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+}
+
+.card__head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.card__head h2 {
+  margin: 0;
+}
+
+.check {
+  align-items: center;
+  color: var(--text);
+  display: flex;
+  font-size: 13px;
+  gap: 9px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.danger {
+  color: var(--danger);
+}
+
+.editor-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.editor-form {
+  display: grid;
+  gap: 14px;
+}
+
+.empty-note {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+
+.field {
+  display: grid;
+  gap: 7px;
+}
+
+.form-error {
+  color: var(--danger);
+  font-size: 12px;
+  margin: 0;
+}
+
+.form-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.quiet-button {
+  border: 0;
+  color: var(--muted);
+  min-height: 44px;
+}
+
+.style-switch {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: inline-flex;
+  padding: 3px;
+}
+
+.style-switch button {
+  border: 0;
+  color: var(--muted);
+  padding: 7px 12px;
+}
+
+.style-switch button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
