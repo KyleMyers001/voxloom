@@ -134,13 +134,5 @@ jobs:
         run: |
           title="Voxloom $GITHUB_REF_NAME"
           [[ "$SIGNED" == "true" ]] || title="$title (UNSIGNED)"
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            echo "Release $GITHUB_REF_NAME exists; updating assets and notes."
-            gh release upload "$GITHUB_REF_NAME" dist-release/* --clobber
-            gh release edit "$GITHUB_REF_NAME" --title "$title" \
-              --notes-file release-notes.md
-          else
-            gh release create "$GITHUB_REF_NAME" dist-release/* \
-              --draft --verify-tag --title "$title" \
-              --notes-file release-notes.md --generate-notes
-          fi
+          bash scripts/release/publish.sh "$GITHUB_REF_NAME" "$title" \
+            release-notes.md dist-release
