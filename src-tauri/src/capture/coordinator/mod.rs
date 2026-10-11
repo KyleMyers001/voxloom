@@ -59,6 +59,8 @@ mod runtime;
 use runtime::*;
 mod level;
 use level::*;
+mod state;
+use state::*;
 
 // Constants
 
@@ -67,40 +69,6 @@ const TEST_SAFETY_SECS: u64 = 10;
 const WATCHDOG_IDLE_SECS: u64 = 5;
 const ACTIVITY_THRESHOLD: f32 = 0.001; // −60 dBFS
 const LEVEL_INTERVAL: Duration = Duration::from_millis(50); // 20 Hz max
-
-// Coordinator
-
-struct Reservation {
-    cancel: Arc<AtomicBool>,
-    /// User stop: deposit + CaptureStopped (distinct from cancel/discard).
-    stop: Arc<AtomicBool>,
-    status: CaptureStatus,
-}
-
-struct CoordinatorState {
-    cancelled_requests: VecDeque<String>,
-    reservation: Option<Reservation>,
-}
-
-/// Clears this request's reservation on worker-thread exit.
-struct PhaseGuard {
-    generation: u64,
-    request_id: String,
-    state: Arc<Mutex<CoordinatorState>>,
-}
-
-impl Drop for PhaseGuard {
-    fn drop(&mut self) {
-        let mut state = self.state.lock().unwrap();
-        let owns_reservation = state.reservation.as_ref().is_some_and(|reservation| {
-            reservation.status.generation == self.generation
-                && reservation.status.request_id == self.request_id
-        });
-        if owns_reservation {
-            state.reservation = None;
-        }
-    }
-}
 
 /// Thread-safe capture coordinator.
 pub struct Coordinator<
@@ -355,32 +323,6 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
 }
 
 // Session worker
-
-fn valid_request_id(request_id: &str) -> bool {
-    !request_id.is_empty()
-        && request_id.len() <= 128
-        && request_id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
-}
-
-fn is_cancelled(flag: &AtomicBool) -> bool {
-    flag.load(Ordering::Acquire)
-}
-
-fn is_stopped(flag: &AtomicBool) -> bool {
-    flag.load(Ordering::Acquire)
-}
-
-fn release_owned_reservation(state: &Mutex<CoordinatorState>, generation: u64, request_id: &str) {
-    let mut state = state.lock().unwrap();
-    let owns_reservation = state.reservation.as_ref().is_some_and(|reservation| {
-        reservation.status.generation == generation && reservation.status.request_id == request_id
-    });
-    if owns_reservation {
-        state.reservation = None;
-    }
-}
 
 fn emit_terminal<E: Fn(SessionEvent)>(
     state: &Mutex<CoordinatorState>,
