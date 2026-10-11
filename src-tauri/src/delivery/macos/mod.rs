@@ -6,6 +6,7 @@
 //! retry after events are posted. Secure/changed targets always refuse.
 
 mod ax;
+mod ax_insert;
 mod focus;
 mod host;
 mod registry;
@@ -15,14 +16,10 @@ mod web_ax;
 
 use std::sync::Mutex;
 
-use ax::{ancestor_roles, copy_string_attr, release, set_ax_string, AXIsProcessTrusted, CFTypeRef};
+use ax::{copy_string_attr, release, AXIsProcessTrusted, CFTypeRef};
 use focus::{build_snapshot, focused_ui_element, snapshot_at};
 
-use super::decide::retry::{retry_once, RETRY_SETTLE_MS};
-use super::decide::{
-    after_ax, check_insert_text, is_web_content_field, validate_snapshots, value_confirms_insert,
-    AfterAx, InsertPath, InsertReport,
-};
+use super::decide::{check_insert_text, validate_snapshots, InsertPath, InsertReport};
 use super::types::TargetSnapshotDto;
 
 /// Serializes inserts (commands run off the main thread and may overlap).
@@ -37,15 +34,6 @@ pub fn validate_target(intended: TargetSnapshotDto) -> Result<TargetSnapshotDto,
         &intended,
         snapshot_at("delivery validation", false),
     ))
-}
-
-fn insert_selected_text_with(
-    text: &str,
-    set: impl FnOnce(&str, &str) -> Result<(), String>,
-) -> Result<(), String> {
-    // AXValue replaces the entire field; a failed selected-text set must not
-    // try another AX mutation. The caller will use the Copy/Failed policy.
-    set("AXSelectedText", text)
 }
 
 /// Re-read focus and require it to still be the validated, insertable field.
@@ -95,28 +83,6 @@ fn terminal_still_matches(
     Ok(())
 }
 
-/// Poll read-back briefly: typed key events are processed asynchronously.
-fn wait_for_insert(element: ax::AXUIElementRef, before: &str, text: &str) -> bool {
-    for _ in 0..30 {
-        if let Some(after) = copy_string_attr(element, "AXValue") {
-            if value_confirms_insert(before, &after, text) {
-                return true;
-            }
-        }
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
-    false
-}
-
-fn unverified(typed: bool, detail: String) -> Result<InsertReport, String> {
-    Ok(InsertReport {
-        typed,
-        unverified: true,
-        detail: Some(detail),
-        ..Default::default()
-    })
-}
-
 pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<InsertReport, String> {
     check_insert_text(text)?;
     if !intended.insertable || intended.kind != "insertable" {
@@ -145,66 +111,7 @@ pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<InsertRep
             typing::type_terminal(text, || terminal_still_matches(&validated, element))
         }
         InsertPath::AxSelectedText => {
-            let before = before.unwrap_or_default();
-            let ax = insert_selected_text_with(text, |a, t| set_ax_string(element, a, t));
-            let after = copy_string_attr(element, "AXValue");
-            let role = validated.element_role.clone().unwrap_or_default();
-            let has_dom_id = copy_string_attr(element, "AXDOMIdentifier").is_some();
-            // Skip the parent walk when the DOM id already proves web content.
-            let ancestors = if has_dom_id {
-                Vec::new()
-            } else {
-                ancestor_roles(element)
-            };
-            // Type only into web fields of hosts known to honor Unicode events.
-            let may_type = is_web_content_field(&role, has_dom_id, &ancestors)
-                && validated.app_pid.is_some_and(host::unicode_typing_ok);
-            let mut outcome = after_ax(may_type, ax, &before, after.as_deref(), text);
-            // Chromium/Electron may have dropped web AX while idle: re-assert
-            // once and retry (re-reading first, so no double insert).
-            if matches!(outcome, AfterAx::Failed(_))
-                && validated
-                    .app_pid
-                    .and_then(host::web_ax_activation)
-                    .is_some()
-            {
-                outcome = retry_once(
-                    &before,
-                    text,
-                    || {
-                        web_ax::reassert(validated.app_pid);
-                        std::thread::sleep(std::time::Duration::from_millis(RETRY_SETTLE_MS));
-                    },
-                    || copy_string_attr(element, "AXValue"),
-                    || {
-                        focus_still_matches(&validated)?;
-                        insert_selected_text_with(text, |a, t| set_ax_string(element, a, t))
-                    },
-                );
-            }
-            match outcome {
-                AfterAx::Inserted => Ok(InsertReport::default()),
-                AfterAx::Failed(err) => Err(err),
-                AfterAx::Unverified => unverified(
-                    false,
-                    "AX write changed the field but could not be verified".into(),
-                ),
-                AfterAx::TypeFallback => {
-                    let (posted, typed) = typing::type_text(
-                        text,
-                        || focus_still_matches(&validated),
-                        |so_far| wait_for_insert(element, &before, so_far),
-                    );
-                    match typed {
-                        Err(err) if posted == 0 => Err(err),
-                        Err(err) => unverified(true, format!("{err} (partially typed)")),
-                        Ok(()) => Ok(InsertReport {
-                            typed: true,
-                            ..Default::default()
-                        }),
-                    }
-                }
-            }
+            ax_insert::insert_selected(element, &validated, before.unwrap_or_default(), text)
         }
     };
     release(element as CFTypeRef);
@@ -214,7 +121,6 @@ pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<InsertRep
 #[cfg(test)]
 mod tests {
     use super::focus::focus_unavailable_reason;
-    use super::*;
 
     #[test]
     fn ax_focus_failure_reports_stage_trust_and_codes_without_target_data() {
@@ -231,16 +137,5 @@ mod tests {
         let reason = focus_unavailable_reason("capture start", 0, 0, true);
         assert!(reason.contains("capture start"));
         assert!(reason.contains("AXFocusedUIElement=0 (null)"));
-    }
-
-    #[test]
-    fn selected_text_failure_never_attempts_value_write() {
-        let mut attrs = Vec::new();
-        let result = insert_selected_text_with("dictation", |attr, text| {
-            attrs.push((attr.to_string(), text.to_string()));
-            Err("AX set failed".into())
-        });
-        assert!(result.is_err());
-        assert_eq!(attrs, [("AXSelectedText".into(), "dictation".into())]);
     }
 }
