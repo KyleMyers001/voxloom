@@ -4,7 +4,10 @@ type ControlProps = { id?: string; 'aria-describedby'?: string };
 
 type Props = {
   label: string;
-  /** Id of the control. Omit to have FormRow assign one to its single child control. */
+  /**
+   * Id for the control when the child has none. A child's own id always wins
+   * (it is never overwritten); without either, FormRow generates one.
+   */
   htmlFor?: string;
   help?: ReactNode;
   tag?: string;
@@ -15,7 +18,7 @@ type Props = {
 /** Settings-style row: label (+ optional tag and help) left, control right. */
 export function FormRow({ label, htmlFor, help, tag, children }: Props) {
   const autoId = useId();
-  const controlId = htmlFor ?? children.props.id ?? `frow-${autoId}`;
+  const controlId = children.props.id ?? htmlFor ?? `frow-${autoId}`;
   const helpId = help ? `${controlId}-help` : undefined;
   const describedBy = [children.props['aria-describedby'], helpId].filter(Boolean).join(' ') || undefined;
   const control = isValidElement(children)
