@@ -91,10 +91,11 @@ test('screens, settings, themes, and baselines stay synchronized', async (
   await expect(page.getByText(
     'Native microphone capture is unavailable here',
   )).toBeVisible();
-  await expect(page.getByLabel('Microphone')).toBeDisabled();
+  await expect(page.getByLabel('Microphone', { exact: true })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Unavailable' }))
     .toBeDisabled();
-  await page.getByLabel('Current style').selectOption('casual');
+  await page.getByRole('radiogroup', { name: 'Current style' })
+    .getByRole('radio', { exact: true, name: 'Casual' }).click();
 
   for (const screen of screens) {
     await page.getByRole('button', { name: screen }).click();
@@ -102,6 +103,7 @@ test('screens, settings, themes, and baselines stay synchronized', async (
   }
   for (const [theme, slug] of themes) {
     await page.getByRole('button', { name: 'Settings' }).click();
+    await page.getByRole('tab', { name: 'Appearance' }).click();
     await page.getByLabel(theme).check();
     for (const screen of screens) {
       await page.getByRole('button', { name: screen }).click();
@@ -113,6 +115,7 @@ test('screens, settings, themes, and baselines stay synchronized', async (
     }
   }
   await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('tab', { name: 'Appearance' }).click();
   await page.getByLabel('Follow system').check();
   await page.emulateMedia({ colorScheme: 'dark' });
   await expect(page.locator('body')).toHaveAttribute(

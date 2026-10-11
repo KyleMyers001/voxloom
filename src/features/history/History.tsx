@@ -24,9 +24,9 @@ const filters: { value: Filter; label: string }[] = [
 ];
 
 const retentionCopy: Record<Settings['transcriptRetention'], string> = {
-  '30-days': 'Kept for 30 days (Settings › Retention & privacy).',
-  forever: 'Kept until you delete them (Settings › Retention & privacy).',
-  off: 'Transcript retention is off (Settings › Retention & privacy).',
+  '30-days': 'Kept for 30 days (Settings › Privacy).',
+  forever: 'Kept until you delete them (Settings › Privacy).',
+  off: 'Transcript retention is off (Settings › Privacy).',
 };
 
 export function History({ onToast }: HistoryProps) {

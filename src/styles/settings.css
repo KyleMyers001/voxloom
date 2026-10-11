@@ -1,0 +1,88 @@
+/* Settings (UI PR 6a): Console Settings window layout — toolbar tabs, rows, callout, recovery grid. */
+.settings-window {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-win);
+  box-shadow: var(--shadow-win);
+  max-width: 760px;
+  overflow: hidden;
+}
+
+.settings-window__bar {
+  align-items: center;
+  background: var(--side);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: var(--s-5) var(--s-8) var(--s-4);
+}
+
+.settings-window__bar h1 { color: var(--mut); font-size: 12px; font-weight: 600; letter-spacing: 0; margin: 0; }
+.settings-tabs { display: flex; gap: var(--s-2); }
+
+.settings-tab {
+  align-items: center;
+  border: 0;
+  border-radius: 8px;
+  color: var(--mut);
+  display: flex;
+  flex-direction: column;
+  font-size: 11.5px;
+  font-weight: 500;
+  gap: 3px;
+  min-width: 84px;
+  padding: 6px 10px;
+}
+
+.settings-tab[aria-selected="true"] { background: var(--navon); color: var(--fg); }
+.settings-tab[aria-selected="true"] .icon { color: var(--accfg); }
+.settings-panel { padding: var(--s-9) var(--pad-x) var(--pad-x); }
+.settings-panel:focus-visible { outline-offset: -3px; }
+.settings-panel > h2 { font-size: 15px; font-weight: 700; margin-bottom: var(--s-7); }
+.settings-rows { display: grid; gap: var(--s-4); }
+.settings-rows .frow { flex-wrap: wrap; }
+.frow__control { align-items: center; display: flex; flex-wrap: wrap; gap: var(--s-4); justify-content: flex-end; }
+.frow__control input:not([type]) { max-width: 190px; }
+
+.mini-hud {
+  align-items: center;
+  background: var(--tile-bg);
+  border-radius: var(--r-pill);
+  box-shadow: var(--hud-shadow);
+  display: inline-flex;
+  gap: 2px;
+  height: 22px;
+  justify-content: center;
+  width: 78px;
+}
+
+.mini-hud i { background: var(--brand); border-radius: 2px; height: 8px; width: 2px; }
+.mini-hud i:nth-child(2n) { height: 13px; }
+
+.callout {
+  background: color-mix(in srgb, var(--info) 8%, var(--field));
+  border-radius: var(--r-tile);
+  margin-top: var(--s-8);
+  padding: var(--s-6) var(--s-7);
+}
+
+.callout p { color: var(--mut); font-size: 12px; margin: 4px 0 0; }
+.settings-subhead { font-size: var(--fs-section); margin: var(--s-9) 0 var(--s-4); }
+.recovery-grid { display: grid; gap: var(--s-4); grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+.recovery-grid .recovery-item {
+  background: var(--field);
+  border-left: 2px solid var(--warn);
+  border-radius: 0 var(--r-tile) var(--r-tile) 0;
+  font-size: 12px;
+  margin: 0;
+  padding: var(--s-4) var(--s-5);
+}
+
+.appearance-options { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+
+@media (max-width: 780px) {
+  .recovery-grid { grid-template-columns: 1fr; }
+  .settings-panel { padding: var(--s-8); }
+}

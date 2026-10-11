@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { App } from '../../src/app/App';
@@ -150,8 +150,9 @@ describe('boot hydrate polish', () => {
     expect(await screen.findByText('durable history row')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Settings' }));
-    const retention = await screen.findByLabelText(/Transcript retention/i);
-    expect(retention).toHaveValue('forever');
+    await user.click(await screen.findByRole('tab', { name: 'Privacy' }));
+    const retention = await screen.findByRole('radiogroup', { name: 'Transcript retention' });
+    expect(within(retention).getByRole('radio', { name: 'Until deleted' })).toHaveAttribute('aria-checked', 'true');
 
     await user.click(screen.getByRole('button', { name: 'Dictionary' }));
     expect(await screen.findByText('PersistedWord')).toBeInTheDocument();
@@ -199,8 +200,9 @@ describe('boot hydrate polish', () => {
     });
 
     await user.click(screen.getByRole('button', { name: 'Settings' }));
-    const retention = await screen.findByLabelText(/Transcript retention/i);
-    expect(retention).toHaveValue('30-days');
+    await user.click(await screen.findByRole('tab', { name: 'Privacy' }));
+    const retention = await screen.findByRole('radiogroup', { name: 'Transcript retention' });
+    expect(within(retention).getByRole('radio', { name: '30 days' })).toHaveAttribute('aria-checked', 'true');
   });
 
   it('is boot-ready immediately when durable persistence is off', async () => {
@@ -213,8 +215,9 @@ describe('boot hydrate polish', () => {
     await user.click(screen.getByRole('button', { name: 'Skip' }));
     await user.click(screen.getByRole('button', { name: 'Settings' }));
     expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
+    await user.click(await screen.findByRole('tab', { name: 'Privacy' }));
     expect(
-      await screen.findByLabelText(/Transcript retention/i),
+      await screen.findByRole('radiogroup', { name: 'Transcript retention' }),
     ).toBeInTheDocument();
   });
 });
