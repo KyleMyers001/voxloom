@@ -56,15 +56,18 @@ pub use backend::{
     CaptureStreamMeta, CpalStreamBackend, PermissionBackend, RealPermissionBackend, StreamBackend,
 };
 mod runtime;
-use runtime::*;
+use runtime::{CaptureLimits, LoopRuntime, SystemLoopRuntime};
 mod level;
-use level::*;
+use level::LevelMeter;
 mod state;
-use state::*;
+use state::{
+    is_cancelled, is_stopped, release_owned_reservation, valid_request_id, CoordinatorState,
+    PhaseGuard, Reservation,
+};
 mod emit;
-use emit::*;
+use emit::{emit_early_stop, emit_terminal};
 mod capture_loop;
-use capture_loop::*;
+use capture_loop::{capture_loop, LoopTerminal};
 
 // Constants
 
