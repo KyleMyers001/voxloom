@@ -10,7 +10,9 @@ const TAURI = join(ROOT, 'src-tauri', 'tauri.conf.json');
 const CARGO = join(ROOT, 'src-tauri', 'Cargo.toml');
 const CARGO_LOCK = join(ROOT, 'src-tauri', 'Cargo.lock');
 
-export const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+// Official semver.org regex (https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string).
+export const SEMVER =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 
 const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'));
 const writeJson = (file, data) =>
