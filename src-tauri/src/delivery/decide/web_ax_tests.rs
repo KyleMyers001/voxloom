@@ -120,6 +120,7 @@ fn ids(window_doc: Option<&str>, area_url: Option<&str>) -> DocIds {
     DocIds {
         window_doc: window_doc.map(Into::into),
         area_url: area_url.map(Into::into),
+        window_title: Some("Inbox - Gmail".into()),
     }
 }
 
@@ -155,7 +156,7 @@ fn found_field_must_be_in_the_captured_web_area() {
 }
 
 #[test]
-fn unknown_area_url_at_completion_relies_on_window_identity() {
+fn window_document_alone_suffices_when_area_url_unknown_at_completion() {
     let start = ids(Some("https://a/"), None);
     assert!(context_holds(
         Some(true),
@@ -163,6 +164,36 @@ fn unknown_area_url_at_completion_relies_on_window_identity() {
         &ids(Some("https://a/"), Some("https://x/")),
         true
     ));
+    assert!(!context_holds(
+        Some(true),
+        &start,
+        &ids(None, Some("https://a/")),
+        true
+    ));
+}
+
+#[test]
+fn no_page_identity_at_completion_refuses_the_late_target() {
+    let none = DocIds::default();
+    assert!(!context_holds(Some(true), &none, &none, false));
+    assert!(!context_holds(Some(true), &none, &none, true));
+    let titled = DocIds {
+        window_title: Some("Inbox".into()),
+        ..DocIds::default()
+    };
+    assert!(!context_holds(Some(true), &titled, &titled, true));
+}
+
+#[test]
+fn title_change_in_the_same_window_aborts() {
+    // Chrome tab switch: same window element, URL/doc may lag; title changes.
+    let start = ids(Some("https://a/"), Some("https://a/"));
+    let mut now = start.clone();
+    now.window_title = Some("Other tab".into());
+    assert!(!context_holds(Some(true), &start, &now, false));
+    assert!(!context_holds(Some(true), &start, &now, true));
+    now.window_title = None;
+    assert!(!context_holds(Some(true), &start, &now, false));
 }
 
 #[test]

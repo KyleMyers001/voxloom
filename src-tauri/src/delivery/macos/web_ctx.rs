@@ -1,5 +1,5 @@
 //! Window/document identity for the bounded web-AX wait: the focused window
-//! (CFEqual) plus its AXDocument and the web area's AXURL, captured at
+//! (CFEqual) plus its AXTitle, AXDocument and the web area's AXURL, captured at
 //! completion and required unchanged on every poll and on the field found.
 
 use super::ax::*;
@@ -79,6 +79,9 @@ pub fn capture(pid: i32, focus: Option<AXUIElementRef>) -> WebContext {
         ids: DocIds {
             window_doc,
             area_url: focus.and_then(web_area_url),
+            window_title: (!window.is_null())
+                .then(|| copy_string_attr(window as AXUIElementRef, "AXTitle"))
+                .flatten(),
         },
     }
 }

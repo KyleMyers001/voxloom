@@ -72,15 +72,25 @@ pub struct DocIds {
     pub window_doc: Option<String>,
     /// AXURL (or AXDocument) of the web area containing focus.
     pub area_url: Option<String>,
+    /// AXTitle of the focused window (the active tab title in Chrome; tabs
+    /// share one window element, so window identity alone misses tab switches).
+    pub window_title: Option<String>,
 }
 
-/// The late field may be used only if the focused window is the same element
-/// (`same_window`: CFEqual; `None` = unreadable on either side => abort) and
-/// every identity known at completion is unchanged. The web area URL is often
-/// unknown until the tree is enabled; once the field is found, its area URL
-/// must match a URL captured at completion.
+/// The late field may be used only if:
+/// - a page identity (window AXDocument or web-area URL) was readable at
+///   completion — otherwise refuse (Copy): a tab switch would be undetectable;
+/// - the focused window is the same element (`same_window`: CFEqual; `None` =
+///   unreadable on either side => refuse);
+/// - the window title (active tab title) is exactly unchanged;
+/// - the window AXDocument, if known at completion, is unchanged;
+/// - the web-area URL, if known at completion, matches whenever it is
+///   readable now, and MUST match on the field that is found.
 pub fn context_holds(same_window: Option<bool>, start: &DocIds, now: &DocIds, found: bool) -> bool {
-    if same_window != Some(true) {
+    if start.window_doc.is_none() && start.area_url.is_none() {
+        return false;
+    }
+    if same_window != Some(true) || now.window_title != start.window_title {
         return false;
     }
     if start.window_doc.is_some() && now.window_doc != start.window_doc {

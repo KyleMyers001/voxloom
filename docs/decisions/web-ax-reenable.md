@@ -15,7 +15,23 @@
 
    Any app switch aborts the wait and keeps the original non-insertable observation (Copy).
    - The snapshot command is now async so this wait never blocks the UI thread.
-   - **Window/page guard (review on #35):** at completion, capture the app's focused window (`AXFocusedWindow`), its `AXDocument`, and the focused web area's `AXURL`/`AXDocument` where available (`macos/web_ctx.rs`). On **every** poll and on the field that's found, the window must be the same element (CFEqual) and every identity known at completion must be unchanged; the found field's web area URL must match a URL captured at completion. Switching window, tab, or page during the wait aborts to Copy. Policy: `decide/web_ax.rs` `context_holds`. Limitation: moving to another field on the same page and in the same window within the wait isn't detectable, because no field existed to compare against.
+   - **Window/page guard (review on #35):** at completion, capture these (`macos/web_ctx.rs`):
+     - the app's focused window (`AXFocusedWindow`);
+     - its `AXTitle` (the active tab's title in Chrome; tabs share one window element);
+     - its `AXDocument`;
+     - the focused web area's `AXURL`/`AXDocument`.
+
+     Rules (`decide/web_ax.rs` `context_holds`):
+     - If **neither** the window document nor the web-area URL was readable at completion, the late target is **refused** (Copy): a tab switch would be undetectable.
+     - Otherwise, on **every** poll and on the field that's found, the window must be the same element (CFEqual) and the title exactly the same.
+     - A window document known at completion must be unchanged.
+     - A web-area URL known at completion must match whenever it's readable, and must match on the found field.
+     - A tab switch changes the title, so it aborts even when the URL lags.
+
+     Limitations:
+     - Moving to another field on the same page in the same window within the wait isn't detectable (no field existed to compare against).
+     - A tab switch between two tabs with identical titles and no readable URL/document is refused only by the all-None rule; with a readable document it's caught by the document check.
+     - Pages that change their title while loading or with notification counts (Slack/Gmail) make the wait fall back to Copy.
 3. **One guarded retry** (`decide/retry.rs`), on "AXSelectedText reported success but nothing changed" in an allowlisted host:
    - It runs only when the first write returned **Ok** and read back unchanged; never after an AX error.
    - Re-assert, then require **two unchanged reads** (after 150 ms, then 300 ms). If the late first write shows up on either read, report Inserted with no second write; any other change → Unverified with no write.
