@@ -72,8 +72,8 @@
   --accfg: #376b00; /* AA: 5.28 on navon; white text on it 6.43 */
   --ok: #18772f; /* AA: 4.61 seg, 4.63 navon, 5.11 field, 5.45 bg, 5.65 panel */
   --info: #00717f; /* AA: 5.18 on field, 5.52 bg */
-  --warn: #9a5a00;
-  --err: #c62f35;
+  --warn: #945600; /* AA: 4.77 seg, 4.8 navon, 5.29 field, 5.64 bg, 5.85 panel */
+  --err: #bf2c32; /* AA: 4.73 seg, 4.76 navon, 5.25 field, 5.59 bg, 5.8 panel */
   --accent-text: #ffffff;
 }
 
