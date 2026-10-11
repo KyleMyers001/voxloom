@@ -11,12 +11,15 @@ site/
   favicon.svg
   assets/og.png Open Graph / Twitter card image (1200x630)
   scripts/rename.sh
+  scripts/check-placeholders.sh
 ```
 
 Preview locally: `python3 -m http.server -d site 8080` and open http://localhost:8080.
 
 ## Placeholders to fill before launch
 Search for `PLACEHOLDER` (visible `// PLACEHOLDER` labels and `<!-- PLACEHOLDER -->` comments).
+
+**Pre-deploy check:** run `site/scripts/check-placeholders.sh`. It lists any remaining `PLACEHOLDER` markers in the site files and exits 1 if there are any (this README and `scripts/` are excluded), so it can gate a deploy step. It fails today on purpose.
 
 | Item | Where |
 |---|---|
@@ -32,4 +35,8 @@ Replace the domain everywhere with:
 
 ## Renaming the product
 "Voxloom" is a placeholder name. Run `site/scripts/rename.sh "NewName"`. It replaces every capitalized `Voxloom` in `*.html` and `*.css` (page text, titles, meta and social tags) and leaves lowercase GitHub URLs alone. Undo with `OLD=NewName site/scripts/rename.sh Voxloom`.
+
+The replacement is literal, so names containing `&`, `/` or `\` are safe. The script exits non-zero if a file can't be rewritten or if the old name is still present afterwards. It writes each file through a temp file and creates no backups.
+
+**Round-trip caveat:** undoing a rename turns *every* occurrence of NewName back into Voxloom. If NewName already appeared in the pages before the rename, those occurrences change too, so the round trip isn't lossless. Check first with `grep -F "NewName" site/*.html site/*.css`.
 `assets/og.png` has the name baked in, so regenerate it after a rename.
