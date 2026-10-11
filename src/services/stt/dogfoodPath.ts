@@ -16,6 +16,7 @@ import {
 import type { SttEngine } from './contracts';
 import { audioHandleFromCapture } from './fromCapture';
 import { createSttEngine } from './factory';
+import { explainEmptyTranscript } from './noSpeech';
 import { resolveTranscriptionModelId } from './resolveModelId';
 import type { Transcript } from './types';
 
@@ -105,13 +106,16 @@ export async function dogfoodTranscribeAndCopy(
         // Unavailable AX must still honor the user's Copy fallback setting.
       }
     }
-    const delivery = await deliverTranscript({
-      clipboardFallback,
-      isCurrent: options.isCurrent,
-      intended,
-      platform,
-      text: transcript.text,
-    });
+    const delivery = explainEmptyTranscript(
+      await deliverTranscript({
+        clipboardFallback,
+        isCurrent: options.isCurrent,
+        intended,
+        platform,
+        text: transcript.text,
+      }),
+      transcript,
+    );
     return {
       copied: delivery.status === 'copied',
       copyWarning: delivery.status === 'failed'

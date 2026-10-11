@@ -21,6 +21,8 @@ export interface DogfoodRecordInput {
   /** STT model id used for this transcript, when known. */
   model?: string | null;
   now: number;
+  /** Raw STT text before BUS-23 cleanup; stored only when it differs. */
+  rawText?: string;
   style: WritingStyle;
   text: string;
 }
@@ -90,12 +92,14 @@ export function createDogfoodRecord(
   }
 
   const durationSeconds = Math.max(0, Math.round(input.durationMs / 1_000));
+  const rawText = input.rawText?.trim();
 
   return {
     createdAt: input.now,
     durationSeconds,
     id: input.id,
     model: input.model ?? null,
+    ...(rawText && rawText !== text ? { rawText } : {}),
     // STT/delivery failures retain text, never a replayable audio buffer.
     recoveryExpiresAt: null,
     status,

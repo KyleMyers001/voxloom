@@ -4,21 +4,37 @@
 //! CI / this box can compile without cmake + ggml. On Kyle's Mac, build with
 //! `--features whisper` (see docs/review/BUS-10-whisper.md).
 
+use super::cleanup::DropReason;
 use super::error::SttErrorDto;
+use super::filter_config::SpeechFilterConfig;
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TranscriptDto {
+    /// Cleaned text used for insert and Copy (BUS-23).
     pub text: String,
     pub language: Option<String>,
+    /// Whisper output before cleanup, kept for debugging / History.
+    pub raw_text: String,
+    /// Set when cleanup or the upstream gates reduced the output to nothing.
+    pub dropped: Option<DropReason>,
 }
 
-/// Transcribe mono f32 PCM at `sample_rate_hz` using the model at `model_path`.
-pub fn transcribe_pcm(
-    model_path: &std::path::Path,
-    samples: &[f32],
-    sample_rate_hz: u32,
-) -> Result<TranscriptDto, SttErrorDto> {
+impl TranscriptDto {
+    /// Raw engine output, before BUS-23 cleanup.
+    #[cfg_attr(not(any(test, feature = "whisper")), allow(dead_code))]
+    pub fn raw(text: String, language: Option<String>) -> Self {
+        Self {
+            raw_text: text.clone(),
+            text,
+            language,
+            dropped: None,
+        }
+    }
+}
+
+/// Reject buffers whisper cannot accept (empty / not 16 kHz).
+pub fn validate_pcm(samples: &[f32], sample_rate_hz: u32) -> Result<(), SttErrorDto> {
     if samples.is_empty() {
         return Err(SttErrorDto::new(
             "unsupported-audio",
@@ -31,15 +47,27 @@ pub fn transcribe_pcm(
             format!("Expected 16 kHz PCM, got {sample_rate_hz} Hz"),
         ));
     }
+    Ok(())
+}
+
+/// Transcribe mono f32 PCM at `sample_rate_hz` using the model at `model_path`.
+/// `decode` supplies the whisper.cpp non-speech parameters (BUS-23).
+pub fn transcribe_pcm(
+    model_path: &std::path::Path,
+    samples: &[f32],
+    sample_rate_hz: u32,
+    decode: &SpeechFilterConfig,
+) -> Result<TranscriptDto, SttErrorDto> {
+    validate_pcm(samples, sample_rate_hz)?;
 
     #[cfg(feature = "whisper")]
     {
-        transcribe_with_whisper(model_path, samples)
+        transcribe_with_whisper(model_path, samples, decode)
     }
 
     #[cfg(not(feature = "whisper"))]
     {
-        let _ = model_path;
+        let _ = (model_path, decode);
         Err(SttErrorDto::new(
             "engine-unavailable",
             "Native whisper.cpp is not linked in this build. On macOS rebuild \
@@ -54,6 +82,7 @@ pub fn transcribe_pcm(
 fn transcribe_with_whisper(
     model_path: &std::path::Path,
     samples: &[f32],
+    decode: &SpeechFilterConfig,
 ) -> Result<TranscriptDto, SttErrorDto> {
     use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
@@ -75,6 +104,9 @@ fn transcribe_with_whisper(
     params.set_print_progress(false);
     params.set_print_realtime(false);
     params.set_print_timestamps(false);
+    params.set_suppress_non_speech_tokens(decode.suppress_non_speech_tokens);
+    params.set_suppress_blank(decode.suppress_blank);
+    params.set_no_speech_thold(decode.no_speech_thold);
 
     state
         .full(params, samples)
@@ -95,10 +127,10 @@ fn transcribe_with_whisper(
         text.push_str(segment.trim());
     }
 
-    Ok(TranscriptDto {
-        text: text.trim().to_owned(),
-        language: Some("en".to_owned()),
-    })
+    Ok(TranscriptDto::raw(
+        text.trim().to_owned(),
+        Some("en".to_owned()),
+    ))
 }
 
 #[cfg(test)]
@@ -108,20 +140,38 @@ mod tests {
 
     #[test]
     fn empty_audio_rejected() {
-        let err = transcribe_pcm(Path::new("/nope"), &[], 16_000).unwrap_err();
+        let err = transcribe_pcm(
+            Path::new("/nope"),
+            &[],
+            16_000,
+            &SpeechFilterConfig::default(),
+        )
+        .unwrap_err();
         assert_eq!(err.code, "unsupported-audio");
     }
 
     #[test]
     fn wrong_rate_rejected() {
-        let err = transcribe_pcm(Path::new("/nope"), &[0.1], 8_000).unwrap_err();
+        let err = transcribe_pcm(
+            Path::new("/nope"),
+            &[0.1],
+            8_000,
+            &SpeechFilterConfig::default(),
+        )
+        .unwrap_err();
         assert_eq!(err.code, "unsupported-audio");
     }
 
     #[cfg(not(feature = "whisper"))]
     #[test]
     fn without_whisper_feature_reports_engine_unavailable() {
-        let err = transcribe_pcm(Path::new("/nope"), &[0.1, 0.2], 16_000).unwrap_err();
+        let err = transcribe_pcm(
+            Path::new("/nope"),
+            &[0.1, 0.2],
+            16_000,
+            &SpeechFilterConfig::default(),
+        )
+        .unwrap_err();
         assert_eq!(err.code, "engine-unavailable");
     }
 }
