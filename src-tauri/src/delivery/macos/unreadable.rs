@@ -80,6 +80,12 @@ pub fn insert_without_value(
     validated: &TargetSnapshotDto,
     text: &str,
 ) -> Result<InsertReport, String> {
+    let readable = copy_string_attr(element, "AXValue").is_some();
+    let how = if readable {
+        "verified by character count and AXValue"
+    } else {
+        "verified by character count (AXValue unreadable)"
+    };
     let mut io = AxCounts {
         element,
         validated,
@@ -87,16 +93,14 @@ pub fn insert_without_value(
     };
     match insert_unreadable(&mut io, text, true) {
         UnreadableOutcome::Ax(AfterAx::Inserted) => Ok(InsertReport {
-            detail: Some("verified by character count (AXValue unreadable)".into()),
+            detail: Some(how.into()),
             ..Default::default()
         }),
         UnreadableOutcome::Ax(AfterAx::Failed(err)) => Err(err),
-        UnreadableOutcome::Ax(_) => {
-            unverified(false, "AXValue unreadable; insert could not be verified")
-        }
+        UnreadableOutcome::Ax(_) => unverified(false, "Messages insert could not be verified"),
         UnreadableOutcome::Typed(_, Ok(())) => Ok(InsertReport {
             typed: true,
-            detail: Some("typed; verified by character count (AXValue unreadable)".into()),
+            detail: Some(format!("typed; {how}")),
             ..Default::default()
         }),
         UnreadableOutcome::TypedUnverified(_) => unverified(

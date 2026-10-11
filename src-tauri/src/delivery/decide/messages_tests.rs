@@ -266,7 +266,8 @@ fn attempt_two_readable_value_caret_at_end_types_and_cross_checks() {
 #[test]
 fn attempt_two_readable_value_with_selection_replaced() {
     // "Hi there" with "there" selected (5) replaced by "hello": 8 -> 8 is
-    // ambiguous by count, so the AX path can't claim; typing proves it.
+    // ambiguous by count, so neither Inserted nor Failed: Unverified, and we
+    // never type on top (the AX write may have landed).
     let mut f = Fake::new(&[Some(8)]);
     f.selected = Some(5);
     f.after_type = Some([Some(8)].into());
@@ -315,4 +316,50 @@ fn readable_value_that_contradicts_the_count_is_unverified() {
         insert_unreadable(&mut f, TEXT, true),
         UnreadableOutcome::TypedUnverified(1)
     );
+}
+
+#[test]
+fn value_readable_before_but_unreadable_after_is_unverified() {
+    let mut f = Fake::new(&[Some(3), Some(8)]);
+    f.values = [v("Hi "), None].into();
+    assert_eq!(
+        insert_unreadable(&mut f, TEXT, true),
+        UnreadableOutcome::Ax(AfterAx::Unverified)
+    );
+    let mut f = Fake::new(&[Some(3)]);
+    f.after_type = Some([Some(8)].into());
+    f.values = [v("Hi "), None].into();
+    assert_eq!(
+        insert_unreadable(&mut f, TEXT, true),
+        UnreadableOutcome::TypedUnverified(1)
+    );
+}
+
+#[test]
+fn counts_are_utf16_code_units_for_emoji_and_cjk() {
+    // "日本😀": 3 scalars, 4 UTF-16 units (CJK 1 each, emoji surrogate pair).
+    let text = "日本😀";
+    assert_eq!(text.encode_utf16().count(), 4);
+    let mut f = Fake::new(&[Some(3), Some(7)]);
+    f.values = [v("Hi "), v("Hi 日本😀")].into();
+    assert_eq!(
+        insert_unreadable(&mut f, text, true),
+        UnreadableOutcome::Ax(AfterAx::Inserted)
+    );
+    // A scalar-count delta (3) is NOT accepted as proof.
+    let mut f = Fake::new(&[Some(3), Some(6)]);
+    assert_eq!(
+        insert_unreadable(&mut f, text, true),
+        UnreadableOutcome::Ax(AfterAx::Unverified)
+    );
+    // ZWJ family emoji: 1 grapheme, 8 UTF-16 units; typed path per-chunk too.
+    let family = "👨‍👩‍👧";
+    assert_eq!(family.encode_utf16().count(), 8);
+    let mut f = Fake::new(&[Some(0)]);
+    f.after_type = Some([Some(8)].into());
+    assert_eq!(
+        insert_unreadable(&mut f, family, true),
+        UnreadableOutcome::Typed(1, Ok(()))
+    );
+    assert!(typed_count_ok(0, 0, Some(8), 8));
 }

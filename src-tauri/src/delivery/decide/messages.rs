@@ -59,7 +59,9 @@ pub enum UnreadableOutcome {
 /// Guarded Messages flow. When AXValue is readable (composer already holds
 /// text, e.g. a second dictation), a success is additionally cross-checked
 /// against the value: a readable value that doesn't prove the insert
-/// downgrades to Unverified.
+/// downgrades to Unverified, and so does one that became unreadable.
+/// Counts and lengths are UTF-16 code units (NSString/CFRange convention for
+/// AXNumberOfCharacters, AXSelectedTextRange).
 pub fn insert_unreadable(
     io: &mut impl UnreadableIo,
     text: &str,
@@ -74,12 +76,14 @@ pub fn insert_unreadable(
     let Some(before_value) = before_value.filter(|_| succeeded) else {
         return outcome;
     };
-    match io.value() {
-        Some(now) if !value_confirms_insert(&before_value, &now, text) => match outcome {
-            UnreadableOutcome::Typed(posted, _) => UnreadableOutcome::TypedUnverified(posted),
-            _ => UnreadableOutcome::Ax(AfterAx::Unverified),
-        },
-        _ => outcome,
+    // Readable before but unreadable after is not proof either: Unverified.
+    let confirmed = io
+        .value()
+        .is_some_and(|now| value_confirms_insert(&before_value, &now, text));
+    match outcome {
+        _ if confirmed => outcome,
+        UnreadableOutcome::Typed(posted, _) => UnreadableOutcome::TypedUnverified(posted),
+        _ => UnreadableOutcome::Ax(AfterAx::Unverified),
     }
 }
 
