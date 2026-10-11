@@ -55,5 +55,10 @@ describe('Switch styling (UI PR 2)', () => {
     expect(controls).not.toMatch(/#fff\b/);
     expect(controls).toContain('background: var(--knob)');
     expect(controls).toMatch(/\.switch i \{[^}]*background: var\(--switch-off\);[^}]*box-shadow: inset 0 0 0 1px var\(--line\)/);
+    const tokens = css('tokens.css');
+    // Per-theme literal values so each theme resolves its own track (no :root-only var() mixing).
+    expect(tokens).toMatch(/:root \{[^}]*--switch-off: #66667a;/);
+    expect(tokens).toMatch(/\[data-appearance-resolved="light"\] \{[^}]*--switch-off: #808389;/);
+    expect(tokens).toMatch(/\[data-appearance-resolved="sodium-rain"\] \{[^}]*--switch-off: #7a909a;/);
   });
 });
