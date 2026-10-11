@@ -48,3 +48,12 @@ describe('AppTile', () => {
     expect(ids[0]).not.toBe(ids[1]);
   });
 });
+
+describe('Switch styling (UI PR 2)', () => {
+  it('uses tokens for the knob and a visible off track', () => {
+    const controls = css('ui-controls.css');
+    expect(controls).not.toMatch(/#fff\b/);
+    expect(controls).toContain('background: var(--knob)');
+    expect(controls).toMatch(/\.switch i \{[^}]*background: var\(--switch-off\);[^}]*box-shadow: inset 0 0 0 1px var\(--line\)/);
+  });
+});

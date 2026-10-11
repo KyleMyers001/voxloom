@@ -88,8 +88,7 @@
 
 .frow__label { display: grid; gap: 2px; }
 
-.frow__label > label,
-.frow__label > span:first-child {
+.frow__label > label {
   color: var(--fg);
   font-size: var(--fs-body);
   font-weight: 550;

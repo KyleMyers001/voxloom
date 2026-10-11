@@ -18,11 +18,16 @@ export function SegmentedControl<T extends string>(
   { label, options, value, onChange, size = 'md', disabled = false }: Props<T>,
 ) {
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
-  const current = Math.max(0, options.findIndex((o) => o.value === value));
+  // -1 when value isn't an option: nothing is checked, but the first option stays focusable.
+  const current = options.findIndex((o) => o.value === value);
+  const tabStop = current < 0 ? 0 : current;
 
   const onKeyDown = (event: KeyboardEvent) => {
     let next: number | undefined;
-    if (event.key in step) next = (current + step[event.key] + options.length) % options.length;
+    if (event.key in step) {
+      const from = current < 0 ? (step[event.key] > 0 ? -1 : 0) : current;
+      next = (from + step[event.key] + options.length) % options.length;
+    }
     else if (event.key === 'Home') next = 0;
     else if (event.key === 'End') next = options.length - 1;
     if (next === undefined) return;
@@ -48,7 +53,7 @@ export function SegmentedControl<T extends string>(
           onClick={() => onChange(option.value)}
           ref={(el) => { refs.current[index] = el; }}
           role="radio"
-          tabIndex={index === current ? 0 : -1}
+          tabIndex={index === tabStop ? 0 : -1}
           type="button"
         >
           {option.label}

@@ -6,6 +6,7 @@ import { EmptyState } from '../../../src/components/EmptyState';
 import { FormRow } from '../../../src/components/FormRow';
 import { Icon, iconNames } from '../../../src/components/Icon';
 import { ProgressBar } from '../../../src/components/ProgressBar';
+import { Switch } from '../../../src/components/Switch';
 
 describe('Icon', () => {
   it('ships the full spec set and is decorative unless labelled', () => {
@@ -64,8 +65,25 @@ describe('ProgressBar', () => {
 });
 
 describe('FormRow', () => {
+  it('auto-wires label and help to a control without an id', () => {
+    render(<FormRow help="Copies when insertion isn't safe." label="Clipboard fallback"><Switch checked hideLabel label="Clipboard fallback" onChange={() => {}} /></FormRow>);
+    const control = screen.getByRole('switch', { name: 'Clipboard fallback' });
+    expect(control.id).not.toBe('');
+    expect(screen.getByText('Clipboard fallback', { selector: 'label' }).getAttribute('for')).toBe(control.id);
+    expect(control).toHaveAccessibleDescription('Copies when insertion isn\'t safe.');
+  });
+
+  it('keeps an existing aria-describedby and omits it without help', () => {
+    render(<>
+      <FormRow help="Help" htmlFor="a" label="A"><input aria-describedby="other" /></FormRow>
+      <FormRow label="B"><input /></FormRow>
+    </>);
+    expect(screen.getByLabelText('A').getAttribute('aria-describedby')).toBe('other a-help');
+    expect(screen.getByLabelText('B').hasAttribute('aria-describedby')).toBe(false);
+  });
+
   it('associates the label with its control and shows tag and help', () => {
-    render(<FormRow help="Used when insertion isn't safe." htmlFor="mic" label="Microphone" tag="English-first"><select id="mic" /></FormRow>);
+    render(<FormRow help="Used when insertion isn't safe." htmlFor="mic" label="Microphone" tag="English-first"><select /></FormRow>);
     expect(screen.getByLabelText('Microphone').tagName).toBe('SELECT');
     expect(screen.getByText('English-first')).toBeTruthy();
     expect(screen.getByText(/insertion isn't safe/)).toBeTruthy();

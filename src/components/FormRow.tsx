@@ -1,17 +1,34 @@
-import type { ReactNode } from 'react';
+import { cloneElement, isValidElement, useId, type ReactElement, type ReactNode } from 'react';
 
-type Props = { label: string; htmlFor?: string; help?: ReactNode; tag?: string; children: ReactNode };
+type ControlProps = { id?: string; 'aria-describedby'?: string };
+
+type Props = {
+  label: string;
+  /** Id of the control. Omit to have FormRow assign one to its single child control. */
+  htmlFor?: string;
+  help?: ReactNode;
+  tag?: string;
+  /** A single control element; FormRow wires its id and aria-describedby. */
+  children: ReactElement<ControlProps>;
+};
 
 /** Settings-style row: label (+ optional tag and help) left, control right. */
 export function FormRow({ label, htmlFor, help, tag, children }: Props) {
+  const autoId = useId();
+  const controlId = htmlFor ?? children.props.id ?? `frow-${autoId}`;
+  const helpId = help ? `${controlId}-help` : undefined;
+  const describedBy = [children.props['aria-describedby'], helpId].filter(Boolean).join(' ') || undefined;
+  const control = isValidElement(children)
+    ? cloneElement(children, { id: controlId, 'aria-describedby': describedBy })
+    : (children as ReactNode);
   return (
     <div className="frow">
       <span className="frow__label">
-        {htmlFor ? <label htmlFor={htmlFor}>{label}</label> : <span>{label}</span>}
+        <label htmlFor={controlId}>{label}</label>
         {tag ? <span className="tag">{tag}</span> : null}
-        {help ? <small className="frow__help">{help}</small> : null}
+        {help ? <small className="frow__help" id={helpId}>{help}</small> : null}
       </span>
-      <span className="frow__control">{children}</span>
+      <span className="frow__control">{control}</span>
     </div>
   );
 }

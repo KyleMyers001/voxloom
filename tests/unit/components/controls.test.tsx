@@ -45,6 +45,20 @@ describe('SegmentedControl', () => {
     expect(onChange.mock.calls.map(([v]) => v)).toEqual(['inserted', 'copied', 'all', 'copied', 'all', 'copied']);
   });
 
+  it('checks nothing for an unknown value but keeps the first option focusable', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<SegmentedControl label="Status" onChange={onChange} options={options} value={'gone' as V} />);
+    const radios = screen.getAllByRole('radio');
+    expect(radios.map((r) => r.getAttribute('aria-checked'))).toEqual(['false', 'false', 'false']);
+    expect(radios.map((r) => r.tabIndex)).toEqual([0, -1, -1]);
+    await user.tab();
+    expect(document.activeElement).toBe(radios[0]);
+    await user.keyboard('{ArrowRight}');
+    await user.keyboard('{ArrowLeft}');
+    expect(onChange.mock.calls.map(([v]) => v)).toEqual(['all', 'copied']);
+  });
+
   it('selects on click', async () => {
     render(<Seg />);
     await userEvent.click(screen.getByRole('radio', { name: 'Copied' }));

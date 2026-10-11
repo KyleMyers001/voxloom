@@ -21,6 +21,8 @@
   --err: #ff6b6b;
   --brand: linear-gradient(90deg, #b6ff3c, #3cf0ff);
   --on-brand: #08080c;
+  --knob: #ffffff; /* switch knob, both themes */
+  --switch-off: color-mix(in srgb, var(--mut) 38%, var(--seg));
 
   --r-kbd: 5px;
   --r-ctl: 7px;
