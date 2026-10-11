@@ -10,12 +10,14 @@ mod focus;
 mod host;
 mod registry;
 mod typing;
+mod web_ax;
 
 use std::sync::Mutex;
 
 use ax::{ancestor_roles, copy_string_attr, release, set_ax_string, AXIsProcessTrusted, CFTypeRef};
 use focus::{build_snapshot, focused_ui_element, snapshot_at};
 
+use super::decide::retry::{retry_once, RETRY_SETTLE_MS};
 use super::decide::{
     after_ax, check_insert_text, is_web_content_field, validate_snapshots, value_confirms_insert,
     AfterAx, InsertPath, InsertReport,
@@ -155,7 +157,30 @@ pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<InsertRep
             // Type only into web fields of hosts known to honor Unicode events.
             let may_type = is_web_content_field(&role, has_dom_id, &ancestors)
                 && validated.app_pid.is_some_and(host::unicode_typing_ok);
-            match after_ax(may_type, ax, &before, after.as_deref(), text) {
+            let mut outcome = after_ax(may_type, ax, &before, after.as_deref(), text);
+            // Chromium/Electron may have dropped web AX while idle: re-assert
+            // once and retry (re-reading first, so no double insert).
+            if matches!(outcome, AfterAx::Failed(_))
+                && validated
+                    .app_pid
+                    .and_then(host::web_ax_activation)
+                    .is_some()
+            {
+                outcome = retry_once(
+                    &before,
+                    text,
+                    || {
+                        web_ax::reassert(validated.app_pid);
+                        std::thread::sleep(std::time::Duration::from_millis(RETRY_SETTLE_MS));
+                    },
+                    || copy_string_attr(element, "AXValue"),
+                    || {
+                        focus_still_matches(&validated)?;
+                        insert_selected_text_with(text, |a, t| set_ax_string(element, a, t))
+                    },
+                );
+            }
+            match outcome {
                 AfterAx::Inserted => Ok(InsertReport::default()),
                 AfterAx::Failed(err) => Err(err),
                 AfterAx::Unverified => unverified(
