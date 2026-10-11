@@ -32,7 +32,7 @@ describe('packaged-app TCC config', () => {
     expect(conf.identifier).toBe('com.voxloom.prototype');
     expect(conf.app.windows[0]?.title).toBe('Voxloom');
     expect(conf.bundle.active).toBe(true);
-    expect(conf.bundle.targets).toEqual(['app']);
+    expect(conf.bundle.targets).toEqual(['app', 'dmg']);
     expect(conf.bundle.macOS.infoPlist).toBe('Info.plist');
     expect(conf.bundle.macOS.entitlements).toBe('Entitlements.plist');
     expect(conf.bundle.macOS.hardenedRuntime).toBe(true);
