@@ -112,3 +112,33 @@ describe('createDogfoodRecord', () => {
     expect(record?.recoveryExpiresAt).toBeNull();
   });
 
+
+describe('createDogfoodRecord rawText (BUS-23)', () => {
+  const base = {
+    durationMs: 1_000,
+    id: 'dogfood-raw',
+    now: 1,
+    status: 'copied' as const,
+    style: 'casual' as const,
+  };
+
+  it('keeps raw whisper text when cleanup changed it', () => {
+    const record = createDogfoodRecord({
+      ...base,
+      rawText: '[Music] hello world',
+      text: 'hello world',
+    });
+    expect(record?.text).toBe('hello world');
+    expect(record?.rawText).toBe('[Music] hello world');
+  });
+
+  it('omits rawText when it equals the cleaned text', () => {
+    const record = createDogfoodRecord({ ...base, rawText: 'hello', text: 'hello' });
+    expect(record).not.toHaveProperty('rawText');
+  });
+
+  it('still skips rows whose cleaned text is empty', () => {
+    const record = createDogfoodRecord({ ...base, rawText: 'Thank you.', text: '' });
+    expect(record).toBeNull();
+  });
+});

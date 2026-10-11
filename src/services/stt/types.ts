@@ -9,8 +9,24 @@ export interface AudioBufferHandle {
   readonly sampleRateHz: number;
 }
 
+/**
+ * Why native cleanup (BUS-23) reduced a transcript to nothing:
+ * near-silent clip (RMS gate), VAD veto, only non-speech tags, or a known
+ * silence hallucination on a quiet clip.
+ */
+export type TranscriptDropReason =
+  | 'silent-audio'
+  | 'no-speech'
+  | 'non-speech-only'
+  | 'quiet-hallucination';
+
 export interface Transcript {
+  /** Set when BUS-23 cleanup dropped the whole output. */
+  readonly dropped?: TranscriptDropReason | null;
   readonly language?: string;
+  /** Whisper output before BUS-23 cleanup (debugging / History). */
+  readonly rawText?: string;
+  /** Cleaned text used for insert and Copy. */
   readonly text: string;
 }
 

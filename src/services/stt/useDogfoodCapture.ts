@@ -217,6 +217,7 @@ export function useDogfoodCapture(
         id: `dogfood-${audio.id}`,
         model: modelId,
         now: nowRef.current(),
+        rawText: result.transcript.rawText,
         status: result.delivery.status,
         style: styleRef.current,
         text: result.transcript.text,

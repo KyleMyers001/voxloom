@@ -32,6 +32,7 @@ function parseRecord(value: unknown): DictationRecord | null {
     durationSeconds,
     id,
     model,
+    rawText,
     recoveryExpiresAt,
     status,
     style,
@@ -53,11 +54,13 @@ function parseRecord(value: unknown): DictationRecord | null {
     return null;
   }
   if (typeof text !== 'string') return null;
+  if (!(rawText === undefined || typeof rawText === 'string')) return null;
   return {
     createdAt,
     durationSeconds,
     id,
     model,
+    ...(rawText === undefined ? {} : { rawText }),
     recoveryExpiresAt,
     status: status as HistoryStatus,
     style: style as WritingStyle,

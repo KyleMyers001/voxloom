@@ -9,6 +9,11 @@ export interface DictationRecord {
   id: string;
   /** Transcription model id when known (dogfood / persisted); null for fixtures. */
   model: string | null;
+  /**
+   * Whisper output before BUS-23 cleanup, only when it differs from `text`.
+   * Lives in the same row, so transcript retention applies to it too.
+   */
+  rawText?: string;
   recoveryExpiresAt: number | null;
   status: HistoryStatus;
   style: WritingStyle;
