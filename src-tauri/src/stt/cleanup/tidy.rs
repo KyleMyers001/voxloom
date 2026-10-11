@@ -28,8 +28,15 @@ fn join(left: &str, right: &str) -> String {
 
     let line_start = l_core.is_empty() || l_core.ends_with('\n');
     let line_end = r_core.is_empty() || r_core.starts_with('\n');
+    let attached = r_after.starts_with(|c: char| !c.is_whitespace());
     let punct = if line_start {
-        String::new() // orphan punctuation left at the start of a line
+        // Orphan punctuation at the start of a line is dropped only when it
+        // stands alone; `:)` or `...so` right after the seam is kept.
+        if attached {
+            rp.to_owned()
+        } else {
+            String::new()
+        }
     } else {
         collapse_run(&format!("{lp}{rp}"))
     };

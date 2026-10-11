@@ -61,3 +61,14 @@ fn unrelated_formatting_survives_a_removal_elsewhere() {
     );
     assert_eq!(loud("a  b [NOISE] c"), "a  b c");
 }
+
+#[test]
+fn punctuation_attached_after_a_leading_tag_is_kept() {
+    assert_eq!(loud("[music] :) hi"), ":) hi");
+    assert_eq!(loud("[Music] ...so anyway"), "...so anyway");
+    assert_eq!(loud("line\n(coughs) ;) ok"), "line\n;) ok");
+    // Standalone orphans are still dropped.
+    assert_eq!(loud("[Music], hello."), "hello.");
+    assert_eq!(loud(". [Applause] Hello"), "Hello");
+    assert_eq!(loud(". [Applause] :) Hello"), ":) Hello");
+}
