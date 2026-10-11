@@ -134,12 +134,14 @@ fn partial_or_phrase_tags_are_kept() {
 }
 
 #[test]
-fn repeated_unknown_tags_collapse_to_one() {
-    assert_eq!(
-        loud("Wait (crosstalk) (crosstalk) ok"),
-        "Wait (crosstalk) ok"
-    );
-    assert_eq!(loud("(I think) so (I think)"), "(I think) so (I think)");
+fn repeated_non_sound_parentheticals_are_kept() {
+    for s in [
+        "(yes) (yes)",
+        "Wait (crosstalk) (crosstalk) ok",
+        "(I think) so (I think)",
+    ] {
+        assert_eq!(loud(s), s);
+    }
 }
 
 #[test]

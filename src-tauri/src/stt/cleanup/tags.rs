@@ -1,5 +1,5 @@
 //! Strip known non-speech tags (`[Music]`, `(coughs)`, `*applause*`) and
-//! music symbols; collapse identical tags repeated back to back.
+//! music symbols. Repeated sound tags disappear with each removal.
 
 use super::lists::{is_sound_tag, MUSIC_SYMBOLS};
 
@@ -39,37 +39,38 @@ fn inner(tag: &str) -> &str {
     &tag[open..tag.len() - close]
 }
 
-/// Remove known sound tags and music symbols. Unknown tags are kept, but an
-/// unknown tag identical to the immediately preceding one is dropped.
-pub fn strip_tags(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut last_kept_tag: Option<String> = None;
+/// Split `text` around known sound tags and music symbols.
+///
+/// Returns `None` when nothing was removed (the caller keeps the text
+/// byte-for-byte). Otherwise returns the kept pieces; a removal sits
+/// between every pair of adjacent pieces. Unknown tags such as `(I think)`,
+/// `[sic]` or an empty `()` are kept verbatim, including repeats.
+pub fn strip_tags(text: &str) -> Option<Vec<&str>> {
+    let mut pieces = Vec::new();
+    let mut piece_start = 0;
+    let mut removed = false;
     let mut i = 0;
     while i < text.len() {
         let rest = &text[i..];
         let c = rest.chars().next().unwrap_or(' ');
-        if MUSIC_SYMBOLS.contains(&c) {
-            out.push(' ');
-            i += c.len_utf8();
-            continue;
-        }
-        if let Some(len) = tag_len(rest) {
-            let tag = &rest[..len];
-            let key = super::lists::normalize_key(inner(tag));
-            if is_sound_tag(inner(tag)) || last_kept_tag.as_deref() == Some(key.as_str()) {
-                out.push(' ');
-            } else {
-                out.push_str(tag);
-                last_kept_tag = Some(key);
+        let cut = if MUSIC_SYMBOLS.contains(&c) {
+            Some(c.len_utf8())
+        } else {
+            tag_len(rest).filter(|&len| is_sound_tag(inner(&rest[..len])))
+        };
+        match cut {
+            Some(len) => {
+                pieces.push(&text[piece_start..i]);
+                removed = true;
+                i += len;
+                piece_start = i;
             }
-            i += len;
-            continue;
+            None => {
+                // Skip a whole unknown tag so its inner text is not re-scanned.
+                i += tag_len(rest).unwrap_or(c.len_utf8());
+            }
         }
-        if !c.is_whitespace() {
-            last_kept_tag = None;
-        }
-        out.push(c);
-        i += c.len_utf8();
     }
-    out
+    pieces.push(&text[piece_start..]);
+    removed.then_some(pieces)
 }

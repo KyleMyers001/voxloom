@@ -43,8 +43,13 @@ pub struct CleanupOptions {
 
 /// Clean raw whisper output. Never removes phrases mid-text.
 pub fn clean_transcript(raw: &str, opts: CleanupOptions) -> Cleaned {
-    let stripped = tidy::tidy(&tags::strip_tags(raw));
-    if stripped.is_empty() {
+    // Tag-free text is never rewritten; seams are repaired only where a
+    // tag or symbol was actually removed.
+    let stripped = match tags::strip_tags(raw) {
+        Some(pieces) => tidy::join_pieces(&pieces),
+        None => raw.to_owned(),
+    };
+    if stripped.trim().is_empty() {
         let dropped = (!raw.trim().is_empty()).then_some(DropReason::NonSpeechOnly);
         return Cleaned {
             text: String::new(),
@@ -58,7 +63,7 @@ pub fn clean_transcript(raw: &str, opts: CleanupOptions) -> Cleaned {
         };
     }
     let text = if opts.strip_outros {
-        tidy::tidy(&phrases::strip_trailing_outros(&stripped))
+        phrases::strip_trailing_outros(&stripped)
     } else {
         stripped
     };

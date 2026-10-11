@@ -40,8 +40,9 @@ fn intentional_punctuation_survives() {
 }
 
 #[test]
-fn empty_brackets_left_by_stripping_are_removed() {
-    assert_eq!(loud("Hi () there []"), "Hi there");
+fn empty_brackets_in_the_original_are_kept() {
+    assert_eq!(loud("Hi () there []"), "Hi () there []");
+    assert_eq!(loud("Hi () [Music] there []"), "Hi () there []");
 }
 
 #[test]

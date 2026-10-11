@@ -16,8 +16,8 @@ Pipeline (`src-tauri/src/stt/pipeline.rs`):
 4. **Whisper** with `suppress_non_speech_tokens`, `suppress_blank` and `no_speech_thold` (default 0.6) from the config.
 5. **Text cleanup** (`stt/cleanup/`, pure functions):
    - Strip `[...]`, `(...)` and `*...*` only when the normalized inner words are on the sound list. Asides like `(I think)` and `[sic]` stay.
-   - Strip ♪ ♫. Collapse identical tags repeated back to back.
-   - Tidy whitespace and orphan punctuation.
+   - Strip ♪ ♫. Repeated sound tags disappear one by one; repeated non-sound asides like `(yes) (yes)` are kept.
+   - Text is changed **only at the seams** where something was removed. There the spaces and orphan punctuation around the cut are repaired, and newlines are kept. Text with nothing removed is returned byte-for-byte, so code like `foo()` / `bar[]`, emoticons like `:)`, leading `...`, newlines and double spaces survive.
    - Remove trailing YouTube outros, but only when real dictation precedes them.
    - Drop the whole output only when every sentence is a known hallucination **and** the clip is quiet (`quietRms` / `quietPeak`). Phrases are never removed mid-text.
 
@@ -30,3 +30,5 @@ All thresholds live in `SpeechFilterConfig` (serde defaults; partial overrides v
 - **Silero VAD backend.** It needs an ONNX runtime (`ort`, a native library of tens of MB) plus a ~2 MB model, adds packaging and codesign work, and can only be verified on macOS. Alternatively, a newer whisper-rs / whisper.cpp ships built-in Silero VAD. The trait seam and the `vad` flag are in place, and `NoVad` (no opinion) is the default.
 - Expose the filter settings in the Settings UI if tuning is needed.
 - Threshold tuning on real Mac recordings.
+- Non-English tags: the lists are English-only, matching the English-first model choice.
+- UI: the dictation phase still reads "success" when cleanup drops everything (cosmetic).

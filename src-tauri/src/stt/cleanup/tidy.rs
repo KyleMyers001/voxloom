@@ -1,9 +1,13 @@
-//! Normalize whitespace and punctuation left behind after stripping.
+//! Repair the text only at the seams where a tag or symbol was removed.
+//!
+//! Nothing away from a seam is touched: newlines, double spaces, empty
+//! brackets, emoticons and leading ellipses elsewhere survive verbatim.
 
 const PUNCT: &[char] = &[',', ';', ':', '.', '!', '?'];
 const TERMINAL: &[char] = &['.', '!', '?'];
+const HSPACE: &[char] = &[' ', '\t'];
 
-/// Collapse a run of adjacent punctuation: keep terminal marks if any
+/// Collapse the punctuation meeting at a seam: keep terminal marks if any
 /// (so "..." and "?!" survive), otherwise the first mark (",," → ",").
 fn collapse_run(run: &str) -> String {
     if run.chars().any(|c| TERMINAL.contains(&c)) {
@@ -13,44 +17,49 @@ fn collapse_run(run: &str) -> String {
     }
 }
 
-/// Collapse whitespace, drop spaces before punctuation, merge orphan
-/// punctuation runs, strip leading punctuation and empty brackets.
-pub fn tidy(text: &str) -> String {
-    let mut s = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    for empty in ["()", "[]", "( )", "[ ]"] {
-        s = s.replace(empty, " ");
-    }
-    let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
+/// Join text left and right of one removed span.
+fn join(left: &str, right: &str) -> String {
+    let l = left.trim_end_matches(HSPACE);
+    let r = right.trim_start_matches(HSPACE);
+    let l_core = l.trim_end_matches(PUNCT);
+    let r_after = r.trim_start_matches(PUNCT);
+    let (lp, rp) = (&l[l_core.len()..], &r[..r.len() - r_after.len()]);
+    let r_core = r_after.trim_start_matches(HSPACE);
 
-    // Remove whitespace that precedes punctuation.
-    let mut no_space = String::with_capacity(s.len());
-    let chars: Vec<char> = s.chars().collect();
-    for (idx, &c) in chars.iter().enumerate() {
-        if c == ' ' && chars.get(idx + 1).is_some_and(|n| PUNCT.contains(n)) {
-            continue;
-        }
-        no_space.push(c);
+    let line_start = l_core.is_empty() || l_core.ends_with('\n');
+    let line_end = r_core.is_empty() || r_core.starts_with('\n');
+    let punct = if line_start {
+        String::new() // orphan punctuation left at the start of a line
+    } else {
+        collapse_run(&format!("{lp}{rp}"))
+    };
+    let space = if line_start || line_end { "" } else { " " };
+    format!("{l_core}{punct}{space}{r_core}")
+}
+
+/// Rejoin the pieces returned by `tags::strip_tags`.
+pub fn join_pieces(pieces: &[&str]) -> String {
+    let mut iter = pieces.iter();
+    let mut out = iter.next().map_or_else(String::new, |p| (*p).to_owned());
+    for piece in iter {
+        out = join(&out, piece);
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seam_keeps_newlines() {
+        assert_eq!(join("line one\n", " next"), "line one\nnext");
+        assert_eq!(join("a", "\n\nb"), "a\n\nb");
     }
 
-    // Collapse punctuation runs.
-    let mut out = String::with_capacity(no_space.len());
-    let mut run = String::new();
-    for c in no_space.chars() {
-        if PUNCT.contains(&c) {
-            run.push(c);
-            continue;
-        }
-        if !run.is_empty() {
-            out.push_str(&collapse_run(&run));
-            run.clear();
-        }
-        out.push(c);
+    #[test]
+    fn seam_collapses_punctuation_only_locally() {
+        assert_eq!(join("Done, ", "."), "Done.");
+        assert_eq!(join("x,, y,", ", z"), "x,, y, z");
     }
-    if !run.is_empty() {
-        out.push_str(&collapse_run(&run));
-    }
-
-    out.trim_start_matches(|c: char| PUNCT.contains(&c) || c.is_whitespace())
-        .trim()
-        .to_owned()
 }

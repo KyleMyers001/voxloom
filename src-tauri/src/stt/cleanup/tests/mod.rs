@@ -4,6 +4,7 @@ use super::lists::SILENCE_HALLUCINATIONS;
 use super::*;
 
 mod hallucinations;
+mod passthrough;
 mod tag_variants;
 mod tidy_and_symbols;
 
