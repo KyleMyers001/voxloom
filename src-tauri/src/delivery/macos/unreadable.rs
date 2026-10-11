@@ -90,6 +90,10 @@ pub fn insert_without_value(
             detail: Some("typed; verified by character count (AXValue unreadable)".into()),
             ..Default::default()
         }),
+        UnreadableOutcome::TypedUnverified(_) => unverified(
+            true,
+            "typed, but the character count changed afterwards (possible late AX write)",
+        ),
         UnreadableOutcome::Typed(0, Err(err)) => Err(err),
         UnreadableOutcome::Typed(_, Err(err)) => {
             unverified(true, &format!("{err} (partially typed)"))

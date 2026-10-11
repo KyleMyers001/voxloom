@@ -3,6 +3,8 @@ use std::collections::VecDeque;
 
 struct Fake {
     counts: VecDeque<Option<i64>>,
+    /// Replaces `counts` when typing runs (what the field shows afterwards).
+    after_type: Option<VecDeque<Option<i64>>>,
     selected: Option<i64>,
     ax: Result<(), String>,
     ax_writes: u32,
@@ -15,6 +17,7 @@ impl Fake {
     fn new(counts: &[Option<i64>]) -> Self {
         Self {
             counts: counts.iter().copied().collect(),
+            after_type: None,
             selected: Some(0),
             ax: Ok(()),
             ax_writes: 0,
@@ -45,6 +48,9 @@ impl UnreadableIo for Fake {
     }
     fn type_verified(&mut self, _: i64, _: i64) -> (usize, Result<(), String>) {
         self.typed += 1;
+        if let Some(next) = self.after_type.take() {
+            self.counts = next;
+        }
         self.type_result.clone()
     }
 }
@@ -92,13 +98,14 @@ fn ignored_ax_write_waits_two_spaced_reads_then_types() {
     // Kyle's Air: Ok, count unchanged => previously "AXSelectedText reported
     // success but nothing changed".
     let mut f = Fake::new(&[Some(10)]);
+    f.after_type = Some([Some(15)].into());
     assert_eq!(
         insert_unreadable(&mut f, TEXT, true),
         UnreadableOutcome::Typed(1, Ok(()))
     );
     assert_eq!((f.ax_writes, f.typed), (1, 1));
-    let tail: Vec<u64> = f.slept.iter().rev().take(2).rev().copied().collect();
-    assert_eq!(tail, [150, 300]);
+    let tail: Vec<u64> = f.slept.iter().rev().take(3).rev().copied().collect();
+    assert_eq!(tail, [150, 300, POST_TYPE_SETTLE_MS]);
 }
 
 #[test]
@@ -162,4 +169,58 @@ fn typed_count_check() {
     assert!(typed_count_ok(10, 4, Some(9), 3));
     assert!(!typed_count_ok(10, 0, Some(10), 3));
     assert!(!typed_count_ok(10, 0, None, 3));
+}
+
+/// 1 initial + 30 polls + 2 spaced reads, all unchanged.
+fn unchanged_until_pre_type_read() -> Vec<Option<i64>> {
+    vec![Some(10); 33]
+}
+
+#[test]
+fn late_write_seen_on_the_pre_type_read_never_types() {
+    let mut counts = unchanged_until_pre_type_read();
+    counts.push(Some(15)); // exact delta: the AX write landed
+    let mut f = Fake::new(&counts);
+    assert_eq!(
+        insert_unreadable(&mut f, TEXT, true),
+        UnreadableOutcome::Ax(AfterAx::Inserted)
+    );
+    assert_eq!(f.typed, 0);
+    let mut counts = unchanged_until_pre_type_read();
+    counts.push(Some(11));
+    let mut f = Fake::new(&counts);
+    assert_eq!(
+        insert_unreadable(&mut f, TEXT, true),
+        UnreadableOutcome::Ax(AfterAx::Unverified)
+    );
+    assert_eq!(f.typed, 0);
+}
+
+#[test]
+fn overshoot_after_typing_is_downgraded_to_unverified() {
+    // Typing confirmed 15, then the late AX write lands: 20.
+    let mut f = Fake::new(&[Some(10)]);
+    f.after_type = Some([Some(20)].into());
+    assert_eq!(
+        insert_unreadable(&mut f, TEXT, true),
+        UnreadableOutcome::TypedUnverified(1)
+    );
+    let mut f = Fake::new(&[Some(10)]);
+    f.after_type = Some([None].into());
+    assert_eq!(
+        insert_unreadable(&mut f, TEXT, true),
+        UnreadableOutcome::TypedUnverified(1)
+    );
+}
+
+#[test]
+fn failed_typing_is_not_rechecked() {
+    let mut f = Fake::new(&[Some(10)]);
+    f.type_result = (0, Err("typing aborted — focus changed".into()));
+    assert_eq!(
+        insert_unreadable(&mut f, TEXT, true),
+        UnreadableOutcome::Typed(0, Err("typing aborted — focus changed".into()))
+    );
+    // Only the spaced pre-type read (300 ms); no post-typing settle.
+    assert_eq!(f.slept.iter().filter(|ms| **ms == 300).count(), 1);
 }

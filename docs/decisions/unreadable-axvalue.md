@@ -18,7 +18,9 @@
 3. **Typing fallback**, used only when the write returned **Ok** and the count stayed unchanged:
    - First take two more spaced reads (150 ms, then 300 ms). If either shows a change, the late AX write landed, so we don't type: exact delta → Inserted, otherwise Unverified.
    - Otherwise use the existing guarded Unicode typing path (`macos/typing.rs` `type_text`): focus is re-checked before each chunk, and each chunk is confirmed by the count delta (polled about 600 ms).
+   - One more count read **right before the first typed chunk**. If it moved, the late AX write landed, so we don't type: exact delta → Inserted, otherwise Unverified.
    - A mismatch stops typing: nothing posted → Failed/Copy; partly posted → Unverified.
+   - About 300 ms after typing completes, the count is read again. If it isn't exactly the expected total (for example a late AX write overshot it) → **Unverified** ("May have been inserted — also copied").
 4. **Never after an AX error.** An AX error is Failed → Copy, with no typing.
 
 ## Residual risks

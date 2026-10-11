@@ -5,7 +5,9 @@
 //!    (~600 ms); exact delta => Inserted, other change => Unverified;
 //! 2. only if the write returned Ok and the count stayed unchanged: two spaced
 //!    unchanged reads (150 ms, 300 ms) so a late AX write cannot combine with
-//!    typing, then the guarded Unicode typing path, verified per chunk by count;
+//!    typing, one more read right before the first chunk, then the guarded
+//!    Unicode typing path, verified per chunk by count, and re-read ~300 ms
+//!    after typing (moved off the expected total => Unverified);
 //! 3. counts unreadable after an Ok write => Unverified, never Failed.
 //!
 //! Secure fields are refused before any of this (decide::web).
@@ -17,6 +19,8 @@ use super::verify::AfterAx;
 pub const MESSAGES_BUNDLE_ID: &str = "com.apple.MobileSMS";
 pub const COUNT_POLLS: usize = 30;
 pub const COUNT_POLL_MS: u64 = 20;
+/// Re-read after typing to catch a late AX write overshooting the total.
+pub const POST_TYPE_SETTLE_MS: u64 = 300;
 
 /// The unreadable-AXValue path is allowlisted to Messages only.
 pub fn unreadable_value_allowed(bundle_id: Option<&str>) -> bool {
@@ -43,6 +47,8 @@ pub trait UnreadableIo {
 pub enum UnreadableOutcome {
     Ax(AfterAx),
     Typed(usize, Result<(), String>),
+    /// Typing completed but the count later moved off the expected total.
+    TypedUnverified(usize),
 }
 
 pub fn insert_unreadable(
@@ -81,9 +87,29 @@ pub fn insert_unreadable(
             ));
         }
     }
+    // Last read right before the first typed chunk: if it moved, the late
+    // AX write landed — never type on top of it.
+    let now = io.count();
+    if now != Some(before) {
+        return UnreadableOutcome::Ax(after_ax_by_length(
+            Ok(()),
+            Some(before),
+            selected,
+            now,
+            text_utf16,
+        ));
+    }
     // Caret assumed when the selection is unreadable; per-chunk count checks
     // stop typing on the first mismatch.
-    let (posted, result) = io.type_verified(before, selected.unwrap_or(0));
+    let sel = selected.unwrap_or(0);
+    let (posted, result) = io.type_verified(before, sel);
+    if result.is_ok() {
+        // A late AX write landing during/after typing would overshoot.
+        io.sleep(POST_TYPE_SETTLE_MS);
+        if !typed_count_ok(before, sel, io.count(), text_utf16) {
+            return UnreadableOutcome::TypedUnverified(posted);
+        }
+    }
     UnreadableOutcome::Typed(posted, result)
 }
 
