@@ -55,6 +55,8 @@ mod backend;
 pub use backend::{
     CaptureStreamMeta, CpalStreamBackend, PermissionBackend, RealPermissionBackend, StreamBackend,
 };
+mod runtime;
+use runtime::*;
 
 // Constants
 
@@ -102,54 +104,6 @@ impl LevelMeter {
         self.power_sum = 0.0;
         self.sample_count = 0;
         Some(level)
-    }
-}
-
-#[derive(Clone, Copy)]
-struct CaptureLimits {
-    full_bound: Duration,
-    poll_interval: Duration,
-    test_bound: Duration,
-    watchdog_grace: Duration,
-    watchdog_idle: Duration,
-}
-
-impl CaptureLimits {
-    fn production() -> Self {
-        CaptureLimits {
-            full_bound: Duration::from_secs(FULL_SAFETY_SECS),
-            poll_interval: Duration::from_millis(10),
-            test_bound: Duration::from_secs(TEST_SAFETY_SECS),
-            watchdog_grace: Duration::from_secs(1),
-            watchdog_idle: Duration::from_secs(WATCHDOG_IDLE_SECS),
-        }
-    }
-}
-
-trait LoopRuntime: Send + Sync + 'static {
-    fn now(&self) -> Duration;
-    fn wait(&self, duration: Duration);
-}
-
-struct SystemLoopRuntime {
-    epoch: Instant,
-}
-
-impl SystemLoopRuntime {
-    fn new() -> Self {
-        SystemLoopRuntime {
-            epoch: Instant::now(),
-        }
-    }
-}
-
-impl LoopRuntime for SystemLoopRuntime {
-    fn now(&self) -> Duration {
-        self.epoch.elapsed()
-    }
-
-    fn wait(&self, duration: Duration) {
-        thread::sleep(duration);
     }
 }
 
