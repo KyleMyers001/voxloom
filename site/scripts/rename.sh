@@ -31,14 +31,16 @@ trap cleanup EXIT
 export OLD NEW
 for f in "${files[@]}"; do
   tmp="$(mktemp "${f}.rename.XXXXXX")"; temps+=("$tmp")
-  # Explicit open-or-die: perl exits non-zero on any read/write error. \Q..\E makes the match literal.
+  # Explicit open-or-die (and mode copy): perl exits non-zero on any read/write error. \Q..\E makes the match literal.
   perl -e 'open(my $in, "<", $ARGV[0]) or die "open $ARGV[0]: $!\n";
            open(my $out, ">", $ARGV[1]) or die "open $ARGV[1]: $!\n";
            while (my $l = <$in>) { $l =~ s/\Q$ENV{OLD}\E/$ENV{NEW}/g; print $out $l or die "write: $!\n"; }
-           close($in) or die "close $ARGV[0]: $!\n"; close($out) or die "close $ARGV[1]: $!\n";' \
+           close($in) or die "close $ARGV[0]: $!\n"; close($out) or die "close $ARGV[1]: $!\n";
+           # Copy the original permission bits to the temp file (portable; no GNU/BSD stat or chmod flags).
+           my $mode = (stat $ARGV[0])[2] // die "stat $ARGV[0]: $!\n";
+           chmod($mode & 07777, $ARGV[1]) or die "chmod $ARGV[1]: $!\n";' \
     -- "$f" "$tmp" || die "rewrite failed on $f; nothing changed"
   if [ -s "$f" ] && [ ! -s "$tmp" ]; then die "rewrite of $f produced an empty file; nothing changed"; fi
-  chmod --reference="$f" "$tmp" 2>/dev/null || true
 done
 
 # 3) All rewrites succeeded: move them into place.
