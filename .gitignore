@@ -10,3 +10,4 @@ test-results-release/
 .cargo-local/
 .target-cpal17/
 *.tsbuildinfo
+dist-release/
