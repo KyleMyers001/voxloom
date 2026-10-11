@@ -10,12 +10,7 @@ pub(super) fn quarantine() {
 }
 
 pub(super) fn release() {
-    let _ = ADMISSION.compare_exchange(
-        ACTIVE,
-        IDLE,
-        Ordering::SeqCst,
-        Ordering::SeqCst,
-    );
+    let _ = ADMISSION.compare_exchange(ACTIVE, IDLE, Ordering::SeqCst, Ordering::SeqCst);
 }
 
 pub(super) fn reserve() -> Result<(), String> {
@@ -24,12 +19,7 @@ pub(super) fn reserve() -> Result<(), String> {
 
 fn reserve_from(admission: &AtomicU8) -> Result<(), String> {
     admission
-        .compare_exchange(
-            IDLE,
-            ACTIVE,
-            Ordering::SeqCst,
-            Ordering::SeqCst,
-        )
+        .compare_exchange(IDLE, ACTIVE, Ordering::SeqCst, Ordering::SeqCst)
         .map(|_| ())
         .map_err(|state| {
             let reason = if state == QUARANTINED {

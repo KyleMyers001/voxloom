@@ -26,11 +26,7 @@ pub fn inspect(buffer: CaptureBuffer) -> TestCaptureMetadata {
     let frame_count = buffer.len();
     let samples = buffer.into_samples();
 
-    let peak_level = samples
-        .iter()
-        .copied()
-        .map(f32::abs)
-        .fold(0.0f32, f32::max);
+    let peak_level = samples.iter().copied().map(f32::abs).fold(0.0f32, f32::max);
 
     let detected_activity = peak_level >= SILENCE_THRESHOLD;
 

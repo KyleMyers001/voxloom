@@ -2,15 +2,9 @@ pub(super) trait ListenerOperations {
     type Registration;
     type Target;
 
-    fn register(
-        &mut self,
-        target: Self::Target,
-    ) -> Result<Self::Registration, String>;
+    fn register(&mut self, target: Self::Target) -> Result<Self::Registration, String>;
 
-    fn remove(
-        &mut self,
-        registration: &Self::Registration,
-    ) -> Result<(), String>;
+    fn remove(&mut self, registration: &Self::Registration) -> Result<(), String>;
 
     fn synchronize(&self);
 

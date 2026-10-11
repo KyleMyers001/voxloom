@@ -99,11 +99,7 @@ impl NativeIdentityMonitor {
         require_valid(&self.gate)
     }
 
-    pub fn validate(
-        &self,
-        device: &cpal::Device,
-        expected: &cpal::DeviceId,
-    ) -> Result<(), String> {
+    pub fn validate(&self, device: &cpal::Device, expected: &cpal::DeviceId) -> Result<(), String> {
         use cpal::traits::DeviceTrait;
         if device.id().as_ref() == Ok(expected) {
             Ok(())
@@ -186,9 +182,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(format!("remove:{registration}"));
-            if self.fail_removal == Some(*registration)
-                && self.removal_failures > 0
-            {
+            if self.fail_removal == Some(*registration) && self.removal_failures > 0 {
                 self.removal_failures -= 1;
                 Err(String::from("removal failed"))
             } else {
@@ -237,9 +231,7 @@ mod tests {
     #[test]
     fn listener_cleanup_is_reverse_order_and_synchronized() {
         let events = Arc::new(Mutex::new(Vec::new()));
-        let mut owner = ListenerOwner::new(fake_listeners(
-            Arc::clone(&events),
-        ));
+        let mut owner = ListenerOwner::new(fake_listeners(Arc::clone(&events)));
         owner.register(1).unwrap();
         owner.register(2).unwrap();
         owner.finish().unwrap();
@@ -329,20 +321,14 @@ mod tests {
         type Registration = LifetimeRegistration;
         type Target = u8;
 
-        fn register(
-            &mut self,
-            target: u8,
-        ) -> Result<Self::Registration, String> {
+        fn register(&mut self, target: u8) -> Result<Self::Registration, String> {
             Ok(LifetimeRegistration {
                 events: Arc::clone(&self.events),
                 id: target,
             })
         }
 
-        fn remove(
-            &mut self,
-            registration: &Self::Registration,
-        ) -> Result<(), String> {
+        fn remove(&mut self, registration: &Self::Registration) -> Result<(), String> {
             self.events
                 .lock()
                 .unwrap()

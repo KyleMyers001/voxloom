@@ -27,8 +27,7 @@ pub fn settings_load(app: AppHandle) -> Result<Option<String>, String> {
     if !path.is_file() {
         return Ok(None);
     }
-    let raw = fs::read_to_string(&path)
-        .map_err(|e| format!("read settings.json: {e}"))?;
+    let raw = fs::read_to_string(&path).map_err(|e| format!("read settings.json: {e}"))?;
     Ok(Some(raw))
 }
 
@@ -37,8 +36,7 @@ pub fn settings_load(app: AppHandle) -> Result<Option<String>, String> {
 pub fn settings_save(app: AppHandle, contents: String) -> Result<(), String> {
     let path = settings_path(&app)?;
     let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, contents.as_bytes())
-        .map_err(|e| format!("write settings.json.tmp: {e}"))?;
+    fs::write(&tmp, contents.as_bytes()).map_err(|e| format!("write settings.json.tmp: {e}"))?;
     fs::rename(&tmp, &path).map_err(|e| {
         let _ = fs::remove_file(&tmp);
         format!("rename settings.json.tmp: {e}")

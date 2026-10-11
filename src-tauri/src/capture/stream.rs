@@ -22,9 +22,7 @@ use ringbuf::{
     HeapCons, HeapProd, HeapRb,
 };
 
-use super::identity::{
-    validate_device_id, CaptureGate, NativeIdentityMonitor,
-};
+use super::identity::{validate_device_id, CaptureGate, NativeIdentityMonitor};
 
 /// Capacity of the ring buffer in f32 mono frames.
 /// 4096 frames ≈ 256 ms at 16 kHz.
@@ -85,11 +83,9 @@ impl DeviceRegistry {
     }
 
     pub fn resolve(&self, id: &str) -> Result<ResolvedDevice, String> {
-        let identity = refresh_registry(
-            &self.state,
-            enumerate_input_devices,
-            |state| resolve_registered(state, id),
-        )?;
+        let identity = refresh_registry(&self.state, enumerate_input_devices, |state| {
+            resolve_registered(state, id)
+        })?;
         resolve_identity(identity)
     }
 }
@@ -121,10 +117,7 @@ struct NativeIdentityInstall<'a> {
 
 impl<'a> NativeIdentityLifecycle<'a> {
     fn install(install: NativeIdentityInstall<'a>) -> Result<Self, String> {
-        let monitor = NativeIdentityMonitor::install(
-            install.expected,
-            Arc::clone(&install.gate),
-        )?;
+        let monitor = NativeIdentityMonitor::install(install.expected, Arc::clone(&install.gate))?;
         Ok(Self {
             device: install.device,
             expected: install.expected,
@@ -186,12 +179,12 @@ pub struct StreamMeta {
 ///
 /// Errors have a `"capture-unavailable: …"` prefix.
 pub fn default_input_device() -> Result<ResolvedDevice, String> {
-    let device = cpal::default_host().default_input_device().ok_or_else(
-        || String::from("capture-unavailable: no default input device"),
-    )?;
-    let identity = device.id().map_err(|error| {
-        format!("capture-unavailable: microphone UID unavailable: {error}")
-    })?;
+    let device = cpal::default_host()
+        .default_input_device()
+        .ok_or_else(|| String::from("capture-unavailable: no default input device"))?;
+    let identity = device
+        .id()
+        .map_err(|error| format!("capture-unavailable: microphone UID unavailable: {error}"))?;
     validate_device_id(&identity)?;
     Ok(ResolvedDevice { device, identity })
 }
@@ -348,9 +341,7 @@ fn validate_unique_input_identity(expected: &DeviceId) -> Result<(), String> {
         .map_err(|error| format!("capture-unavailable: {error}"))?
     {
         let identity = device.id().map_err(|error| {
-            format!(
-                "capture-unavailable: microphone UID unavailable: {error}",
-            )
+            format!("capture-unavailable: microphone UID unavailable: {error}",)
         })?;
         validate_device_id(&identity)?;
         if &identity == expected {
@@ -441,17 +432,12 @@ fn prune_tombstones<T>(state: &mut RegistryState<T>) {
     }
 }
 
-fn resolve_registered<T: Clone>(
-    state: &RegistryState<T>,
-    id: &str,
-) -> Result<T, String> {
+fn resolve_registered<T: Clone>(state: &RegistryState<T>, id: &str) -> Result<T, String> {
     state
         .entries
         .iter()
         .find(|entry| entry.descriptor.id == id)
-        .ok_or_else(|| {
-            format!("capture-unavailable: unknown microphone id {id}")
-        })
+        .ok_or_else(|| format!("capture-unavailable: unknown microphone id {id}"))
         .and_then(|entry| {
             if entry.descriptor.available {
                 Ok(entry.identity.clone())
@@ -466,12 +452,12 @@ fn resolve_registered<T: Clone>(
 
 fn resolve_identity(identity: DeviceId) -> Result<ResolvedDevice, String> {
     let host = cpal::default_host();
-    let device = host.device_by_id(&identity).ok_or_else(|| {
-        String::from("capture-unavailable: microphone is disconnected")
-    })?;
-    let actual = device.id().map_err(|error| {
-        format!("capture-unavailable: microphone UID unavailable: {error}")
-    })?;
+    let device = host
+        .device_by_id(&identity)
+        .ok_or_else(|| String::from("capture-unavailable: microphone is disconnected"))?;
+    let actual = device
+        .id()
+        .map_err(|error| format!("capture-unavailable: microphone UID unavailable: {error}"))?;
     validate_device_id(&actual)?;
     validate_resolution(&identity, &actual, device.supports_input())?;
     Ok(ResolvedDevice { device, identity })
@@ -536,14 +522,7 @@ fn build_stream(
                         Some(s) => s,
                         None => return,
                     };
-                    write_mono_f32(
-                        samples,
-                        ch,
-                        &mut producer,
-                        &accepting2,
-                        &in_flight2,
-                        &of2,
-                    );
+                    write_mono_f32(samples, ch, &mut producer, &accepting2, &in_flight2, &of2);
                 },
                 move |_err: StreamError| {
                     // Device disconnect or revocation is distinct from
@@ -844,10 +823,7 @@ mod tests {
             GateOperation::CallbackCheck,
             GateOperation::CallbackRelease,
         ];
-        const CLOSER: [GateOperation; 2] = [
-            GateOperation::CloserClose,
-            GateOperation::CloserCheck,
-        ];
+        const CLOSER: [GateOperation; 2] = [GateOperation::CloserClose, GateOperation::CloserCheck];
 
         if callback_step == CALLBACK.len() && closer_step == CLOSER.len() {
             orders.push(prefix.clone());
@@ -890,9 +866,7 @@ mod tests {
                     }
                     GateOperation::CloserClose => accepting = false,
                     GateOperation::CloserCheck => {
-                        closer_safe = !callback_accepted
-                            || leases > 0
-                            || callback_completed;
+                        closer_safe = !callback_accepted || leases > 0 || callback_completed;
                     }
                 }
             }
@@ -928,17 +902,9 @@ mod tests {
     #[test]
     fn label_change_preserves_identity() {
         let mut state = RegistryState::default();
-        reconcile_devices(
-            &mut state,
-            vec![(7, String::from("Old label"))],
-        )
-        .unwrap();
+        reconcile_devices(&mut state, vec![(7, String::from("Old label"))]).unwrap();
         let id = state.entries[0].descriptor.id.clone();
-        reconcile_devices(
-            &mut state,
-            vec![(7, String::from("New label"))],
-        )
-        .unwrap();
+        reconcile_devices(&mut state, vec![(7, String::from("New label"))]).unwrap();
         assert_eq!(state.entries[0].descriptor.id, id);
         assert_eq!(state.entries[0].descriptor.label, "New label");
         assert!(state.entries[0].descriptor.available);
@@ -947,20 +913,12 @@ mod tests {
     #[test]
     fn same_uid_reconnects_to_original_opaque_id() {
         let mut state = RegistryState::default();
-        reconcile_devices(
-            &mut state,
-            vec![(9, String::from("Travel Mic"))],
-        )
-        .unwrap();
+        reconcile_devices(&mut state, vec![(9, String::from("Travel Mic"))]).unwrap();
         let id = state.entries[0].descriptor.id.clone();
         reconcile_devices(&mut state, vec![]).unwrap();
         assert!(!state.entries[0].descriptor.available);
 
-        reconcile_devices(
-            &mut state,
-            vec![(9, String::from("Travel Mic"))],
-        )
-        .unwrap();
+        reconcile_devices(&mut state, vec![(9, String::from("Travel Mic"))]).unwrap();
         let listed = descriptors(&state);
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].id, id);
@@ -970,19 +928,11 @@ mod tests {
     #[test]
     fn changed_native_identity_gets_new_id_without_replacing_stale_one() {
         let mut state = RegistryState::default();
-        reconcile_devices(
-            &mut state,
-            vec![(9, String::from("Travel Mic"))],
-        )
-        .unwrap();
+        reconcile_devices(&mut state, vec![(9, String::from("Travel Mic"))]).unwrap();
         let original_id = state.entries[0].descriptor.id.clone();
         reconcile_devices(&mut state, vec![]).unwrap();
 
-        reconcile_devices(
-            &mut state,
-            vec![(10, String::from("Travel Mic"))],
-        )
-        .unwrap();
+        reconcile_devices(&mut state, vec![(10, String::from("Travel Mic"))]).unwrap();
         let listed = descriptors(&state);
         assert_eq!(listed.len(), 2);
         assert_eq!(listed[0].id, original_id);
@@ -994,18 +944,10 @@ mod tests {
     #[test]
     fn uid_replacement_without_empty_snapshot_never_rebinds_old_id() {
         let mut state = RegistryState::default();
-        reconcile_devices(
-            &mut state,
-            vec![(9, String::from("Travel Mic"))],
-        )
-        .unwrap();
+        reconcile_devices(&mut state, vec![(9, String::from("Travel Mic"))]).unwrap();
         let original_id = state.entries[0].descriptor.id.clone();
 
-        reconcile_devices(
-            &mut state,
-            vec![(10, String::from("Travel Mic"))],
-        )
-        .unwrap();
+        reconcile_devices(&mut state, vec![(10, String::from("Travel Mic"))]).unwrap();
 
         assert_eq!(state.entries.len(), 2);
         assert_eq!(state.entries[0].descriptor.id, original_id);
@@ -1017,11 +959,7 @@ mod tests {
     #[test]
     fn duplicate_uid_fails_without_mutating_registry() {
         let mut state = RegistryState::default();
-        reconcile_devices(
-            &mut state,
-            vec![(7, String::from("Original"))],
-        )
-        .unwrap();
+        reconcile_devices(&mut state, vec![(7, String::from("Original"))]).unwrap();
         let before = descriptors(&state);
 
         let error = reconcile_devices(
@@ -1073,11 +1011,7 @@ mod tests {
     #[test]
     fn missing_and_unknown_ids_fail_without_substitution() {
         let mut state = RegistryState::default();
-        reconcile_devices(
-            &mut state,
-            vec![(11, String::from("Desk Mic"))],
-        )
-        .unwrap();
+        reconcile_devices(&mut state, vec![(11, String::from("Desk Mic"))]).unwrap();
         let id = state.entries[0].descriptor.id.clone();
         reconcile_devices(&mut state, vec![]).unwrap();
 
@@ -1096,11 +1030,7 @@ mod tests {
         let mut issued = Vec::new();
 
         for native_id in 0..cycles {
-            reconcile_devices(
-                &mut state,
-                vec![(native_id, format!("Mic {native_id}"))],
-            )
-            .unwrap();
+            reconcile_devices(&mut state, vec![(native_id, format!("Mic {native_id}"))]).unwrap();
             issued.push(state.entries.last().unwrap().descriptor.id.clone());
             reconcile_devices(&mut state, vec![]).unwrap();
         }
@@ -1181,15 +1111,12 @@ mod tests {
 
     impl IdentityLifecycle for FakeIdentityLifecycle {
         fn check(&self) -> Result<(), String> {
-            self.events.lock().unwrap().extend([
-                "synchronize",
-                "unique-uid",
-                "validate-uid-alive",
-            ]);
+            self.events
+                .lock()
+                .unwrap()
+                .extend(["synchronize", "unique-uid", "validate-uid-alive"]);
             let check = self.checks.fetch_add(1, Ordering::SeqCst) + 1;
-            if self.fail_check == Some(check)
-                || self.gate.is_invalidated()
-            {
+            if self.fail_check == Some(check) || self.gate.is_invalidated() {
                 Err(String::from("identity check failed"))
             } else {
                 Ok(())
@@ -1218,9 +1145,7 @@ mod tests {
         }
     }
 
-    fn install_fake(
-        install: FakeIdentityLifecycle,
-    ) -> Result<FakeIdentityLifecycle, String> {
+    fn install_fake(install: FakeIdentityLifecycle) -> Result<FakeIdentityLifecycle, String> {
         install.events.lock().unwrap().extend([
             "install-topology",
             "translate-uid",
@@ -1251,11 +1176,7 @@ mod tests {
     #[test]
     fn guarded_orchestration_orders_every_production_boundary() {
         let events = Arc::new(Mutex::new(Vec::new()));
-        let (lifecycle, gate) = fake_identity_lifecycle(
-            Arc::clone(&events),
-            None,
-            false,
-        );
+        let (lifecycle, gate) = fake_identity_lifecycle(Arc::clone(&events), None, false);
         let build_events = Arc::clone(&events);
         let capture_events = Arc::clone(&events);
         let stop_events = Arc::clone(&events);
@@ -1310,11 +1231,8 @@ mod tests {
     fn guarded_orchestration_fails_closed_at_each_identity_check() {
         for failed_check in 1..=3 {
             let events = Arc::new(Mutex::new(Vec::new()));
-            let (lifecycle, gate) = fake_identity_lifecycle(
-                Arc::clone(&events),
-                Some(failed_check),
-                false,
-            );
+            let (lifecycle, gate) =
+                fake_identity_lifecycle(Arc::clone(&events), Some(failed_check), false);
             let result = guarded_stream_lifecycle(
                 || install_fake(lifecycle),
                 || Ok(((), ())),
@@ -1340,11 +1258,7 @@ mod tests {
     #[test]
     fn guarded_orchestration_cleans_monitor_after_build_failure() {
         let events = Arc::new(Mutex::new(Vec::new()));
-        let (lifecycle, gate) = fake_identity_lifecycle(
-            Arc::clone(&events),
-            None,
-            false,
-        );
+        let (lifecycle, gate) = fake_identity_lifecycle(Arc::clone(&events), None, false);
         let result: Result<(), String> = guarded_stream_lifecycle(
             || install_fake(lifecycle),
             || Err::<((), ()), _>(String::from("build failed")),
@@ -1367,11 +1281,7 @@ mod tests {
     #[test]
     fn guarded_orchestration_cleans_stream_after_play_failure() {
         let events = Arc::new(Mutex::new(Vec::new()));
-        let (lifecycle, gate) = fake_identity_lifecycle(
-            Arc::clone(&events),
-            None,
-            false,
-        );
+        let (lifecycle, gate) = fake_identity_lifecycle(Arc::clone(&events), None, false);
         let play_events = Arc::clone(&events);
         let result: Result<(), String> = guarded_stream_lifecycle(
             || install_fake(lifecycle),
@@ -1384,23 +1294,14 @@ mod tests {
         );
         assert_eq!(result.unwrap_err(), "play failed");
         assert!(!gate.is_open());
-        assert!(events
-            .lock()
-            .unwrap()
-            .contains(&"remove-and-barrier"));
+        assert!(events.lock().unwrap().contains(&"remove-and-barrier"));
     }
 
     #[test]
     fn guarded_orchestration_stops_when_listener_install_fails() {
         let result: Result<(), String> = guarded_stream_lifecycle(
-            || {
-                Err::<FakeIdentityLifecycle, _>(String::from(
-                    "listener install failed",
-                ))
-            },
-            || -> Result<((), ()), String> {
-                panic!("build must not run after install failure")
-            },
+            || Err::<FakeIdentityLifecycle, _>(String::from("listener install failed")),
+            || -> Result<((), ()), String> { panic!("build must not run after install failure") },
             |_| {},
             |_: ()| {},
         );
@@ -1410,11 +1311,7 @@ mod tests {
     #[test]
     fn guarded_orchestration_cannot_enable_after_invalidation() {
         let events = Arc::new(Mutex::new(Vec::new()));
-        let (lifecycle, gate) = fake_identity_lifecycle(
-            Arc::clone(&events),
-            None,
-            true,
-        );
+        let (lifecycle, gate) = fake_identity_lifecycle(Arc::clone(&events), None, true);
         let result: Result<(), String> = guarded_stream_lifecycle(
             || install_fake(lifecycle),
             || Ok(((), ())),
@@ -1429,11 +1326,7 @@ mod tests {
     #[test]
     fn guarded_orchestration_discards_result_after_capture_invalidation() {
         let events = Arc::new(Mutex::new(Vec::new()));
-        let (lifecycle, gate) = fake_identity_lifecycle(
-            Arc::clone(&events),
-            None,
-            false,
-        );
+        let (lifecycle, gate) = fake_identity_lifecycle(Arc::clone(&events), None, false);
         let invalidating_gate = Arc::clone(&gate);
         let result = guarded_stream_lifecycle(
             || install_fake(lifecycle),

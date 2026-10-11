@@ -11,8 +11,7 @@
 /// Output accounting removes Rubato's startup delay exactly once, then emits
 /// exactly round(input_frames * 16_000 / native_rate) canonical frames.
 use rubato::{
-    Resampler, SincFixedIn, SincInterpolationParameters,
-    SincInterpolationType, WindowFunction,
+    Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
 };
 
 use crate::capture::buffer::TARGET_RATE;
@@ -20,14 +19,13 @@ use crate::capture::buffer::TARGET_RATE;
 /// Input chunk size in native-rate frames fed to the resampler per call.
 pub const CHUNK_FRAMES: usize = 1024;
 
-const SINC_PARAMS: SincInterpolationParameters =
-    SincInterpolationParameters {
-        f_cutoff: 0.95,
-        interpolation: SincInterpolationType::Cubic,
-        oversampling_factor: 128,
-        sinc_len: 256,
-        window: WindowFunction::BlackmanHarris2,
-    };
+const SINC_PARAMS: SincInterpolationParameters = SincInterpolationParameters {
+    f_cutoff: 0.95,
+    interpolation: SincInterpolationType::Cubic,
+    oversampling_factor: 128,
+    sinc_len: 256,
+    window: WindowFunction::BlackmanHarris2,
+};
 
 const MAX_RATIO_RELATIVE: f64 = 1.0;
 
@@ -50,12 +48,9 @@ impl Downmixer {
     /// Returns `Err` for rates that produce an invalid ratio (e.g. 0).
     pub fn new(native_rate: u32) -> Result<Self, String> {
         if native_rate == 0 {
-            return Err(String::from(
-                "capture-unavailable: native_rate must be > 0",
-            ));
+            return Err(String::from("capture-unavailable: native_rate must be > 0"));
         }
-        let (delay_remaining, resampler, out_buf) =
-            if native_rate != TARGET_RATE {
+        let (delay_remaining, resampler, out_buf) = if native_rate != TARGET_RATE {
             let ratio = TARGET_RATE as f64 / native_rate as f64;
             if !ratio.is_finite() || ratio <= 0.0 {
                 return Err(format!(
@@ -63,24 +58,11 @@ impl Downmixer {
                      {ratio} for native_rate={native_rate}"
                 ));
             }
-            let r = SincFixedIn::<f32>::new(
-                ratio,
-                MAX_RATIO_RELATIVE,
-                SINC_PARAMS,
-                CHUNK_FRAMES,
-                1,
-            )
-            .map_err(|e| {
-                format!(
-                    "capture-unavailable: resampler init failed: {e}"
-                )
-            })?;
+            let r =
+                SincFixedIn::<f32>::new(ratio, MAX_RATIO_RELATIVE, SINC_PARAMS, CHUNK_FRAMES, 1)
+                    .map_err(|e| format!("capture-unavailable: resampler init failed: {e}"))?;
             let max_out = r.output_frames_max();
-            (
-                r.output_delay(),
-                Some(r),
-                vec![vec![0.0f32; max_out]; 1],
-            )
+            (r.output_delay(), Some(r), vec![vec![0.0f32; max_out]; 1])
         } else {
             (0, None, Vec::new())
         };
@@ -121,8 +103,7 @@ impl Downmixer {
         let mut output = Vec::new();
 
         while self.staging.len() >= CHUNK_FRAMES {
-            let window: Vec<f32> =
-                self.staging.drain(..CHUNK_FRAMES).collect();
+            let window: Vec<f32> = self.staging.drain(..CHUNK_FRAMES).collect();
             let n_out = self.process_chunk(&window)?;
             self.processed_input += CHUNK_FRAMES as u64;
             let target = self.canonical_frames(self.processed_input);
@@ -147,9 +128,7 @@ impl Downmixer {
         }
 
         let target = self.canonical_frames(self.accepted_input);
-        let mut output = Vec::with_capacity(
-            (target.saturating_sub(self.emitted_output)) as usize,
-        );
+        let mut output = Vec::with_capacity((target.saturating_sub(self.emitted_output)) as usize);
         if !self.staging.is_empty() {
             let real_frames = self.staging.len() as u64;
             self.staging.resize(CHUNK_FRAMES, 0.0);
@@ -159,8 +138,7 @@ impl Downmixer {
             self.collect_aligned(n_out, target, &mut output);
         }
 
-        let raw_needed = self.delay_remaining
-            + target.saturating_sub(self.emitted_output) as usize;
+        let raw_needed = self.delay_remaining + target.saturating_sub(self.emitted_output) as usize;
         let raw_per_chunk = self
             .resampler
             .as_ref()
@@ -192,16 +170,10 @@ impl Downmixer {
 
     fn canonical_frames(&self, input_frames: u64) -> u64 {
         let numerator = input_frames as u128 * TARGET_RATE as u128;
-        ((numerator + self.native_rate as u128 / 2)
-            / self.native_rate as u128) as u64
+        ((numerator + self.native_rate as u128 / 2) / self.native_rate as u128) as u64
     }
 
-    fn collect_aligned(
-        &mut self,
-        raw_len: usize,
-        target: u64,
-        output: &mut Vec<f32>,
-    ) {
+    fn collect_aligned(&mut self, raw_len: usize, target: u64, output: &mut Vec<f32>) {
         let skip = self.delay_remaining.min(raw_len);
         self.delay_remaining -= skip;
         let available = raw_len - skip;
@@ -212,14 +184,13 @@ impl Downmixer {
     }
 
     fn process_chunk(&mut self, input: &[f32]) -> Result<usize, String> {
-        let resampler = self.resampler.as_mut().ok_or_else(|| {
-            String::from("capture-unavailable: missing resampler")
-        })?;
+        let resampler = self
+            .resampler
+            .as_mut()
+            .ok_or_else(|| String::from("capture-unavailable: missing resampler"))?;
         let (_, produced) = resampler
             .process_into_buffer(&[input], &mut self.out_buf, None)
-            .map_err(|error| {
-                format!("capture-unavailable: resampler error: {error}")
-            })?;
+            .map_err(|error| format!("capture-unavailable: resampler error: {error}"))?;
         Ok(produced)
     }
 }
@@ -231,28 +202,23 @@ mod tests {
 
     fn sine(freq_hz: f32, rate: u32, n: usize) -> Vec<f32> {
         (0..n)
-            .map(|i| {
-                (2.0 * PI * freq_hz * i as f32 / rate as f32).sin()
-            })
+            .map(|i| (2.0 * PI * freq_hz * i as f32 / rate as f32).sin())
             .collect()
     }
 
     fn rms(s: &[f32]) -> f32 {
-        if s.is_empty() { return 0.0; }
+        if s.is_empty() {
+            return 0.0;
+        }
         (s.iter().map(|x| x * x).sum::<f32>() / s.len() as f32).sqrt()
     }
 
     fn canonical_frames(input_frames: usize, native_rate: u32) -> usize {
         let numerator = input_frames as u128 * TARGET_RATE as u128;
-        ((numerator + native_rate as u128 / 2) / native_rate as u128)
-            as usize
+        ((numerator + native_rate as u128 / 2) / native_rate as u128) as usize
     }
 
-    fn normalize(
-        input: &[f32],
-        native_rate: u32,
-        call_sizes: &[usize],
-    ) -> Vec<f32> {
+    fn normalize(input: &[f32], native_rate: u32, call_sizes: &[usize]) -> Vec<f32> {
         let mut downmixer = Downmixer::new(native_rate).unwrap();
         let mut output = Vec::new();
         let mut offset = 0;
@@ -366,10 +332,7 @@ mod tests {
         let mut d = Downmixer::new(native).unwrap();
         let out = d.process(&vec![0.0f32; CHUNK_FRAMES * 4]).unwrap();
         for &s in &out {
-            assert!(
-                s.abs() < 1e-5,
-                "silence must produce near-zero, got {s}"
-            );
+            assert!(s.abs() < 1e-5, "silence must produce near-zero, got {s}");
         }
     }
 
@@ -380,9 +343,7 @@ mod tests {
         let single = normalize(&input, native_rate, &[input.len()]);
         let fragmented = normalize(&input, native_rate, &[1, 37, 1_023, 5]);
         assert_eq!(fragmented.len(), single.len());
-        for (index, (actual, expected)) in
-            fragmented.iter().zip(single.iter()).enumerate()
-        {
+        for (index, (actual, expected)) in fragmented.iter().zip(single.iter()).enumerate() {
             assert!(
                 (actual - expected).abs() < 1e-6,
                 "chunking changed frame {index}: {actual} vs {expected}",
@@ -412,9 +373,7 @@ mod tests {
             let impulse_index = input_len - 97;
             let mut input = vec![0.0; input_len];
             input[impulse_index] = 1.0;
-            let startup_delay = Downmixer::new(native_rate)
-                .unwrap()
-                .delay_remaining;
+            let startup_delay = Downmixer::new(native_rate).unwrap().delay_remaining;
             let output = normalize(&input, native_rate, &[211, 17, 1_024]);
             let actual_peak = output
                 .iter()
@@ -422,8 +381,8 @@ mod tests {
                 .max_by(|left, right| left.1.abs().total_cmp(&right.1.abs()))
                 .map(|(index, _)| index)
                 .unwrap();
-            let expected_peak = canonical_frames(impulse_index, native_rate)
-                .saturating_sub(startup_delay);
+            let expected_peak =
+                canonical_frames(impulse_index, native_rate).saturating_sub(startup_delay);
             // Rubato's documented file-output pattern discards its leading
             // delay, so aligned source positions move left by that amount.
             assert!(
