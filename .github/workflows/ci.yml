@@ -3,6 +3,15 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   browser-app:
@@ -18,6 +27,33 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run lint
+      - run: npm run typecheck
       - run: npm run test:unit
       - run: npm run build
       - run: npm run test:e2e
+
+  rust:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Tauri Linux system dependencies
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libasound2-dev libxdo-dev libssl-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Ensure frontend dist exists for tauri::generate_context!
+        working-directory: .
+        run: mkdir -p dist
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets
+      - run: cargo test
