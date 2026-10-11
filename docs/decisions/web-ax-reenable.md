@@ -23,6 +23,7 @@
 
      Rules (`decide/web_ax.rs` `context_holds`):
      - If **neither** the window document nor the web-area URL was readable at completion, the late target is **refused** (Copy): a tab switch would be undetectable.
+     - If the window title was unreadable at completion, the late target is also **refused** (Copy).
      - Otherwise, on **every** poll and on the field that's found, the window must be the same element (CFEqual) and the title exactly the same.
      - A window document known at completion must be unchanged.
      - A web-area URL known at completion must match whenever it's readable, and must match on the found field.

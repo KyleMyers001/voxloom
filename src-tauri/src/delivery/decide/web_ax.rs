@@ -82,12 +82,17 @@ pub struct DocIds {
 ///   completion — otherwise refuse (Copy): a tab switch would be undetectable;
 /// - the focused window is the same element (`same_window`: CFEqual; `None` =
 ///   unreadable on either side => refuse);
-/// - the window title (active tab title) is exactly unchanged;
+/// - the window title (active tab title) was readable at completion and is
+///   exactly unchanged;
 /// - the window AXDocument, if known at completion, is unchanged;
 /// - the web-area URL, if known at completion, matches whenever it is
 ///   readable now, and MUST match on the field that is found.
 pub fn context_holds(same_window: Option<bool>, start: &DocIds, now: &DocIds, found: bool) -> bool {
     if start.window_doc.is_none() && start.area_url.is_none() {
+        return false;
+    }
+    // Without a title at capture, a same-window tab switch can't be detected.
+    if start.window_title.is_none() {
         return false;
     }
     if same_window != Some(true) || now.window_title != start.window_title {

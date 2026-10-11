@@ -224,3 +224,14 @@ fn failed_typing_is_not_rechecked() {
     // Only the spaced pre-type read (300 ms); no post-typing settle.
     assert_eq!(f.slept.iter().filter(|ms| **ms == 300).count(), 1);
 }
+
+#[test]
+fn unreadable_count_on_the_post_type_reread_is_unverified() {
+    let mut f = Fake::new(&[Some(10)]);
+    f.after_type = Some([None].into());
+    assert_eq!(
+        insert_unreadable(&mut f, TEXT, true),
+        UnreadableOutcome::TypedUnverified(1)
+    );
+    assert_eq!(f.typed, 1);
+}

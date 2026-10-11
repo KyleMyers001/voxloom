@@ -218,3 +218,11 @@ fn same_pid_field_found_after_context_change_is_rejected_by_the_wait() {
     );
     assert_eq!(r, Err("context changed"));
 }
+
+#[test]
+fn unreadable_window_title_at_capture_refuses_the_late_target() {
+    let mut start = ids(Some("https://a/"), Some("https://a/"));
+    start.window_title = None;
+    assert!(!context_holds(Some(true), &start, &start, false));
+    assert!(!context_holds(Some(true), &start, &start, true));
+}
