@@ -14,6 +14,20 @@ afterEach(() => vi.mocked(isTauriEnv).mockReturnValue(false));
 const rows = () => screen.queryAllByRole('article');
 const statuses: HistoryStatus[] = ['inserted', 'copied', 'failed', 'unverified'];
 
+describe('History empty states (UI PR 4)', () => {
+  it('shows "No dictations yet" when there is no history at all, not the no-match state', () => {
+    renderWithApp(<History onToast={vi.fn()} />);
+    for (const button of screen.getAllByRole('button', { name: 'Delete transcript' })) fireEvent.click(button);
+    expect(screen.getByText('No dictations yet')).toBeInTheDocument();
+    expect(screen.queryByText('No history matches these filters')).not.toBeInTheDocument();
+  });
+
+  it('names the real Settings section in the retention line', () => {
+    renderWithApp(<History onToast={vi.fn()} />);
+    expect(screen.getByText(/\(Settings › Retention & privacy\)/)).toBeInTheDocument();
+  });
+});
+
 describe('History segmented filter (UI PR 4)', () => {
   it('shows exactly the records the old select showed for each status', () => {
     renderWithApp(<History onToast={vi.fn()} />);
@@ -34,6 +48,8 @@ describe('History segmented filter (UI PR 4)', () => {
     await user.type(screen.getByRole('searchbox', { name: 'Search history' }), 'zzz-no-match');
     expect(rows()).toHaveLength(0);
     expect(screen.getByText('No history matches these filters')).toBeInTheDocument();
+    expect(screen.getByText('Clear the search or choose All.')).toBeInTheDocument();
+    expect(screen.queryByText('No dictations yet')).not.toBeInTheDocument();
     await user.keyboard('{Escape}');
     expect(rows()).toHaveLength(initialRecords.length);
     screen.getByRole('radio', { name: 'All' }).focus();
