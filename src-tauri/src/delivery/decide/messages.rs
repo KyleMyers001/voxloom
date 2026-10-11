@@ -14,7 +14,7 @@
 
 use super::length::after_ax_by_length;
 use super::retry::RETRY_UNCHANGED_READS_MS;
-use super::verify::AfterAx;
+use super::verify::{value_confirms_insert, AfterAx};
 
 pub const MESSAGES_BUNDLE_ID: &str = "com.apple.MobileSMS";
 pub const COUNT_POLLS: usize = 30;
@@ -33,7 +33,12 @@ pub fn typed_count_ok(before: i64, selected: i64, now: Option<i64>, typed_utf16:
 }
 
 pub trait UnreadableIo {
+    /// Character count; the platform side falls back to the AXValue length.
     fn count(&mut self) -> Option<i64>;
+    /// AXValue, when readable (used only to cross-check a success).
+    fn value(&mut self) -> Option<String> {
+        None
+    }
     /// UTF-16 length of the current selection (0 for a caret), if readable.
     fn selected_len(&mut self) -> Option<i64>;
     fn sleep(&mut self, ms: u64);
@@ -51,11 +56,34 @@ pub enum UnreadableOutcome {
     TypedUnverified(usize),
 }
 
+/// Guarded Messages flow. When AXValue is readable (composer already holds
+/// text, e.g. a second dictation), a success is additionally cross-checked
+/// against the value: a readable value that doesn't prove the insert
+/// downgrades to Unverified.
 pub fn insert_unreadable(
     io: &mut impl UnreadableIo,
-    text_utf16: i64,
+    text: &str,
     may_type: bool,
 ) -> UnreadableOutcome {
+    let before_value = io.value();
+    let outcome = flow(io, text.encode_utf16().count() as i64, may_type);
+    let succeeded = matches!(
+        outcome,
+        UnreadableOutcome::Ax(AfterAx::Inserted) | UnreadableOutcome::Typed(_, Ok(()))
+    );
+    let Some(before_value) = before_value.filter(|_| succeeded) else {
+        return outcome;
+    };
+    match io.value() {
+        Some(now) if !value_confirms_insert(&before_value, &now, text) => match outcome {
+            UnreadableOutcome::Typed(posted, _) => UnreadableOutcome::TypedUnverified(posted),
+            _ => UnreadableOutcome::Ax(AfterAx::Unverified),
+        },
+        _ => outcome,
+    }
+}
+
+fn flow(io: &mut impl UnreadableIo, text_utf16: i64, may_type: bool) -> UnreadableOutcome {
     let before = io.count();
     let selected = io.selected_len();
     let ax = io.write_ax();

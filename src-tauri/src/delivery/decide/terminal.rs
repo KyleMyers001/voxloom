@@ -9,7 +9,7 @@ pub fn apple_terminal_host(exe: &str) -> bool {
 pub fn choose_path(
     target: &TargetSnapshotDto,
     value_readable: bool,
-    unreadable_ok: bool,
+    messages_host: bool,
     terminal: Option<bool>,
 ) -> InsertPath {
     let Some(terminal) = terminal else {
@@ -18,7 +18,7 @@ pub fn choose_path(
         );
     };
     if !terminal {
-        return choose_insert_path(target, value_readable, unreadable_ok);
+        return choose_insert_path(target, value_readable, messages_host);
     }
     if target.insertable
         && target.kind == "insertable"
@@ -181,7 +181,7 @@ mod tests {
         ] {
             let checked = super::super::validate_snapshots(&intended, current);
             assert!(matches!(
-                choose_path(&checked, true, true, Some(true)),
+                choose_path(&checked, true, false, Some(true)),
                 InsertPath::Refuse(_)
             ));
             let result = dispatch(
@@ -216,33 +216,40 @@ mod tests {
         ));
         let mut t = target("insertable", Some(42), Some("42:AXTextArea:#1"));
         assert!(
-            matches!(choose_path(&t, true, true, None), InsertPath::Refuse(_)),
+            matches!(choose_path(&t, true, false, None), InsertPath::Refuse(_)),
             "unknown executable must not fall through to AX mutation"
         );
         assert_eq!(
-            choose_path(&t, false, true, Some(true)),
+            choose_path(&t, false, false, Some(true)),
             InsertPath::TerminalUnicode
         );
         assert_eq!(
-            choose_path(&t, true, true, Some(false)),
+            choose_path(&t, true, false, Some(false)),
             InsertPath::AxSelectedText
         );
-        // Unreadable AXValue: one guarded write, count-verified or Unverified.
-        assert_eq!(
-            choose_path(&t, false, true, Some(false)),
-            InsertPath::AxSelectedTextUnreadable
-        );
+        // Unreadable AXValue outside Messages: refused (BUS-14).
+        assert!(matches!(
+            choose_path(&t, false, false, Some(false)),
+            InsertPath::Refuse(_)
+        ));
+        // Messages: guarded flow whether or not AXValue is readable.
+        for readable in [true, false] {
+            assert_eq!(
+                choose_path(&t, readable, true, Some(false)),
+                InsertPath::MessagesGuarded
+            );
+        }
         for role in ["AXTextField", "AXGroup", "AXWebArea", "AXSecureTextField"] {
             t.element_role = Some(role.into());
             assert!(matches!(
-                choose_path(&t, true, true, Some(true)),
+                choose_path(&t, true, false, Some(true)),
                 InsertPath::Refuse(_)
             ));
         }
         t.element_role = Some("AXTextArea".into());
         t.kind = "secure".into();
         assert!(matches!(
-            choose_path(&t, true, true, Some(true)),
+            choose_path(&t, true, false, Some(true)),
             InsertPath::Refuse(_)
         ));
     }

@@ -2,6 +2,8 @@ use super::*;
 use std::collections::VecDeque;
 
 struct Fake {
+    /// AXValue before / after (None = unreadable, as in an empty composer).
+    values: VecDeque<Option<String>>,
     counts: VecDeque<Option<i64>>,
     /// Replaces `counts` when typing runs (what the field shows afterwards).
     after_type: Option<VecDeque<Option<i64>>>,
@@ -18,6 +20,7 @@ impl Fake {
         Self {
             counts: counts.iter().copied().collect(),
             after_type: None,
+            values: [None].into(),
             selected: Some(0),
             ax: Ok(()),
             ax_writes: 0,
@@ -29,6 +32,13 @@ impl Fake {
 }
 
 impl UnreadableIo for Fake {
+    fn value(&mut self) -> Option<String> {
+        if self.values.len() > 1 {
+            self.values.pop_front().unwrap()
+        } else {
+            self.values.front().cloned().flatten()
+        }
+    }
     fn count(&mut self) -> Option<i64> {
         if self.counts.len() > 1 {
             self.counts.pop_front().unwrap()
@@ -55,7 +65,7 @@ impl UnreadableIo for Fake {
     }
 }
 
-const TEXT: i64 = 5;
+const TEXT: &str = "hello";
 
 #[test]
 fn only_messages_bundle_is_allowlisted() {
@@ -234,4 +244,75 @@ fn unreadable_count_on_the_post_type_reread_is_unverified() {
         UnreadableOutcome::TypedUnverified(1)
     );
     assert_eq!(f.typed, 1);
+}
+
+fn v(s: &str) -> Option<String> {
+    Some(s.into())
+}
+
+#[test]
+fn attempt_two_readable_value_caret_at_end_types_and_cross_checks() {
+    // Composer already holds "Hi " (count 3); AX set ignored; typing lands.
+    let mut f = Fake::new(&[Some(3)]);
+    f.after_type = Some([Some(8)].into());
+    f.values = [v("Hi "), v("Hi hello")].into();
+    assert_eq!(
+        insert_unreadable(&mut f, TEXT, true),
+        UnreadableOutcome::Typed(1, Ok(()))
+    );
+    assert_eq!((f.ax_writes, f.typed), (1, 1));
+}
+
+#[test]
+fn attempt_two_readable_value_with_selection_replaced() {
+    // "Hi there" with "there" selected (5) replaced by "hello": 8 -> 8 is
+    // ambiguous by count, so the AX path can't claim; typing proves it.
+    let mut f = Fake::new(&[Some(8)]);
+    f.selected = Some(5);
+    f.after_type = Some([Some(8)].into());
+    f.values = [v("Hi there"), v("Hi hello")].into();
+    let out = insert_unreadable(&mut f, TEXT, true);
+    assert_eq!(out, UnreadableOutcome::Ax(AfterAx::Unverified));
+    assert_eq!(
+        f.typed, 0,
+        "same-length replace is ambiguous: never type on top"
+    );
+    // Different-length selection: "Hi there!" select "there!" (6) -> 8.
+    let mut f = Fake::new(&[Some(9)]);
+    f.selected = Some(6);
+    f.after_type = Some([Some(8)].into());
+    f.values = [v("Hi there!"), v("Hi hello")].into();
+    assert_eq!(
+        insert_unreadable(&mut f, TEXT, true),
+        UnreadableOutcome::Typed(1, Ok(()))
+    );
+}
+
+#[test]
+fn attempt_two_ax_write_honoured_is_inserted_and_value_confirms() {
+    let mut f = Fake::new(&[Some(3), Some(8)]);
+    f.values = [v("Hi "), v("Hi hello")].into();
+    assert_eq!(
+        insert_unreadable(&mut f, TEXT, true),
+        UnreadableOutcome::Ax(AfterAx::Inserted)
+    );
+    assert_eq!(f.typed, 0);
+}
+
+#[test]
+fn readable_value_that_contradicts_the_count_is_unverified() {
+    // Count matches but the value shows something else (e.g. autocorrect).
+    let mut f = Fake::new(&[Some(3), Some(8)]);
+    f.values = [v("Hi "), v("Hi Hello")].into();
+    assert_eq!(
+        insert_unreadable(&mut f, TEXT, true),
+        UnreadableOutcome::Ax(AfterAx::Unverified)
+    );
+    let mut f = Fake::new(&[Some(3)]);
+    f.after_type = Some([Some(8)].into());
+    f.values = [v("Hi "), v("Hi Hello")].into();
+    assert_eq!(
+        insert_unreadable(&mut f, TEXT, true),
+        UnreadableOutcome::TypedUnverified(1)
+    );
 }

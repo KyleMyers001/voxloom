@@ -1,5 +1,5 @@
-//! Apple Messages only (allowlisted in `decide::messages`): insert into a
-//! non-secure text element whose AXValue cannot be read. AXSelectedText first,
+//! Apple Messages only (allowlisted in `decide::messages`), whether or not
+//! its composer's AXValue is readable. AXSelectedText first,
 //! then (if ignored) guarded Unicode typing, both verified by
 //! `AXNumberOfCharacters`. The caller has already refused secure fields.
 
@@ -15,6 +15,12 @@ fn utf16_len(s: &str) -> i64 {
     s.encode_utf16().count() as i64
 }
 
+/// AXNumberOfCharacters, else the readable AXValue's UTF-16 length.
+fn count_of(element: AXUIElementRef) -> Option<i64> {
+    copy_i64_attr(element, "AXNumberOfCharacters")
+        .or_else(|| copy_string_attr(element, "AXValue").map(|v| utf16_len(&v)))
+}
+
 fn sleep_ms(ms: u64) {
     std::thread::sleep(std::time::Duration::from_millis(ms));
 }
@@ -27,7 +33,10 @@ struct AxCounts<'a> {
 
 impl UnreadableIo for AxCounts<'_> {
     fn count(&mut self) -> Option<i64> {
-        copy_i64_attr(self.element, "AXNumberOfCharacters")
+        count_of(self.element)
+    }
+    fn value(&mut self) -> Option<String> {
+        copy_string_attr(self.element, "AXValue")
     }
     fn selected_len(&mut self) -> Option<i64> {
         copy_string_attr(self.element, "AXSelectedText").map(|s| utf16_len(&s))
@@ -49,7 +58,7 @@ impl UnreadableIo for AxCounts<'_> {
                     if i > 0 {
                         sleep_ms(COUNT_POLL_MS);
                     }
-                    let now = copy_i64_attr(element, "AXNumberOfCharacters");
+                    let now = count_of(element);
                     typed_count_ok(before, selected, now, utf16_len(so_far))
                 })
             },
@@ -76,7 +85,7 @@ pub fn insert_without_value(
         validated,
         text,
     };
-    match insert_unreadable(&mut io, utf16_len(text), true) {
+    match insert_unreadable(&mut io, text, true) {
         UnreadableOutcome::Ax(AfterAx::Inserted) => Ok(InsertReport {
             detail: Some("verified by character count (AXValue unreadable)".into()),
             ..Default::default()

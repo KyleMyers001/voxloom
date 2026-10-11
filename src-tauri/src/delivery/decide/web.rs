@@ -23,20 +23,22 @@ pub fn is_web_content_field<S: AsRef<str>>(
 #[derive(Debug, PartialEq, Eq)]
 pub enum InsertPath {
     AxSelectedText,
-    /// Editable, non-secure text element whose AXValue cannot be read (e.g.
-    /// Messages): write AXSelectedText once, verify by character count or
-    /// report Unverified. Never used for secure fields.
-    AxSelectedTextUnreadable,
+    /// Apple Messages only (readable or unreadable AXValue): the guarded
+    /// AX-write → spaced reads → typing flow in `decide::messages`. Never used
+    /// for secure fields.
+    MessagesGuarded,
     TerminalUnicode,
     Refuse(String),
 }
 
-/// `unreadable_ok`: the host is allowlisted for the unreadable-AXValue path
-/// (`decide::messages::unreadable_value_allowed`, Messages only).
+/// `messages_host`: Apple Messages (`decide::messages::unreadable_value_allowed`).
+/// Messages ignores AXSelectedText sets while reporting success whether or not
+/// its AXValue is readable (empty composer: unreadable; after text: readable),
+/// so it ALWAYS takes the guarded Messages flow.
 pub fn choose_insert_path(
     validated: &TargetSnapshotDto,
     value_readable: bool,
-    unreadable_ok: bool,
+    messages_host: bool,
 ) -> InsertPath {
     if !validated.insertable || validated.kind != "insertable" {
         return InsertPath::Refuse(format!(
@@ -47,19 +49,18 @@ pub fn choose_insert_path(
                 .unwrap_or_else(|| validated.kind.clone())
         ));
     }
-    // Without a readable value we cannot prove the exact text landed. Only
-    // Messages (allowlisted) may proceed: verified by character count, or
-    // Unverified (amends BUS-14; docs/decisions/unreadable-axvalue.md). The
-    // secure-field guard is absolute and checked first, independently.
+    // The secure-field guard is absolute and checked first, independently.
+    let role = validated.element_role.as_deref().unwrap_or_default();
+    if validated.kind == "secure" || role == "AXSecureTextField" {
+        return InsertPath::Refuse("secure field — insert skipped".into());
+    }
+    if messages_host {
+        return InsertPath::MessagesGuarded;
+    }
+    // Without a readable value we cannot prove the exact text landed
+    // (BUS-14; docs/decisions/unreadable-axvalue.md).
     if !value_readable {
-        let role = validated.element_role.as_deref().unwrap_or_default();
-        if validated.kind == "secure" || role == "AXSecureTextField" {
-            return InsertPath::Refuse("secure field — insert skipped".into());
-        }
-        if !unreadable_ok {
-            return InsertPath::Refuse("AXValue unreadable before insert — insert skipped".into());
-        }
-        return InsertPath::AxSelectedTextUnreadable;
+        return InsertPath::Refuse("AXValue unreadable before insert — insert skipped".into());
     }
     InsertPath::AxSelectedText
 }
