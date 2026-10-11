@@ -1,5 +1,7 @@
 # Voxloom — macOS-first local dictation (work in progress)
 
+**Download:** [latest release](https://github.com/KyleMyers001/voxloom/releases/latest) (macOS; see [Releases](#releases)).
+
 The Tauri desktop shell captures real microphone audio, can transcribe it
 locally using an explicitly downloaded Whisper model (`--features whisper`),
 and attempts to insert text into the transcription-completion-time macOS target. When
@@ -109,6 +111,36 @@ npm run macos:assert-entitlements
 ```
 
 See `docs/review/BUS-10-entitlements-codesign.md` if the dump is empty.
+
+## Releases
+
+macOS builds are published as **draft** GitHub Releases by
+`.github/workflows/release.yml` whenever a `v*` tag is pushed. Each release
+has a universal `.dmg`, a zipped `.app` and `SHA256SUMS`.
+
+Cutting a release:
+
+```sh
+npm run release:bump -- 0.2.0   # syncs package.json, tauri.conf.json, Cargo.toml (+ locks), commits, tags v0.2.0
+git push && git push origin v0.2.0
+```
+
+Then review the draft release on GitHub, edit the notes (template:
+`.github/release-notes.md`; changes are auto-generated from merged PRs), and
+publish it. The workflow fails if the tag and manifest versions differ
+(`npm run release:check-version -- v0.2.0`).
+
+**Signing:** builds are ad-hoc signed and labeled **UNSIGNED** until these
+repository secrets exist, after which they are Developer ID signed,
+notarized and stapled automatically: `APPLE_CERTIFICATE` (base64 `.p12`),
+`APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, plus either
+`APPLE_ID` + `APPLE_PASSWORD` (app-specific) + `APPLE_TEAM_ID`, or
+`APPLE_API_KEY` + `APPLE_API_ISSUER` + `APPLE_API_PRIVATE_KEY` (`.p8`
+contents).
+
+**Test build without releasing:** run the *Release* workflow manually
+(Actions → Release → Run workflow). It uploads the build as a workflow
+artifact and does not create a release.
 
 ## Local STT (whisper.cpp)
 
