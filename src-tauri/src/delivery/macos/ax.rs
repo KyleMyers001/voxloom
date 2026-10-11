@@ -37,6 +37,8 @@ extern "C" {
     fn CFStringGetMaximumSizeForEncoding(length: isize, encoding: u32) -> isize;
     fn CFGetTypeID(cf: CFTypeRef) -> usize;
     fn CFStringGetTypeID() -> usize;
+    fn CFNumberGetTypeID() -> usize;
+    fn CFNumberGetValue(number: CFTypeRef, the_type: isize, value_ptr: *mut c_void) -> u8;
     fn CFRelease(cf: CFTypeRef);
     pub fn CFRetain(cf: CFTypeRef) -> CFTypeRef;
     pub fn CFEqual(a: CFTypeRef, b: CFTypeRef) -> u8;
@@ -107,6 +109,23 @@ pub fn copy_string_attr(element: AXUIElementRef, attr: &str) -> Option<String> {
     let result = cfstring_to_rust(value);
     release(value);
     result
+}
+
+/// Integer attribute (e.g. `AXNumberOfCharacters`), if it is a CFNumber.
+pub fn copy_i64_attr(element: AXUIElementRef, attr: &str) -> Option<i64> {
+    const K_CF_NUMBER_SINT64_TYPE: isize = 4;
+    let value = copy_attr(element, attr).ok()?;
+    let mut out: i64 = 0;
+    let ok = unsafe {
+        CFGetTypeID(value) == CFNumberGetTypeID()
+            && CFNumberGetValue(
+                value,
+                K_CF_NUMBER_SINT64_TYPE,
+                &mut out as *mut i64 as *mut c_void,
+            ) != 0
+    };
+    release(value);
+    ok.then_some(out)
 }
 
 pub fn element_pid(element: AXUIElementRef) -> Option<i32> {

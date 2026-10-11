@@ -36,14 +36,40 @@ fn web_content_detection() {
 fn path_choice() {
     let ok = target("insertable", Some(1), Some("1:AXTextField:#1"));
     assert_eq!(choose_insert_path(&ok, true), InsertPath::AxSelectedText);
-    assert!(matches!(
+    assert_eq!(
         choose_insert_path(&ok, false),
-        InsertPath::Refuse(_)
-    ));
+        InsertPath::AxSelectedTextUnreadable
+    );
     for kind in ["secure", "changed", "unavailable", "unsupported"] {
         assert!(matches!(
             choose_insert_path(&target(kind, Some(1), Some("x")), true),
             InsertPath::Refuse(_)
         ));
     }
+}
+
+#[test]
+fn unreadable_value_never_unlocks_secure_fields() {
+    let mut secure = target("insertable", Some(1), Some("x"));
+    secure.element_role = Some("AXSecureTextField".into());
+    assert!(matches!(
+        choose_insert_path(&secure, false),
+        InsertPath::Refuse(_)
+    ));
+    for kind in ["secure", "changed", "unavailable", "unsupported"] {
+        assert!(matches!(
+            choose_insert_path(&target(kind, Some(1), Some("x")), false),
+            InsertPath::Refuse(_)
+        ));
+    }
+}
+
+#[test]
+fn messages_like_text_area_with_unreadable_value_is_attempted() {
+    // Role AXTextArea, insertable, AXValue not a readable string.
+    let messages = target("insertable", Some(9), Some("9:AXTextArea:#1"));
+    assert_eq!(
+        choose_insert_path(&messages, false),
+        InsertPath::AxSelectedTextUnreadable
+    );
 }

@@ -10,6 +10,7 @@ mod focus;
 mod host;
 mod registry;
 mod typing;
+mod unreadable;
 mod web_ax;
 
 use std::sync::Mutex;
@@ -139,6 +140,7 @@ pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<InsertRep
     let result = match super::decide::terminal::choose_path(&validated, before.is_some(), terminal)
     {
         InsertPath::Refuse(reason) => Err(reason),
+        InsertPath::AxSelectedTextUnreadable => unreadable::insert_without_value(element, text),
         InsertPath::TerminalUnicode => {
             typing::type_terminal(text, || terminal_still_matches(&validated, element))
         }

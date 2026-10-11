@@ -226,10 +226,11 @@ mod tests {
             choose_path(&t, true, Some(false)),
             InsertPath::AxSelectedText
         );
-        assert!(matches!(
+        // Unreadable AXValue: one guarded write, count-verified or Unverified.
+        assert_eq!(
             choose_path(&t, false, Some(false)),
-            InsertPath::Refuse(_)
-        ));
+            InsertPath::AxSelectedTextUnreadable
+        );
         for role in ["AXTextField", "AXGroup", "AXWebArea", "AXSecureTextField"] {
             t.element_role = Some(role.into());
             assert!(matches!(

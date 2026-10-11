@@ -23,6 +23,10 @@ pub fn is_web_content_field<S: AsRef<str>>(
 #[derive(Debug, PartialEq, Eq)]
 pub enum InsertPath {
     AxSelectedText,
+    /// Editable, non-secure text element whose AXValue cannot be read (e.g.
+    /// Messages): write AXSelectedText once, verify by character count or
+    /// report Unverified. Never used for secure fields.
+    AxSelectedTextUnreadable,
     TerminalUnicode,
     Refuse(String),
 }
@@ -37,10 +41,16 @@ pub fn choose_insert_path(validated: &TargetSnapshotDto, value_readable: bool) -
                 .unwrap_or_else(|| validated.kind.clone())
         ));
     }
-    // A readable value is needed to prove the text actually landed; without
-    // it we refuse before mutating anything (no double insert).
+    // Without a readable value we cannot prove the exact text landed. Still
+    // write once into a safe text element and verify by character count, or
+    // report Unverified (amends BUS-14; docs/decisions/unreadable-axvalue.md).
+    // The secure-field guard is absolute and checked independently here.
     if !value_readable {
-        return InsertPath::Refuse("AXValue unreadable before insert — insert skipped".into());
+        let role = validated.element_role.as_deref().unwrap_or_default();
+        if validated.kind == "secure" || role == "AXSecureTextField" {
+            return InsertPath::Refuse("secure field — insert skipped".into());
+        }
+        return InsertPath::AxSelectedTextUnreadable;
     }
     InsertPath::AxSelectedText
 }
