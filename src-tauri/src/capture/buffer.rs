@@ -55,9 +55,7 @@ impl CaptureBuffer {
 
     /// Duration of audio stored at TARGET_RATE.
     pub fn duration(&self) -> Duration {
-        Duration::from_secs_f64(
-            self.frames.len() as f64 / TARGET_RATE as f64,
-        )
+        Duration::from_secs_f64(self.frames.len() as f64 / TARGET_RATE as f64)
     }
 
     /// Consume the buffer, returning all stored samples.

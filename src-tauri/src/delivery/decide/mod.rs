@@ -4,8 +4,8 @@
 pub mod host;
 pub mod report;
 pub mod target;
-pub mod text;
 pub mod terminal;
+pub mod text;
 pub mod verify;
 pub mod web;
 

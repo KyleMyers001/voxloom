@@ -32,9 +32,7 @@ pub fn delivery_snapshot_target() -> Result<TargetSnapshotDto, String> {
 /// Re-validate intended target at completion time.
 /// Async: runs off the main thread so AX calls never stall the UI.
 #[tauri::command(async)]
-pub fn delivery_validate_target(
-    intended: TargetSnapshotDto,
-) -> Result<TargetSnapshotDto, String> {
+pub fn delivery_validate_target(intended: TargetSnapshotDto) -> Result<TargetSnapshotDto, String> {
     platform::validate_target(intended)
 }
 

@@ -37,6 +37,7 @@ use std::time::{Duration, Instant};
 
 use ringbuf::traits::Consumer;
 
+use crate::capture::pcm_store::PcmBufferStore;
 use crate::capture::{
     buffer::CaptureBuffer,
     consumer::{inspect, TestCaptureMetadata},
@@ -44,11 +45,9 @@ use crate::capture::{
     permission::{self, MicPermission},
     resample::Downmixer,
     stream::{
-        self, DeviceRegistry, DeviceSelection, InputDeviceDescriptor,
-        StreamMeta, RING_CAPACITY,
+        self, DeviceRegistry, DeviceSelection, InputDeviceDescriptor, StreamMeta, RING_CAPACITY,
     },
 };
-use crate::capture::pcm_store::PcmBufferStore;
 
 // Constants
 
@@ -90,9 +89,7 @@ impl LevelMeter {
         let level = if self.sample_count == 0 {
             0.0
         } else {
-            (self.power_sum / self.sample_count as f64)
-                .sqrt()
-                .min(1.0) as f32
+            (self.power_sum / self.sample_count as f64).sqrt().min(1.0) as f32
         };
         self.last_emit = now;
         self.power_sum = 0.0;
@@ -262,11 +259,7 @@ pub struct CaptureStreamMeta {
 /// `with_stream` calls `f` while the stream is alive, then drops the stream.
 /// The stream need not be `Send`; it lives and dies in the scope of `f`.
 pub trait StreamBackend: Send + Sync + 'static {
-    fn with_stream<F, R>(
-        &self,
-        selection: &DeviceSelection,
-        f: F,
-    ) -> Result<R, String>
+    fn with_stream<F, R>(&self, selection: &DeviceSelection, f: F) -> Result<R, String>
     where
         F: FnOnce(CaptureStreamMeta) -> R;
 
@@ -305,11 +298,7 @@ impl CpalStreamBackend {
 }
 
 impl StreamBackend for CpalStreamBackend {
-    fn with_stream<F, R>(
-        &self,
-        selection: &DeviceSelection,
-        f: F,
-    ) -> Result<R, String>
+    fn with_stream<F, R>(&self, selection: &DeviceSelection, f: F) -> Result<R, String>
     where
         F: FnOnce(CaptureStreamMeta) -> R,
     {
@@ -359,13 +348,10 @@ struct PhaseGuard {
 impl Drop for PhaseGuard {
     fn drop(&mut self) {
         let mut state = self.state.lock().unwrap();
-        let owns_reservation = state
-            .reservation
-            .as_ref()
-            .is_some_and(|reservation| {
-                reservation.status.generation == self.generation
-                    && reservation.status.request_id == self.request_id
-            });
+        let owns_reservation = state.reservation.as_ref().is_some_and(|reservation| {
+            reservation.status.generation == self.generation
+                && reservation.status.request_id == self.request_id
+        });
         if owns_reservation {
             state.reservation = None;
         }
@@ -419,11 +405,7 @@ impl Default for Coordinator {
 impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
     #[allow(dead_code)]
     pub fn with_backends(permission: P, stream_backend: S) -> Self {
-        Self::with_backends_store(
-            permission,
-            stream_backend,
-            Arc::new(PcmBufferStore::new()),
-        )
+        Self::with_backends_store(permission, stream_backend, Arc::new(PcmBufferStore::new()))
     }
 
     #[allow(dead_code)]
@@ -486,9 +468,7 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
             .map(|reservation| reservation.status.clone())
     }
 
-    pub fn list_devices(
-        &self,
-    ) -> Result<Vec<InputDeviceDescriptor>, String> {
+    pub fn list_devices(&self) -> Result<Vec<InputDeviceDescriptor>, String> {
         self.stream_backend.list_devices()
     }
 
@@ -521,26 +501,14 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
     }
 
     pub fn cancel_any(&self) {
-        if let Some(reservation) = self
-            .state
-            .lock()
-            .unwrap()
-            .reservation
-            .as_ref()
-        {
+        if let Some(reservation) = self.state.lock().unwrap().reservation.as_ref() {
             reservation.cancel.store(true, Ordering::Release);
         }
     }
 
     /// Request a clean stop of the active session (deposit PCM in full mode).
     pub fn stop_any(&self) {
-        if let Some(reservation) = self
-            .state
-            .lock()
-            .unwrap()
-            .reservation
-            .as_ref()
-        {
+        if let Some(reservation) = self.state.lock().unwrap().reservation.as_ref() {
             reservation.stop.store(true, Ordering::Release);
         }
     }
@@ -580,8 +548,7 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
                 }
                 return Err(String::from("busy"));
             }
-            let generation =
-                self.generation.fetch_add(1, Ordering::AcqRel) + 1;
+            let generation = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
             let mode = if test_mode {
                 CaptureMode::Test
             } else {
@@ -599,9 +566,7 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
                 .iter()
                 .position(|item| item == &request_id);
             let was_cancelled = cancelled_index
-                .is_some_and(|index| {
-                    state.cancelled_requests.remove(index).is_some()
-                });
+                .is_some_and(|index| state.cancelled_requests.remove(index).is_some());
             flag.store(was_cancelled, Ordering::Release);
             state.reservation = Some(Reservation {
                 cancel: Arc::clone(&flag),
@@ -650,9 +615,9 @@ impl<P: PermissionBackend, S: StreamBackend> Coordinator<P, S> {
 fn valid_request_id(request_id: &str) -> bool {
     !request_id.is_empty()
         && request_id.len() <= 128
-        && request_id.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'
-        })
+        && request_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
 }
 
 fn is_cancelled(flag: &AtomicBool) -> bool {
@@ -663,19 +628,11 @@ fn is_stopped(flag: &AtomicBool) -> bool {
     flag.load(Ordering::Acquire)
 }
 
-fn release_owned_reservation(
-    state: &Mutex<CoordinatorState>,
-    generation: u64,
-    request_id: &str,
-) {
+fn release_owned_reservation(state: &Mutex<CoordinatorState>, generation: u64, request_id: &str) {
     let mut state = state.lock().unwrap();
-    let owns_reservation = state
-        .reservation
-        .as_ref()
-        .is_some_and(|reservation| {
-            reservation.status.generation == generation
-                && reservation.status.request_id == request_id
-        });
+    let owns_reservation = state.reservation.as_ref().is_some_and(|reservation| {
+        reservation.status.generation == generation && reservation.status.request_id == request_id
+    });
     if owns_reservation {
         state.reservation = None;
     }
@@ -691,7 +648,6 @@ fn emit_terminal<E: Fn(SessionEvent)>(
     release_owned_reservation(state, generation, request_id);
     emit(event);
 }
-
 
 fn emit_early_stop<E: Fn(SessionEvent)>(
     state: &Mutex<CoordinatorState>,
@@ -783,9 +739,7 @@ fn run_session<P, S, E>(
                             return;
                         }
                         if is_stopped(&stop) {
-                            emit_early_stop(
-                                &state, gen, &request_id, emit,
-                            );
+                            emit_early_stop(&state, gen, &request_id, emit);
                             return;
                         }
                     }
@@ -850,68 +804,63 @@ fn run_session<P, S, E>(
     // Phase 4: Open stream — stays local to this thread via `with_stream`.
     // The stream is created, used, and dropped inside this closure.
     let open_result: Result<(LoopTerminal, CaptureBuffer), String> =
-        stream_backend.with_stream(
-            &selection,
-            |meta: CaptureStreamMeta| {
-                if is_cancelled(&cancel) {
-                    return (LoopTerminal::Cancelled, CaptureBuffer::new());
+        stream_backend.with_stream(&selection, |meta: CaptureStreamMeta| {
+            if is_cancelled(&cancel) {
+                return (LoopTerminal::Cancelled, CaptureBuffer::new());
+            }
+            if is_stopped(&stop) {
+                return (LoopTerminal::Clean, CaptureBuffer::new());
+            }
+
+            let mut downmixer = match Downmixer::new(meta.native_rate) {
+                Ok(d) => d,
+                Err(e) => {
+                    return (
+                        LoopTerminal::Error(String::from("capture-unavailable"), e),
+                        CaptureBuffer::new(),
+                    )
                 }
-                if is_stopped(&stop) {
-                    return (LoopTerminal::Clean, CaptureBuffer::new());
-                }
+            };
 
-                let mut downmixer =
-                    match Downmixer::new(meta.native_rate) {
-                        Ok(d) => d,
-                        Err(e) => return (
-                            LoopTerminal::Error(
-                                String::from("capture-unavailable"),
-                                e,
-                            ),
-                            CaptureBuffer::new(),
-                        ),
-                    };
+            emit(SessionEvent::CaptureStarted {
+                device_name: meta.device_name.clone(),
+                generation: gen,
+                request_id: request_id.clone(),
+            });
 
-                emit(SessionEvent::CaptureStarted {
-                    device_name: meta.device_name.clone(),
-                    generation: gen,
-                    request_id: request_id.clone(),
-                });
+            let mut buffer = CaptureBuffer::new();
+            let bound = if test_mode {
+                limits.test_bound
+            } else {
+                limits.full_bound
+            };
+            let start = runtime.now();
+            let mut last_sample = start;
+            let mut activity_emitted = false;
+            let mut consumer = meta.consumer;
 
-                let mut buffer = CaptureBuffer::new();
-                let bound = if test_mode {
-                    limits.test_bound
-                } else {
-                    limits.full_bound
-                };
-                let start = runtime.now();
-                let mut last_sample = start;
-                let mut activity_emitted = false;
-                let mut consumer = meta.consumer;
-
-                let term = capture_loop(
-                    &mut consumer,
-                    &meta.accepting,
-                    &meta.callbacks_in_flight,
-                    &meta.overflow,
-                    &meta.stream_error,
-                    &cancel,
-                    &stop,
-                    &mut downmixer,
-                    &mut buffer,
-                    bound,
-                    limits,
-                    &mut last_sample,
-                    &mut activity_emitted,
-                    start,
-                    gen,
-                    &request_id,
-                    emit,
-                    runtime.as_ref(),
-                );
-                (term, buffer)
-            },
-        );
+            let term = capture_loop(
+                &mut consumer,
+                &meta.accepting,
+                &meta.callbacks_in_flight,
+                &meta.overflow,
+                &meta.stream_error,
+                &cancel,
+                &stop,
+                &mut downmixer,
+                &mut buffer,
+                bound,
+                limits,
+                &mut last_sample,
+                &mut activity_emitted,
+                start,
+                gen,
+                &request_id,
+                emit,
+                runtime.as_ref(),
+            );
+            (term, buffer)
+        });
 
     let (term, buffer) = match open_result {
         Err(e) => {
@@ -1061,16 +1010,11 @@ fn capture_loop<E: Fn(SessionEvent)>(
             let mono = match downmixer.process(&drain_buf[..n]) {
                 Ok(m) => m,
                 Err(e) => {
-                    return LoopTerminal::Error(
-                        String::from("capture-unavailable"),
-                        e,
-                    );
+                    return LoopTerminal::Error(String::from("capture-unavailable"), e);
                 }
             };
 
-            if !*activity_emitted
-                && mono.iter().any(|&s| s.abs() >= ACTIVITY_THRESHOLD)
-            {
+            if !*activity_emitted && mono.iter().any(|&s| s.abs() >= ACTIVITY_THRESHOLD) {
                 *activity_emitted = true;
                 emit(SessionEvent::ActivityDetected {
                     generation: gen,
@@ -1116,9 +1060,7 @@ fn capture_loop<E: Fn(SessionEvent)>(
         if stream_error.load(Ordering::Acquire) {
             return LoopTerminal::Error(
                 String::from("capture-unavailable"),
-                String::from(
-                    "Audio device error (disconnect or revocation).",
-                ),
+                String::from("Audio device error (disconnect or revocation)."),
             );
         }
 
@@ -1132,10 +1074,7 @@ fn capture_loop<E: Fn(SessionEvent)>(
                 }
                 Ok(_) => {}
                 Err(e) => {
-                    return LoopTerminal::Error(
-                        String::from("capture-unavailable"),
-                        e,
-                    );
+                    return LoopTerminal::Error(String::from("capture-unavailable"), e);
                 }
             }
             return LoopTerminal::Clean;
@@ -1213,9 +1152,7 @@ mod tests {
 
     impl LoopRuntime for VirtualRuntime {
         fn now(&self) -> Duration {
-            Duration::from_millis(
-                self.elapsed_millis.load(Ordering::Acquire),
-            )
+            Duration::from_millis(self.elapsed_millis.load(Ordering::Acquire))
         }
 
         fn wait(&self, duration: Duration) {
@@ -1242,21 +1179,15 @@ mod tests {
         }
 
         fn elapsed(&self) -> Duration {
-            Duration::from_millis(
-                self.state.elapsed_millis.load(Ordering::Acquire),
-            )
+            Duration::from_millis(self.state.elapsed_millis.load(Ordering::Acquire))
         }
 
         fn install_feed(&self, feed: impl FnMut() + Send + 'static) {
             *self.state.feed.lock().unwrap() = Some(Box::new(feed));
         }
 
-        fn observe_ten_seconds(
-            &self,
-            observer: impl FnOnce() + Send + 'static,
-        ) {
-            *self.state.ten_second_observer.lock().unwrap() =
-                Some(Box::new(observer));
+        fn observe_ten_seconds(&self, observer: impl FnOnce() + Send + 'static) {
+            *self.state.ten_second_observer.lock().unwrap() = Some(Box::new(observer));
         }
     }
 
@@ -1275,12 +1206,7 @@ mod tests {
                 feed();
             }
             if previous < 10_000 && previous + millis >= 10_000 {
-                let observer = self
-                    .state
-                    .ten_second_observer
-                    .lock()
-                    .unwrap()
-                    .take();
+                let observer = self.state.ten_second_observer.lock().unwrap().take();
                 if let Some(observer) = observer {
                     observer();
                 }
@@ -1339,11 +1265,7 @@ mod tests {
     }
 
     impl StreamBackend for FakeStreamBackend {
-        fn with_stream<F, R>(
-            &self,
-            _selection: &DeviceSelection,
-            f: F,
-        ) -> Result<R, String>
+        fn with_stream<F, R>(&self, _selection: &DeviceSelection, f: F) -> Result<R, String>
         where
             F: FnOnce(CaptureStreamMeta) -> R,
         {
@@ -1363,12 +1285,8 @@ mod tests {
                 consumer: cons,
                 device_name: String::from("Fake"),
                 native_rate: self.native_rate,
-                overflow: Arc::new(AtomicBool::new(
-                    self.simulate_overflow,
-                )),
-                stream_error: Arc::new(AtomicBool::new(
-                    self.simulate_stream_error,
-                )),
+                overflow: Arc::new(AtomicBool::new(self.simulate_overflow)),
+                stream_error: Arc::new(AtomicBool::new(self.simulate_stream_error)),
             };
             if let Some(alive) = &self.resource_alive {
                 alive.store(true, Ordering::Release);
@@ -1380,9 +1298,7 @@ mod tests {
             Ok(output)
         }
 
-        fn list_devices(
-            &self,
-        ) -> Result<Vec<InputDeviceDescriptor>, String> {
+        fn list_devices(&self) -> Result<Vec<InputDeviceDescriptor>, String> {
             Ok(vec![])
         }
     }
@@ -1392,11 +1308,7 @@ mod tests {
     }
 
     impl StreamBackend for PostCaptureIdentityFailureBackend {
-        fn with_stream<F, R>(
-            &self,
-            _selection: &DeviceSelection,
-            f: F,
-        ) -> Result<R, String>
+        fn with_stream<F, R>(&self, _selection: &DeviceSelection, f: F) -> Result<R, String>
         where
             F: FnOnce(CaptureStreamMeta) -> R,
         {
@@ -1423,9 +1335,7 @@ mod tests {
             ))
         }
 
-        fn list_devices(
-            &self,
-        ) -> Result<Vec<InputDeviceDescriptor>, String> {
+        fn list_devices(&self) -> Result<Vec<InputDeviceDescriptor>, String> {
             Ok(vec![])
         }
     }
@@ -1436,18 +1346,13 @@ mod tests {
     }
 
     impl StreamBackend for RestartStreamBackend {
-        fn with_stream<F, R>(
-            &self,
-            _selection: &DeviceSelection,
-            f: F,
-        ) -> Result<R, String>
+        fn with_stream<F, R>(&self, _selection: &DeviceSelection, f: F) -> Result<R, String>
         where
             F: FnOnce(CaptureStreamMeta) -> R,
         {
             use ringbuf::traits::Split;
 
-            let stream_error =
-                self.opens.fetch_add(1, Ordering::AcqRel) == 0;
+            let stream_error = self.opens.fetch_add(1, Ordering::AcqRel) == 0;
             let rb = ringbuf::HeapRb::<f32>::new(RING_CAPACITY);
             let (_producer, consumer) = rb.split();
             self.resource_alive.store(true, Ordering::Release);
@@ -1464,9 +1369,7 @@ mod tests {
             Ok(output)
         }
 
-        fn list_devices(
-            &self,
-        ) -> Result<Vec<InputDeviceDescriptor>, String> {
+        fn list_devices(&self) -> Result<Vec<InputDeviceDescriptor>, String> {
             Ok(vec![])
         }
     }
@@ -1477,11 +1380,7 @@ mod tests {
     }
 
     impl StreamBackend for ContinuousStreamBackend {
-        fn with_stream<F, R>(
-            &self,
-            _selection: &DeviceSelection,
-            f: F,
-        ) -> Result<R, String>
+        fn with_stream<F, R>(&self, _selection: &DeviceSelection, f: F) -> Result<R, String>
         where
             F: FnOnce(CaptureStreamMeta) -> R,
         {
@@ -1507,9 +1406,7 @@ mod tests {
             Ok(output)
         }
 
-        fn list_devices(
-            &self,
-        ) -> Result<Vec<InputDeviceDescriptor>, String> {
+        fn list_devices(&self) -> Result<Vec<InputDeviceDescriptor>, String> {
             Ok(vec![])
         }
     }
@@ -1519,11 +1416,7 @@ mod tests {
     }
 
     impl StreamBackend for ChangingDefaultBackend {
-        fn with_stream<F, R>(
-            &self,
-            selection: &DeviceSelection,
-            f: F,
-        ) -> Result<R, String>
+        fn with_stream<F, R>(&self, selection: &DeviceSelection, f: F) -> Result<R, String>
         where
             F: FnOnce(CaptureStreamMeta) -> R,
         {
@@ -1544,9 +1437,7 @@ mod tests {
             }))
         }
 
-        fn list_devices(
-            &self,
-        ) -> Result<Vec<InputDeviceDescriptor>, String> {
+        fn list_devices(&self) -> Result<Vec<InputDeviceDescriptor>, String> {
             Ok(vec![])
         }
     }
@@ -1557,20 +1448,14 @@ mod tests {
     }
 
     impl StreamBackend for ListingBackend {
-        fn with_stream<F, R>(
-            &self,
-            _selection: &DeviceSelection,
-            _f: F,
-        ) -> Result<R, String>
+        fn with_stream<F, R>(&self, _selection: &DeviceSelection, _f: F) -> Result<R, String>
         where
             F: FnOnce(CaptureStreamMeta) -> R,
         {
             panic!("device listing must not open an input stream")
         }
 
-        fn list_devices(
-            &self,
-        ) -> Result<Vec<InputDeviceDescriptor>, String> {
+        fn list_devices(&self) -> Result<Vec<InputDeviceDescriptor>, String> {
             if let Some(error) = &self.error {
                 Err(error.clone())
             } else {
@@ -1579,10 +1464,7 @@ mod tests {
         }
     }
 
-    fn mk<P: PermissionBackend, S: StreamBackend>(
-        p: P,
-        s: S,
-    ) -> Coordinator<P, S> {
+    fn mk<P: PermissionBackend, S: StreamBackend>(p: P, s: S) -> Coordinator<P, S> {
         Coordinator::with_backends(p, s)
     }
 
@@ -1602,8 +1484,7 @@ mod tests {
         impl Fn(SessionEvent) + Send + 'static + Clone,
         Arc<Mutex<Vec<String>>>,
     ) {
-        let log: Arc<Mutex<Vec<String>>> =
-            Arc::new(Mutex::new(Vec::new()));
+        let log: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let log2 = Arc::clone(&log);
         let emit = move |e: SessionEvent| {
             log2.lock().unwrap().push(event_tag(&e));
@@ -1616,35 +1497,19 @@ mod tests {
             SessionEvent::PermissionStatus { status, .. } => {
                 format!("perm:{status:?}")
             }
-            SessionEvent::CaptureStarted { .. } => {
-                String::from("started")
-            }
-            SessionEvent::ActivityDetected { .. } => {
-                String::from("activity")
-            }
-            SessionEvent::CaptureLevel { .. } => {
-                String::from("level")
-            }
-            SessionEvent::TestComplete { .. } => {
-                String::from("test-complete")
-            }
-            SessionEvent::CaptureStopped { .. } => {
-                String::from("stopped")
-            }
-            SessionEvent::CaptureCancelled { .. } => {
-                String::from("cancelled")
-            }
+            SessionEvent::CaptureStarted { .. } => String::from("started"),
+            SessionEvent::ActivityDetected { .. } => String::from("activity"),
+            SessionEvent::CaptureLevel { .. } => String::from("level"),
+            SessionEvent::TestComplete { .. } => String::from("test-complete"),
+            SessionEvent::CaptureStopped { .. } => String::from("stopped"),
+            SessionEvent::CaptureCancelled { .. } => String::from("cancelled"),
             SessionEvent::CaptureError { category, .. } => {
                 format!("error:{category}")
             }
         }
     }
 
-    fn wait_for(
-        log: &Arc<Mutex<Vec<String>>>,
-        tag: &str,
-        timeout: Duration,
-    ) -> bool {
+    fn wait_for(log: &Arc<Mutex<Vec<String>>>, tag: &str, timeout: Duration) -> bool {
         let start = Instant::now();
         loop {
             if log.lock().unwrap().iter().any(|t| t == tag) {
@@ -1667,18 +1532,13 @@ mod tests {
     trait IsActive {
         fn is_active(&self) -> bool;
     }
-    impl<P: PermissionBackend, S: StreamBackend> IsActive
-        for Coordinator<P, S>
-    {
+    impl<P: PermissionBackend, S: StreamBackend> IsActive for Coordinator<P, S> {
         fn is_active(&self) -> bool {
             Coordinator::is_active(self)
         }
     }
 
-    fn authorized_backend(samples: Vec<f32>) -> (
-        FakePermission,
-        FakeStreamBackend,
-    ) {
+    fn authorized_backend(samples: Vec<f32>) -> (FakePermission, FakeStreamBackend) {
         (
             FakePermission(MicPermission::Authorized),
             FakeStreamBackend::new(samples),
@@ -1842,8 +1702,7 @@ mod tests {
             })
             .count();
         assert_eq!(
-            cancelled_terminals,
-            1,
+            cancelled_terminals, 1,
             "pre-start tombstone must emit exactly one terminal",
         );
 
@@ -1857,11 +1716,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(next.request_id, "next-request");
-        assert!(wait_for(
-            &next_log,
-            "started",
-            Duration::from_secs(3),
-        ));
+        assert!(wait_for(&next_log, "started", Duration::from_secs(3),));
         assert_eq!(
             c.status(),
             Some(next.clone()),
@@ -1879,8 +1734,7 @@ mod tests {
             })
             .count();
         assert_eq!(
-            unrelated_terminals,
-            0,
+            unrelated_terminals, 0,
             "cancelled request ID must emit no terminal for unrelated IDs",
         );
         assert!(c.cancel_request(&next.request_id));
@@ -1917,7 +1771,8 @@ mod tests {
             DeviceSelection::SystemDefault,
             true,
             emit,
-        ).unwrap();
+        )
+        .unwrap();
         assert!(wait_for(&log, "started", Duration::from_secs(3)));
     }
 
@@ -1933,7 +1788,8 @@ mod tests {
             DeviceSelection::SystemDefault,
             false,
             emit,
-        ).unwrap();
+        )
+        .unwrap();
         assert!(wait_for(
             &log,
             "error:permission-denied",
@@ -1954,7 +1810,8 @@ mod tests {
             DeviceSelection::SystemDefault,
             false,
             emit,
-        ).unwrap();
+        )
+        .unwrap();
         assert!(wait_for(
             &log,
             "error:permission-denied",
@@ -1985,17 +1842,16 @@ mod tests {
         c.cancel_request(&status.request_id);
         idle_wait(&c, Duration::from_secs(3));
         let events = log.lock().unwrap().clone();
-        let terminals: Vec<_> = events.iter().filter(|e| {
-            e.starts_with("error:")
-                || *e == "cancelled"
-                || *e == "stopped"
-                || *e == "test-complete"
-        }).collect();
-        assert_eq!(
-            terminals.len(),
-            1,
-            "exactly one terminal; got: {events:?}"
-        );
+        let terminals: Vec<_> = events
+            .iter()
+            .filter(|e| {
+                e.starts_with("error:")
+                    || *e == "cancelled"
+                    || *e == "stopped"
+                    || *e == "test-complete"
+            })
+            .collect();
+        assert_eq!(terminals.len(), 1, "exactly one terminal; got: {events:?}");
     }
 
     #[test]
@@ -2011,7 +1867,7 @@ mod tests {
             false,
             emit,
         )
-            .unwrap();
+        .unwrap();
         wait_for(&log, "error:permission-denied", Duration::from_secs(3));
         idle_wait(&c, Duration::from_secs(3));
         assert!(c.status().is_none());
@@ -2032,9 +1888,7 @@ mod tests {
         let c = mk(
             FakePermission(MicPermission::Authorized),
             FakeStreamBackend {
-                open_error: Some(String::from(
-                    "capture-unavailable: no device",
-                )),
+                open_error: Some(String::from("capture-unavailable: no device")),
                 ..FakeStreamBackend::new(vec![])
             },
         );
@@ -2044,7 +1898,8 @@ mod tests {
             DeviceSelection::SystemDefault,
             false,
             emit,
-        ).unwrap();
+        )
+        .unwrap();
         assert!(wait_for(
             &log,
             "error:capture-unavailable",
@@ -2127,11 +1982,7 @@ mod tests {
                     DeviceSelection::SystemDefault,
                     false,
                     move |event| {
-                        if let SessionEvent::CaptureStarted {
-                            device_name,
-                            ..
-                        } = event
-                        {
+                        if let SessionEvent::CaptureStarted { device_name, .. } = event {
                             event_labels.lock().unwrap().push(device_name);
                         }
                     },
@@ -2176,9 +2027,7 @@ mod tests {
         let coordinator = mk(
             FakePermission(MicPermission::Authorized),
             ListingBackend {
-                error: Some(String::from(
-                    "capture-unavailable: enumeration failed",
-                )),
+                error: Some(String::from("capture-unavailable: enumeration failed")),
                 listed: vec![],
             },
         );
@@ -2206,13 +2055,10 @@ mod tests {
             DeviceSelection::SystemDefault,
             false,
             emit,
-        ).unwrap();
+        )
+        .unwrap();
         assert!(
-            wait_for(
-                &log,
-                "error:capture-unavailable",
-                Duration::from_secs(3),
-            ),
+            wait_for(&log, "error:capture-unavailable", Duration::from_secs(3),),
             "stream error must be capture-unavailable"
         );
         assert!(
@@ -2300,12 +2146,8 @@ mod tests {
         let observed_count = Arc::clone(&count_at_ten);
         let event_count = Arc::clone(&terminal_count);
         runtime.observe_ten_seconds(move || {
-            *observed_status.lock().unwrap() =
-                ten_second_coordinator.status();
-            observed_count.store(
-                event_count.load(Ordering::Acquire),
-                Ordering::Release,
-            );
+            *observed_status.lock().unwrap() = ten_second_coordinator.status();
+            observed_count.store(event_count.load(Ordering::Acquire), Ordering::Release);
         });
 
         let terminals = Arc::new(Mutex::new(Vec::new()));
@@ -2369,7 +2211,8 @@ mod tests {
             DeviceSelection::SystemDefault,
             true,
             emit,
-        ).unwrap();
+        )
+        .unwrap();
         // Must see test-complete; errors or stopped are failures.
         assert!(
             wait_for(&log, "test-complete", Duration::from_secs(5)),
@@ -2382,12 +2225,15 @@ mod tests {
         );
         // Exactly one terminal.
         let events = log.lock().unwrap().clone();
-        let terminals: Vec<_> = events.iter().filter(|e| {
-            e.starts_with("error:")
-                || *e == "cancelled"
-                || *e == "stopped"
-                || *e == "test-complete"
-        }).collect();
+        let terminals: Vec<_> = events
+            .iter()
+            .filter(|e| {
+                e.starts_with("error:")
+                    || *e == "cancelled"
+                    || *e == "stopped"
+                    || *e == "test-complete"
+            })
+            .collect();
         assert_eq!(terminals.len(), 1, "exactly one terminal: {events:?}");
     }
 
@@ -2406,7 +2252,8 @@ mod tests {
             DeviceSelection::SystemDefault,
             true,
             emit,
-        ).unwrap();
+        )
+        .unwrap();
         assert!(wait_for(&log, "test-complete", Duration::from_secs(5)));
         assert!(
             !log.lock().unwrap().contains(&String::from("activity")),
@@ -2500,13 +2347,10 @@ mod tests {
             DeviceSelection::SystemDefault,
             false,
             emit,
-        ).unwrap();
+        )
+        .unwrap();
         assert!(
-            wait_for(
-                &log,
-                "error:input-limit-exceeded",
-                Duration::from_secs(5),
-            ),
+            wait_for(&log, "error:input-limit-exceeded", Duration::from_secs(5),),
             "ring overflow must be input-limit-exceeded"
         );
     }
@@ -2557,8 +2401,7 @@ mod tests {
                 ..FakeStreamBackend::new(vec![])
             },
         );
-        let events: Arc<Mutex<Vec<SessionEvent>>> =
-            Arc::new(Mutex::new(Vec::new()));
+        let events: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
         let events2 = Arc::clone(&events);
         let status = c
             .start_session(
@@ -2573,9 +2416,11 @@ mod tests {
         // Wait for TestComplete.
         let start = Instant::now();
         loop {
-            let has_tc = events.lock().unwrap().iter().any(|e| {
-                matches!(e, SessionEvent::TestComplete { .. })
-            });
+            let has_tc = events
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|e| matches!(e, SessionEvent::TestComplete { .. }));
             if has_tc || start.elapsed() > Duration::from_secs(5) {
                 break;
             }
@@ -2711,11 +2556,7 @@ mod tests {
         let mut consumer = ringbuf::HeapRb::<f32>::new(8).split().1;
         let overflow = AtomicBool::new(true);
         let stream_error = AtomicBool::new(false);
-        let terminal = run_immediate_loop(
-            &mut consumer,
-            &overflow,
-            &stream_error,
-        );
+        let terminal = run_immediate_loop(&mut consumer, &overflow, &stream_error);
         assert!(matches!(terminal, LoopTerminal::Error(ref category, _)
             if category == "input-limit-exceeded"));
     }
@@ -2726,11 +2567,7 @@ mod tests {
         let mut consumer = ringbuf::HeapRb::<f32>::new(8).split().1;
         let overflow = AtomicBool::new(false);
         let stream_error = AtomicBool::new(true);
-        let terminal = run_immediate_loop(
-            &mut consumer,
-            &overflow,
-            &stream_error,
-        );
+        let terminal = run_immediate_loop(&mut consumer, &overflow, &stream_error);
         assert!(matches!(terminal, LoopTerminal::Error(ref category, _)
             if category == "capture-unavailable"));
     }
@@ -2743,12 +2580,8 @@ mod tests {
         accepting.invalidate();
         let overflow = AtomicBool::new(false);
         let stream_error = AtomicBool::new(false);
-        let terminal = run_immediate_loop_with_gate(
-            &mut consumer,
-            &accepting,
-            &overflow,
-            &stream_error,
-        );
+        let terminal =
+            run_immediate_loop_with_gate(&mut consumer, &accepting, &overflow, &stream_error);
         assert!(matches!(terminal, LoopTerminal::Error(ref category, _)
             if category == "capture-unavailable"));
     }
@@ -2896,13 +2729,14 @@ mod tests {
             &runtime,
         );
 
-        assert!(matches!(terminal, LoopTerminal::Clean),
-            "capacity / flush limit must deposit via Clean, not error");
+        assert!(
+            matches!(terminal, LoopTerminal::Clean),
+            "capacity / flush limit must deposit via Clean, not error"
+        );
         assert_eq!(downmixer.flush_calls(), 1);
         assert_eq!(buffer.len(), MAX_FRAMES);
         assert!(!accepting.is_open());
     }
-
 
     #[test]
     fn capture_loop_buffer_capacity_returns_clean_not_error() {
@@ -3009,8 +2843,7 @@ mod tests {
             FakeStreamBackend::new(vec![0.5f32; 480]),
             Arc::clone(&store),
         );
-        let events: Arc<Mutex<Vec<SessionEvent>>> =
-            Arc::new(Mutex::new(Vec::new()));
+        let events: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
         let events2 = Arc::clone(&events);
         let status = c
             .start_session(
@@ -3022,13 +2855,17 @@ mod tests {
                 },
             )
             .unwrap();
-        assert!(wait_for_event(&events, |e| {
-            matches!(e, SessionEvent::CaptureStarted { .. })
-        }, Duration::from_secs(3)));
+        assert!(wait_for_event(
+            &events,
+            |e| { matches!(e, SessionEvent::CaptureStarted { .. }) },
+            Duration::from_secs(3)
+        ));
         c.stop_any();
-        assert!(wait_for_event(&events, |e| {
-            matches!(e, SessionEvent::CaptureStopped { .. })
-        }, Duration::from_secs(3)));
+        assert!(wait_for_event(
+            &events,
+            |e| { matches!(e, SessionEvent::CaptureStopped { .. }) },
+            Duration::from_secs(3)
+        ));
         idle_wait(&c, Duration::from_secs(3));
 
         let evs = events.lock().unwrap().clone();
@@ -3052,8 +2889,7 @@ mod tests {
         assert!(store.take(&audio.id).is_some());
         assert!(!evs.iter().any(|e| matches!(
             e,
-            SessionEvent::CaptureError { .. }
-                | SessionEvent::CaptureCancelled { .. }
+            SessionEvent::CaptureError { .. } | SessionEvent::CaptureCancelled { .. }
         )));
     }
 
@@ -3065,8 +2901,7 @@ mod tests {
             FakeStreamBackend::new(vec![0.5f32; 480]),
             Arc::clone(&store),
         );
-        let events: Arc<Mutex<Vec<SessionEvent>>> =
-            Arc::new(Mutex::new(Vec::new()));
+        let events: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
         let events2 = Arc::clone(&events);
         c.start_session(
             String::from("cancel-discard"),
@@ -3077,25 +2912,27 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(wait_for_event(&events, |e| {
-            matches!(e, SessionEvent::CaptureStarted { .. })
-        }, Duration::from_secs(3)));
+        assert!(wait_for_event(
+            &events,
+            |e| { matches!(e, SessionEvent::CaptureStarted { .. }) },
+            Duration::from_secs(3)
+        ));
         c.cancel_any();
-        assert!(wait_for_event(&events, |e| {
-            matches!(e, SessionEvent::CaptureCancelled { .. })
-        }, Duration::from_secs(3)));
+        assert!(wait_for_event(
+            &events,
+            |e| { matches!(e, SessionEvent::CaptureCancelled { .. }) },
+            Duration::from_secs(3)
+        ));
         idle_wait(&c, Duration::from_secs(3));
 
         assert_eq!(store.len(), 0, "cancel must not deposit PCM");
         let evs = events.lock().unwrap();
-        assert!(evs.iter().any(|e| matches!(
-            e,
-            SessionEvent::CaptureCancelled { .. }
-        )));
-        assert!(!evs.iter().any(|e| matches!(
-            e,
-            SessionEvent::CaptureStopped { .. }
-        )));
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, SessionEvent::CaptureCancelled { .. })));
+        assert!(!evs
+            .iter()
+            .any(|e| matches!(e, SessionEvent::CaptureStopped { .. })));
     }
 
     fn wait_for_event(
@@ -3121,12 +2958,7 @@ mod tests {
         stream_error: &AtomicBool,
     ) -> LoopTerminal {
         let accepting = open_gate();
-        run_immediate_loop_with_gate(
-            consumer,
-            &accepting,
-            overflow,
-            stream_error,
-        )
+        run_immediate_loop_with_gate(consumer, &accepting, overflow, stream_error)
     }
 
     fn run_immediate_loop_with_gate(

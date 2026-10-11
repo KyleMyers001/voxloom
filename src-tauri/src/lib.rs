@@ -11,14 +11,12 @@ use std::sync::Arc;
 
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use capture::pcm_store::PcmBufferStore;
 use capture::{
     coordinator::{CaptureCoordinator, CaptureStatus, SessionEvent},
     permission,
-    stream::{
-        DeviceSelection, InputDeviceDescriptor, SYSTEM_DEFAULT_ID,
-    },
+    stream::{DeviceSelection, InputDeviceDescriptor, SYSTEM_DEFAULT_ID},
 };
-use capture::pcm_store::PcmBufferStore;
 use stt::{store::ModelStore, SttState};
 
 // IPC commands — capture
@@ -26,10 +24,7 @@ use stt::{store::ModelStore, SttState};
 /// Query the current microphone permission without prompting.
 /// Emits a `capture:event` PermissionStatus with generation 0 (not a session).
 #[tauri::command]
-fn capture_query_permission(
-    app: AppHandle,
-    request_id: String,
-) {
+fn capture_query_permission(app: AppHandle, request_id: String) {
     let status = permission::query();
     let _ = app.emit(
         "capture:event",
@@ -94,10 +89,9 @@ fn capture_start(
         _ => DeviceSelection::SystemDefault,
     };
     let app2 = app.clone();
-    coordinator
-        .start_session(request_id, selection, test_mode, move |event| {
-            let _ = app2.emit("capture:event", event);
-        })
+    coordinator.start_session(request_id, selection, test_mode, move |event| {
+        let _ = app2.emit("capture:event", event);
+    })
 }
 
 /// Clean-stop any active capture session (deposit PCM + capture-stopped).
@@ -109,18 +103,13 @@ fn capture_stop(coordinator: State<CaptureCoordinator>) {
 
 /// Cancel one client request, including a start whose response is pending.
 #[tauri::command]
-fn capture_cancel(
-    coordinator: State<CaptureCoordinator>,
-    request_id: String,
-) -> bool {
+fn capture_cancel(coordinator: State<CaptureCoordinator>, request_id: String) -> bool {
     coordinator.cancel_request(&request_id)
 }
 
 /// Return the exact active request, or null when idle.
 #[tauri::command]
-fn capture_status(
-    coordinator: State<CaptureCoordinator>,
-) -> Option<CaptureStatus> {
+fn capture_status(coordinator: State<CaptureCoordinator>) -> Option<CaptureStatus> {
     coordinator.status()
 }
 
@@ -142,13 +131,8 @@ pub fn run() {
         .setup(|app| {
             let buffers = Arc::new(PcmBufferStore::new());
             let models = ModelStore::from_app(app.handle())
-                .unwrap_or_else(|_| {
-                    ModelStore::new(
-                        std::env::temp_dir().join("voxloom-models"),
-                    )
-                });
-            let coordinator =
-                CaptureCoordinator::with_pcm_store(Arc::clone(&buffers));
+                .unwrap_or_else(|_| ModelStore::new(std::env::temp_dir().join("voxloom-models")));
+            let coordinator = CaptureCoordinator::with_pcm_store(Arc::clone(&buffers));
             app.manage(coordinator);
             app.manage(SttState::new(models, buffers));
             Ok(())
@@ -183,9 +167,7 @@ pub fn run() {
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
-                if let Some(coordinator) =
-                    window.try_state::<CaptureCoordinator>()
-                {
+                if let Some(coordinator) = window.try_state::<CaptureCoordinator>() {
                     coordinator.cancel_any();
                 }
             }

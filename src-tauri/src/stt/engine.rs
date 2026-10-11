@@ -63,13 +63,11 @@ fn transcribe_with_whisper(
             .ok_or_else(|| SttErrorDto::new("model-missing", "Invalid model path"))?,
         WhisperContextParameters::default(),
     )
-    .map_err(|e| {
-        SttErrorDto::new("transcribe-failed", format!("load model: {e}"))
-    })?;
+    .map_err(|e| SttErrorDto::new("transcribe-failed", format!("load model: {e}")))?;
 
-    let mut state = ctx.create_state().map_err(|e| {
-        SttErrorDto::new("transcribe-failed", format!("create state: {e}"))
-    })?;
+    let mut state = ctx
+        .create_state()
+        .map_err(|e| SttErrorDto::new("transcribe-failed", format!("create state: {e}")))?;
 
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
     params.set_language(Some("en"));
@@ -82,15 +80,15 @@ fn transcribe_with_whisper(
         .full(params, samples)
         .map_err(|e| SttErrorDto::new("transcribe-failed", format!("full: {e}")))?;
 
-    let n = state.full_n_segments().map_err(|e| {
-        SttErrorDto::new("transcribe-failed", format!("segments: {e}"))
-    })?;
+    let n = state
+        .full_n_segments()
+        .map_err(|e| SttErrorDto::new("transcribe-failed", format!("segments: {e}")))?;
 
     let mut text = String::new();
     for i in 0..n {
-        let segment = state.full_get_segment_text(i).map_err(|e| {
-            SttErrorDto::new("transcribe-failed", format!("segment text: {e}"))
-        })?;
+        let segment = state
+            .full_get_segment_text(i)
+            .map_err(|e| SttErrorDto::new("transcribe-failed", format!("segment text: {e}")))?;
         if !text.is_empty() {
             text.push(' ');
         }
@@ -116,16 +114,14 @@ mod tests {
 
     #[test]
     fn wrong_rate_rejected() {
-        let err =
-            transcribe_pcm(Path::new("/nope"), &[0.1], 8_000).unwrap_err();
+        let err = transcribe_pcm(Path::new("/nope"), &[0.1], 8_000).unwrap_err();
         assert_eq!(err.code, "unsupported-audio");
     }
 
     #[cfg(not(feature = "whisper"))]
     #[test]
     fn without_whisper_feature_reports_engine_unavailable() {
-        let err =
-            transcribe_pcm(Path::new("/nope"), &[0.1, 0.2], 16_000).unwrap_err();
+        let err = transcribe_pcm(Path::new("/nope"), &[0.1, 0.2], 16_000).unwrap_err();
         assert_eq!(err.code, "engine-unavailable");
     }
 }

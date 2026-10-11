@@ -79,8 +79,7 @@ impl PcmBufferStore {
     /// Take (consume) samples for transcription.
     pub fn take(&self, id: &str) -> Option<(Vec<f32>, u32)> {
         let mut map = self.inner.lock().unwrap();
-        map.remove(id)
-            .map(|b| (b.samples, b.sample_rate_hz))
+        map.remove(id).map(|b| (b.samples, b.sample_rate_hz))
     }
 
     #[cfg(test)]

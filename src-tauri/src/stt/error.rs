@@ -18,10 +18,7 @@ impl SttErrorDto {
 
     pub fn to_string_payload(&self) -> String {
         serde_json::to_string(self).unwrap_or_else(|_| {
-            format!(
-                r#"{{"code":"{}","message":"{}"}}"#,
-                self.code, self.message
-            )
+            format!(r#"{{"code":"{}","message":"{}"}}"#, self.code, self.message)
         })
     }
 }
