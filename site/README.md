@@ -30,13 +30,17 @@ Search for `PLACEHOLDER` (visible `// PLACEHOLDER` labels and `<!-- PLACEHOLDER 
 | Privacy last-updated date | privacy.html |
 | Changelog | changelog.html (link to GitHub Releases once published) |
 
+### Launch checklist
+- [ ] Repo must be public (or hide the GitHub source/issue links) before publishing
+- [ ] `site/scripts/check-placeholders.sh` exits 0
+
 Replace the domain everywhere with:
 `grep -rl DOMAIN-PLACEHOLDER.example site | xargs sed -i 's#https://DOMAIN-PLACEHOLDER.example#https://your.domain#g'`
 
 ## Renaming the product
 "Voxloom" is a placeholder name. Run `site/scripts/rename.sh "NewName"`. It replaces every capitalized `Voxloom` in `*.html` and `*.css` (page text, titles, meta and social tags) and leaves lowercase GitHub URLs alone. Undo with `OLD=NewName site/scripts/rename.sh Voxloom`.
 
-The replacement is literal, so names containing `&`, `/` or `\` are safe. The script exits non-zero if a file can't be rewritten or if the old name is still present afterwards. It writes each file through a temp file and creates no backups.
+The replacement is literal, so names containing `&`, `/` or `\` are safe. The script checks that every file is readable and writable before changing anything, writes all replacements to temp files and only moves them into place once every file succeeded, and creates no backups. It exits non-zero if `OLD` is empty or not found, if any file can't be read or rewritten (originals are then left untouched), or if the old name is still present afterwards.
 
 **Round-trip caveat:** undoing a rename turns *every* occurrence of NewName back into Voxloom. If NewName already appeared in the pages before the rename, those occurrences change too, so the round trip isn't lossless. Check first with `grep -F "NewName" site/*.html site/*.css`.
 `assets/og.png` has the name baked in, so regenerate it after a rename.
