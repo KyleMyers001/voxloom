@@ -73,6 +73,11 @@ describe('FormRow', () => {
     expect(control).toHaveAccessibleDescription('Copies when insertion isn\'t safe.');
   });
 
+  it('never overwrites a child id, even when htmlFor differs', () => {
+    render(<FormRow htmlFor="other" label="Mic"><select id="mic-select" /></FormRow>);
+    expect(screen.getByLabelText('Mic').id).toBe('mic-select');
+  });
+
   it('keeps an existing aria-describedby and omits it without help', () => {
     render(<>
       <FormRow help="Help" htmlFor="a" label="A"><input aria-describedby="other" /></FormRow>

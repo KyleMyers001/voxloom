@@ -15,7 +15,8 @@ export function useAppKeys({ blocked, onHelp, onNavigate }: Options) {
     const handleKey = (event: KeyboardEvent) => {
       if (blocked || hasOpenModal()) return;
       const target = event.target as HTMLElement;
-      if (event.key === '?' && !target.matches('input, select, textarea')) {
+      const typing = event.isComposing || isEditable(target);
+      if (event.key === '?' && !typing) {
         onHelp(target);
         return;
       }
@@ -24,12 +25,21 @@ export function useAppKeys({ blocked, onHelp, onNavigate }: Options) {
         onNavigate('settings');
         return;
       }
+      // ⌥ alone, never while typing (Option+digit types characters on macOS).
+      if (typing || !event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return;
       // event.code: on macOS, Option+1 reports key "¡", so match the physical digit.
       const digit = /^Digit[1-4]$/.test(event.code) ? event.code.slice(5) : event.key;
-      const screen = event.altKey ? screenForAltDigit(digit) : null;
-      if (screen) onNavigate(screen);
+      const screen = screenForAltDigit(digit);
+      if (!screen) return;
+      event.preventDefault();
+      onNavigate(screen);
     };
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
   }, [blocked, onHelp, onNavigate]);
+}
+
+function isEditable(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.isContentEditable || target.matches('input, textarea, select, [contenteditable]:not([contenteditable="false"])');
 }

@@ -21,7 +21,7 @@ export function Sidebar({ screen, shortcut, status, onNavigate, onScenario, onRe
         <AppTile />
         <div>
           <b className="brand__name">Voxloom</b>
-          <small aria-label={`${status}, shortcut ${shortcut}`} className="brand__status">
+          <small className="brand__status">
             {status} · {comboKeys(shortcut).join('')}
           </small>
         </div>
