@@ -115,7 +115,7 @@ test('screens, settings, themes, and baselines stay synchronized', async (
   );
   expect(await page.locator('body').evaluate((body) =>
     getComputedStyle(body).getPropertyValue('--bg').trim()
-  )).toBe('#0b111b');
+  )).toBe('#0b0b10');
   await page.emulateMedia({ colorScheme: 'light' });
   await expect(page.locator('body')).toHaveAttribute(
     'data-appearance-resolved',
@@ -123,7 +123,7 @@ test('screens, settings, themes, and baselines stay synchronized', async (
   );
   expect(await page.locator('body').evaluate((body) =>
     getComputedStyle(body).getPropertyValue('--bg').trim()
-  )).toBe('#f4f5f6');
+  )).toBe('#fbfbf8');
   await page.keyboard.press('Alt+1');
   await expect(page.getByRole('button', { exact: true, name: 'Casual' }))
     .toHaveAttribute('aria-pressed', 'true');
