@@ -1,0 +1,62 @@
+/* History (UI PR 4): page header, search + segmented filter, rows with badge and notes. */
+.page-head { margin-bottom: var(--s-8); }
+
+.page-head h1 {
+  font-size: var(--fs-page);
+  font-weight: 850;
+  letter-spacing: -.03em;
+  margin-bottom: 4px;
+}
+
+.page-head p { color: var(--mut); margin: 0; max-width: 640px; }
+
+.history-tools {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-6);
+  margin-bottom: var(--s-6);
+}
+
+.history-tools .search { min-width: 220px; }
+
+.history-list.card { border-radius: var(--r-win); gap: 0; padding: 0; }
+
+.history-row.recent-row {
+  align-items: start;
+  border-top: 1px solid var(--line);
+  gap: var(--s-6);
+  grid-template-columns: 62px minmax(0, 1fr) auto;
+  padding: var(--s-6) var(--s-7);
+}
+
+.history-row.recent-row:first-child { border-top: 0; padding-top: var(--s-6); }
+.history-row .timestamp { padding-top: 2px; }
+.history-row h3 { font-size: var(--fs-body); font-weight: 550; line-height: var(--lh-body); margin: 0; }
+
+.history-row__meta {
+  align-items: center;
+  color: var(--mut);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--fs-caption);
+  gap: 6px;
+  margin: 3px 0 0;
+}
+
+.history-row .recovery-state {
+  align-items: flex-start;
+  color: var(--warn);
+  display: flex;
+  font-size: var(--fs-caption);
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.history-row .recovery-state .icon { margin-top: 2px; }
+.history-row .action-group { gap: 2px; }
+
+@media (max-width: 780px) {
+  .history-row.recent-row { grid-template-columns: 58px minmax(0, 1fr); }
+  .history-row.recent-row > :last-child { grid-column: 2; }
+}
