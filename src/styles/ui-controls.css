@@ -126,3 +126,15 @@
   padding: 4px 6px;
   text-align: center;
 }
+
+.key-combo__caps { display: inline-flex; gap: 4px; }
+
+.sr-only {
+  clip: rect(0 0 0 0);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}

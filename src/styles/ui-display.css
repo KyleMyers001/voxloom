@@ -9,12 +9,12 @@
 }
 
 .badge--inserted,
-.badge--available { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.badge--available { background: color-mix(in srgb, var(--ok) 10%, transparent); color: var(--ok); }
 .badge--copied,
-.badge--downloading { background: color-mix(in srgb, var(--info) 16%, transparent); color: var(--info); }
-.badge--failed { background: color-mix(in srgb, var(--err) 15%, transparent); color: var(--err); }
+.badge--downloading { background: color-mix(in srgb, var(--info) 10%, transparent); color: var(--info); }
+.badge--failed { background: color-mix(in srgb, var(--err) 10%, transparent); color: var(--err); }
 .badge--unverified,
-.badge--missing { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+.badge--missing { background: color-mix(in srgb, var(--warn) 10%, transparent); color: var(--warn); }
 
 .banner {
   align-items: center;

@@ -18,11 +18,14 @@ export function Kbd({ children }: { children: string }) {
   return <kbd className="kbd">{children}</kbd>;
 }
 
-/** Renders a shortcut as key caps; the original text is the accessible name. */
+/** Renders a shortcut as key caps; screen readers get the original text. */
 export function KeyCombo({ combo }: { combo: string }) {
   return (
-    <span aria-label={combo} className="key-combo" role="img">
-      {comboKeys(combo).map((key, index) => <Kbd key={`${key}-${index}`}>{key}</Kbd>)}
+    <span className="key-combo">
+      <span aria-hidden="true" className="key-combo__caps">
+        {comboKeys(combo).map((key, index) => <Kbd key={`${key}-${index}`}>{key}</Kbd>)}
+      </span>
+      <span className="sr-only">{combo}</span>
     </span>
   );
 }

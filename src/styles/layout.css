@@ -1,11 +1,4 @@
-/* App shell: grid, top bar, sidebar, main, overlays, toast. */
-.app {
-  display: grid;
-  grid-template-columns: 210px minmax(0, 1fr);
-  grid-template-rows: auto 1fr;
-  min-height: 100vh;
-}
-
+/* Page hero, dialogs/overlays, dev scenario list, toast. */
 .hero {
   align-items: end;
   display: flex;
@@ -20,38 +13,9 @@
   max-width: 560px;
 }
 
-.main {
-  max-width: 1180px;
-  padding: 34px clamp(24px, 4vw, 58px) 70px;
-  width: 100%;
-}
-
 .modal-close {
   float: right;
   font-size: 22px;
-}
-
-.nav-button {
-  align-items: center;
-  border: 0;
-  color: var(--muted);
-  display: flex;
-  gap: 10px;
-  justify-content: flex-start;
-  padding: 10px 11px;
-  text-align: left;
-  width: 100%;
-}
-
-.nav-button[aria-current="page"] {
-  background: var(--accent-soft);
-  color: var(--text);
-}
-
-.nav-glyph {
-  color: var(--identity);
-  font-family: var(--mono);
-  width: 16px;
 }
 
 .overlay {
@@ -90,30 +54,6 @@
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 16px;
-}
-
-.review-note {
-  border-top: 1px solid var(--border);
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.5;
-  margin-top: auto;
-  padding-top: 16px;
-}
-
-.sidebar {
-  background: var(--rail);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  grid-row: 2;
-  min-height: calc(100vh - 49px);
-  padding: 22px 16px;
-}
-
-.sidebar nav {
-  display: grid;
-  gap: 5px;
 }
 
 .state-lab {
@@ -159,26 +99,3 @@
   opacity: 1;
   transform: translate(-50%, 0);
 }
-
-.topbar {
-  align-items: center;
-  background: var(--rail);
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  grid-column: 1 / -1;
-  justify-content: space-between;
-  min-height: 49px;
-  padding: 0 14px 0 18px;
-}
-
-.topbar__mark {
-  align-items: center;
-  display: flex;
-  font-size: 12px;
-  font-weight: 800;
-  gap: 9px;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-
-

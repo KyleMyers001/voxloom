@@ -31,6 +31,12 @@ async function tapShortcut(page: Page) {
   await page.keyboard.press('Control+Shift+Space');
 }
 
+/** The dev scenario panel sits in a collapsed "Developer" disclosure (CHECKLIST N10). */
+async function openDevPanel(page: Page) {
+  const summary = page.getByText('Developer', { exact: true });
+  if (await page.locator('details.dev-panel[open]').count() === 0) await summary.click();
+}
+
 async function skipOnboarding(page: Page) {
   await page.getByRole('button', { name: 'Skip' }).click();
 }
@@ -125,8 +131,8 @@ test('screens, settings, themes, and baselines stay synchronized', async (
     getComputedStyle(body).getPropertyValue('--bg').trim()
   )).toBe('#fbfbf8');
   await page.keyboard.press('Alt+1');
-  await expect(page.getByRole('button', { exact: true, name: 'Casual' }))
-    .toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('radio', { exact: true, name: 'Casual' }))
+    .toHaveAttribute('aria-checked', 'true');
 });
 
 test('dialogs, reduced motion, narrow and coarse layouts work', async (
@@ -187,6 +193,7 @@ test('dialogs, reduced motion, narrow and coarse layouts work', async (
 test('mock scenarios cover retry cancellation and expiry', async ({ page }) => {
   await page.goto('/');
   await skipOnboarding(page);
+  await openDevPanel(page);
   await page.getByRole('button', { name: 'Listening · silent' }).click();
   await page.getByRole('button', { name: 'Processing' }).click();
   await page.getByRole('button', { name: 'Complete error' }).click();
@@ -212,6 +219,7 @@ test('History retry cannot interrupt an active listening run', async (
 ) => {
   await page.goto('/');
   await skipOnboarding(page);
+  await openDevPanel(page);
   await page.getByRole('button', { name: 'Listening · silent' }).click();
   await page.getByRole('button', { name: 'History' }).click();
   await page.getByLabel('History status').selectOption('failed');
