@@ -28,7 +28,7 @@ describe('Console design tokens (UI PR 1)', () => {
   it('defines dark defaults and light/sodium-rain overrides on the theme attribute', () => {
     const tokens = css('tokens.css');
     expect(tokens).toMatch(/:root \{[^}]*--bg: #0b0b10;[^}]*--accfg: #b6ff3c;/);
-    expect(tokens).toMatch(/\[data-appearance-resolved="light"\] \{[^}]*--bg: #fbfbf8;[^}]*--accfg: #3f7a00;/);
+    expect(tokens).toMatch(/\[data-appearance-resolved="light"\] \{[^}]*--bg: #fbfbf8;[^}]*--accfg: #376b00;/);
     expect(tokens).toContain('[data-appearance-resolved="sodium-rain"]');
   });
 

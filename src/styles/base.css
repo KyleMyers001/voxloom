@@ -1,6 +1,10 @@
 /* Element defaults. System font only (no bundled fonts). */
 :root {
   font-family: var(--font);
+}
+
+/* Body text is 13px per spec; set on body so 1rem stays 16px. */
+body {
   font-size: var(--fs-body);
   line-height: var(--lh-body);
 }

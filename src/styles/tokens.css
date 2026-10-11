@@ -13,7 +13,7 @@
   --winline: rgba(255, 255, 255, .1);
   --fg: #ececf1;
   --mut: #8b8b99;
-  --navon: #1a1a24;
+  --navon: #2a2a38; /* selected nav: 1.36:1 vs --side (was #1a1a24, 1.12:1) */
   --accfg: #b6ff3c;
   --ok: #7ff07a;
   --info: #3cf0ff;
@@ -69,9 +69,9 @@
   --fg: #0b0b10;
   --mut: #5d6068;
   --navon: #e7eadf;
-  --accfg: #3f7a00; /* white text on it: 5.26:1 (WCAG AA) */
-  --ok: #1f8a3a;
-  --info: #007f8f;
+  --accfg: #376b00; /* AA: 5.28 on navon; white text on it 6.43 */
+  --ok: #1a7a33; /* AA: 5.23 on bg, 5.42 panel, 4.9 field */
+  --info: #00717f; /* AA: 5.18 on field, 5.52 bg */
   --warn: #9a5a00;
   --err: #c62f35;
   --accent-text: #ffffff;
