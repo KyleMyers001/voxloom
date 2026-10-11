@@ -65,6 +65,33 @@ pub fn reassert_with<A>(
     }
 }
 
+/// Document identity captured at completion and on every wait poll.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DocIds {
+    /// AXDocument of the app's focused window (native; works without web AX).
+    pub window_doc: Option<String>,
+    /// AXURL (or AXDocument) of the web area containing focus.
+    pub area_url: Option<String>,
+}
+
+/// The late field may be used only if the focused window is the same element
+/// (`same_window`: CFEqual; `None` = unreadable on either side => abort) and
+/// every identity known at completion is unchanged. The web area URL is often
+/// unknown until the tree is enabled; once the field is found, its area URL
+/// must match a URL captured at completion.
+pub fn context_holds(same_window: Option<bool>, start: &DocIds, now: &DocIds, found: bool) -> bool {
+    if same_window != Some(true) {
+        return false;
+    }
+    if start.window_doc.is_some() && now.window_doc != start.window_doc {
+        return false;
+    }
+    match &start.area_url {
+        Some(url) if found || now.area_url.is_some() => now.area_url.as_ref() == Some(url),
+        _ => true,
+    }
+}
+
 #[cfg(test)]
 #[path = "web_ax_tests.rs"]
 mod tests;

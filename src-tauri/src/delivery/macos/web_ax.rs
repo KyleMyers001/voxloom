@@ -5,6 +5,7 @@
 use super::ax::*;
 use super::focus::focused_ui_element_once;
 use super::host;
+use super::web_ctx::{self, WebContext};
 use crate::delivery::decide::web_ax::{
     bootstrap_allowed, needs_web_ax, reassert_with, wait_for_focus, Read, BOOTSTRAP_WAIT_MS,
 };
@@ -29,7 +30,11 @@ pub fn reassert(pid: Option<i32>) -> bool {
 }
 
 /// One focus read for the wait: a real field in `pid` (still frontmost).
-fn read_once(stage: &str, pid: i32) -> Read<(AXUIElementRef, Option<String>), String> {
+fn read_once(
+    stage: &str,
+    pid: i32,
+    start: &WebContext,
+) -> Read<(AXUIElementRef, Option<String>), String> {
     if host::frontmost_pid() != Some(pid) || unsafe { AXIsProcessTrusted() } == 0 {
         return Read::Abort(
             "web focus wait aborted — foreground changed or permission denied".into(),
@@ -37,13 +42,19 @@ fn read_once(stage: &str, pid: i32) -> Read<(AXUIElementRef, Option<String>), St
     }
     let (el, name) = match focused_ui_element_once(stage) {
         Ok(found) => found,
-        Err(e) => return Read::Retry(e),
+        Err(e) if web_ctx::holds(start, pid, None, false) => return Read::Retry(e),
+        Err(_) => return Read::Abort("web focus wait aborted — window or page changed".into()),
     };
     if element_pid(el) != Some(pid) || host::frontmost_pid() != Some(pid) {
         release(el as CFTypeRef);
         return Read::Abort("web focus wait aborted — focused process changed".into());
     }
-    if needs_web_ax(copy_string_attr(el, "AXRole").as_deref()) {
+    let found = !needs_web_ax(copy_string_attr(el, "AXRole").as_deref());
+    if !web_ctx::holds(start, pid, Some(el), found) {
+        release(el as CFTypeRef);
+        return Read::Abort("web focus wait aborted — window, tab or page changed".into());
+    }
+    if !found {
         release(el as CFTypeRef);
         return Read::Retry(
             "Accessibility web focus still unavailable after initialization".into(),
@@ -71,8 +82,10 @@ pub fn settle_focus(stage: &str, front: Option<i32>, initial: Focus) -> Focus {
         return initial;
     }
     let pid = front.unwrap_or_default(); // bootstrap_allowed requires Some(pid > 0).
+                                         // Window + document identity at completion; must hold on every poll.
+    let start = web_ctx::capture(pid, initial.as_ref().ok().map(|(el, _)| *el));
     let waited = wait_for_focus(
-        || read_once(stage, pid),
+        || read_once(stage, pid, &start),
         || std::thread::sleep(std::time::Duration::from_millis(BOOTSTRAP_WAIT_MS)),
     );
     match waited {

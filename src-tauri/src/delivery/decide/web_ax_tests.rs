@@ -115,3 +115,75 @@ fn failed_reassert_is_reported_and_retried_next_time() {
     ));
     assert_eq!(calls, 2);
 }
+
+fn ids(window_doc: Option<&str>, area_url: Option<&str>) -> DocIds {
+    DocIds {
+        window_doc: window_doc.map(Into::into),
+        area_url: area_url.map(Into::into),
+    }
+}
+
+#[test]
+fn context_requires_the_same_focused_window() {
+    let a = ids(Some("https://a/"), None);
+    assert!(context_holds(Some(true), &a, &a, false));
+    assert!(!context_holds(Some(false), &a, &a, false), "window switch");
+    assert!(!context_holds(None, &a, &a, false), "window unreadable");
+}
+
+#[test]
+fn tab_switch_in_the_same_window_aborts() {
+    let start = ids(Some("https://a/"), Some("https://a/"));
+    let tab = ids(Some("https://b/"), None);
+    assert!(!context_holds(Some(true), &start, &tab, false));
+    let tab_area = ids(Some("https://a/"), Some("https://b/"));
+    assert!(!context_holds(Some(true), &start, &tab_area, true));
+}
+
+#[test]
+fn found_field_must_be_in_the_captured_web_area() {
+    let start = ids(None, Some("https://a/"));
+    assert!(context_holds(
+        Some(true),
+        &start,
+        &ids(None, Some("https://a/")),
+        true
+    ));
+    assert!(!context_holds(Some(true), &start, &ids(None, None), true));
+    // While polling, an unknown area URL is fine (tree still coming up).
+    assert!(context_holds(Some(true), &start, &ids(None, None), false));
+}
+
+#[test]
+fn unknown_area_url_at_completion_relies_on_window_identity() {
+    let start = ids(Some("https://a/"), None);
+    assert!(context_holds(
+        Some(true),
+        &start,
+        &ids(Some("https://a/"), Some("https://x/")),
+        true
+    ));
+}
+
+#[test]
+fn same_pid_field_found_after_context_change_is_rejected_by_the_wait() {
+    // Simulate the wait: polls 1-2 retry, then the user switches tab (abort).
+    let start = ids(Some("https://a/"), None);
+    let polls = [ids(Some("https://a/"), None), ids(Some("https://b/"), None)];
+    let mut i = 0;
+    let r: Result<u8, &str> = wait_for_focus(
+        || {
+            let now = &polls[i.min(1)];
+            i += 1;
+            if !context_holds(Some(true), &start, now, false) {
+                Read::Abort("context changed")
+            } else if i < 3 {
+                Read::Retry("not yet")
+            } else {
+                Read::Found(1)
+            }
+        },
+        || {},
+    );
+    assert_eq!(r, Err("context changed"));
+}
