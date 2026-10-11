@@ -22,15 +22,15 @@ export function HomeHero({ isNative }: { isNative: boolean }) {
         </h1>
         <p>Speak in any app. Release to type. Transcribed locally with Whisper.</p>
         <div className="home-hero__style">
+          <span className="fine">
+            {isNative ? 'Style preference · cleanup not available yet' : 'Writing style'}
+          </span>
           <SegmentedControl
             label="Current writing style"
             onChange={(value) => settings.update({ key: 'style', value })}
             options={styles}
             value={state.settings.style}
           />
-          <span className="fine">
-            {isNative ? 'Style preference · cleanup not available yet' : 'Writing style'}
-          </span>
         </div>
       </div>
     </section>

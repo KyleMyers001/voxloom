@@ -94,3 +94,10 @@
 @media (prefers-reduced-motion: reduce) {
   .rec-dot { animation: none; }
 }
+
+/* Disabled primary (browser preview): solid, readable in both themes instead of a faded gradient. */
+.btn.primary:disabled {
+  background: var(--seg);
+  color: var(--mut);
+  opacity: 1;
+}

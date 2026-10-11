@@ -130,6 +130,8 @@ test('screens, settings, themes, and baselines stay synchronized', async (
   expect(await page.locator('body').evaluate((body) =>
     getComputedStyle(body).getPropertyValue('--bg').trim()
   )).toBe('#fbfbf8');
+  // ⌥-digits are ignored while a form control has focus (UI PR 3), so blur first.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.keyboard.press('Alt+1');
   await expect(page.getByRole('radio', { exact: true, name: 'Casual' }))
     .toHaveAttribute('aria-checked', 'true');

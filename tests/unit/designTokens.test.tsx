@@ -62,3 +62,9 @@ describe('Switch styling (UI PR 2)', () => {
     expect(tokens).toMatch(/\[data-appearance-resolved="sodium-rain"\] \{[^}]*--switch-off: #7a909a;/);
   });
 });
+
+describe('Disabled primary button (UI PR 3)', () => {
+  it('is solid and uses muted text instead of fading the gradient', () => {
+    expect(css('home.css')).toMatch(/\.btn\.primary:disabled \{[^}]*background: var\(--seg\);[^}]*color: var\(--mut\);[^}]*opacity: 1;/);
+  });
+});
