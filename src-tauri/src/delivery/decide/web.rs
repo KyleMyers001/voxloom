@@ -31,7 +31,13 @@ pub enum InsertPath {
     Refuse(String),
 }
 
-pub fn choose_insert_path(validated: &TargetSnapshotDto, value_readable: bool) -> InsertPath {
+/// `unreadable_ok`: the host is allowlisted for the unreadable-AXValue path
+/// (`decide::messages::unreadable_value_allowed`, Messages only).
+pub fn choose_insert_path(
+    validated: &TargetSnapshotDto,
+    value_readable: bool,
+    unreadable_ok: bool,
+) -> InsertPath {
     if !validated.insertable || validated.kind != "insertable" {
         return InsertPath::Refuse(format!(
             "refusing insert: {}",
@@ -41,14 +47,17 @@ pub fn choose_insert_path(validated: &TargetSnapshotDto, value_readable: bool) -
                 .unwrap_or_else(|| validated.kind.clone())
         ));
     }
-    // Without a readable value we cannot prove the exact text landed. Still
-    // write once into a safe text element and verify by character count, or
-    // report Unverified (amends BUS-14; docs/decisions/unreadable-axvalue.md).
-    // The secure-field guard is absolute and checked independently here.
+    // Without a readable value we cannot prove the exact text landed. Only
+    // Messages (allowlisted) may proceed: verified by character count, or
+    // Unverified (amends BUS-14; docs/decisions/unreadable-axvalue.md). The
+    // secure-field guard is absolute and checked first, independently.
     if !value_readable {
         let role = validated.element_role.as_deref().unwrap_or_default();
         if validated.kind == "secure" || role == "AXSecureTextField" {
             return InsertPath::Refuse("secure field — insert skipped".into());
+        }
+        if !unreadable_ok {
+            return InsertPath::Refuse("AXValue unreadable before insert — insert skipped".into());
         }
         return InsertPath::AxSelectedTextUnreadable;
     }

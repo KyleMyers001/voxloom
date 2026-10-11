@@ -35,14 +35,17 @@ fn web_content_detection() {
 #[test]
 fn path_choice() {
     let ok = target("insertable", Some(1), Some("1:AXTextField:#1"));
-    assert_eq!(choose_insert_path(&ok, true), InsertPath::AxSelectedText);
     assert_eq!(
-        choose_insert_path(&ok, false),
+        choose_insert_path(&ok, true, true),
+        InsertPath::AxSelectedText
+    );
+    assert_eq!(
+        choose_insert_path(&ok, false, true),
         InsertPath::AxSelectedTextUnreadable
     );
     for kind in ["secure", "changed", "unavailable", "unsupported"] {
         assert!(matches!(
-            choose_insert_path(&target(kind, Some(1), Some("x")), true),
+            choose_insert_path(&target(kind, Some(1), Some("x")), true, true),
             InsertPath::Refuse(_)
         ));
     }
@@ -53,12 +56,12 @@ fn unreadable_value_never_unlocks_secure_fields() {
     let mut secure = target("insertable", Some(1), Some("x"));
     secure.element_role = Some("AXSecureTextField".into());
     assert!(matches!(
-        choose_insert_path(&secure, false),
+        choose_insert_path(&secure, false, true),
         InsertPath::Refuse(_)
     ));
     for kind in ["secure", "changed", "unavailable", "unsupported"] {
         assert!(matches!(
-            choose_insert_path(&target(kind, Some(1), Some("x")), false),
+            choose_insert_path(&target(kind, Some(1), Some("x")), false, true),
             InsertPath::Refuse(_)
         ));
     }
@@ -69,7 +72,21 @@ fn messages_like_text_area_with_unreadable_value_is_attempted() {
     // Role AXTextArea, insertable, AXValue not a readable string.
     let messages = target("insertable", Some(9), Some("9:AXTextArea:#1"));
     assert_eq!(
-        choose_insert_path(&messages, false),
+        choose_insert_path(&messages, false, true),
         InsertPath::AxSelectedTextUnreadable
+    );
+}
+
+#[test]
+fn unreadable_value_refused_outside_the_messages_allowlist() {
+    let other = target("insertable", Some(9), Some("9:AXTextArea:#1"));
+    assert_eq!(
+        choose_insert_path(&other, false, false),
+        InsertPath::Refuse("AXValue unreadable before insert — insert skipped".into())
+    );
+    // Readable values are unaffected by the allowlist.
+    assert_eq!(
+        choose_insert_path(&other, true, false),
+        InsertPath::AxSelectedText
     );
 }
