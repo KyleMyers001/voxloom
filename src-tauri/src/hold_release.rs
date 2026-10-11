@@ -128,11 +128,7 @@ mod macos {
         ) -> CFRunLoopSourceRef;
         fn CFMachPortInvalidate(port: CFMachPortRef);
         fn CFRunLoopAddSource(rl: CFRunLoopRef, source: CFRunLoopSourceRef, mode: *const c_void);
-        fn CFRunLoopRemoveSource(
-            rl: CFRunLoopRef,
-            source: CFRunLoopSourceRef,
-            mode: *const c_void,
-        );
+        fn CFRunLoopRemoveSource(rl: CFRunLoopRef, source: CFRunLoopSourceRef, mode: *const c_void);
         fn CFRunLoopGetMain() -> CFRunLoopRef;
         fn CFRelease(cf: *mut c_void);
         static kCFRunLoopCommonModes: *const c_void;
@@ -154,8 +150,7 @@ mod macos {
 
         fn still_held(self) -> bool {
             // SAFETY: CoreGraphics session-state queries; no pointers.
-            let key_down =
-                unsafe { CGEventSourceKeyState(SESSION_STATE, self.key_code) };
+            let key_down = unsafe { CGEventSourceKeyState(SESSION_STATE, self.key_code) };
             let flags = unsafe { CGEventSourceFlagsState(SESSION_STATE) };
             let mods_match = self.flags_match(flags);
             chord_held_from_sample(self.requires_modifiers(), key_down, mods_match)
@@ -240,9 +235,7 @@ mod macos {
                 "control" | "ctrl" => chord.need_control = true,
                 "shift" => chord.need_shift = true,
                 "alt" | "option" => chord.need_option = true,
-                "command" | "cmd" | "meta" | "super" => {
-                    chord.need_command = true
-                }
+                "command" | "cmd" | "meta" | "super" => chord.need_command = true,
                 other => return Err(format!("unknown modifier {other}")),
             }
         }
@@ -298,9 +291,7 @@ mod macos {
             "n" => 45,
             "m" => 46,
             other => {
-                return Err(format!(
-                    "unsupported key '{other}' for hold-release watch"
-                ));
+                return Err(format!("unsupported key '{other}' for hold-release watch"));
             }
         })
     }
@@ -342,7 +333,11 @@ mod macos {
         event
     }
 
-    fn try_install_tap(app: AppHandle, chord: Chord, generation: u64) -> Option<(CFMachPortRef, CFRunLoopSourceRef, *mut TapCtx)> {
+    fn try_install_tap(
+        app: AppHandle,
+        chord: Chord,
+        generation: u64,
+    ) -> Option<(CFMachPortRef, CFRunLoopSourceRef, *mut TapCtx)> {
         let ctx = Box::into_raw(Box::new(TapCtx {
             app,
             chord,
@@ -403,9 +398,7 @@ mod macos {
     }
 
     fn start_watch(app: AppHandle, chord: Chord, generation: u64) -> Armed {
-        if let Some((tap, source, ctx)) =
-            try_install_tap(app.clone(), chord, generation)
-        {
+        if let Some((tap, source, ctx)) = try_install_tap(app.clone(), chord, generation) {
             // Poll owns mods-first finish (mods-primary + debounce). Tap owns
             // letter key-up (key-first); flagsChanged does not emit from tap.
             let poll_stop = start_poll_fallback(app, chord, generation);
@@ -436,11 +429,7 @@ mod macos {
             unsafe {
                 if let (Some(tap), Some(source)) = (armed.tap, armed.source) {
                     CGEventTapEnable(tap, false);
-                    CFRunLoopRemoveSource(
-                        CFRunLoopGetMain(),
-                        source,
-                        kCFRunLoopCommonModes,
-                    );
+                    CFRunLoopRemoveSource(CFRunLoopGetMain(), source, kCFRunLoopCommonModes);
                     CFMachPortInvalidate(tap);
                     CFRelease(source);
                     CFRelease(tap);

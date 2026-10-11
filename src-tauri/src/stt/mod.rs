@@ -39,7 +39,10 @@ fn err_string(e: SttErrorDto) -> String {
 }
 
 fn join_err(code: &str, e: impl std::fmt::Display) -> String {
-    err_string(SttErrorDto::new(code, format!("background task failed: {e}")))
+    err_string(SttErrorDto::new(
+        code,
+        format!("background task failed: {e}"),
+    ))
 }
 
 #[tauri::command]
@@ -48,10 +51,7 @@ pub fn stt_list_models(state: State<'_, SttState>) -> Vec<ModelInfoDto> {
 }
 
 #[tauri::command]
-pub fn stt_model_status(
-    state: State<'_, SttState>,
-    model_id: String,
-) -> Option<ModelInfoDto> {
+pub fn stt_model_status(state: State<'_, SttState>, model_id: String) -> Option<ModelInfoDto> {
     state.models.status(&model_id)
 }
 
@@ -77,10 +77,7 @@ pub async fn stt_download_model(
 /// Cancel is intentionally synchronous and cheap so it can interrupt an
 /// in-flight `stt_download_model` that is running on the blocking pool.
 #[tauri::command]
-pub fn stt_cancel_download(
-    state: State<'_, SttState>,
-    model_id: String,
-) -> Result<(), String> {
+pub fn stt_cancel_download(state: State<'_, SttState>, model_id: String) -> Result<(), String> {
     state.models.cancel(&model_id).map_err(err_string)
 }
 
@@ -134,10 +131,7 @@ mod tests {
 
     #[test]
     fn transcribe_path_consumes_buffer_and_returns_engine_result() {
-        let dir = std::env::temp_dir().join(format!(
-            "voxloom-stt-async-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("voxloom-stt-async-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         // Place a placeholder so resolved_path succeeds; engine stub still

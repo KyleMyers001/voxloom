@@ -6,18 +6,14 @@ use cpal::DeviceId;
 use dispatch2::{DispatchQueue, DispatchRetained};
 use objc2_core_audio::{
     kAudioDevicePropertyDeviceIsAlive, kAudioDevicePropertyDeviceUID,
-    kAudioHardwarePropertyDevices,
-    kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal,
-    kAudioObjectSystemObject, AudioObjectAddPropertyListenerBlock,
-    AudioObjectID, AudioObjectPropertyAddress,
-    AudioObjectRemovePropertyListenerBlock,
+    kAudioHardwarePropertyDevices, kAudioObjectPropertyElementMain,
+    kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject, AudioObjectAddPropertyListenerBlock,
+    AudioObjectID, AudioObjectPropertyAddress, AudioObjectRemovePropertyListenerBlock,
 };
 
 use super::admission;
+use super::macos_api::{check_status, core_audio_uid, device_is_alive, translate_uid};
 use super::{require_valid, CaptureGate, ListenerOperations, ListenerOwner};
-use super::macos_api::{
-    check_status, core_audio_uid, device_is_alive, translate_uid,
-};
 
 type ListenerBlock = RcBlock<dyn Fn(u32, NonNull<AudioObjectPropertyAddress>)>;
 
@@ -42,10 +38,7 @@ impl ListenerOperations for NativeListenerOperations {
     type Registration = Registration;
     type Target = ListenerTarget;
 
-    fn register(
-        &mut self,
-        target: ListenerTarget,
-    ) -> Result<Registration, String> {
+    fn register(&mut self, target: ListenerTarget) -> Result<Registration, String> {
         let address = AudioObjectPropertyAddress {
             mElement: kAudioObjectPropertyElementMain,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -100,10 +93,7 @@ pub struct NativeIdentityMonitor {
 }
 
 impl NativeIdentityMonitor {
-    pub fn install(
-        expected: &DeviceId,
-        gate: Arc<CaptureGate>,
-    ) -> Result<Self, String> {
+    pub fn install(expected: &DeviceId, gate: Arc<CaptureGate>) -> Result<Self, String> {
         let expected_uid = core_audio_uid(expected)?;
         admission::reserve()?;
         let queue = DispatchQueue::new("com.voxloom.capture.identity", None);
@@ -146,11 +136,7 @@ impl NativeIdentityMonitor {
         require_valid(&self.gate)
     }
 
-    pub fn validate(
-        &self,
-        device: &cpal::Device,
-        expected: &DeviceId,
-    ) -> Result<(), String> {
+    pub fn validate(&self, device: &cpal::Device, expected: &DeviceId) -> Result<(), String> {
         use cpal::traits::DeviceTrait;
 
         let valid = !self.gate.is_invalidated()
@@ -175,9 +161,7 @@ impl NativeIdentityMonitor {
     }
 
     fn cleanup(&mut self) -> Result<(), String> {
-        self.listeners
-            .take()
-            .map_or(Ok(()), ListenerOwner::finish)
+        self.listeners.take().map_or(Ok(()), ListenerOwner::finish)
     }
 
     fn release_admission(&self) {

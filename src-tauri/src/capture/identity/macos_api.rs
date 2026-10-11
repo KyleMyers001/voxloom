@@ -7,18 +7,13 @@ use std::ptr::{null, NonNull};
 use cpal::platform::HostId;
 use cpal::DeviceId;
 use objc2_core_audio::{
-    kAudioDevicePropertyDeviceIsAlive,
-    kAudioHardwarePropertyTranslateUIDToDevice,
-    kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal,
-    kAudioObjectSystemObject, AudioObjectGetPropertyData, AudioObjectID,
-    AudioObjectPropertyAddress,
+    kAudioDevicePropertyDeviceIsAlive, kAudioHardwarePropertyTranslateUIDToDevice,
+    kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject,
+    AudioObjectGetPropertyData, AudioObjectID, AudioObjectPropertyAddress,
 };
 use objc2_core_foundation::CFString;
 
-pub(super) fn check_status(
-    status: i32,
-    operation: &str,
-) -> Result<(), String> {
+pub(super) fn check_status(status: i32, operation: &str) -> Result<(), String> {
     if status == 0 {
         Ok(())
     } else {
@@ -38,9 +33,7 @@ pub(super) fn core_audio_uid(expected: &DeviceId) -> Result<&str, String> {
     }
 }
 
-pub(super) fn device_is_alive(
-    device_id: AudioObjectID,
-) -> Result<bool, String> {
+pub(super) fn device_is_alive(device_id: AudioObjectID) -> Result<bool, String> {
     let address = AudioObjectPropertyAddress {
         mElement: kAudioObjectPropertyElementMain,
         mScope: kAudioObjectPropertyScopeGlobal,
@@ -104,10 +97,7 @@ mod tests {
 
     #[test]
     fn core_audio_uid_accepts_nonempty_core_audio_identity() {
-        let identity = DeviceId(
-            HostId::CoreAudio,
-            String::from("persistent-device-uid"),
-        );
+        let identity = DeviceId(HostId::CoreAudio, String::from("persistent-device-uid"));
         assert_eq!(core_audio_uid(&identity).unwrap(), identity.1);
     }
 }

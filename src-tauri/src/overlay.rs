@@ -3,8 +3,8 @@
 //! Delivery/insert is out of scope — this window must never steal focus.
 
 use tauri::{
-    AppHandle, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewUrl,
-    WebviewWindow, WebviewWindowBuilder,
+    AppHandle, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
 };
 
 const OVERLAY_URL: &str = "overlay.html";
@@ -77,25 +77,21 @@ fn build_overlay(
     width: u32,
     height: u32,
 ) -> Result<WebviewWindow, String> {
-    let builder = WebviewWindowBuilder::new(
-        app,
-        label,
-        WebviewUrl::App(OVERLAY_URL.into()),
-    )
-    .title("Voxloom dictation")
-    .inner_size(width as f64, height as f64)
-    .decorations(false)
-    .resizable(false)
-    .maximizable(false)
-    .minimizable(false)
-    .closable(false)
-    .skip_taskbar(true)
-    .always_on_top(true)
-    .focused(false)
-    .focusable(false)
-    .visible(false)
-    .transparent(true)
-    .shadow(false);
+    let builder = WebviewWindowBuilder::new(app, label, WebviewUrl::App(OVERLAY_URL.into()))
+        .title("Voxloom dictation")
+        .inner_size(width as f64, height as f64)
+        .decorations(false)
+        .resizable(false)
+        .maximizable(false)
+        .minimizable(false)
+        .closable(false)
+        .skip_taskbar(true)
+        .always_on_top(true)
+        .focused(false)
+        .focusable(false)
+        .visible(false)
+        .transparent(true)
+        .shadow(false);
 
     // macOS: transparent requires private API (enabled in tauri.conf).
     // Linux builds still compile; transparency works without private API.

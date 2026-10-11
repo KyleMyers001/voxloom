@@ -144,22 +144,14 @@ impl ModelStore {
     /// Explicit user-triggered download. Never call from constructors.
     /// Emits `stt:download-progress` while bytes arrive; returns only after
     /// the file is finalized on disk (or cancel / error).
-    pub fn download(
-        &self,
-        app: &AppHandle,
-        model_id: &str,
-    ) -> Result<(), SttErrorDto> {
+    pub fn download(&self, app: &AppHandle, model_id: &str) -> Result<(), SttErrorDto> {
         self.download_with_sink(model_id, |progress| {
             let _ = app.emit("stt:download-progress", progress);
         })
     }
 
     /// Core download with a progress sink (used by IPC and unit tests).
-    pub fn download_with_sink<F>(
-        &self,
-        model_id: &str,
-        on_progress: F,
-    ) -> Result<(), SttErrorDto>
+    pub fn download_with_sink<F>(&self, model_id: &str, on_progress: F) -> Result<(), SttErrorDto>
     where
         F: FnMut(DownloadProgressDto),
     {
@@ -232,16 +224,15 @@ impl ModelStore {
     where
         F: FnMut(DownloadProgressDto),
     {
-        fs::create_dir_all(&self.root).map_err(|e| {
-            SttErrorDto::new("download-failed", format!("create models dir: {e}"))
-        })?;
+        fs::create_dir_all(&self.root)
+            .map_err(|e| SttErrorDto::new("download-failed", format!("create models dir: {e}")))?;
 
         let dest = self.model_path(spec);
         let tmp = dest.with_extension("bin.partial");
 
-        let response = ureq::get(url).call().map_err(|e| {
-            SttErrorDto::new("download-failed", format!("request failed: {e}"))
-        })?;
+        let response = ureq::get(url)
+            .call()
+            .map_err(|e| SttErrorDto::new("download-failed", format!("request failed: {e}")))?;
 
         let total = response
             .header("Content-Length")
@@ -249,9 +240,8 @@ impl ModelStore {
             .unwrap_or(spec.size_bytes);
 
         let mut reader = response.into_reader();
-        let mut file = File::create(&tmp).map_err(|e| {
-            SttErrorDto::new("download-failed", format!("create temp file: {e}"))
-        })?;
+        let mut file = File::create(&tmp)
+            .map_err(|e| SttErrorDto::new("download-failed", format!("create temp file: {e}")))?;
 
         let mut buf = [0u8; 64 * 1024];
         let mut received: u64 = 0;
@@ -266,15 +256,14 @@ impl ModelStore {
                     format!("Download cancelled: {}", spec.id),
                 ));
             }
-            let n = reader.read(&mut buf).map_err(|e| {
-                SttErrorDto::new("download-failed", format!("read failed: {e}"))
-            })?;
+            let n = reader
+                .read(&mut buf)
+                .map_err(|e| SttErrorDto::new("download-failed", format!("read failed: {e}")))?;
             if n == 0 {
                 break;
             }
-            file.write_all(&buf[..n]).map_err(|e| {
-                SttErrorDto::new("download-failed", format!("write failed: {e}"))
-            })?;
+            file.write_all(&buf[..n])
+                .map_err(|e| SttErrorDto::new("download-failed", format!("write failed: {e}")))?;
             received += n as u64;
             // Intermediate progress only — never claim ratio 1.0 until the
             // file is renamed into place (completion is the Ok return + final emit).
@@ -294,9 +283,8 @@ impl ModelStore {
             }
         }
 
-        file.flush().map_err(|e| {
-            SttErrorDto::new("download-failed", format!("flush failed: {e}"))
-        })?;
+        file.flush()
+            .map_err(|e| SttErrorDto::new("download-failed", format!("flush failed: {e}")))?;
         drop(file);
 
         if cancel.load(Ordering::Acquire) {
@@ -307,9 +295,8 @@ impl ModelStore {
             ));
         }
 
-        fs::rename(&tmp, &dest).map_err(|e| {
-            SttErrorDto::new("download-failed", format!("finalize failed: {e}"))
-        })?;
+        fs::rename(&tmp, &dest)
+            .map_err(|e| SttErrorDto::new("download-failed", format!("finalize failed: {e}")))?;
 
         // Only after the destination file exists do we report completion.
         debug_assert!(dest.is_file());
@@ -400,10 +387,7 @@ mod tests {
 
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("ggml-tiny.en.bin"), b"fake").unwrap();
-        assert_eq!(
-            store.status("whisper-tiny.en").unwrap().status,
-            "available"
-        );
+        assert_eq!(store.status("whisper-tiny.en").unwrap().status, "available");
         assert!(store.cancel("whisper-tiny.en").is_ok());
         assert!(dir.join("ggml-tiny.en.bin").is_file());
         let _ = fs::remove_dir_all(&dir);
@@ -431,10 +415,7 @@ mod tests {
         assert_eq!(written, body);
 
         let snapshot = events.lock().unwrap().clone();
-        assert!(
-            !snapshot.is_empty(),
-            "expected at least one progress event"
-        );
+        assert!(!snapshot.is_empty(), "expected at least one progress event");
         // No ratio==1.0 event may fire before the destination file exists.
         for (ratio, exists) in &snapshot {
             if *ratio >= 1.0 {
@@ -449,10 +430,7 @@ mod tests {
         assert!(last.1);
 
         // Status flips to available only after completion (command returned).
-        assert_eq!(
-            store.status("whisper-tiny.en").unwrap().status,
-            "available"
-        );
+        assert_eq!(store.status("whisper-tiny.en").unwrap().status, "available");
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -489,10 +467,7 @@ mod tests {
             !dir.join("ggml-base.en.bin.partial").exists(),
             "partial file should be cleaned up"
         );
-        assert_eq!(
-            store.status("whisper-base.en").unwrap().status,
-            "missing"
-        );
+        assert_eq!(store.status("whisper-base.en").unwrap().status, "missing");
         let _ = fs::remove_dir_all(&dir);
     }
 
