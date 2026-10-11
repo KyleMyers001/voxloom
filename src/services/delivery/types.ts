@@ -13,13 +13,13 @@ export type TargetKind =
   | 'unavailable';
 
 /**
- * Invocation-time snapshot of the intended insertion target
+ * Transcription-completion-time snapshot of the intended insertion target
  * (frontmost app + focused AX element insertability).
  */
 export interface TargetSnapshot {
   /** Frontmost application name when known. */
   appName: string | null;
-  /** Process id when known (identity check at completion). */
+  /** Process id when known (identity check before insertion). */
   appPid: number | null;
   /** Opaque element identity for change detection (role + pid + optional id). */
   elementId: string | null;
@@ -35,7 +35,7 @@ export interface TargetSnapshot {
 }
 
 /** Evidence-backed delivery result — never claim Inserted/Copied/Failed without it. */
-export type DeliveryStatus = 'inserted' | 'copied' | 'failed';
+export type DeliveryStatus = 'inserted' | 'copied' | 'failed' | 'unverified';
 
 export interface DeliveryOutcome {
   /** Clipboard restore ran successfully after a temporary paste path. */
@@ -49,6 +49,21 @@ export interface DeliveryOutcome {
   status: DeliveryStatus;
   /** Always the transcript text for manual recovery (even if history is off). */
   text: string;
+}
+
+/** Structured native insert result (macOS). */
+export interface InsertReport {
+  /** Events posted to Terminal, never proof of input-buffer contents. */
+  terminalDispatch?: 'complete' | 'partial';
+  /** Unicode events posted; not alone proof of input-buffer delivery. */
+  typed: boolean;
+  /**
+   * A mutation happened but read-back could not prove the full transcript
+   * landed — text may be (partially) in the field. Treated as not inserted.
+   */
+  unverified: boolean;
+  /** Diagnostic detail. */
+  detail: string | null;
 }
 
 export interface ClipboardSnapshot {
@@ -74,11 +89,14 @@ export interface DeliveryPlatformAdapter {
    * no full-field value replacement).
    * Must refuse rather than insert into a different app.
    */
-  insertText(text: string, intended: TargetSnapshot): Promise<void>;
+  insertText(
+    text: string,
+    intended: TargetSnapshot,
+  ): Promise<InsertReport | void>;
   /** Snapshot frontmost app + focused element insertability. */
   snapshotTarget(): Promise<TargetSnapshot>;
   /**
-   * Re-check intended target at completion: still present, same identity,
+   * Re-check completion snapshot before insertion: still present, same identity,
    * still insertable — or classify unavailable / secure / changed / unsupported.
    * Closure must not be inferred from unavailable AX focus alone.
    */
@@ -86,13 +104,15 @@ export interface DeliveryPlatformAdapter {
 }
 
 export interface DeliverOptions {
+  /** Session lease, checked after awaits and before dispatching writes. */
+  isCurrent?: () => boolean;
   /** Settings `clipboardFallback` — default-on per fixtures / ADR. */
   clipboardFallback: boolean;
   /** Injectable clock (tests). */
   now?: () => number;
   /** Platform adapter (macOS AX / stub / test double). */
   platform: DeliveryPlatformAdapter;
-  /** Invocation-time snapshot; null means none taken (treat as unavailable). */
+  /** Completion-time snapshot; null means none taken (treat as unavailable). */
   intended: TargetSnapshot | null;
   /** Transcript text to deliver. */
   text: string;

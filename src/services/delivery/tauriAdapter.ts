@@ -10,6 +10,7 @@ import { createStubDeliveryAdapter } from './stubAdapter';
 import type {
   ClipboardSnapshot,
   DeliveryPlatformAdapter,
+  InsertReport,
   TargetSnapshot,
 } from './types';
 
@@ -67,10 +68,10 @@ export function createTauriDeliveryAdapter(
     clipboardRestore: (prior) => stub.clipboardRestore(prior),
     clipboardWrite: (text) => stub.clipboardWrite(text),
     async insertText(text, intended) {
-      await invoke('delivery_insert_text', {
+      return await invoke<InsertReport | null>('delivery_insert_text', {
         text,
         intended,
-      });
+      }) ?? undefined;
     },
     async snapshotTarget() {
       try {

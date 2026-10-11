@@ -82,6 +82,7 @@ export function History({ onToast }: HistoryProps) {
             <option value="inserted">Inserted</option>
             <option value="copied">Copied</option>
             <option value="failed">Failed</option>
+            <option value="unverified">Unverified</option>
           </select>
         </div>
         <div className="history-list">
@@ -99,6 +100,11 @@ export function History({ onToast }: HistoryProps) {
                       `${record.style[0].toUpperCase()}${record.style.slice(1)}`
                   }
                 </p>
+                {record.status === 'unverified' && (
+                  <p className="recovery-state">
+                    Terminal input not verified. Inspect before copying or retrying.
+                  </p>
+                )}
                 {record.status === 'failed' && (
                   <p className="recovery-state">
                     {isNative

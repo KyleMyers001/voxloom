@@ -17,6 +17,7 @@ import {
 import type {
   DeliverOptions,
   DeliveryOutcome,
+  InsertReport,
   TargetSnapshot,
 } from './types';
 
@@ -58,9 +59,25 @@ export async function deliverTranscript(
   const text = options.text;
   const now = options.now ?? Date.now;
   const platform = options.platform;
+  const current = () => options.isCurrent?.() ?? true;
+  const stale = () => failOutcome(text, 'session cancelled or superseded; delivery skipped');
+
+  // Nothing to deliver: never insert, and never overwrite the clipboard.
+  if (text.trim() === '') {
+    return {
+      clipboardRestored: false,
+      detail: 'empty transcript',
+      message: deliveryMessage('failed', 'nothing to insert (empty transcript)'),
+      restoreSkippedReason: null,
+      status: 'failed',
+      text,
+    };
+  }
+
+  if (!current()) return stale();
 
   const intended: TargetSnapshot = options.intended
-    ?? unavailableSnapshot(now(), 'no intended target snapshot at invocation');
+    ?? unavailableSnapshot(now(), 'no intended target snapshot at transcription completion');
 
   let validated: TargetSnapshot;
   try {
@@ -75,29 +92,50 @@ export async function deliverTranscript(
     };
   }
 
+  if (!current()) return stale();
   const plan = planDelivery(validated, options.clipboardFallback);
 
   if (plan.action === 'insert') {
+    let report: InsertReport | void;
     try {
-      await platform.insertText(text, plan.target);
-      return {
-        clipboardRestored: false,
-        detail: null,
-        message: deliveryMessage('inserted', null),
-        restoreSkippedReason: null,
-        status: 'inserted',
-        text,
-      };
+      report = await platform.insertText(text, plan.target);
     } catch (error: unknown) {
       const insertFail = error instanceof Error
         ? error.message
         : String(error);
+      if (!current()) return stale();
       // Insert API failed after a valid-looking target → Copy + toast if enabled.
       if (!options.clipboardFallback) {
         return failOutcome(text, `insert failed: ${insertFail}`);
       }
       return copyFallback(platform, text, `insert failed: ${insertFail}`);
     }
+    if (report?.terminalDispatch) {
+      // Posting is not input-buffer confirmation. Never copy or retry after
+      // any Terminal dispatch, even if the session was cancelled in flight.
+      const sent = report.terminalDispatch === 'complete' ? 'Text sent' : 'Text partly sent';
+      return {
+        clipboardRestored: false,
+        detail: report.detail,
+        message: `${sent} to Terminal — input not verified. Inspect before retrying.`,
+        restoreSkippedReason: null,
+        status: 'unverified',
+        text,
+      };
+    }
+    if (report?.unverified) {
+      // An in-flight native write cannot be undone; preserve its uncertainty.
+      if (!current()) return mayHaveInserted(platform, text, false, report);
+      return mayHaveInserted(platform, text, options.clipboardFallback, report);
+    }
+    return {
+      clipboardRestored: false,
+      detail: report?.typed ? 'typed' : null,
+      message: deliveryMessage('inserted', null),
+      restoreSkippedReason: null,
+      status: 'inserted',
+      text,
+    };
   }
 
   if (plan.action === 'copy') {
@@ -105,6 +143,29 @@ export async function deliverTranscript(
   }
 
   return failOutcome(text, plan.reason);
+}
+
+/**
+ * Native write happened but could not be proven complete: the text may already
+ * be (partly) in the field. Never claim Inserted, never imply nothing happened
+ * — including when the Copy fallback itself fails or is disabled.
+ */
+async function mayHaveInserted(
+  platform: DeliverOptions['platform'],
+  text: string,
+  clipboardFallback: boolean,
+  report: InsertReport,
+): Promise<DeliveryOutcome> {
+  const detail = `unverified insert: ${report.detail ?? 'read-back failed'}`;
+  if (!clipboardFallback) {
+    const failed = failOutcome(text, detail);
+    return { ...failed, message: `May have been inserted — ${failed.message}` };
+  }
+  const copied = await copyFallback(platform, text, detail);
+  if (copied.status === 'copied') {
+    return { ...copied, message: 'May have been inserted — also copied' };
+  }
+  return { ...copied, message: `May have been inserted — ${copied.message}` };
 }
 
 /**

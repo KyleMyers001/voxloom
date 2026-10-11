@@ -143,6 +143,20 @@ describe('useShortcutGestures', () => {
   });
 
   describe('native mode focus survival', () => {
+    it.each(['hold', 'latch'] as const)('%s finish stops before a listening commit', async (mode) => {
+      vi.mocked(isTauri).mockReturnValue(true);
+      const native = makeNativeController();
+      mocks.createNativeShortcutController.mockReturnValue(native);
+      mocks.createOverlayBridge.mockReturnValue(makeOverlay());
+      const dogfood = makeDogfood();
+      renderHook(() => useShortcutGestures(makeOptions({ dogfood })));
+      await waitFor(() => expect(native.setShortcut).toHaveBeenCalled());
+      const { onGesture } = mocks.createNativeShortcutController.mock.calls[0][0];
+      act(() => { onGesture(`${mode}-start`); });
+      act(() => { onGesture(`${mode}-finish`); });
+      expect(dogfood.stop).toHaveBeenCalledOnce();
+    });
+
     it('does not resetPartial on visibilitychange or pagehide', async () => {
       vi.mocked(isTauri).mockReturnValue(true);
       const native = makeNativeController();
@@ -338,6 +352,27 @@ describe('useShortcutGestures', () => {
       expect(dictation.complete).not.toHaveBeenCalled();
 
       unmount();
+    });
+
+    it('stops on release before the pending React listening commit', async () => {
+      vi.useFakeTimers();
+      let now = 0;
+      const dogfood = makeDogfood();
+      const options = makeOptions({ dogfood, now: () => now });
+      const { rerender } = renderHook((props) => useShortcutGestures(props), {
+        initialProps: options,
+      });
+      act(() => { document.dispatchEvent(shortcutEvent('keydown')); });
+      now = 320;
+      act(() => { vi.advanceTimersByTime(320); });
+      act(() => { document.dispatchEvent(shortcutEvent('keyup')); });
+      // No listening commit exists yet: target acquisition must not wait for it.
+      expect(dogfood.stop).toHaveBeenCalledOnce();
+      rerender({ ...options, state: { ...options.state, dictation: {
+        kind: 'listening', runId: 91, waveform: 'silent',
+      } } });
+      await act(async () => { await Promise.resolve(); });
+      expect(dogfood.stop).toHaveBeenCalledOnce();
     });
 
     it('hold-finish calls dogfood.stop and clears overlay, not synthetic complete', async () => {

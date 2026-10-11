@@ -27,8 +27,8 @@ import type {
 
 /**
  * Product gestures drive real dogfood capture → STT → deliverTranscript.
- * Snapshot runs inside dogfood.start() at gesture invocation (while the
- * other app is still frontmost — global shortcut must not activate Voxloom).
+ * Target snapshot dispatch runs after transcription completes, not at the
+ * finish edge. No product path activates another app.
  * Overlay visibility is torn down on finish/cancel/error unconditionally
  * (try/finally) so a failed stop/STT/deliver cannot leave the waveform up.
  * Dogfood terminal (Home Stop / success / error / cancel) also forces overlay
@@ -91,11 +91,6 @@ function tearDownOverlayDictation(
   options.dictation.cancel(d.runId);
 }
 
-/** Dictation run the overlay currently shows, if any. */
-function visibleRunId(options: GestureOptions): number | null {
-  const d = options.state.dictation;
-  return d.kind === 'listening' || d.kind === 'processing' ? d.runId : null;
-}
 
 /**
  * Finish hold/latch: stop capture for STT/delivery, but always clear overlay
@@ -103,19 +98,9 @@ function visibleRunId(options: GestureOptions): number | null {
  * Never dictation.finish/complete — that invents synthetic Inserted rows.
  */
 function endGestureCapture(optionsRef: { current: GestureOptions }): void {
-  // Immediate clear on release (Clara: overlay must not wait for STT).
-  const runId = visibleRunId(optionsRef.current);
+  // The audio stop already ran at the gesture edge. This
+  // gate only tears down an overlay whose listening commit may arrive late.
   tearDownOverlayDictation(optionsRef.current);
-  void (async () => {
-    try {
-      await optionsRef.current.dogfood.stop();
-    } catch {
-      // stop / STT / deliver failure must not leave overlay up
-    } finally {
-      // Only this run — a new hold may already be listening by now.
-      if (runId !== null) tearDownOverlayDictation(optionsRef.current, runId);
-    }
-  })();
 }
 
 /**
@@ -138,7 +123,7 @@ export function useShortcutGestures(options: GestureOptions) {
   const phaseGuardRef = useRef<PhaseGuard>({ seen: options.dogfood.phase });
 
   // Shared pending-finish gate (hold release can race React listening commit).
-  // Finish → dogfood.stop (real STT/delivery) + unconditional overlay teardown.
+  // Finish stops audio immediately; this gate handles only overlay teardown.
   // Never dictation.finish/complete — that path invents synthetic Inserted.
   if (pendingFinishRef.current === null) {
     pendingFinishRef.current = createPendingFinishGate({
@@ -342,15 +327,17 @@ function handleGesture(
     // "transcribing": prior utterance's STT/delivery keeps running in the
     // background; dogfood.start() supersedes its phase (session-guarded).
     pending?.resetForStart();
-    // Overlay first (sync), then real capture. dogfood.start snapshots the
-    // frontmost app *before* mic work — global shortcut must not activate
-    // Voxloom (ADR §4). Home Start may still Copy when Voxloom is focused.
+    // Overlay first (sync), then real capture. Target selection waits until
+    // final transcription; global shortcut must not activate Voxloom (ADR §4).
     dictation.start();
     void dogfood.start().catch(() => {
       // start failure → tear down overlay (phase effect also covers terminal)
       tearDownOverlayDictation(optionsRef.current);
     });
   } else if (gesture === 'hold-finish' || gesture === 'latch-finish') {
+    // Stop audio now, before the pending-listening gate or overlay work.
+    // A release racing model/microphone startup must also latch stop now.
+    void dogfood.stop().catch(() => {});
     if (state.dictation.kind === 'listening') {
       const runId = state.dictation.runId;
       if (pending) pending.requestFinish(true, runId);

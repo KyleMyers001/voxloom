@@ -24,6 +24,12 @@ function sample(overrides: Partial<DictationRecord> = {}): DictationRecord {
 }
 
 describe('parseHistoryJson', () => {
+  it('preserves unverified delivery rather than claiming insertion or dropping recovery text', () => {
+    const row = sample({ status: 'unverified' });
+    const parsed = parseHistoryJson(serializeHistoryFile([row]));
+    expect(parsed).toEqual({ file: { records: [row], version: 1 }, ok: true });
+  });
+
   it('accepts a valid v1 document', () => {
     const raw = serializeHistoryFile([sample()]);
     const parsed = parseHistoryJson(raw);
