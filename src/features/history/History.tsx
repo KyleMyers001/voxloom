@@ -24,9 +24,9 @@ const filters: { value: Filter; label: string }[] = [
 ];
 
 const retentionCopy: Record<Settings['transcriptRetention'], string> = {
-  '30-days': 'Kept for 30 days (Settings › Privacy).',
-  forever: 'Kept until you delete them (Settings › Privacy).',
-  off: 'Transcript retention is off (Settings › Privacy).',
+  '30-days': 'Kept for 30 days (Settings › Retention & privacy).',
+  forever: 'Kept until you delete them (Settings › Retention & privacy).',
+  off: 'Transcript retention is off (Settings › Retention & privacy).',
 };
 
 export function History({ onToast }: HistoryProps) {
@@ -95,9 +95,14 @@ export function History({ onToast }: HistoryProps) {
             record={record}
           />
         ))}
-        {!records.length && (
+        {!state.records.length && (
+          <EmptyState icon="clock" title="No dictations yet">
+            Hold the shortcut in any app to dictate. Transcripts appear here.
+          </EmptyState>
+        )}
+        {state.records.length > 0 && !records.length && (
           <EmptyState icon="search" title="No history matches these filters">
-            Clear the search or choose All statuses.
+            Clear the search or choose All.
           </EmptyState>
         )}
       </div>

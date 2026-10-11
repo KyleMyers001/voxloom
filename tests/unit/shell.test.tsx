@@ -32,7 +32,8 @@ describe('App shell (UI PR 3)', () => {
     const nav = screen.getByRole('navigation', { name: 'Voxloom screens' });
     expect(within(nav).getAllByRole('button').map((b) => b.getAttribute('aria-label')))
       .toEqual(['Home', 'History', 'Dictionary']);
-    expect(screen.getByText('Ready · ⌃⇧Space')).toBeInTheDocument();
+    const status = screen.getByText('Ready · ⌃⇧Space');
+    expect(status).not.toHaveAttribute('aria-label');
     expect(screen.getByText(/Hold the shortcut in any app to dictate/)).toBeInTheDocument();
     expect(screen.queryByText(/Global hold\/latch snapshots/)).not.toBeInTheDocument();
   });
@@ -45,6 +46,31 @@ describe('App shell (UI PR 3)', () => {
     expect(current()).toBe('History');
     fireEvent.keyDown(document, { altKey: true, code: 'Digit1', key: '¡' });
     expect(current()).toBe('Home');
+  });
+
+  it('ignores ⌥-digits while typing or composing, and with other modifiers', async () => {
+    await renderShell();
+    const input = document.createElement('input');
+    const editable = document.createElement('div');
+    editable.setAttribute('contenteditable', 'true');
+    document.body.append(input, editable);
+    const alt2 = { altKey: true, code: 'Digit2', key: '™' };
+    fireEvent.keyDown(input, alt2);
+    fireEvent.keyDown(editable, alt2);
+    fireEvent.keyDown(document, { ...alt2, isComposing: true });
+    fireEvent.keyDown(document, { ...alt2, metaKey: true });
+    fireEvent.keyDown(document, { ...alt2, ctrlKey: true });
+    fireEvent.keyDown(document, { ...alt2, shiftKey: true });
+    expect(current()).toBe('Home');
+    input.remove();
+    editable.remove();
+  });
+
+  it('prevents the default action only when ⌥-digit navigates', async () => {
+    await renderShell();
+    expect(fireEvent.keyDown(document, { altKey: true, code: 'Digit2', key: '™' })).toBe(false);
+    expect(current()).toBe('History');
+    expect(fireEvent.keyDown(document, { altKey: true, code: 'Digit7', key: '¶' })).toBe(true);
   });
 
   it('opens Settings from the title bar, ⌥4 and ⌘,', async () => {
@@ -80,7 +106,10 @@ describe('Home (UI PR 3)', () => {
     renderWithApp(<Home dogfood={dogfood()} onToast={vi.fn()} />);
     expect(screen.queryByText(/Native capture requires the Tauri shell/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Start capture' })).toBeEnabled();
-    expect(screen.getByText('Style preference · cleanup not available yet')).toBeInTheDocument();
+    const caption = screen.getByText('Style preference · cleanup not available yet');
+    // Caption precedes the segmented control.
+    expect(caption.compareDocumentPosition(screen.getByRole('radiogroup', { name: 'Current writing style' })))
+      .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it('shows Stop/Cancel while recording and Transcribing… while busy', () => {
