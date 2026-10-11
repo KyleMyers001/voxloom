@@ -39,10 +39,10 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: src-tauri
           key: ${{ env.TARGET }}
@@ -82,6 +82,11 @@ jobs:
         run: |
           bash scripts/release/package-macos.sh "$TARGET" "$VERSION" "$SIGNED"
           echo "signed=$SIGNED" >> "$GITHUB_OUTPUT"
+      - name: Remove App Store Connect key
+        if: always()
+        run: |
+          if [[ -n "${APPLE_API_KEY_PATH:-}" ]]; then rm -f "$APPLE_API_KEY_PATH"; fi
+          rm -f "$RUNNER_TEMP"/AuthKey_*.p8
       - uses: actions/upload-artifact@v4
         with:
           name: voxloom-macos-${{ env.TARGET }}
@@ -90,7 +95,7 @@ jobs:
           retention-days: 14
 
   publish:
-    if: github.ref_type == 'tag'
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: build-macos
     runs-on: ubuntu-latest
     permissions:
@@ -129,6 +134,13 @@ jobs:
         run: |
           title="Voxloom $GITHUB_REF_NAME"
           [[ "$SIGNED" == "true" ]] || title="$title (UNSIGNED)"
-          gh release create "$GITHUB_REF_NAME" dist-release/* \
-            --draft --verify-tag --title "$title" \
-            --notes-file release-notes.md --generate-notes
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME exists; updating assets and notes."
+            gh release upload "$GITHUB_REF_NAME" dist-release/* --clobber
+            gh release edit "$GITHUB_REF_NAME" --title "$title" \
+              --notes-file release-notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" dist-release/* \
+              --draft --verify-tag --title "$title" \
+              --notes-file release-notes.md --generate-notes
+          fi

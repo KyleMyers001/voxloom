@@ -34,9 +34,14 @@ fi
 if [[ "$SIGNED" == "true" ]]; then
   # Tauri notarizes and staples the .app; notarize + staple the dmg too.
   if [[ -n "${APPLE_API_KEY:-}" ]]; then
+    : "${APPLE_API_KEY_PATH:?APPLE_API_KEY_PATH missing (build step did not write the .p8)}"
+    : "${APPLE_API_ISSUER:?APPLE_API_ISSUER is required with APPLE_API_KEY}"
     xcrun notarytool submit "$DMG" --wait --key "$APPLE_API_KEY_PATH" \
       --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER"
   else
+    : "${APPLE_ID:?APPLE_ID is required for notarization}"
+    : "${APPLE_PASSWORD:?APPLE_PASSWORD is required for notarization}"
+    : "${APPLE_TEAM_ID:?APPLE_TEAM_ID is required for notarization}"
     xcrun notarytool submit "$DMG" --wait --apple-id "$APPLE_ID" \
       --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID"
   fi
