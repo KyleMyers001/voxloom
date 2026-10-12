@@ -27,6 +27,7 @@ export function Toast({ message, tone = toastTone(message) }: ToastProps) {
   return (
     <div aria-live="polite" className={`toast t-${tone}${message ? ' visible' : ''}`}>
       {message && <Icon name={icons[tone]} size={14} />}
+      {message && tone === 'err' && <span className="sr-only">Error: </span>}
       {message}
     </div>
   );

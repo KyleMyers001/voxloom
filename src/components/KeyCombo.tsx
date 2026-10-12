@@ -13,11 +13,13 @@ export function isMacPlatform(): boolean {
 
 /**
  * "Ctrl + Shift + Space" → ["⌃", "⇧", "Space"]. Single letters are upper-cased.
- * CommandOrControl is ⌘ on macOS and "Ctrl" elsewhere.
+ * CommandOrControl is ⌘ on macOS and "Ctrl" elsewhere. With `altWord`, Alt
+ * reads "Alt" off macOS (where ⌥ means nothing on the keyboard).
  */
-export function comboKeys(combo: string, mac = isMacPlatform()): string[] {
+export function comboKeys(combo: string, mac = isMacPlatform(), altWord = false): string[] {
   return combo.split('+').map((part) => part.trim()).filter(Boolean).map((key) => {
     if (cmdOrCtrl.has(key.toLowerCase())) return mac ? '⌘' : 'Ctrl';
+    if (altWord && !mac && ['alt', 'option', 'opt'].includes(key.toLowerCase())) return 'Alt';
     const symbol = symbols[key.toLowerCase()];
     if (symbol) return symbol;
     return key.length === 1 ? key.toUpperCase() : key;
@@ -29,11 +31,11 @@ export function Kbd({ children }: { children: string }) {
 }
 
 /** Renders a shortcut as key caps; screen readers get the original text. */
-export function KeyCombo({ combo }: { combo: string }) {
+export function KeyCombo({ combo, altWord = false }: { combo: string; altWord?: boolean }) {
   return (
     <span className="key-combo">
       <span aria-hidden="true" className="key-combo__caps">
-        {comboKeys(combo).map((key, index) => <Kbd key={`${key}-${index}`}>{key}</Kbd>)}
+        {comboKeys(combo, isMacPlatform(), altWord).map((key, index) => <Kbd key={`${key}-${index}`}>{key}</Kbd>)}
       </span>
       <span className="sr-only">{combo}</span>
     </span>

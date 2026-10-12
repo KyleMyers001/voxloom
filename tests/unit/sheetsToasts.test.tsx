@@ -1,8 +1,9 @@
 /// UI PR 9: step dots, shortcuts sheet, toast severity icons.
-import { render, screen } from '@testing-library/react';
+import { act, render, renderHook, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ShortcutsDialog } from '../../src/app/AppDialogs';
+import { useToastMessages } from '../../src/app/useToastMessages';
 import { Toast, toastTone } from '../../src/components/Toast';
 import { StepDots } from '../../src/features/onboarding/StepDots';
 
@@ -48,5 +49,41 @@ describe('ShortcutsDialog', () => {
     }
     await userEvent.setup().click(screen.getByRole('button', { name: 'Done' }));
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe('review #45 nits', () => {
+  it('reads "Error:" before error toasts (visually hidden)', () => {
+    const { container, rerender } = render(<Toast message="Copy failed" />);
+    expect(container.querySelector('.toast .sr-only')).toHaveTextContent('Error:');
+    expect(container.querySelector('.toast')).toHaveTextContent('Error: Copy failed');
+    rerender(<Toast message="Copied to clipboard" />);
+    expect(container.querySelector('.toast .sr-only')).toBeNull();
+  });
+
+  it('shows "Alt" instead of ⌥ off macOS in the Shortcuts sheet', () => {
+    const spy = vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32');
+    const { unmount } = render(<ShortcutsDialog onClose={() => {}} opener={null} shortcut="Control+Shift+Space" />);
+    const caps = [...document.body.querySelectorAll('.key-combo__caps .kbd')].map((k) => k.textContent);
+    expect(caps).toContain('Alt');
+    expect(caps).not.toContain('⌥');
+    unmount();
+    spy.mockReturnValue('MacIntel');
+    render(<ShortcutsDialog onClose={() => {}} opener={null} shortcut="Control+Shift+Space" />);
+    expect([...document.body.querySelectorAll('.key-combo__caps .kbd')].map((k) => k.textContent)).toContain('⌥');
+    spy.mockRestore();
+  });
+
+  it('a newer toast is not hidden by the older toast’s timer', () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useToastMessages([]));
+    act(() => result.current.announce('first'));
+    act(() => { vi.advanceTimersByTime(1_000); });
+    act(() => result.current.announce('second'));
+    act(() => { vi.advanceTimersByTime(1_000); }); // first's 1.8 s timer would have fired here
+    expect(result.current.toast).toBe('second');
+    act(() => { vi.advanceTimersByTime(800); });
+    expect(result.current.toast).toBe('');
+    vi.useRealTimers();
   });
 });
