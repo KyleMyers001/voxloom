@@ -25,6 +25,14 @@ describe('Dictionary console layout (UI PR 5)', () => {
     await user.type(screen.getByRole('searchbox'), 'zzz-none');
     expect(screen.getByText('No words found.')).toBeInTheDocument();
     expect(screen.getByText('Try another search.')).toBeInTheDocument();
+    expect(screen.queryByText('No words yet')).toBeNull();
+  });
+
+  it('focuses the Word field when the add/edit sheet opens', async () => {
+    const user = userEvent.setup();
+    renderWithApp(<Dictionary />);
+    await user.click(screen.getByRole('button', { name: 'Add term' }));
+    expect(screen.getByRole('textbox', { name: 'Word' })).toHaveFocus();
   });
 
   it('marks the field invalid and links the error', async () => {

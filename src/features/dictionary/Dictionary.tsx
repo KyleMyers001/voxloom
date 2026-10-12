@@ -52,7 +52,7 @@ export function Dictionary() {
           </div>
         ))}
         {!words.length && (
-          <EmptyState icon="book" title="No words found.">
+          <EmptyState icon="book" title={query ? 'No words found.' : 'No words yet'}>
             {query ? 'Try another search.' : 'Add names and terms you use often.'}
           </EmptyState>
         )}

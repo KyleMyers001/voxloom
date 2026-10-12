@@ -1,7 +1,8 @@
-import { fireEvent, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/app/App';
+import { Switch } from '../../src/components/Switch';
 import { screenForAltDigit } from '../../src/app/shell/screens';
 import { Home } from '../../src/features/home/Home';
 import { isTauriEnv } from '../../src/services/capture/captureService';
@@ -53,9 +54,13 @@ describe('App shell (UI PR 3)', () => {
     const input = document.createElement('input');
     const editable = document.createElement('div');
     editable.setAttribute('contenteditable', 'true');
-    document.body.append(input, editable);
+    const textarea = document.createElement('textarea');
+    const select = document.createElement('select');
+    document.body.append(input, editable, textarea, select);
     const alt2 = { altKey: true, code: 'Digit2', key: '™' };
     fireEvent.keyDown(input, alt2);
+    fireEvent.keyDown(textarea, alt2);
+    fireEvent.keyDown(select, alt2);
     fireEvent.keyDown(editable, alt2);
     fireEvent.keyDown(document, { ...alt2, isComposing: true });
     fireEvent.keyDown(document, { ...alt2, metaKey: true });
@@ -64,6 +69,21 @@ describe('App shell (UI PR 3)', () => {
     expect(current()).toBe('Home');
     input.remove();
     editable.remove();
+    textarea.remove();
+    select.remove();
+  });
+
+  it('⌥2 still navigates while a SegmentedControl radio or a Switch has focus', async () => {
+    const user = await renderShell();
+    const casual = screen.getByRole('radio', { exact: true, name: 'Casual' });
+    casual.focus();
+    await user.keyboard('{Alt>}2{/Alt}');
+    expect(current()).toBe('History');
+    render(<Switch checked={false} label="Probe switch" onChange={vi.fn()} />);
+    const probe = screen.getByRole('switch', { name: 'Probe switch' });
+    probe.focus();
+    fireEvent.keyDown(probe, { altKey: true, code: 'Digit1', key: '¡' });
+    expect(current()).toBe('Home');
   });
 
   it('prevents the default action only when ⌥-digit navigates', async () => {
