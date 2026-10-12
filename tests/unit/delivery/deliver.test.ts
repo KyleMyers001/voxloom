@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
 import { deliverTranscript } from '../../../src/services/delivery/deliver';
+import { InsertError } from '../../../src/services/delivery/types';
 import type {
   DeliveryPlatformAdapter,
   TargetSnapshot,
@@ -180,6 +181,28 @@ describe('deliverTranscript', () => {
     expect(outcome.status).toBe('failed');
     expect(outcome.message).toMatch(/^May have been inserted — Failed/);
     expect(outcome.mayHaveInserted).toBe(true);
+  });
+
+  it('insertText throwing after the write began → may have inserted, not "Couldn\'t insert"', async () => {
+    for (const clipboardFallback of [true, false]) {
+      const platform = adapter({
+        clipboardRead: vi.fn().mockResolvedValue({ ok: true, text: 'hello' }),
+        insertText: vi.fn().mockRejectedValue(new InsertError('IPC closed', true)),
+      });
+      const outcome = await deliverTranscript({ clipboardFallback, intended: snap(), platform, text: 'hello' });
+      expect(outcome.mayHaveInserted).toBe(true);
+      expect(outcome.message).toMatch(/^May have been inserted/);
+      expect(outcome.status).toBe(clipboardFallback ? 'copied' : 'failed');
+    }
+  });
+
+  it('a native refusal (write never started) stays a plain failure / copy', async () => {
+    const platform = adapter({
+      insertText: vi.fn().mockRejectedValue(new InsertError('insert skipped', false)),
+    });
+    const outcome = await deliverTranscript({ clipboardFallback: false, intended: snap(), platform, text: 'hello' });
+    expect(outcome.status).toBe('failed');
+    expect(outcome.mayHaveInserted).toBeUndefined();
   });
 
   it('keeps the warning when Copy fallback is disabled', async () => {
