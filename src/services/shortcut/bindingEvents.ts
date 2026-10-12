@@ -14,6 +14,8 @@ export interface ShortcutBoundPayload {
   ok: boolean;
   /** Settings-format combo the OS holds after this attempt (revert target). */
   active?: string | null;
+  /** On a refusal: the combo held before this attempt (what restore tried). */
+  previous?: string | null;
   message?: string;
 }
 

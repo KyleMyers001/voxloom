@@ -22,6 +22,7 @@ import {
   type PendingFinishGate,
 } from '../services/shortcut';
 import { useShortcutRegistration } from './useShortcutRegistration';
+import { bootRefusedText } from '../features/settings/shortcutCopy';
 import type {
   DogfoodPhase,
   UseDogfoodCaptureResult,
@@ -185,9 +186,8 @@ export function useShortcutGestures(options: GestureOptions) {
         optionsRef,
         phaseGuardRef.current,
       ),
-      onRegisterFailure: (message) => {
-        optionsRef.current.onShortcutError?.(message);
-      },
+      // No onRegisterFailure toast: registration outcomes are reported once,
+      // in words, by the boot path below and useShortcutRegistration.
       scheduler: browserScheduler,
     });
     nativeControllerRef.current = controller;
@@ -201,8 +201,8 @@ export function useShortcutGestures(options: GestureOptions) {
       // Seed the revert target from what the OS accepted, not from settings.
       registeredRef.current = outcome.ok ? bootShortcut : null;
       if (cancelled) return;
-      if (!outcome.ok && outcome.message) {
-        optionsRef.current.onShortcutError?.(outcome.message);
+      if (!outcome.ok) {
+        optionsRef.current.onShortcutError?.(bootRefusedText(bootShortcut, outcome.active));
       }
       controller.setContext(interactionContext(optionsRef.current));
     })();

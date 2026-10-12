@@ -6,6 +6,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { ShortcutRecorder } from '../../src/features/settings/ShortcutRecorder';
 import { captureShortcut, keyName } from '../../src/services/shortcut/shortcutCapture';
 import { toPluginHotkey } from '../../src/services/shortcut/formatHotkey';
+import { addAKey, HELP, inUseText, invalidText, resetText } from '../../src/features/settings/shortcutCopy';
+import { comboLabel, spokenCombo } from '../../src/components/KeyCombo';
 
 const DEFAULT = 'Ctrl + Shift + Space';
 const ev = (code: string, key: string, mods: Partial<Record<'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey', boolean>> = {}) => ({
@@ -48,7 +50,49 @@ describe('captureShortcut', () => {
     expect(captureShortcut(ev('AltRight', 'Alt', { altKey: true })))
       .toEqual({ kind: 'modifier-only', preview: 'Alt' });
     expect(captureShortcut(ev('Space', ' ', { metaKey: true })))
-      .toMatchObject({ kind: 'invalid', message: expect.stringMatching(/Spotlight/) });
+      .toMatchObject({ invalid: { feature: 'Spotlight', reason: 'reserved' }, kind: 'invalid' });
+  });
+
+  it('reserves ⌃⌘Space, ⌥⌘Space and ⌃⌘Q too', () => {
+    const reserved = (code: string, key: string, mods: Partial<KeyboardEvent>) =>
+      (captureShortcut(ev(code, key, mods)) as { invalid?: { reason: string } }).invalid?.reason;
+    expect(reserved('Space', ' ', { ctrlKey: true, metaKey: true })).toBe('reserved');
+    expect(reserved('Space', ' ', { altKey: true, metaKey: true })).toBe('reserved');
+    expect(reserved('KeyQ', 'q', { ctrlKey: true, metaKey: true })).toBe('reserved');
+  });
+});
+
+describe('recorder copy (designer final copy)', () => {
+  it('says each refusal in words, with glyphs on macOS and words elsewhere', () => {
+    const msg = (code: string, key: string, mods: Partial<KeyboardEvent> = {}, mac = true) => {
+      const r = captureShortcut(ev(code, key, mods));
+      return r.kind === 'invalid' ? invalidText(r.invalid, mac) : r.kind;
+    };
+    expect(msg('ArrowUp', 'ArrowUp', { ctrlKey: true }))
+      .toBe('Up Arrow can\'t be used. Use a letter, number, Space, Return, Delete or Tab.');
+    expect(msg('F5', 'F5', { ctrlKey: true })).toMatch(/^F5 can't be used/);
+    expect(msg('NumpadEnter', 'Enter', { ctrlKey: true }))
+      .toBe('Keypad Enter can\'t be used. Use Return instead.');
+    expect(msg('KeyK', 'k')).toBe('Add ⌃, ⌥ or ⌘ to K.');
+    expect(msg('KeyK', 'K', { shiftKey: true })).toBe('Shift alone isn\'t enough. Add ⌃, ⌥ or ⌘.');
+    expect(msg('Space', ' ', { metaKey: true })).toBe('macOS uses ⌘Space for Spotlight. Choose another.');
+    expect(msg('KeyK', 'k', {}, false)).toBe('Add Ctrl, Alt or Super to K.');
+    expect(addAKey(true)).toBe('Add a key: hold ⌃, ⌥ or ⌘ and press a letter, number or Space.');
+    expect(addAKey(false)).not.toMatch(/[⌃⌥⌘]/);
+    expect(inUseText('Ctrl + Alt + B', 'Ctrl + Shift + Space', true))
+      .toBe('⌃⌥B is in use by another app. Kept ⌃⇧Space.');
+    expect(inUseText('Ctrl + Alt + B', 'Ctrl + Shift + Space', false))
+      .toBe('Ctrl+Alt+B is in use by another app. Kept Ctrl+Shift+Space.');
+    expect(resetText('Ctrl + Shift + Space', true)).toBe('Shortcut reset to ⌃⇧Space.');
+    expect(HELP).toBe('Click, then press keys. Hold to dictate; double-tap to latch.');
+  });
+
+  it('shows Return and Delete on macOS and speaks what the label shows', () => {
+    expect(comboLabel('Ctrl + Enter', true)).toBe('⌃Return');
+    expect(comboLabel('Alt + Backspace', true)).toBe('⌥Delete');
+    expect(comboLabel('Ctrl + Enter', false)).toBe('Ctrl+Enter');
+    expect(spokenCombo('Ctrl + Meta + Space', true)).toBe('Control Command Space');
+    expect(spokenCombo('Ctrl + Meta + Space', false)).toBe('Control Super Space');
   });
 });
 
@@ -69,6 +113,10 @@ describe('ShortcutRecorder', () => {
     const user = userEvent.setup();
     await user.click(field());
     expect(field()).toHaveAttribute('aria-pressed', 'true');
+    expect(field()).toHaveTextContent('Press keys…');
+    expect(screen.getByRole('status')).toHaveTextContent('Press the new shortcut. Esc cancels.');
+    // The status announces itself; describing the field by it would read it twice.
+    expect(field().getAttribute('aria-describedby')).not.toMatch(/status/);
     await user.keyboard('{Alt>}{Meta>}j{/Meta}{/Alt}');
     expect(onChange).toHaveBeenCalledWith('Alt + Meta + J');
     expect(field()).toHaveAccessibleName('Dictation shortcut, Option Command J');
@@ -84,7 +132,7 @@ describe('ShortcutRecorder', () => {
     expect(onChange).not.toHaveBeenCalled();
     expect(field()).toHaveAttribute('aria-pressed', 'false');
     expect(field()).toHaveAccessibleName('Dictation shortcut, Control Shift Space');
-    expect(screen.getByRole('status')).toHaveTextContent(/canceled/);
+    expect(screen.getByRole('status')).toHaveTextContent('Canceled. Shortcut unchanged.');
   });
 
   it('an unsupported key shows an inline message and keeps recording', async () => {
@@ -129,7 +177,7 @@ describe('ShortcutRecorder', () => {
     await user.tab({ shift: true });
     expect(screen.getByRole('button', { name: 'before' })).toHaveFocus();
     expect(field()).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.getByRole('status')).toHaveTextContent('Recording canceled');
+    expect(screen.getByRole('status')).toHaveTextContent('Canceled. Shortcut unchanged.');
     expect(onChange).not.toHaveBeenCalled();
     expect(captureShortcut(ev('Tab', 'Tab', { shiftKey: true })))
       .toEqual({ kind: 'cancel', reason: 'tab' });

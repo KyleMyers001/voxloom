@@ -17,7 +17,15 @@ export type CaptureResult =
   | { kind: 'captured'; combo: string }
   | { kind: 'cancel'; reason: 'escape' | 'tab' }
   | { kind: 'modifier-only'; preview: string }
-  | { kind: 'invalid'; message: string };
+  | { kind: 'invalid'; invalid: InvalidCapture };
+
+/** Why a chord can't be recorded; the recorder turns this into copy. */
+export type InvalidCapture =
+  | { reason: 'unsupported'; code: string; key: string }
+  | { reason: 'numpad-enter' }
+  | { reason: 'no-modifier'; key: string }
+  | { reason: 'shift-only' }
+  | { reason: 'reserved'; combo: string; feature: string };
 
 const MODIFIER_CODES = new Set([
   'AltLeft', 'AltRight', 'ControlLeft', 'ControlRight', 'MetaLeft',
@@ -32,21 +40,22 @@ const NAMED: Record<string, string> = {
   Tab: 'Tab',
 };
 
-/** macOS reserved combos (stored format) blocked with a warning. */
-const RESERVED: Record<string, string> = {
-  'Ctrl + Space': 'input source switching',
-  'Meta + H': 'Hide app',
-  'Meta + M': 'Minimize',
-  'Meta + Q': 'Quit',
+/** macOS reserved combos (stored format) → what macOS uses them for. */
+export const RESERVED: Record<string, string> = {
+  'Alt + Meta + Space': 'Finder search',
+  'Ctrl + Meta + Q': 'Lock Screen',
+  'Ctrl + Meta + Space': 'the Character Viewer',
+  'Ctrl + Space': 'switching input sources',
+  'Meta + H': 'hiding apps',
+  'Meta + M': 'minimizing windows',
+  'Meta + Q': 'quitting apps',
   'Meta + Space': 'Spotlight',
   'Meta + Tab': 'the app switcher',
-  'Meta + W': 'Close window',
+  'Meta + W': 'closing windows',
   'Shift + Meta + 3': 'screenshots',
   'Shift + Meta + 4': 'screenshots',
   'Shift + Meta + 5': 'screenshots',
 };
-
-export const ADD_A_KEY = 'Add a key: hold a modifier and press a letter, number or Space.';
 
 function modifierParts(event: CaptureKeyEvent): string[] {
   const parts: string[] = [];
@@ -84,23 +93,18 @@ export function captureShortcut(event: CaptureKeyEvent): CaptureResult {
   if (event.code === 'Tab' && (mods.length === 0 || (mods.length === 1 && mods[0] === 'Shift'))) {
     return { kind: 'cancel', reason: 'tab' };
   }
+  // Detect by code: keypad Enter reports key "Enter" like Return does.
+  if (event.code === 'NumpadEnter') return { invalid: { reason: 'numpad-enter' }, kind: 'invalid' };
   const key = keyName(event.code);
   if (!key) {
-    return {
-      kind: 'invalid',
-      message: `${event.key || event.code} can't be used. Choose a letter, number, Space, Enter, Backspace or Tab.`,
-    };
+    return { invalid: { code: event.code, key: event.key, reason: 'unsupported' }, kind: 'invalid' };
   }
-  if (mods.length === 0) {
-    return { kind: 'invalid', message: `Add a modifier (⌃, ⌥ or ⌘) to ${key}.` };
-  }
+  if (mods.length === 0) return { invalid: { key, reason: 'no-modifier' }, kind: 'invalid' };
   if (mods.length === 1 && mods[0] === 'Shift') {
-    return { kind: 'invalid', message: 'Shift alone isn\'t enough. Add ⌃, ⌥ or ⌘.' };
+    return { invalid: { reason: 'shift-only' }, kind: 'invalid' };
   }
   const combo = sortedForReserved(mods, key);
-  const reserved = RESERVED[combo];
-  if (reserved) {
-    return { kind: 'invalid', message: `Reserved by macOS for ${reserved}. Choose another.` };
-  }
+  const feature = RESERVED[combo];
+  if (feature) return { invalid: { combo, feature, reason: 'reserved' }, kind: 'invalid' };
   return { combo, kind: 'captured' };
 }

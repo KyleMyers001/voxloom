@@ -235,7 +235,7 @@ describe('Shortcut recorder (BUS-47)', () => {
     renderWithApp(<Settings onSetup={vi.fn()} />);
     const field = screen.getByRole('button', { name: /^Dictation shortcut/ });
     await user.click(field);
-    expect(field).toHaveTextContent('Press shortcut…');
+    expect(field).toHaveTextContent('Press keys…');
     await user.keyboard('{Control>}{Alt>}k{/Alt}{/Control}');
     expect(field).toHaveAccessibleName('Dictation shortcut, Control Option K');
     expect(screen.getByText(/^Shortcut set to/)).toBeInTheDocument();

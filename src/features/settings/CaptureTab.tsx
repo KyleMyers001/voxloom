@@ -6,6 +6,7 @@ import type { WritingStyle } from '../../domain/types';
 import { isTauriEnv } from '../../services/capture/captureService';
 import { MicrophoneRows } from './MicrophoneRows';
 import { ShortcutRecorder } from './ShortcutRecorder';
+import { HELP as SHORTCUT_HELP } from './shortcutCopy';
 
 const styles: { value: WritingStyle; label: string }[] = [
   { value: 'formal', label: 'Formal' },
@@ -24,7 +25,7 @@ export function CaptureTab({ onSetup }: { onSetup: (opener: HTMLElement) => void
         <span className="frow__label">
           <span id="settings-shortcut-label">Shortcut</span>
           <small className="frow__help" id="settings-shortcut-help">
-            Click, then press a shortcut. Hold to dictate; double-tap to latch. If the combo is taken, your previous one is kept.
+            {SHORTCUT_HELP}
           </small>
         </span>
         <span className="frow__control">

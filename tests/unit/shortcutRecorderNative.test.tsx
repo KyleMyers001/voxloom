@@ -5,7 +5,9 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-type Payload = { active?: string | null; message?: string; ok: boolean; shortcut: string };
+type Payload = {
+  active?: string | null; message?: string; ok: boolean; previous?: string | null; shortcut: string;
+};
 const bound = vi.hoisted(() => ({ handler: null as ((p: Payload) => void) | null }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), isTauri: () => true }));
 vi.mock('../../src/services/shortcut/bindingEvents', () => ({
@@ -45,7 +47,7 @@ describe('ShortcutRecorder waits for native registration', () => {
     await report({ message: 'raw Control+Alt+K', ok: false, shortcut: 'Ctrl + Alt + K' });
     expect(onChange).toHaveBeenLastCalledWith(DEFAULT);
     expect(field()).toHaveAccessibleName('Dictation shortcut, Control Shift Space');
-    expect(status()).toHaveTextContent('Previous shortcut kept');
+    expect(status()).toHaveTextContent('⌃⌥K is in use by another app. Kept ⌃⇧Space.');
     expect(status()).not.toHaveTextContent('Control+Alt+K'); // no raw hotkey string
   });
 
@@ -67,7 +69,7 @@ describe('ShortcutRecorder waits for native registration', () => {
     expect(status()).toHaveTextContent(/^Setting/);
     await report({ ok: false, shortcut: DEFAULT });
     expect(onChange).toHaveBeenLastCalledWith('Alt + J');
-    expect(status()).toHaveTextContent('Previous shortcut kept');
+    expect(status()).toHaveTextContent('⌃⇧Space is in use by another app. Kept ⌥J.');
   });
 
   it('stops saying "Setting…" if no result arrives', async () => {
@@ -77,7 +79,7 @@ describe('ShortcutRecorder waits for native registration', () => {
     await user.click(field());
     await user.keyboard('{Control>}{Alt>}k{/Alt}{/Control}');
     await act(async () => { vi.advanceTimersByTime(CONFIRM_TIMEOUT_MS + 1); });
-    expect(status()).toHaveTextContent(/Couldn't confirm/);
+    expect(status()).toHaveTextContent(/Still waiting for/);
     expect(status()).toHaveAttribute('role', 'status');
   });
 
@@ -88,7 +90,7 @@ describe('ShortcutRecorder waits for native registration', () => {
     await user.click(field());
     await user.keyboard('{Control>}{Alt>}k{/Alt}{/Control}');
     await act(async () => { vi.advanceTimersByTime(CONFIRM_TIMEOUT_MS + 1); });
-    expect(status()).toHaveTextContent(/Couldn't confirm/);
+    expect(status()).toHaveTextContent(/Still waiting for/);
     await report({ ok: true, shortcut: 'Ctrl + Alt + K' });
     expect(status()).toHaveTextContent(/^Shortcut set to/);
   });
@@ -136,10 +138,63 @@ describe('ShortcutRecorder waits for native registration', () => {
     await user.click(field());
     await user.keyboard('{Control>}{Alt>}k{/Alt}{/Control}');
     await act(async () => { vi.advanceTimersByTime(CONFIRM_TIMEOUT_MS + 1); });
-    expect(status()).toHaveTextContent(/Couldn't confirm/);
+    expect(status()).toHaveTextContent(/Still waiting for/);
     await report({ active: DEFAULT, ok: false, shortcut: 'Ctrl + Alt + K' });
     expect(onChange).toHaveBeenLastCalledWith(DEFAULT);
     expect(field()).toHaveAccessibleName('Dictation shortcut, Control Shift Space');
-    expect(status()).toHaveTextContent('Previous shortcut kept');
+    expect(status()).toHaveTextContent('⌃⌥K is in use by another app. Kept ⌃⇧Space.');
+  });
+
+  it('says so when the new combo is refused and restoring the old one fails too', async () => {
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+    const user = userEvent.setup();
+    await user.click(field());
+    await user.keyboard('{Control>}{Alt>}t{/Alt}{/Control}');
+    await report({ active: null, ok: false, previous: DEFAULT, shortcut: 'Ctrl + Alt + T' });
+    expect(status()).toHaveTextContent(
+      'Couldn\'t set ⌃⌥T or restore ⌃⇧Space. No shortcut is active. Record one.',
+    );
+    expect(status()).not.toHaveTextContent('kept');
+    // settings.json never keeps the refused combo; next launch retries the old one.
+    expect(onChange).toHaveBeenLastCalledWith(DEFAULT);
+  });
+
+  it('a refusal that lands while the combo is being saved is not overwritten by "Setting…"', async () => {
+    let refuse = true;
+    function Racy() {
+      const [value, setValue] = useState(DEFAULT);
+      return (
+        <ShortcutRecorder
+          defaultValue={DEFAULT}
+          onChange={(next) => {
+            setValue(next);
+            if (refuse && next === 'Ctrl + Alt + K') {
+              refuse = false;
+              bound.handler!({ active: DEFAULT, ok: false, shortcut: next });
+            }
+          }}
+          value={value}
+        />
+      );
+    }
+    render(<Racy />);
+    const user = userEvent.setup();
+    await user.click(field());
+    await user.keyboard('{Control>}{Alt>}k{/Alt}{/Control}');
+    expect(status()).toHaveTextContent('⌃⌥K is in use by another app. Kept ⌃⇧Space.');
+  });
+
+  it('uses the final copy for pending, success and timeout', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(<Harness onChange={vi.fn()} />);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    await user.click(field());
+    await user.keyboard('{Control>}{Alt>}k{/Alt}{/Control}');
+    expect(status()).toHaveTextContent('Setting ⌃⌥K…');
+    await act(async () => { vi.advanceTimersByTime(CONFIRM_TIMEOUT_MS + 1); });
+    expect(status()).toHaveTextContent('Still waiting for ⌃⌥K. Try it, or record again.');
+    await report({ ok: true, shortcut: 'Ctrl + Alt + K' });
+    expect(status()).toHaveTextContent('Shortcut set to ⌃⌥K.');
   });
 });

@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
-import { comboLabel, KeyCombo } from '../../components/KeyCombo';
-import {
-  ADD_A_KEY,
-  captureShortcut,
-} from '../../services/shortcut/shortcutCapture';
+import { comboLabel, KeyCombo, spokenCombo } from '../../components/KeyCombo';
+import { captureShortcut } from '../../services/shortcut/shortcutCapture';
 import { listenShortcutBound } from '../../services/shortcut/bindingEvents';
 import { subscribe } from '../../services/settingsWindow';
+import {
+  addAKey, CANCELED, inUseText, invalidText, noneActiveText, pendingText, PROMPT, RECORDING,
+  resetText, successText, timeoutText,
+} from './shortcutCopy';
 
 interface ShortcutRecorderProps {
   defaultValue: string;
@@ -14,13 +15,8 @@ interface ShortcutRecorderProps {
   value: string;
 }
 
-const SPOKEN: Record<string, string> = { Alt: 'Option', Ctrl: 'Control', Meta: 'Command' };
-
-/** "Ctrl + Alt + Space" → "Control Option Space" for VoiceOver. */
-export function spokenShortcut(combo: string): string {
-  return combo.split('+').map((part) => part.trim()).filter(Boolean)
-    .map((part) => SPOKEN[part] ?? part).join(' ');
-}
+/** "Ctrl + Meta + Space" → "Control Command Space" for VoiceOver. */
+export const spokenShortcut = (combo: string) => spokenCombo(combo);
 
 type Status = { tone: 'error' | 'info' | 'ok'; text: string } | null;
 
@@ -42,8 +38,8 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Combo whose confirmation timed out; a late result still updates status. */
   const lateRef = useRef<{ combo: string } | null>(null);
-  /** Last combo confirmed registered; the revert target (not the last attempt). */
-  const confirmedRef = useRef(value);
+  /** Last combo confirmed registered; the revert target (null: none active). */
+  const confirmedRef = useRef<string | null>(value);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
@@ -53,20 +49,31 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
     timerRef.current = null;
   };
 
-  useEffect(() => subscribe(() => listenShortcutBound(({ active, ok, shortcut }) => {
+  useEffect(() => subscribe(() => listenShortcutBound(({ active, ok, previous, shortcut }) => {
     // Track what the OS holds from every result, even superseded ones, so a
     // late ok for A still makes A the revert target when B is refused.
+    const before = confirmedRef.current;
     if (ok) confirmedRef.current = shortcut;
-    else if (active !== undefined && active !== null) confirmedRef.current = active;
+    else if (active !== undefined) confirmedRef.current = active;
     const pending = pendingRef.current?.combo === shortcut ? pendingRef.current
       : lateRef.current?.combo === shortcut ? lateRef.current : null;
     if (!pending) return;
     clearPending();
     lateRef.current = null;
-    if (!ok) onChangeRef.current(confirmedRef.current); // never keep a refused combo
-    setStatus(ok
-      ? { text: `Shortcut set to ${comboLabel(shortcut)}.`, tone: 'ok' }
-      : { text: `Couldn't set ${comboLabel(shortcut)}. Previous shortcut kept.`, tone: 'error' });
+    if (ok) {
+      setStatus({ text: successText(shortcut), tone: 'ok' });
+      return;
+    }
+    const kept = confirmedRef.current;
+    // Never keep a refused combo. With nothing active, keep the previous one
+    // in settings so the next launch retries it.
+    const restore = previous ?? before;
+    const target = kept ?? restore;
+    if (target && target !== shortcut) onChangeRef.current(target);
+    setStatus({
+      text: kept === null ? noneActiveText(shortcut, restore) : inUseText(shortcut, kept),
+      tone: 'error',
+    });
   })), []);
 
   useEffect(() => clearPending, []);
@@ -75,8 +82,8 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
   const apply = (combo: string, okText: string) => {
     const changed = combo !== value;
     clearPending();
-    onChange(combo);
     if (!changed || !isTauri()) {
+      onChange(combo);
       stop({ text: okText, tone: 'ok' });
       return;
     }
@@ -86,16 +93,19 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
       if (pendingRef.current?.combo !== combo) return;
       lateRef.current = pendingRef.current;
       clearPending();
-      setStatus({ text: `Couldn't confirm ${comboLabel(combo)} yet. Try it, or record it again.`, tone: 'error' });
+      setStatus({ text: timeoutText(combo), tone: 'error' });
     }, CONFIRM_TIMEOUT_MS);
-    stop({ text: `Setting ${comboLabel(combo)}…`, tone: 'info' });
+    // "Setting…" first, then save: a result that lands during the save must
+    // replace "Setting…", never be overwritten by it.
+    stop({ text: pendingText(combo), tone: 'info' });
+    onChange(combo);
   };
 
   const start = () => {
     sawKeyRef.current = false;
     setPreview('');
     setRecording(true);
-    setStatus({ text: 'Recording. Press a shortcut, Escape to cancel.', tone: 'info' });
+    setStatus({ text: RECORDING, tone: 'info' });
   };
 
   const stop = (next: Status) => {
@@ -108,22 +118,22 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
     if (!recording) return;
     const result = captureShortcut(event.nativeEvent);
     if (result.kind === 'cancel' && result.reason === 'tab') {
-      stop({ text: 'Recording canceled. Shortcut unchanged.', tone: 'info' });
+      stop({ text: CANCELED, tone: 'info' });
       return; // let Tab move focus on
     }
     // Keep the keystroke away from the in-app shortcut listener while recording.
     event.preventDefault();
     event.stopPropagation();
     if (result.kind === 'cancel') {
-      stop({ text: 'Recording canceled. Shortcut unchanged.', tone: 'info' });
+      stop({ text: CANCELED, tone: 'info' });
     } else if (result.kind === 'modifier-only') {
       setPreview(result.preview);
     } else if (result.kind === 'invalid') {
       sawKeyRef.current = true;
       setPreview('');
-      setStatus({ text: result.message, tone: 'error' });
+      setStatus({ text: invalidText(result.invalid), tone: 'error' });
     } else {
-      apply(result.combo, `Shortcut set to ${comboLabel(result.combo)}.`);
+      apply(result.combo, successText(result.combo));
     }
   };
 
@@ -135,29 +145,31 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
     if (preview && !anyModifier) {
       // Released with only modifiers held: lone modifiers are BUS-46.
       setPreview('');
-      setStatus({ text: ADD_A_KEY, tone: 'error' });
+      setStatus({ text: addAKey(), tone: 'error' });
     }
   };
 
-  const reset = () => apply(defaultValue, `Shortcut reset to ${comboLabel(defaultValue)}.`);
+  const reset = () => apply(defaultValue, resetText(defaultValue));
 
   return (
     <span className="shortcut-recorder">
       <button
-        aria-describedby="settings-shortcut-help settings-shortcut-status"
+        // Only the help: the role=status line announces itself, so describing
+        // the field by it too would read each status twice.
+        aria-describedby="settings-shortcut-help"
         aria-label={recording ? 'Dictation shortcut, recording' : `Dictation shortcut, ${spokenShortcut(value)}`}
         aria-pressed={recording}
         className="shortcut-recorder__field"
         data-recording={recording || undefined}
         id="settings-shortcut"
-        onBlur={() => recording && stop({ text: 'Recording canceled. Shortcut unchanged.', tone: 'info' })}
+        onBlur={() => recording && stop({ text: CANCELED, tone: 'info' })}
         onClick={() => (recording ? undefined : start())}
         onKeyDown={onKeyDown}
         onKeyUp={onKeyUp}
         type="button"
       >
         {recording
-          ? <span className="shortcut-recorder__prompt">{preview ? `${comboLabel(preview)} …` : 'Press shortcut…'}</span>
+          ? <span className="shortcut-recorder__prompt">{preview ? `${comboLabel(preview)} …` : PROMPT}</span>
           : <KeyCombo combo={value} />}
       </button>
       <button className="btn" disabled={value === defaultValue} onClick={reset} type="button">
