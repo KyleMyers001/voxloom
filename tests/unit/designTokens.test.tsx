@@ -113,3 +113,10 @@ describe('History rows take the app focus ring (QA)', () => {
     expect(readFileSync('src/styles/base.css', 'utf8')).toMatch(/\.history-row:focus-visible,[^{]*\{\s*outline: 3px solid var\(--focus\)/);
   });
 });
+
+describe('Dictionary rows take the app focus ring (QA)', () => {
+  it('styles .term-row:focus-visible with --focus', async () => {
+    const { readFileSync } = await import('node:fs');
+    expect(readFileSync('src/styles/base.css', 'utf8')).toMatch(/\.term-row:focus-visible,[^{]*\{\s*outline: 3px solid var\(--focus\)/);
+  });
+});
