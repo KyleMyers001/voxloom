@@ -8,7 +8,7 @@ site/
   index.html download.html privacy.html changelog.html
   base.css      shared styles (nav, buttons, footer, doc pages)
   home.css      home page only (hero, feature grid, closing CTA)
-  favicon.svg
+  favicon.svg   favicon.ico   apple-touch-icon.png (180x180)
   assets/og.png Open Graph / Twitter card image (1200x630)
   scripts/rename.sh
   scripts/check-placeholders.sh
@@ -43,4 +43,4 @@ Replace the domain everywhere with:
 The replacement is literal, so names containing `&`, `/` or `\` are safe. The script checks that every file is readable and writable before changing anything, writes all replacements to temp files and only moves them into place once every file succeeded, and creates no backups. It exits non-zero if `OLD` is empty or not found, if any file can't be read or rewritten (originals are then left untouched), or if the old name is still present afterwards.
 
 **Round-trip caveat:** undoing a rename turns *every* occurrence of NewName back into Voxloom. If NewName already appeared in the pages before the rename, those occurrences change too, so the round trip isn't lossless. Check first with `grep -F "NewName" site/*.html site/*.css`.
-`assets/og.png` has the name baked in, so regenerate it after a rename.
+Images need no update after a rename: `assets/og.png`, the favicons and the touch icon don't contain the product name.
