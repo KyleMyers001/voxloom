@@ -34,8 +34,9 @@ export function HistoryRow({ record, isNative, currentTime, canStart, onCopy, on
     ? 'Terminal input not verified. Inspect before copying or retrying.'
     : record.status === 'failed' ? failedNote : null;
 
+  const hasText = Boolean(record.text.trim());
   return (
-    <article aria-labelledby={textId} className="recent-row history-row" tabIndex={0}>
+    <article className="recent-row history-row" tabIndex={0}>
       <span className="timestamp">{formatTime(record.createdAt)}</span>
       <div className="history-row__body">
         <h2 className="history-row__text" id={textId}>{record.text}</h2>
@@ -50,13 +51,14 @@ export function HistoryRow({ record, isNative, currentTime, canStart, onCopy, on
         )}
       </div>
       <div aria-label="Transcript actions" className="action-group" role="group">
-        {record.text.trim() && (
+        {/* Only the first action is described by the transcript, so VoiceOver reads it once. */}
+        {hasText && (
           <IconButton icon="copy" aria-describedby={textId} label="Copy transcript" onClick={() => onCopy(record.text)} />
         )}
         {retryable && (
-          <IconButton disabled={!canStart} icon="retry" aria-describedby={textId} label="Retry transcription" onClick={() => onRetry(record)} />
+          <IconButton disabled={!canStart} icon="retry" aria-describedby={hasText ? undefined : textId} label="Retry transcription" onClick={() => onRetry(record)} />
         )}
-        <IconButton icon="trash" aria-describedby={textId} label="Delete transcript" onClick={() => onDelete(record.id)} tone="danger" />
+        <IconButton icon="trash" aria-describedby={hasText || retryable ? undefined : textId} label="Delete transcript" onClick={() => onDelete(record.id)} tone="danger" />
       </div>
     </article>
   );
