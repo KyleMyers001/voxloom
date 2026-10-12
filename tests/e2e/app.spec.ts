@@ -155,6 +155,20 @@ test('every Settings tab passes axe in light and dark', async ({ page }) => {
   }
 });
 
+test('the shortcut field does not move while typing (QA #41)', async ({ page }) => {
+  await page.goto('/');
+  await skipOnboarding(page);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const field = page.getByLabel('Shortcut', { exact: true });
+  await field.click();
+  const before = await field.boundingBox();
+  for (const key of ['+', 'A', 'l', 't', '+', 'K']) {
+    await field.press(key);
+    expect(await field.boundingBox()).toEqual(before);
+  }
+  await field.fill('Control+Shift+Space');
+});
+
 test('dialogs, reduced motion, narrow and coarse layouts work', async (
   { browser, page },
 ) => {
