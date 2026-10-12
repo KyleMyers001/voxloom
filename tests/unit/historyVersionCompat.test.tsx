@@ -206,5 +206,57 @@ describe('BUS-42 history file version compatibility', () => {
     await createHistoryStore(io).load('forever', NOW);
     expect(io.backups()).toEqual(['{broken']);
   });
+
+  it('main rewrites a v2 settings file as v1 during boot (after backup)', async () => {
+    const v2 = JSON.stringify({
+      onboardingComplete: true,
+      settings: { ...initialSettings, cleanupEnabled: true, transcriptRetention: 'forever' },
+      version: 2,
+    });
+    const settingsIo = createMemorySettingsIo(v2);
+    api = null;
+    render(
+      <AppProvider
+        clock={() => NOW}
+        historyPersistence={{ enabled: true, store: createHistoryStore(createMemoryHistoryIo(null)) }}
+        settingsPersistence={{ enabled: true, store: createSettingsStore(settingsIo) }}
+      >
+        <Probe />
+      </AppProvider>,
+    );
+    await waitFor(() => expect(api?.bootReady).toBe(true));
+    const disk = JSON.parse(settingsIo.snapshot()!) as {
+      settings: { transcriptRetention: string };
+      version: number;
+    };
+    expect(disk.version).toBe(1);
+    expect(disk.settings.transcriptRetention).toBe('forever');
+    expect(settingsIo.backups()).toEqual([v2]);
+    expect(api!.state.settingsError).toBeNull();
+  });
+
+  it('main replaces corrupt settings with v1 defaults during boot, after a backup', async () => {
+    const settingsIo = createMemorySettingsIo('{not json');
+    api = null;
+    render(
+      <AppProvider
+        clock={() => NOW}
+        historyPersistence={{ enabled: true, store: createHistoryStore(createMemoryHistoryIo(null)) }}
+        settingsPersistence={{ enabled: true, store: createSettingsStore(settingsIo) }}
+      >
+        <Probe />
+      </AppProvider>,
+    );
+    await waitFor(() => expect(api?.bootReady).toBe(true));
+    expect(JSON.parse(settingsIo.snapshot()!)).toMatchObject({ version: 1 });
+    expect(settingsIo.backups()).toEqual(['{not json']);
+  });
+
+  it('a settings read failure never allows writing defaults', async () => {
+    const io = createMemorySettingsIo('x');
+    const failing = { ...io, read: async () => { throw new Error('EACCES'); } };
+    const result = await createSettingsStore(failing).load();
+    expect(result).toMatchObject({ ok: false, writeBlocked: true });
+  });
 });
 

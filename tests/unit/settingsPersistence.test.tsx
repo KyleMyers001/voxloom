@@ -126,8 +126,9 @@ describe('durable settings persistence', () => {
       expect(screen.getByText(/not valid JSON|Settings file/i))
         .toBeInTheDocument();
     });
-    // Corrupt settings bytes left untouched until a later successful save.
-    expect(settingsIo.snapshot()).toBe('{corrupt');
+    // BUS-42: corrupt bytes are backed up, then replaced with v1 defaults.
+    expect(settingsIo.backups()).toEqual(['{corrupt']);
+    expect(JSON.parse(settingsIo.snapshot()!)).toMatchObject({ version: 1 });
     // History file still holds its original payload.
     expect(historyIo.snapshot()).toContain('keep-me');
 

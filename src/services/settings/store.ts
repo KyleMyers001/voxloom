@@ -14,7 +14,7 @@ import {
 } from '../storeBackup';
 
 export type SettingsLoadResult =
-  | { ok: true; file: SettingsFile }
+  | { ok: true; file: SettingsFile; needsRewrite?: boolean }
   | {
     ok: false;
     error: string;
@@ -58,7 +58,8 @@ export function createSettingsStore(io: SettingsFileIo): DurableSettingsStore {
           error: `Failed to read settings store: ${message}${describeBackup(backup)}`,
           file: defaultSettingsFile(),
           ok: false,
-          writeBlocked: !backup.ok,
+          // A failed read is not known-corrupt JSON: never replace it.
+          writeBlocked: true,
         };
       }
       if (raw === null || raw.trim() === '') {
@@ -89,6 +90,8 @@ export function createSettingsStore(io: SettingsFileIo): DurableSettingsStore {
             writeBlocked: true,
           };
         }
+        // Main rewrites it as the current version right away (BUS-42).
+        return { file: parsed.file, needsRewrite: true, ok: true };
       }
       return { file: parsed.file, ok: true };
     },

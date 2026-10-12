@@ -51,7 +51,8 @@ export function createDictionaryStore(
           error: `Failed to read dictionary store: ${message}${describeBackup(backup)}`,
           file: defaultDictionaryFile(),
           ok: false,
-          writeBlocked: !backup.ok,
+          // A failed read is not known-corrupt JSON: never replace it.
+          writeBlocked: true,
         };
       }
       if (raw === null || raw.trim() === '') {

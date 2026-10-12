@@ -21,7 +21,7 @@ fn file_name_for(store: &str) -> Result<&'static str, String> {
     }
 }
 
-/// Most backups kept per store name collision before giving up.
+/// Highest `-N` suffix tried when backup names collide; past it, fail safely.
 const MAX_SUFFIX: u32 = 100;
 
 /// Newest existing `<name>.unreadable-*.bak` next to `path`, by mtime.
