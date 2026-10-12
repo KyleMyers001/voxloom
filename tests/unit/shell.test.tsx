@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/app/App';
 import { Switch } from '../../src/components/Switch';
 import { screenForAltDigit } from '../../src/app/shell/screens';
+import { Sidebar } from '../../src/app/shell/Sidebar';
+import { TitleBar } from '../../src/app/shell/TitleBar';
 import { Home } from '../../src/features/home/Home';
 import { isTauriEnv } from '../../src/services/capture/captureService';
 import type { UseDogfoodCaptureResult } from '../../src/services/stt/useDogfoodCapture';
@@ -166,5 +168,23 @@ describe('Title bar (designer: standard macOS title bar)', () => {
     vi.mocked(isTauriEnv).mockReturnValue(true);
     const native = renderWithApp(<App />);
     expect(native.container.querySelector('.titlebar__title')).toBeNull();
+  });
+});
+
+describe('off-Mac shell labels (QA #45)', () => {
+  it('title bar says Ctrl+, and the sidebar says Alt+1–3 and Ctrl+Shift+Space', () => {
+    const spy = vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32');
+    try {
+      render(<TitleBar onHelp={() => {}} onSettings={() => {}} settingsOpen={false} />);
+      expect(screen.getByRole('button', { name: 'Settings' })).toHaveTextContent('Settings… Ctrl+,');
+      renderWithApp(
+        <Sidebar onNavigate={() => {}} onReset={() => {}} onScenario={() => {}} screen="home" shortcut="Control+Shift+Space" status="Ready" />,
+      );
+      expect(screen.getByText(/Ready · Ctrl\+Shift\+Space/)).toBeInTheDocument();
+      expect(document.body.textContent).toContain('Alt+1');
+      expect(document.body.textContent).not.toMatch(/[⌥⌘⌃⇧]/);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
