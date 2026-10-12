@@ -3,11 +3,13 @@
 
 pub mod host;
 pub mod report;
+pub mod retry;
 pub mod target;
 pub mod terminal;
 pub mod text;
 pub mod verify;
 pub mod web;
+pub mod web_ax;
 
 pub use host::unicode_typing_supported;
 pub use report::InsertReport;
