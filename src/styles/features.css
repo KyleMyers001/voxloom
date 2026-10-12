@@ -62,7 +62,7 @@
 .appearance-swatch[data-preview="light"] {
   --preview-accent: #376b00; /* light --accfg */
   --preview-bg: #fbfbf8;
-  --preview-border: #e1e3dc;
+  --preview-border: #b9bdb2; /* visible on the white card (designer) */
   --preview-surface: #ffffff;
 }
 
