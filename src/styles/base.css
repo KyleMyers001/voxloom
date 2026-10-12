@@ -49,7 +49,7 @@ button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--accent) 42%, transparent);
+  outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
 

@@ -59,6 +59,8 @@
 
 .switch.on i { background: var(--switch-on, var(--brand)); box-shadow: none; }
 .switch.on i::after { left: 16px; }
+/* Disabled ON: the brand gradient, dimmed by the shared disabled opacity (not the olive solid). */
+.switch.on:disabled i { background: var(--brand); }
 
 .ib {
   border: 0;
