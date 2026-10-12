@@ -80,7 +80,8 @@ export function captureShortcut(event: CaptureKeyEvent): CaptureResult {
   if (MODIFIER_CODES.has(event.code) || MODIFIER_KEYS.has(event.key)) {
     return { kind: 'modifier-only', preview: mods.join(' + ') };
   }
-  if (event.code === 'Tab' && mods.length === 0) {
+  // Tab and Shift+Tab move focus (cancel); they're never recorded alone.
+  if (event.code === 'Tab' && (mods.length === 0 || (mods.length === 1 && mods[0] === 'Shift'))) {
     return { kind: 'cancel', reason: 'tab' };
   }
   const key = keyName(event.code);

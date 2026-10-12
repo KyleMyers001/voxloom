@@ -24,6 +24,9 @@ export function spokenShortcut(combo: string): string {
 
 type Status = { tone: 'error' | 'info' | 'ok'; text: string } | null;
 
+/** How long "Setting…" waits for the main window's result. */
+export const CONFIRM_TIMEOUT_MS = 5000;
+
 /**
  * BUS-47: click Record (or Enter/Space on it), press a chord, and it's saved.
  * Focus alone never records, so tabbing through doesn't hijack keys. Esc,
@@ -35,15 +38,46 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
   const [status, setStatus] = useState<Status>(null);
   const sawKeyRef = useRef(false);
   /** Combo awaiting the main window's native registration result. */
-  const pendingRef = useRef<string | null>(null);
+  const pendingRef = useRef<{ combo: string; previous: string } | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
-  useEffect(() => subscribe(() => listenShortcutBound(({ message, ok, shortcut }) => {
-    if (pendingRef.current !== shortcut) return;
+  const clearPending = () => {
     pendingRef.current = null;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = null;
+  };
+
+  useEffect(() => subscribe(() => listenShortcutBound(({ ok, shortcut }) => {
+    const pending = pendingRef.current;
+    if (pending?.combo !== shortcut) return;
+    clearPending();
+    if (!ok) onChangeRef.current(pending.previous); // never keep a refused combo
     setStatus(ok
       ? { text: `Shortcut set to ${comboLabel(shortcut)}.`, tone: 'ok' }
-      : { text: message ?? `Couldn't set ${comboLabel(shortcut)}. Previous shortcut kept.`, tone: 'error' });
+      : { text: `Couldn't set ${comboLabel(shortcut)}. Previous shortcut kept.`, tone: 'error' });
   })), []);
+
+  useEffect(() => clearPending, []);
+
+  /** Save a combo and announce success only once registration confirms it. */
+  const apply = (combo: string, okText: string) => {
+    const changed = combo !== value;
+    clearPending();
+    onChange(combo);
+    if (!changed || !isTauri()) {
+      stop({ text: okText, tone: 'ok' });
+      return;
+    }
+    pendingRef.current = { combo, previous: value };
+    timerRef.current = setTimeout(() => {
+      if (pendingRef.current?.combo !== combo) return;
+      clearPending();
+      setStatus({ text: `Couldn't confirm ${comboLabel(combo)} yet. Try it, or record it again.`, tone: 'error' });
+    }, CONFIRM_TIMEOUT_MS);
+    stop({ text: `Setting ${comboLabel(combo)}…`, tone: 'info' });
+  };
 
   const start = () => {
     sawKeyRef.current = false;
@@ -77,15 +111,7 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
       setPreview('');
       setStatus({ text: result.message, tone: 'error' });
     } else {
-      const changed = result.combo !== value;
-      onChange(result.combo);
-      if (changed && isTauri()) {
-        // Native registration is async in the main window; wait for its result.
-        pendingRef.current = result.combo;
-        stop({ text: `Setting ${comboLabel(result.combo)}…`, tone: 'info' });
-      } else {
-        stop({ text: `Shortcut set to ${comboLabel(result.combo)}.`, tone: 'ok' });
-      }
+      apply(result.combo, `Shortcut set to ${comboLabel(result.combo)}.`);
     }
   };
 
@@ -101,10 +127,7 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
     }
   };
 
-  const reset = () => {
-    onChange(defaultValue);
-    stop({ text: `Shortcut reset to ${comboLabel(defaultValue)}.`, tone: 'ok' });
-  };
+  const reset = () => apply(defaultValue, `Shortcut reset to ${comboLabel(defaultValue)}.`);
 
   return (
     <span className="shortcut-recorder">
@@ -133,7 +156,7 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
         className="shortcut-recorder__status"
         data-tone={status?.tone}
         id="settings-shortcut-status"
-        role={status?.tone === 'error' ? 'alert' : 'status'}
+        role="status"
       >
         {status?.text}
       </span>

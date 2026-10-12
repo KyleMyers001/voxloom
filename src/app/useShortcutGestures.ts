@@ -60,6 +60,8 @@ interface GestureOptions {
   now: () => number;
   onboardingOpen: boolean;
   onShortcutError?: (message: string) => void;
+  /** BUS-47: registration failed; put this last-good combo back in settings. */
+  onShortcutRevert?: (shortcut: string) => void;
   setup: SetupLifecycle;
   shortcutOpen: boolean;
   state: AppState;
@@ -236,20 +238,24 @@ export function useShortcutGestures(options: GestureOptions) {
       return;
     }
     if (boundShortcutRef.current === shortcut) return;
+    const previous = boundShortcutRef.current;
     boundShortcutRef.current = shortcut;
     let cancelled = false;
     void (async () => {
       const outcome = await native.setShortcut(shortcut);
       emitShortcutBound({ message: outcome.ok ? undefined : outcome.message, ok: outcome.ok, shortcut });
       if (cancelled) return;
-      if (!outcome.ok && outcome.message) {
-        options.onShortcutError?.(outcome.message);
+      if (!outcome.ok) {
+        // Don't keep (or retry next launch) a combo the OS refused.
+        boundShortcutRef.current = previous;
+        options.onShortcutRevert?.(previous);
+        if (outcome.message) options.onShortcutError?.(outcome.message);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [options.onShortcutError, options.state.settings.shortcut]);
+  }, [options.onShortcutError, options.onShortcutRevert, options.state.settings.shortcut]);
 
   useEffect(() => {
     const ctx = interactionContext(options);

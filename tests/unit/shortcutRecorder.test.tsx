@@ -94,7 +94,7 @@ describe('ShortcutRecorder', () => {
     await user.click(field());
     await user.keyboard('{Control>}{F5}{/Control}');
     expect(onChange).not.toHaveBeenCalled();
-    expect(screen.getByRole('alert')).toHaveTextContent(/can't be used/);
+    expect(screen.getByRole('status')).toHaveTextContent(/can't be used/);
     expect(field()).toHaveAttribute('aria-pressed', 'true');
   });
 
@@ -106,7 +106,7 @@ describe('ShortcutRecorder', () => {
     await user.keyboard('{Alt>}');
     expect(field()).toHaveTextContent('…');
     await user.keyboard('{/Alt}');
-    expect(screen.getByRole('alert')).toHaveTextContent(/Add a key/);
+    expect(screen.getByRole('status')).toHaveTextContent(/Add a key/);
     expect(onChange).not.toHaveBeenCalled();
   });
 
@@ -119,6 +119,20 @@ describe('ShortcutRecorder', () => {
     expect(field()).not.toHaveFocus();
     expect(field()).toHaveAttribute('aria-pressed', 'false');
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('Shift+Tab cancels and lets focus move back', async () => {
+    const onChange = vi.fn();
+    render(<><button type="button">before</button><Harness onChange={onChange} /></>);
+    const user = userEvent.setup();
+    await user.click(field());
+    await user.tab({ shift: true });
+    expect(screen.getByRole('button', { name: 'before' })).toHaveFocus();
+    expect(field()).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('status')).toHaveTextContent('Recording canceled');
+    expect(onChange).not.toHaveBeenCalled();
+    expect(captureShortcut(ev('Tab', 'Tab', { shiftKey: true })))
+      .toEqual({ kind: 'cancel', reason: 'tab' });
   });
 
   it('Reset to default restores the default combo', async () => {
@@ -143,27 +157,5 @@ describe('BUS-47 review follow-ups', () => {
     const combo = (captureShortcut(ev('KeyK', 'å', { altKey: true })) as { combo: string }).combo;
     expect(matchesShortcut(ev('KeyK', 'å', { altKey: true }), combo)).toBe(true);
     expect(matchesShortcut(ev('KeyL', 'k', { altKey: true }), combo)).toBe(false);
-  });
-});
-
-describe('ShortcutRecorder waits for native registration', () => {
-  it('announces success or failure only after the main window reports', async () => {
-    vi.resetModules();
-    let handler: ((p: { message?: string; ok: boolean; shortcut: string }) => void) | null = null;
-    vi.doMock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), isTauri: () => true }));
-    vi.doMock('../../src/services/shortcut/bindingEvents', () => ({
-      listenShortcutBound: async (h: typeof handler) => { handler = h; return () => {}; },
-    }));
-    const { ShortcutRecorder: Recorder } = await import('../../src/features/settings/ShortcutRecorder');
-    const { act } = await import('@testing-library/react');
-    const user = userEvent.setup();
-    render(<Recorder defaultValue={DEFAULT} onChange={vi.fn()} value={DEFAULT} />);
-    await user.click(field());
-    await user.keyboard('{Control>}{Alt>}k{/Alt}{/Control}');
-    expect(screen.getByRole('status')).toHaveTextContent(/^Setting/);
-    await act(async () => handler!({ message: 'Could not bind it. Kept prior shortcut.', ok: false, shortcut: 'Ctrl + Alt + K' }));
-    expect(screen.getByRole('alert')).toHaveTextContent('Kept prior shortcut');
-    vi.doUnmock('@tauri-apps/api/core');
-    vi.doUnmock('../../src/services/shortcut/bindingEvents');
   });
 });

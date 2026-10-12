@@ -323,6 +323,36 @@ describe('useShortcutGestures', () => {
 
       unmount();
     });
+
+    it('BUS-47: reverts settings.shortcut to the last good combo when registration fails', async () => {
+      vi.mocked(isTauri).mockReturnValue(true);
+      const native = makeNativeController();
+      mocks.createNativeShortcutController.mockReturnValue(native);
+      mocks.createOverlayBridge.mockReturnValue(makeOverlay());
+      const onShortcutError = vi.fn();
+      const onShortcutRevert = vi.fn();
+      const baseState = createInitialState(0);
+      const withShortcut = (shortcut: string) => ({
+        ...baseState, settings: { ...baseState.settings, shortcut },
+      });
+      const first = { ...makeOptions({ now: () => 0, onShortcutError, state: withShortcut('Ctrl + Shift + Space') }), onShortcutRevert };
+      const { rerender, unmount } = renderHook((props) => useShortcutGestures(props), { initialProps: first });
+      await waitFor(() => expect(native.setShortcut).toHaveBeenCalledTimes(1));
+
+      native.setShortcut.mockResolvedValue({
+        active: 'Control+Shift+Space', attempted: 'Control+Alt+K',
+        lastKnownGood: 'Control+Shift+Space', message: 'Taken.', ok: false as const,
+      });
+      rerender({ ...first, state: withShortcut('Ctrl + Alt + K') });
+      await waitFor(() => expect(onShortcutRevert).toHaveBeenCalledWith('Ctrl + Shift + Space'));
+      expect(onShortcutError).toHaveBeenCalledWith('Taken.');
+
+      // The reverted value doesn't trigger another registration.
+      rerender({ ...first, state: withShortcut('Ctrl + Shift + Space') });
+      await new Promise((r) => setTimeout(r, 10));
+      expect(native.setShortcut).toHaveBeenCalledTimes(2);
+      unmount();
+    });
   });
 
   describe('product gesture → dogfood delivery', () => {
