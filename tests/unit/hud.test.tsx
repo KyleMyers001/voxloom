@@ -45,42 +45,35 @@ describe('HUD view', () => {
     expect(live).toHaveTextContent('Copied. Press ⌘V to paste');
   });
 
-  it('shows only a brief Copied, unverified or short error, with the platform paste key', () => {
+  it('shows only a brief Copied, maybe-copied or short error, with the platform paste key', () => {
     expect(resultText('copied', true)).toBe('Copied. Press ⌘V to paste');
     expect(resultText('copied', false)).toBe('Copied. Press Ctrl+V to paste');
     expect(resultText('maybe-copied', true)).toBe('Maybe inserted · copied');
-    expect(resultText('unverified', true)).toBe('Not verified');
-    expect(resultText('maybe-inserted', true)).toBe('Maybe inserted · check field');
-    // Full sentences go to screen readers only.
-    expect(spokenResultText('maybe-copied', true)).toBe('May have been inserted; also copied. If it\'s missing, press Command V to paste.');
-    expect(spokenResultText('maybe-inserted', false)).toBe('May have been inserted; check the field. Nothing was copied.');
     // The spoken text keeps the pill's meaning (QA #44).
-    for (const r of ['maybe-copied', 'maybe-inserted'] as const) {
-      expect(resultText(r)).toMatch(/^Maybe inserted/);
-      expect(spokenResultText(r)).toMatch(/^May have been inserted/);
-    }
-    expect(spokenResultText('unverified')).toMatch(/not verified/);
+    expect(spokenResultText('maybe-copied', true)).toBe('May have been inserted; also copied. If it\'s missing, press Command V to paste.');
     expect(resultText('transcribe-failed')).toBe('Couldn’t transcribe');
     expect(resultText('insert-failed')).toBe('Couldn’t insert');
-    const { container, rerender } = render(<OverlayWaveformView levels={levels} mac={false} result="unverified" waveform="result-unverified" />);
-    expect(container.querySelector('.hud-result--unverified')).toHaveTextContent('Not verified');
-    rerender(<OverlayWaveformView levels={levels} mac result="maybe-copied" waveform={resultWaveform('maybe-copied')} />);
+    const { container } = render(<OverlayWaveformView levels={levels} mac result="maybe-copied" waveform={resultWaveform('maybe-copied')} />);
     expect(container.querySelector('.hud-result--unverified')).toHaveTextContent('Maybe inserted · copied');
-    expect(screen.getByRole('status')).toHaveTextContent('press Command V to paste');
-    rerender(<OverlayWaveformView levels={levels} mac result="maybe-inserted" waveform={resultWaveform('maybe-inserted')} />);
-    expect(container.querySelector('.hud-result--unverified')).toHaveTextContent('Maybe inserted · check field');
+    expect(screen.getByRole('status')).toHaveTextContent('May have been inserted; also copied');
+  });
+
+  it('unverified and may-have-inserted (nothing copied) dismiss silently, like a success (Kyle)', () => {
+    expect(hudResultFor({ status: 'unverified' })).toBeNull();
+    expect(hudResultFor({ mayHaveInserted: true, status: 'failed' })).toBeNull();
+    // A null result never reaches overlayBridge.showResult, so there is no pill and no announcement.
   });
 });
 
 describe('hudResultFor (rules 3–6 + review)', () => {
   it('maps delivery status to a HUD result', () => {
     expect(hudResultFor({ status: 'inserted' })).toBeNull();
-    expect(hudResultFor({ status: 'unverified' })).toBe('unverified');
+    expect(hudResultFor({ status: 'unverified' })).toBeNull();
     expect(hudResultFor({ status: 'copied' })).toBe('copied');
     expect(hudResultFor({ mayHaveInserted: true, status: 'copied' })).toBe('maybe-copied');
     expect(hudResultFor({ status: 'failed' })).toBe('insert-failed');
-    // Review #44: Copy off or failed after an unconfirmed write is NOT "Couldn't insert".
-    expect(hudResultFor({ mayHaveInserted: true, status: 'failed' })).toBe('maybe-inserted');
+    // Review #44: an unconfirmed write with nothing copied is NOT "Couldn't insert"; it dismisses silently.
+    expect(hudResultFor({ mayHaveInserted: true, status: 'failed' })).toBeNull();
   });
 
   it('reads the flag, never the message text', () => {
