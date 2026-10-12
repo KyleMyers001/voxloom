@@ -1,3 +1,4 @@
+import { Icon } from '../../components/Icon';
 import { useApp } from '../../app/AppContext';
 import { SegmentedControl } from '../../components/SegmentedControl';
 import { audioRetentions, parseChoice } from '../../domain/settings';
@@ -64,6 +65,8 @@ export function PrivacyTab() {
         </div>
       </div>
       <div className="callout">
+        <Icon name="check" size={18} />
+        <div>
         <b>Stays on this Mac</b>
         <p>
           Audio is captured locally and not stored. No audio or transcript is sent to a
@@ -71,11 +74,15 @@ export function PrivacyTab() {
           registers, or reverts to the last working one if there’s a conflict
           (register-or-revert).
         </p>
+        </div>
       </div>
       <h3 className="settings-subhead">If something goes wrong</h3>
       <div className="recovery-grid">
         {recovery.map(([title, body]) => (
-          <p className="recovery-item" key={title}><b>{title}</b> · {body}</p>
+          <div className="recovery-item" key={title}>
+            <Icon name="warn" size={16} />
+            <p><b>{title}</b><span>{body}</span></p>
+          </div>
         ))}
       </div>
     </>
