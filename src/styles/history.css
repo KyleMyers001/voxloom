@@ -32,7 +32,7 @@
 
 .history-row.recent-row:first-child { border-top: 0; padding-top: var(--s-6); }
 .history-row .timestamp { padding-top: 2px; }
-.history-row h3 { font-size: var(--fs-body); font-weight: 550; line-height: var(--lh-body); margin: 0; }
+.history-row .history-row__text { font-size: var(--fs-body); font-weight: 550; line-height: var(--lh-body); margin: 0; }
 
 .history-row__meta {
   align-items: center;
