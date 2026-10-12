@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AppearanceTab } from './AppearanceTab';
 import { CaptureTab } from './CaptureTab';
 import { ModelsTab } from './ModelsTab';
@@ -8,15 +8,18 @@ import { settingsTabs, SettingsTabs, type SettingsTab } from './SettingsTabs';
 interface SettingsProps {
   onSetup: (opener: HTMLElement) => void;
   initialTab?: SettingsTab;
+  /** In the native Settings window: name the window after the current tab. */
+  onTabTitle?: (label: string) => void;
 }
 
 /**
  * Settings, laid out as the Console Settings window: toolbar tabs over one panel.
  * Rendered in-page for now; UI PR 6b moves it into its own Tauri window (⌘,).
  */
-export function Settings({ onSetup, initialTab = 'capture' }: SettingsProps) {
+export function Settings({ onSetup, initialTab = 'capture', onTabTitle }: SettingsProps) {
   const [tab, setTab] = useState<SettingsTab>(initialTab);
-  const { title } = settingsTabs.find((t) => t.value === tab)!;
+  const { label, title } = settingsTabs.find((t) => t.value === tab)!;
+  useEffect(() => { onTabTitle?.(label); }, [label, onTabTitle]);
   return (
     <section aria-labelledby="settings-title" className="settings-window">
       <header className="settings-window__bar">

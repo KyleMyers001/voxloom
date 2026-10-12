@@ -225,7 +225,7 @@ describe('Settings', () => {
     const downloads = screen.getAllByRole('button', { name: 'Download' });
     await user.click(downloads[0]);
     expect(await screen.findByText('On disk')).toBeInTheDocument();
-    expect(screen.getByText('available')).toBeInTheDocument();
+    expect(screen.getByText('On disk')).toHaveClass('badge--available');
   });
 });
 

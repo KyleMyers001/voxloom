@@ -8,6 +8,7 @@
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
+    "core:window:allow-set-title",
     "allow-settings-load",
     "allow-settings-save",
     "allow-settings-window-open",

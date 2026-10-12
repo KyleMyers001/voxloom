@@ -1,4 +1,5 @@
 import { Badge, type BadgeStatus } from '../../components/Badge';
+import { Icon } from '../../components/Icon';
 import { ProgressBar } from '../../components/ProgressBar';
 import type { SttDownloadProgress, SttModelInfo } from '../../services/stt/types';
 
@@ -32,7 +33,7 @@ export function ModelCard({ model, selected, progress, failure, onSelect, onDown
           <span className="stt-model-id"><span>{model.id}</span> · {mb(model.sizeBytes)}</span>
         </span>
       </label>
-      <Badge status={status}>{status}</Badge>
+      <Badge status={status} />
       <div className="stt-model-actions">
         {downloading ? (
           <>
@@ -43,14 +44,16 @@ export function ModelCard({ model, selected, progress, failure, onSelect, onDown
             />
             <button className="btn" onClick={onCancel} type="button">Cancel download</button>
           </>
-        ) : model.status === 'available' ? (
-          <span className="empty-note">On disk</span>
-        ) : failed ? (
+        ) : model.status === 'available' ? null : failed ? (
           <button aria-describedby={errorId} className="btn primary" onClick={onDownload} type="button">
+            <Icon name="retry" size={14} />
             Retry download
           </button>
         ) : (
-          <button className="btn" onClick={onDownload} type="button">Download</button>
+          <button className="btn" onClick={onDownload} type="button">
+            <Icon name="download" size={14} />
+            Download
+          </button>
         )}
       </div>
       {failed && (

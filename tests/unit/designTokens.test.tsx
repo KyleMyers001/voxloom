@@ -90,3 +90,29 @@ describe('light --ok on its 10% badge tint (review #43)', () => {
     }
   });
 });
+
+describe('designer #37: focus ring, tag pill, disabled ON switch', () => {
+  const lin = (c: number) => { const v = c / 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+  const hex = (s: string) => [1, 3, 5].map((i) => parseInt(s.slice(i, i + 2), 16));
+  const lum = (rgb: number[]) => 0.2126 * lin(rgb[0]) + 0.7152 * lin(rgb[1]) + 0.0722 * lin(rgb[2]);
+  const ratio = (a: string, b: string) => { const [x, y] = [lum(hex(a)), lum(hex(b))].sort((m, n) => n - m); return (x + 0.05) / (y + 0.05); };
+
+  it('light focus ring is solid and ≥3:1 on every light surface', async () => {
+    const { readFileSync } = await import('node:fs');
+    const light = readFileSync('src/styles/tokens.css', 'utf8').split('[data-appearance-resolved="light"]')[1];
+    const focus = /--focus: (#[0-9a-f]{6});/.exec(light)![1];
+    for (const surface of ['#fbfbf8', '#ffffff', '#f3f4ef', '#f2f3ee', '#e7e9e1']) {
+      expect(ratio(focus, surface)).toBeGreaterThanOrEqual(3);
+    }
+    expect(readFileSync('src/styles/base.css', 'utf8')).toMatch(/outline: 3px solid var\(--focus\)/);
+  });
+
+  it('dark tag pill text stays ≥4.5:1 on its pill', () => {
+    expect(ratio('#9a9aa8', '#2c2c3a')).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('a disabled ON switch shows the dimmed brand gradient', async () => {
+    const { readFileSync } = await import('node:fs');
+    expect(readFileSync('src/styles/ui-controls.css', 'utf8')).toMatch(/\.switch\.on:disabled i \{ background: var\(--brand\); \}/);
+  });
+});

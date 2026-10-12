@@ -47,7 +47,8 @@ describe('Settings window tabs (UI PR 6a)', () => {
     expect(screen.getByRole('radiogroup', { name: 'Transcript retention' })).toBeInTheDocument();
     expect(screen.getByLabelText('Audio retention')).toBeEnabled();
     expect(screen.getByText('Stays on this Mac')).toBeInTheDocument();
-    expect(screen.getAllByText(/·/, { selector: '.recovery-item' })).toHaveLength(6);
+    expect(document.querySelectorAll('.recovery-item')).toHaveLength(6);
+    for (const item of document.querySelectorAll('.recovery-item')) expect(item.querySelector('svg')).not.toBeNull();
     expect(screen.getByText(/Temporary recovery buffers expire/)).toBeInTheDocument();
   });
 

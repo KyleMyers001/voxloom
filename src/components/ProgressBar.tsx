@@ -6,7 +6,7 @@ export function ProgressBar({ label, value, caption }: Props) {
   return (
     <div className="prog">
       {caption ? <span>{caption}</span> : null}
-      <div aria-label={label} aria-valuemax={100} aria-valuemin={0} aria-valuenow={pct} className="bar" role="progressbar">
+      <div aria-label={label} aria-valuemax={100} aria-valuemin={0} aria-valuenow={pct} aria-valuetext={caption ?? `${pct}%`} className="bar" role="progressbar">
         <i style={{ width: `${pct}%` }} />
       </div>
     </div>
