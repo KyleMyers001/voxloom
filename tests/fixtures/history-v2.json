@@ -1,0 +1,45 @@
+{
+  "records": [
+    {
+      "cleanup": {
+        "dictionaryDigest": null,
+        "dictionaryVersion": 1,
+        "modelDigest": "sha256:abc",
+        "modelId": "local-cleanup-small",
+        "promptVersion": "cleanup-v3",
+        "reason": null,
+        "status": "cleaned"
+      },
+      "createdAt": 1799999000000,
+      "durationSeconds": 4,
+      "id": "v2-cleaned",
+      "model": "whisper-tiny.en",
+      "rawText": "um so the meeting is at three",
+      "recoveryExpiresAt": null,
+      "status": "inserted",
+      "style": "formal",
+      "text": "The meeting is at three."
+    },
+    {
+      "cleanup": {
+        "dictionaryDigest": null,
+        "dictionaryVersion": 1,
+        "modelDigest": null,
+        "modelId": null,
+        "promptVersion": "legacy-v1",
+        "reason": "migrated from history v1",
+        "status": "skipped"
+      },
+      "createdAt": 1799998000000,
+      "durationSeconds": 2,
+      "id": "v2-legacy",
+      "model": null,
+      "rawText": "hello world",
+      "recoveryExpiresAt": null,
+      "status": "copied",
+      "style": "casual",
+      "text": "hello world"
+    }
+  ],
+  "version": 2
+}

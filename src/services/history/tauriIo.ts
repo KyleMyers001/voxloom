@@ -1,5 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 
+import { tauriBackup } from '../storeBackup';
 import type { HistoryFileIo } from './io';
 
 /**
@@ -8,6 +9,7 @@ import type { HistoryFileIo } from './io';
  */
 export function createTauriHistoryIo(): HistoryFileIo {
   return {
+    backup: tauriBackup('history'),
     async read() {
       const raw = await invoke<string | null>('history_load');
       return raw;

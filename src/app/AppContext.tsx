@@ -184,9 +184,9 @@ export function AppProvider({
           allowSettingsPersistRef.current = true;
           retention = result.file.settings.transcriptRetention;
         } else {
-          // Safe defaults already in state; surface error; still allow
-          // first successful write of defaults so the user can recover.
-          allowSettingsPersistRef.current = true;
+          // Safe defaults already in state; surface error. Writing defaults
+          // is allowed only once the unreadable file was backed up.
+          allowSettingsPersistRef.current = !result.writeBlocked;
           lastSavedSettingsRef.current = result.file;
           lastRequestedSettingsRef.current = result.file;
           dispatch({
@@ -212,7 +212,7 @@ export function AppProvider({
           // Safe empty already in state; surface error; still allow first
           // successful write so the user can recover without touching
           // settings.json / history.json.
-          allowDictionaryPersistRef.current = true;
+          allowDictionaryPersistRef.current = !dictResult.writeBlocked;
           lastSavedWordsRef.current = dictResult.file.words;
           dispatch({
             message: dictResult.error,
@@ -239,6 +239,8 @@ export function AppProvider({
         dispatch({ records: historyResult.records, type: 'hydrate-records' });
         allowHistoryPersistRef.current = true;
       } else {
+        // Unreadable / unknown-version history.json: never write over it
+        // (the store already tried to back it up). BUS-42.
         allowHistoryPersistRef.current = false;
         dispatch({
           message: historyResult.error,

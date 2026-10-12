@@ -4,6 +4,15 @@ import type { DictationRecord, HistoryStatus, WritingStyle } from
 /** On-disk schema version for `history.json`. */
 export const HISTORY_FILE_VERSION = 1 as const;
 
+/**
+ * Older/sibling schema versions this reader accepts. Version 2 was written
+ * by the BUS-16 local-cleanup branch (#24): same record shape plus a
+ * required `rawText` and a `cleanup` provenance object, which this reader
+ * ignores. Accepted files are re-written as HISTORY_FILE_VERSION only after
+ * the store has backed up the original (BUS-42).
+ */
+export const READABLE_HISTORY_VERSIONS: readonly number[] = [1, 2];
+
 export type TranscriptRetention = '30-days' | 'forever' | 'off';
 
 export interface HistoryFile {
@@ -18,7 +27,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export const RETENTION_30_DAYS_MS = 30 * DAY_MS;
 
 export type ParseHistoryResult =
-  | { ok: true; file: HistoryFile }
+  | { ok: true; file: HistoryFile; sourceVersion: number }
   | { ok: false; error: string };
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -88,7 +97,10 @@ export function parseHistoryJson(raw: string): ParseHistoryResult {
   if (!isObject(parsed)) {
     return { error: 'History file root must be an object', ok: false };
   }
-  if (parsed.version !== HISTORY_FILE_VERSION) {
+  if (
+    typeof parsed.version !== 'number'
+    || !READABLE_HISTORY_VERSIONS.includes(parsed.version)
+  ) {
     return {
       error: `Unsupported history file version: ${String(parsed.version)}`,
       ok: false,
@@ -105,6 +117,7 @@ export function parseHistoryJson(raw: string): ParseHistoryResult {
   return {
     file: { records, version: HISTORY_FILE_VERSION },
     ok: true,
+    sourceVersion: parsed.version,
   };
 }
 

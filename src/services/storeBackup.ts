@@ -1,0 +1,50 @@
+import { invoke } from '@tauri-apps/api/core';
+
+/** Store files that can be preserved before an unreadable file is replaced. */
+export type BackupStore = 'dictionary' | 'history' | 'settings';
+
+/**
+ * Copy the on-disk store file aside (Tauri `store_backup`). Resolves to the
+ * backup path, or `null` when no file existed. Never modifies the original.
+ */
+export function tauriBackup(store: BackupStore): () => Promise<string | null> {
+  return () => invoke<string | null>('store_backup', { store });
+}
+
+export type BackupOutcome =
+  | { ok: true; path: string | null }
+  | { ok: false; error: string };
+
+/** Run an optional IO backup hook, never throwing. */
+export async function runBackup(
+  backup: (() => Promise<string | null>) | undefined,
+): Promise<BackupOutcome> {
+  if (!backup) return { error: 'no backup support', ok: false };
+  try {
+    return { ok: true, path: await backup() };
+  } catch (error: unknown) {
+    return {
+      error: error instanceof Error ? error.message : String(error),
+      ok: false,
+    };
+  }
+}
+
+/** Memory backup list for in-memory IOs (tests / non-Tauri shells). */
+export function memoryBackups(read: () => string | null) {
+  const backups: string[] = [];
+  return {
+    backup: async () => {
+      const data = read();
+      if (data === null) return null;
+      backups.push(data);
+      return `memory-backup-${backups.length}`;
+    },
+    backups: () => [...backups],
+  };
+}
+
+export function describeBackup(outcome: BackupOutcome): string {
+  if (!outcome.ok) return ` (backup failed: ${outcome.error}; file left untouched)`;
+  return outcome.path ? ` (original kept at ${outcome.path})` : '';
+}

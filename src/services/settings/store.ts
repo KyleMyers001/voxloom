@@ -1,15 +1,26 @@
 import type { Settings } from '../../domain/types';
 import {
+  SETTINGS_FILE_VERSION,
   defaultSettingsFile,
   parseSettingsJson,
   serializeSettingsFile,
   type SettingsFile,
 } from './format';
 import type { SettingsFileIo } from './io';
+import { describeBackup, runBackup } from '../storeBackup';
 
 export type SettingsLoadResult =
   | { ok: true; file: SettingsFile }
-  | { ok: false; error: string; file: SettingsFile };
+  | {
+    ok: false;
+    error: string;
+    file: SettingsFile;
+    /**
+     * True when the unreadable file could not be backed up: the caller must
+     * not write defaults over it (BUS-42).
+     */
+    writeBlocked: boolean;
+  };
 
 export interface DurableSettingsStore {
   /**
@@ -22,6 +33,14 @@ export interface DurableSettingsStore {
   save(settings: Settings, onboardingComplete: boolean): Promise<void>;
 }
 
+function fileVersion(raw: string): unknown {
+  try {
+    return (JSON.parse(raw) as { version?: unknown }).version;
+  } catch {
+    return undefined;
+  }
+}
+
 export function createSettingsStore(io: SettingsFileIo): DurableSettingsStore {
   return {
     async load() {
@@ -30,10 +49,12 @@ export function createSettingsStore(io: SettingsFileIo): DurableSettingsStore {
         raw = await io.read();
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
+        const backup = await runBackup(io.backup);
         return {
-          error: `Failed to read settings store: ${message}`,
+          error: `Failed to read settings store: ${message}${describeBackup(backup)}`,
           file: defaultSettingsFile(),
           ok: false,
+          writeBlocked: !backup.ok,
         };
       }
       if (raw === null || raw.trim() === '') {
@@ -41,11 +62,26 @@ export function createSettingsStore(io: SettingsFileIo): DurableSettingsStore {
       }
       const parsed = parseSettingsJson(raw);
       if (!parsed.ok) {
+        const backup = await runBackup(io.backup);
         return {
-          error: parsed.error,
+          error: `${parsed.error}${describeBackup(backup)}`,
           file: defaultSettingsFile(),
           ok: false,
+          writeBlocked: !backup.ok,
         };
+      }
+      if (fileVersion(raw) !== SETTINGS_FILE_VERSION) {
+        // Older/sibling version accepted by the parser: the next save
+        // rewrites it, so keep the original first.
+        const backup = await runBackup(io.backup);
+        if (!backup.ok) {
+          return {
+            error: `Settings file needs migration${describeBackup(backup)}`,
+            file: parsed.file,
+            ok: false,
+            writeBlocked: true,
+          };
+        }
       }
       return { file: parsed.file, ok: true };
     },
