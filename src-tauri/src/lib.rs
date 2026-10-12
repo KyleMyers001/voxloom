@@ -5,6 +5,7 @@ mod history;
 mod hold_release;
 mod overlay;
 mod settings;
+mod settings_window;
 mod stt;
 
 use std::sync::Arc;
@@ -135,7 +136,14 @@ pub fn run() {
             let coordinator = CaptureCoordinator::with_pcm_store(Arc::clone(&buffers));
             app.manage(coordinator);
             app.manage(SttState::new(models, buffers));
+            #[cfg(target_os = "macos")]
+            app.set_menu(settings_window::app_menu(app.handle())?)?;
             Ok(())
+        })
+        .on_menu_event(|app, event| {
+            if event.id() == settings_window::SETTINGS_MENU_ID {
+                let _ = settings_window::open_settings_window(app);
+            }
         })
         .invoke_handler(tauri::generate_handler![
             capture_cancel,
@@ -159,6 +167,8 @@ pub fn run() {
             overlay::overlay_show,
             settings::settings_load,
             settings::settings_save,
+            settings_window::settings_request_onboarding,
+            settings_window::settings_window_open,
             stt::stt_cancel_download,
             stt::stt_download_model,
             stt::stt_list_models,
@@ -166,9 +176,19 @@ pub fn run() {
             stt::stt_transcribe,
         ])
         .on_window_event(|window, event| {
+            // Only closing main ends capture; closing Settings must not.
+            if window.label() != settings_window::MAIN_LABEL {
+                return;
+            }
             if let tauri::WindowEvent::CloseRequested { .. } = event {
                 if let Some(coordinator) = window.try_state::<CaptureCoordinator>() {
                     coordinator.cancel_any();
+                }
+                if let Some(settings) = window
+                    .app_handle()
+                    .get_webview_window(settings_window::SETTINGS_LABEL)
+                {
+                    let _ = settings.close();
                 }
             }
         })
