@@ -6,6 +6,8 @@ import { History } from '../features/history/History';
 import { Home } from '../features/home/Home';
 import { Onboarding } from '../features/onboarding/Onboarding';
 import { Settings } from '../features/settings/Settings';
+import { isTauriEnv } from '../services/capture/captureService';
+import { listenOnboardingOpen, openSettingsWindow, subscribe } from '../services/settingsWindow';
 import { useDogfoodCapture } from '../services/stt/useDogfoodCapture';
 import { ResetSessionDialog, ShortcutsDialog } from './AppDialogs';
 import { useApp } from './AppContext';
@@ -57,10 +59,13 @@ export function App() {
     state,
   });
 
-  const navigate = useCallback(
-    (screen: Screen) => dispatch({ screen, type: 'set-screen' }),
-    [dispatch],
-  );
+  // Native: Settings is its own window (title bar, ⌥4, ⌘,); browser dev keeps it in-page.
+  const native = isTauriEnv();
+  const navigate = useCallback((screen: Screen) => {
+    if (screen === 'settings' && native) void openSettingsWindow()
+      .catch((error: unknown) => announceError(`Couldn't open Settings: ${String(error)}`));
+    else dispatch({ screen, type: 'set-screen' });
+  }, [announceError, dispatch, native]);
   const openHelp = useCallback((opener: HTMLElement) => {
     modalOpener.current = opener;
     setShortcutOpen(true);
@@ -72,11 +77,13 @@ export function App() {
     () => { modalOpener.current = null; },
   );
 
-  function openSetup(opener: HTMLElement) {
+  const openSetup = useCallback((opener: HTMLElement | null) => {
     modalOpener.current = opener;
     setup.reopen();
     setOnboardingOpen(true);
-  }
+  }, [setup]);
+  // "Set up shortcuts…" in the Settings window opens onboarding here.
+  useEffect(() => subscribe(() => listenOnboardingOpen(() => openSetup(null))), [openSetup]);
 
   const status = dogfood.phase === 'recording' ? 'Listening'
     : dogfood.phase === 'transcribing' ? 'Transcribing' : 'Ready';
@@ -88,7 +95,7 @@ export function App() {
       <TitleBar
         onHelp={openHelp}
         onSettings={() => navigate('settings')}
-        settingsOpen={state.screen === 'settings'}
+        settingsOpen={!native && state.screen === 'settings'}
       />
       <Sidebar
         onNavigate={navigate}
@@ -99,10 +106,10 @@ export function App() {
         status={status}
       />
       <main className="main">
-        {state.screen === 'home' && <Home dogfood={dogfood} onToast={announce} />}
+        {(state.screen === 'home' || (native && state.screen === 'settings')) && <Home dogfood={dogfood} onToast={announce} />}
         {state.screen === 'history' && gated('History', <History onToast={announce} />)}
         {state.screen === 'dictionary' && gated('Dictionary', <Dictionary />)}
-        {state.screen === 'settings' && gated('Settings', <Settings onSetup={openSetup} />)}
+        {!native && state.screen === 'settings' && gated('Settings', <Settings onSetup={openSetup} />)}
       </main>
     </div>
     {onboardingOpen && <Onboarding onClose={() => setOnboardingOpen(false)}

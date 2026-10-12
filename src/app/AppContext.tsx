@@ -33,6 +33,7 @@ import {
   type DurableSettingsStore,
   type SettingsFile,
 } from '../services/settings';
+import { useSettingsSync } from './useSettingsSync';
 import {
   createDictionaryService,
   createHistoryService,
@@ -250,6 +251,13 @@ export function AppProvider({
     };
     // Intentional once-on-mount boot load (persistence identity is stable).
   }, [clock, dictionaryPers, historyPers, settingsPers]);
+
+  useSettingsSync({
+    dispatch,
+    enabled: settingsPers.enabled,
+    lastSavedRef: lastSavedSettingsRef,
+    persistGenRef: settingsPersistGenRef,
+  });
 
   // Persist settings after hydrate whenever settings or onboarding-complete
   // change. Strategy: optimistic UI (reducer updates immediately) with

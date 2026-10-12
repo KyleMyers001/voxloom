@@ -155,6 +155,13 @@ test('every Settings tab passes axe in light and dark', async ({ page }) => {
   }
 });
 
+test('settings.html (the native Settings window entry) renders and passes axe', async ({ page }) => {
+  await page.goto('/settings.html');
+  await expect(page.getByRole('tablist', { name: 'Settings sections' })).toBeVisible();
+  await page.getByRole('tab', { name: 'Privacy' }).click();
+  await expectAccessible(page);
+});
+
 test('dialogs, reduced motion, narrow and coarse layouts work', async (
   { browser, page },
 ) => {

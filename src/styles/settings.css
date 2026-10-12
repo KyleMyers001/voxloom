@@ -86,3 +86,8 @@
   .recovery-grid { grid-template-columns: 1fr; }
   .settings-panel { padding: var(--s-8); }
 }
+
+/* Native Settings window (UI PR 6b): the card fills its own window. */
+.settings-window-root { background: var(--panel); min-height: 100vh; }
+.settings-window-root > .banner { margin: var(--s-4) var(--s-8) 0; }
+.settings-window-root .settings-window { border: 0; border-radius: 0; box-shadow: none; max-width: none; }
