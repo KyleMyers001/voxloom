@@ -40,7 +40,7 @@ export function ModelCard({ model, selected, progress, failure, onSelect, onDown
             <ProgressBar
               caption={progress ? `${pct}% · ${Math.round(progress.bytesReceived / 1_000_000)} of ${mb(total)}` : 'Downloading…'}
               label={`Downloading ${model.label}`}
-              value={pct}
+              value={progress ? pct : null}
             />
             <button className="btn" onClick={onCancel} type="button">Cancel download</button>
           </>

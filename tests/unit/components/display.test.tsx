@@ -66,7 +66,7 @@ describe('ProgressBar', () => {
     render(<><ProgressBar caption="42%" label="Downloading tiny" value={41.6} /><ProgressBar label="Over" value={140} /><ProgressBar label="NaN" value={Number.NaN} /></>);
     expect(screen.getByRole('progressbar', { name: 'Downloading tiny' }).getAttribute('aria-valuenow')).toBe('42');
     expect(screen.getByRole('progressbar', { name: 'Over' }).getAttribute('aria-valuenow')).toBe('100');
-    expect(screen.getByRole('progressbar', { name: 'NaN' }).getAttribute('aria-valuenow')).toBe('0');
+    expect(screen.getByRole('progressbar', { name: 'NaN' })).not.toHaveAttribute('aria-valuenow'); // indeterminate (QA #43)
   });
 });
 

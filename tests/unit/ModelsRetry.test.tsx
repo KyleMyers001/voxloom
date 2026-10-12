@@ -148,3 +148,14 @@ describe('ModelCard polish (designer #43)', () => {
     expect(readFileSync('src/styles/models.css', 'utf8')).toMatch(/\.stt-model-id \{[^}]*font-family: var\(--mono\)/);
   });
 });
+
+describe('indeterminate download progress (QA #43)', () => {
+  it('omits aria-valuenow before the first progress event', async () => {
+    const { ModelCard } = await import('../../src/features/settings/ModelCard');
+    const model = { id: 'base.en', label: 'Base (English)', sizeBytes: 488_000_000, status: 'downloading' } as never;
+    render(<ul><ModelCard failure={undefined} model={model} onCancel={() => {}} onDownload={() => {}} onSelect={() => {}} progress={null} selected={false} /></ul>);
+    const bar = screen.getByRole('progressbar');
+    expect(bar).not.toHaveAttribute('aria-valuenow');
+    expect(bar).toHaveAttribute('aria-valuetext', 'Downloading…');
+  });
+});
