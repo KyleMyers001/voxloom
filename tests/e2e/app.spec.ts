@@ -173,18 +173,25 @@ test('the 760×600 Settings window keeps two-column rows and a two-column recove
   expect(await cols('.appearance-options')).toBe(3);
 });
 
-test('the shortcut field does not move while typing (QA #41)', async ({ page }) => {
+test('records the shortcut by pressing it (BUS-47)', async ({ page }) => {
   await page.goto('/');
   await skipOnboarding(page);
   await page.getByRole('button', { name: 'Settings' }).click();
-  const field = page.getByLabel('Shortcut', { exact: true });
-  await field.click();
+  const field = page.getByRole('button', { name: /^Dictation shortcut/ });
   const before = await field.boundingBox();
-  for (const key of ['+', 'A', 'l', 't', '+', 'K']) {
-    await field.press(key);
-    expect(await field.boundingBox()).toEqual(before);
-  }
-  await field.fill('Control+Shift+Space');
+  await field.click();
+  await expect(field).toHaveText('Press shortcut…');
+  await page.keyboard.press('Escape');
+  await expect(field).toHaveAccessibleName('Dictation shortcut, Control Shift Space');
+  await field.click();
+  await page.keyboard.press('Control+F5');
+  await expect(page.getByText(/can't be used/)).toBeVisible();
+  await page.keyboard.press('Control+Alt+KeyK');
+  await expect(field).toHaveAccessibleName('Dictation shortcut, Control Option K');
+  expect((await field.boundingBox())?.y).toBe(before?.y);
+  if (process.env.BUS47_SHOT) await page.screenshot({ path: process.env.BUS47_SHOT });
+  await page.getByRole('button', { name: 'Reset to default' }).click();
+  await expect(field).toHaveAccessibleName('Dictation shortcut, Control Shift Space');
 });
 
 test('dialogs, reduced motion, narrow and coarse layouts work', async (
