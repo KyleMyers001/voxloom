@@ -44,19 +44,21 @@
   --font: -apple-system, BlinkMacSystemFont, system-ui, "Helvetica Neue", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
   /* BUS-41 type scale: windowed value at <=1280px wide, growing linearly to
-     the fullscreen value at >=1920px (TYPE-SCALE.md). The HUD keeps its own sizes. */
-  --fs-micro: clamp(11px, calc(11px + (100vw - 1280px) * .001563), 12px);
-  --fs-badge: clamp(11.5px, calc(11.5px + (100vw - 1280px) * .002344), 13px);
-  --fs-label: clamp(12px, calc(12px + (100vw - 1280px) * .002344), 13.5px);
-  --fs-secondary: clamp(13px, calc(13px + (100vw - 1280px) * .002344), 14.5px);
-  --fs-mono: clamp(12.5px, calc(12.5px + (100vw - 1280px) * .002344), 14px);
-  --fs-body: clamp(15px, calc(15px + (100vw - 1280px) * .003125), 17px);
-  --fs-emph: clamp(16px, calc(16px + (100vw - 1280px) * .003125), 18px);
-  --fs-section: clamp(16px, calc(16px + (100vw - 1280px) * .003906), 18.5px);
-  --fs-sheet: clamp(17px, calc(17px + (100vw - 1280px) * .003906), 19.5px);
-  --fs-hero: clamp(30px, calc(30px + (100vw - 1280px) * .010937), 37px);
-  --fs-page: clamp(34px, calc(34px + (100vw - 1280px) * .0125), 42px);
-  --fs-bigkey: clamp(20px, calc(20px + (100vw - 1280px) * .00625), 24px);
+     the fullscreen value at >=1920px (TYPE-SCALE.md). The HUD keeps its own sizes.
+     Media queries + additive calc() only: macOS 10.15's WKWebView can't parse
+     calc() multiplication (or rely on clamp()), so no `*` here. */
+  --fs-micro: 11px;
+  --fs-badge: 11.5px;
+  --fs-label: 12px;
+  --fs-secondary: 13px;
+  --fs-mono: 12.5px;
+  --fs-body: 15px;
+  --fs-emph: 16px;
+  --fs-section: 16px;
+  --fs-sheet: 17px;
+  --fs-hero: 30px;
+  --fs-page: 34px;
+  --fs-bigkey: 20px;
   --lh-body: 1.45;
 
   --shadow-win: 0 0 0 .5px var(--winline), 0 30px 80px rgba(0, 0, 0, .35);
@@ -114,4 +116,39 @@ body {
   --panel-2: var(--field);
   --rail: var(--side);
   --text: var(--fg);
+}
+
+/* BUS-41: linear growth between 1280px and 1920px wide (see :root above). */
+@media (min-width: 1281px) {
+  :root {
+    --fs-micro: calc(9px + 0.15625vw);
+    --fs-badge: calc(8.5px + 0.234375vw);
+    --fs-label: calc(9px + 0.234375vw);
+    --fs-secondary: calc(10px + 0.234375vw);
+    --fs-mono: calc(9.5px + 0.234375vw);
+    --fs-body: calc(11px + 0.3125vw);
+    --fs-emph: calc(12px + 0.3125vw);
+    --fs-section: calc(11px + 0.390625vw);
+    --fs-sheet: calc(12px + 0.390625vw);
+    --fs-hero: calc(16px + 1.09375vw);
+    --fs-page: calc(18px + 1.25vw);
+    --fs-bigkey: calc(12px + 0.625vw);
+  }
+}
+
+@media (min-width: 1920px) {
+  :root {
+    --fs-micro: 12px;
+    --fs-badge: 13px;
+    --fs-label: 13.5px;
+    --fs-secondary: 14.5px;
+    --fs-mono: 14px;
+    --fs-body: 17px;
+    --fs-emph: 18px;
+    --fs-section: 18.5px;
+    --fs-sheet: 19.5px;
+    --fs-hero: 37px;
+    --fs-page: 42px;
+    --fs-bigkey: 24px;
+  }
 }
