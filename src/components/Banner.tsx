@@ -9,7 +9,7 @@ type Props = { tone?: BannerTone; children: ReactNode; action?: ReactNode };
 export function Banner({ tone = 'info', children, action }: Props) {
   return (
     <div className={`banner banner--${tone}`} role={tone === 'error' ? 'alert' : 'status'}>
-      <Icon name={tone === 'ok' ? 'check' : 'warn'} size={14} />
+      <Icon name={tone === 'ok' ? 'check' : tone === 'info' ? 'info' : 'warn'} size={14} />
       <span className="banner__text">{children}</span>
       {action}
     </div>
