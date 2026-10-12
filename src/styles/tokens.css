@@ -43,12 +43,21 @@
 
   --font: -apple-system, BlinkMacSystemFont, system-ui, "Helvetica Neue", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
-  --fs-body: 13px;
+  /* BUS-41 type scale: windowed value at <=1280px wide, growing linearly to
+     the fullscreen value at >=1920px (TYPE-SCALE.md). The HUD keeps its own sizes. */
+  --fs-micro: clamp(11px, calc(11px + (100vw - 1280px) * .001563), 12px);
+  --fs-badge: clamp(11.5px, calc(11.5px + (100vw - 1280px) * .002344), 13px);
+  --fs-label: clamp(12px, calc(12px + (100vw - 1280px) * .002344), 13.5px);
+  --fs-secondary: clamp(13px, calc(13px + (100vw - 1280px) * .002344), 14.5px);
+  --fs-mono: clamp(12.5px, calc(12.5px + (100vw - 1280px) * .002344), 14px);
+  --fs-body: clamp(15px, calc(15px + (100vw - 1280px) * .003125), 17px);
+  --fs-emph: clamp(16px, calc(16px + (100vw - 1280px) * .003125), 18px);
+  --fs-section: clamp(16px, calc(16px + (100vw - 1280px) * .003906), 18.5px);
+  --fs-sheet: clamp(17px, calc(17px + (100vw - 1280px) * .003906), 19.5px);
+  --fs-hero: clamp(30px, calc(30px + (100vw - 1280px) * .010937), 37px);
+  --fs-page: clamp(34px, calc(34px + (100vw - 1280px) * .0125), 42px);
+  --fs-bigkey: clamp(20px, calc(20px + (100vw - 1280px) * .00625), 24px);
   --lh-body: 1.45;
-  --fs-caption: 11.5px;
-  --fs-section: 13px;
-  --fs-page: 30px;
-  --fs-hero: 26px;
 
   --shadow-win: 0 0 0 .5px var(--winline), 0 30px 80px rgba(0, 0, 0, .35);
   --shadow-dialog: 0 24px 60px rgba(0, 0, 0, .4);
