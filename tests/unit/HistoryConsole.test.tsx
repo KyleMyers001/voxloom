@@ -105,4 +105,15 @@ describe('History row actions (designer: reachable by keyboard and VoiceOver)', 
     expect(css).toMatch(/\.recent-row:focus-within \.action-group/);
     expect(css).not.toMatch(/\.history-list \.action-group \{[^}]*visibility: hidden/);
   });
+
+  it('keeps actions always visible on Failed and Unverified rows (designer)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const css = readFileSync('src/styles/lists.css', 'utf8');
+    expect(css).toMatch(/\.recent-row\[data-status="failed"\] \.action-group,\s*\.history-list \.recent-row\[data-status="unverified"\] \.action-group \{ opacity: 1; \}/);
+    renderWithApp(<History onToast={() => {}} />);
+    for (const row of screen.getAllByRole('article')) {
+      expect(row).toHaveAttribute('data-status');
+      expect(within(row).queryByRole('heading', { level: 3 })).toBeNull();
+    }
+  });
 });
