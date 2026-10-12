@@ -26,8 +26,9 @@ export function resultText(result: OverlayResult | null, mac = isMacPlatform()):
 
 /** Full sentence for the live region (no width limit). */
 export function spokenResultText(result: OverlayResult | null, mac = isMacPlatform()): string {
-  if (result === 'copied') return `Copied. Press ${mac ? '⌘V' : 'Ctrl+V'} to paste`;
+  // Spelled out so screen readers say it; the visible pill keeps ⌘V / Ctrl+V.
   const paste = mac ? 'Command V' : 'Control V';
+  if (result === 'copied') return `Copied. Press ${paste} to paste`;
   if (result === 'maybe-copied') return `May have been inserted; also copied. If it's missing, press ${paste} to paste.`;
   return resultText(result, mac);
 }
