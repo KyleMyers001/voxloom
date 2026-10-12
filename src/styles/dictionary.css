@@ -42,10 +42,6 @@
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
-@media (max-width: 780px) {
-  .term-grid { grid-template-columns: 1fr; }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .spin { animation: none; }
 }

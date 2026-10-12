@@ -39,14 +39,14 @@
 
   --s-1: 2px; --s-2: 4px; --s-3: 6px; --s-4: 8px; --s-5: 10px; --s-6: 12px;
   --s-7: 14px; --s-8: 16px; --s-9: 18px; --s-10: 22px; --s-11: 32px;
-  --pad-x: 32px;
 
   --font: -apple-system, BlinkMacSystemFont, system-ui, "Helvetica Neue", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
   /* BUS-41 type scale: windowed value at <=1280px wide, growing linearly to
      the fullscreen value at >=1920px (TYPE-SCALE.md). The HUD keeps its own sizes.
-     Media queries + additive calc() only: macOS 10.15's WKWebView can't parse
-     calc() multiplication (or rely on clamp()), so no `*` here. */
+     Media queries + calc(), no clamp(): clamp() needs Safari 13.1 (macOS
+     10.15.4), and the app supports 10.15.0. calc() with `*`/`/` by a number
+     works there (calc() is Safari 7+, nested calc() 11+; MDN browser-compat-data). */
   --fs-micro: 11px;
   --fs-badge: 11.5px;
   --fs-label: 12px;

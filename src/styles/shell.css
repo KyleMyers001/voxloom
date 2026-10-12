@@ -1,7 +1,6 @@
 /* App shell (UI PR 3): toolbar, sidebar (brand, nav, dev disclosure, hint), main. */
 .app {
   display: grid;
-  grid-template-columns: 232px minmax(0, 1fr);
   grid-template-rows: auto 1fr;
   min-height: 100vh;
 }
@@ -100,12 +99,10 @@
 .dev-panel .state-lab { border-top: 0; margin-top: var(--s-3); padding-top: 0; }
 
 .main {
-  max-width: 1080px;
   padding: var(--s-10) var(--pad-x) var(--pad-x);
   width: 100%;
 }
 
 @media (max-width: 780px) {
-  .app { grid-template-columns: 168px minmax(0, 1fr); }
   .main { padding: var(--s-10) var(--s-9) 60px; }
 }
