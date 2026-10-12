@@ -6,7 +6,6 @@ const themes = [
   ['Follow system', 'system'],
   ['Light', 'light'],
   ['Dark', 'dark'],
-  ['Sodium Rain', 'sodium-rain'],
 ] as const;
 
 async function expectAccessible(page: Page) {

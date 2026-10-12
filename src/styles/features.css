@@ -65,13 +65,6 @@
   --preview-surface: #ffffff;
 }
 
-.appearance-swatch[data-preview="sodium-rain"] {
-  --preview-accent: #ffb000;
-  --preview-bg: #0a0d10;
-  --preview-border: #223039;
-  --preview-surface: #182127;
-}
-
 .appearance-swatch[data-preview="system"] {
   --preview-accent: #79b8c9;
   --preview-bg: #e7ebed;

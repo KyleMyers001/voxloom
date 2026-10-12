@@ -150,3 +150,35 @@ describe('settings store does not touch history IO', () => {
     expect(historyWrite).not.toHaveBeenCalled();
   });
 });
+
+describe('Sodium Rain migration (UI PR 10)', () => {
+  const withAppearance = (appearance: string) =>
+    JSON.stringify({
+      ...JSON.parse(serializeSettingsFile({ ...initialSettings, appearance: 'dark' }, true)),
+      settings: { ...initialSettings, appearance, style: 'casual' },
+    });
+
+  it('loads a stored \'sodium-rain\' appearance as \'system\' and keeps the other keys', () => {
+    const parsed = parseSettingsJson(withAppearance('sodium-rain'));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.file.settings.appearance).toBe('system');
+    expect(parsed.file.settings.style).toBe('casual');
+    expect(parsed.file.onboardingComplete).toBe(true);
+  });
+
+  it('keeps the three remaining appearances and defaults unknown ones', () => {
+    for (const appearance of ['system', 'light', 'dark'] as const) {
+      expect(coerceSettings({ appearance }).appearance).toBe(appearance);
+    }
+    expect(coerceSettings({ appearance: 'sodium-rain' }).appearance).toBe('system');
+    expect(coerceSettings({ appearance: 'neon' }).appearance).toBe(initialSettings.appearance);
+  });
+
+  it('the durable store loads the migrated value', async () => {
+    const io = createMemorySettingsIo(withAppearance('sodium-rain'));
+    const store = createSettingsStore(io);
+    const loaded = await store.load();
+    expect(loaded.ok && loaded.file.settings.appearance).toBe('system');
+  });
+});
