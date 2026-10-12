@@ -36,7 +36,7 @@ export function HistoryRow({ record, isNative, currentTime, canStart, onCopy, on
 
   const hasText = Boolean(record.text.trim());
   return (
-    <article className="recent-row history-row" tabIndex={0}>
+    <article className="recent-row history-row" data-status={record.status} tabIndex={0}>
       <span className="timestamp">{formatTime(record.createdAt)}</span>
       <div className="history-row__body">
         <h2 className="history-row__text" id={textId}>{record.text}</h2>

@@ -111,3 +111,17 @@ describe('Settings window root', () => {
     expect(bridge.request).toHaveBeenCalledOnce();
   });
 });
+
+describe('Settings window title follows the tab (designer #42)', () => {
+  it('calls onTabTitle with the tab label', async () => {
+    const { Settings } = await import('../../src/features/settings/Settings');
+    const { renderWithApp } = await import('./testUtils');
+    const { default: userEvent } = await import('@testing-library/user-event');
+    const { screen } = await import('@testing-library/react');
+    const onTabTitle = vi.fn();
+    renderWithApp(<Settings onSetup={() => {}} onTabTitle={onTabTitle} />);
+    expect(onTabTitle).toHaveBeenLastCalledWith('Capture');
+    await userEvent.setup().click(screen.getByRole('tab', { name: 'Models' }));
+    expect(onTabTitle).toHaveBeenLastCalledWith('Models');
+  });
+});

@@ -5,7 +5,7 @@ export type SettingsTab = 'capture' | 'models' | 'appearance' | 'privacy';
 
 export const settingsTabs: { value: SettingsTab; label: string; title: string; icon: IconName }[] = [
   { value: 'capture', label: 'Capture', title: 'Capture & Output', icon: 'mic' },
-  { value: 'models', label: 'Models', title: 'Speech-to-text models', icon: 'down' },
+  { value: 'models', label: 'Models', title: 'Speech-to-text models', icon: 'download' },
   { value: 'appearance', label: 'Appearance', title: 'Appearance', icon: 'gear' },
   { value: 'privacy', label: 'Privacy', title: 'Privacy & Recovery', icon: 'check' },
 ];

@@ -1,5 +1,5 @@
 /// UI PR 7: Models tab cards, Retry download, list-error Try again.
-import { act, renderHook, screen, waitFor, within } from '@testing-library/react';
+import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ModelsTab } from '../../src/features/settings/ModelsTab';
@@ -74,7 +74,7 @@ describe('Models tab', () => {
     const retry = await within(row).findByRole('button', { name: 'Retry download' });
     expect(within(row).getByRole('alert')).toHaveTextContent('Download failed: network error (HTTP 503). Nothing was saved.');
     expect(retry).toHaveAccessibleDescription(/Nothing was saved/);
-    expect(within(row).getByText('failed')).toBeInTheDocument();
+    expect(within(row).getByText('Failed')).toBeInTheDocument();
     await user.click(retry);
     expect(await within(row).findByText('On disk')).toBeInTheDocument();
     expect(within(row).queryByRole('alert')).toBeNull();
@@ -114,5 +114,37 @@ describe('Models tab', () => {
     expect(within(row).getByRole('button', { name: 'Cancel download' })).toBeInTheDocument();
     await act(async () => release());
     factory.store = null;
+  });
+});
+
+describe('ModelCard polish (designer #43)', () => {
+  it('shows Badge labels, neutral Missing, icons on Download/Retry, and a progress label', async () => {
+    const { ModelCard } = await import('../../src/features/settings/ModelCard');
+    const model = { id: 'base.en', label: 'Base (English)', sizeBytes: 488_000_000, status: 'missing' } as never;
+    const noop = () => {};
+    const { rerender } = render(
+      <ul><ModelCard failure={undefined} model={model} onCancel={noop} onDownload={noop} onSelect={noop} progress={null} selected={false} /></ul>,
+    );
+    expect(screen.getByText('Not downloaded')).toHaveClass('badge--missing');
+    expect(screen.getByRole('button', { name: 'Download' }).querySelector('svg')).not.toBeNull();
+    rerender(
+      <ul><ModelCard failure="Network down" model={model} onCancel={noop} onDownload={noop} onSelect={noop} progress={null} selected={false} /></ul>,
+    );
+    expect(screen.getByRole('button', { name: 'Retry download' }).querySelector('svg')).not.toBeNull();
+    rerender(
+      <ul><ModelCard failure={undefined} model={model} onCancel={noop} onDownload={noop} onSelect={noop}
+        progress={{ bytesReceived: 205_000_000, bytesTotal: 488_000_000, ratio: 0.42 } as never} selected={false} /></ul>,
+    );
+    const bar = screen.getByRole('progressbar');
+    expect(bar).toHaveAttribute('aria-valuenow', '42');
+    expect(bar).toHaveAttribute('aria-valuetext', '42% · 205 of 488 MB');
+    expect(screen.getByText('42% · 205 of 488 MB')).toBeInTheDocument();
+  });
+
+  it('missing is neutral grey, radios use the accent, ids are mono', async () => {
+    const { readFileSync } = await import('node:fs');
+    expect(readFileSync('src/styles/ui-display.css', 'utf8')).toMatch(/\.badge--missing \{ background: var\(--tag-bg\); color: var\(--tag-fg\); \}/);
+    expect(readFileSync('src/styles/base.css', 'utf8')).toMatch(/input\[type="radio"\],\s*input\[type="checkbox"\] \{ accent-color: var\(--accent\); \}/);
+    expect(readFileSync('src/styles/models.css', 'utf8')).toMatch(/\.stt-model-id \{[^}]*font-family: var\(--mono\)/);
   });
 });
