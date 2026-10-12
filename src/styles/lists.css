@@ -14,6 +14,10 @@
 .history-list .recent-row:focus-within .action-group,
 .history-list .recent-row:hover .action-group { opacity: 1; }
 
+/* Failed and Unverified rows need recovery at a glance: actions always shown. */
+.history-list .recent-row[data-status="failed"] .action-group,
+.history-list .recent-row[data-status="unverified"] .action-group { opacity: 1; }
+
 .icon-btn {
   border: 0;
   color: var(--muted);
