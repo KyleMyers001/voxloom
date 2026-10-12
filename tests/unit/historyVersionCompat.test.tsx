@@ -315,5 +315,29 @@ describe('BUS-42 history file version compatibility', () => {
     expect(disk.settings.style).toBe(initialSettings.style);
     expect(disk.settings.cleanupEnabled).toBe(false);
   });
+
+  it('keeps an unknown __proto__ settings key as data', async () => {
+    const raw = '{"onboardingComplete":true,"settings":{"__proto__":{"x":1},"style":"formal"},"version":1}';
+    const io = createMemorySettingsIo(raw);
+    const store = createSettingsStore(io);
+    const loaded = await store.load();
+    await store.save(loaded.file.settings, true);
+    expect(io.snapshot()).toContain('"__proto__"');
+    const disk = JSON.parse(io.snapshot()!) as { settings: Record<string, unknown> };
+    expect(Object.getOwnPropertyDescriptor(disk.settings, '__proto__')?.value).toEqual({ x: 1 });
+    expect(({} as Record<string, unknown>).x).toBeUndefined();
+  });
+
+  it('reload drops unknown keys that are no longer on disk', async () => {
+    const io = createMemorySettingsIo(JSON.stringify({
+      onboardingComplete: true, settings: { ...initialSettings, cleanupEnabled: true }, version: 1,
+    }));
+    const store = createSettingsStore(io);
+    await store.load();
+    await io.write(JSON.stringify({ onboardingComplete: true, settings: initialSettings, version: 1 }));
+    const loaded = await store.load();
+    await store.save(loaded.file.settings, true);
+    expect(io.snapshot()).not.toContain('cleanupEnabled');
+  });
 });
 

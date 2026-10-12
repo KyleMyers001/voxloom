@@ -56,6 +56,8 @@ export function createSettingsStore(io: SettingsFileIo): DurableSettingsStore {
   let extras: Record<string, unknown> = {};
   return {
     async load() {
+      // Never carry keys from an earlier load into this one.
+      extras = {};
       let raw: string | null;
       try {
         raw = await io.read();

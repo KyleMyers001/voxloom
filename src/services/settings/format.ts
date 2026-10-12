@@ -142,7 +142,8 @@ export function unknownSettingsKeys(raw: string): Record<string, unknown> {
   }
   if (!isObject(parsed) || !isObject(parsed.settings)) return {};
   const known = new Set(Object.keys(initialSettings));
-  const extras: Record<string, unknown> = {};
+  // Null prototype: a `__proto__` key is stored as data, not swallowed.
+  const extras = Object.create(null) as Record<string, unknown>;
   for (const [key, value] of Object.entries(parsed.settings)) {
     if (!known.has(key)) extras[key] = value;
   }
