@@ -37,6 +37,10 @@ export interface DurableSettingsStore {
   save(settings: Settings, onboardingComplete: boolean): Promise<void>;
 }
 
+/** Shown by a window that may not back up (Settings) instead of an error. */
+export const SETTINGS_UPGRADING_MESSAGE =
+  'Settings are being updated by the main Voxloom window. Your changes will save once it finishes.';
+
 function fileVersion(raw: string): unknown {
   try {
     return (JSON.parse(raw) as { version?: unknown }).version;
@@ -72,7 +76,9 @@ export function createSettingsStore(io: SettingsFileIo): DurableSettingsStore {
         // Only truly corrupt JSON may be replaced, and only after a backup.
         const unknownVersion = hasUnknownVersion(raw, [SETTINGS_FILE_VERSION, 2]);
         return {
-          error: `${parsed.error}${describeBackup(backup)}`,
+          error: !io.backup && !unknownVersion
+            ? SETTINGS_UPGRADING_MESSAGE
+            : `${parsed.error}${describeBackup(backup)}`,
           file: defaultSettingsFile(),
           ok: false,
           writeBlocked: unknownVersion || !backup.ok,
@@ -84,7 +90,9 @@ export function createSettingsStore(io: SettingsFileIo): DurableSettingsStore {
         const backup = await runBackup(io.backup);
         if (!backup.ok) {
           return {
-            error: `Settings file needs migration${describeBackup(backup)}`,
+            error: io.backup
+              ? `Settings file needs migration${describeBackup(backup)}`
+              : SETTINGS_UPGRADING_MESSAGE,
             file: parsed.file,
             ok: false,
             writeBlocked: true,

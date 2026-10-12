@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod acl_tests;
 mod capture;
 mod delivery;
 mod dictionary;

@@ -206,6 +206,13 @@ export function AppProvider({
           // Safe defaults already in state; surface error. Writing defaults
           // is allowed only once the unreadable file was backed up.
           allowSettingsPersistRef.current = !result.writeBlocked;
+          // Defaults, or the parsed values of a file this window may not
+          // migrate (Settings window, BUS-42) so it shows the real values.
+          dispatch({
+            onboardingComplete: result.file.onboardingComplete,
+            settings: result.file.settings,
+            type: 'hydrate-settings',
+          });
           lastSavedSettingsRef.current = result.file;
           lastRequestedSettingsRef.current = result.file;
           dispatch({
@@ -283,6 +290,7 @@ export function AppProvider({
   }, [clock, dictionaryPers, historyPers, settingsPers]);
 
   useSettingsSync({
+    allowRef: allowSettingsPersistRef,
     current: { onboardingComplete: state.onboarding.complete, settings: state.settings },
     dispatch,
     enabled: settingsPers.enabled,
