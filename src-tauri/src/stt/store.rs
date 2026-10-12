@@ -287,6 +287,44 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// Declare `declared` bytes but send only `body`, then drop the connection.
+    fn serve_truncated(body: Vec<u8>, declared: usize) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut req = [0u8; 4096];
+            let _ = stream.read(&mut req);
+            let header = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {declared}\r\nConnection: close\r\n\r\n"
+            );
+            stream.write_all(header.as_bytes()).unwrap();
+            let _ = stream.write_all(&body);
+            let _ = stream.flush();
+            // Dropping the stream mid-body is the mid-stream failure.
+        });
+        format!("http://127.0.0.1:{port}/model.bin")
+    }
+
+    #[test]
+    fn mid_stream_failure_removes_partial_file() {
+        let (store, dir) = temp_store("midstream-partial");
+        let spec = catalog::find("whisper-base.en").unwrap();
+        let partial = store.model_path(spec).with_extension("bin.partial");
+        let url = serve_truncated(vec![7u8; 600 * 1024], 2 * 1024 * 1024);
+        let mut progressed = 0u64;
+        let err = store
+            .download_spec_with_sink(spec, &url, |p| progressed = p.bytes_received)
+            .unwrap_err();
+        assert_eq!(err.code, "download-failed");
+        assert!(progressed > 0, "bytes were written before the failure");
+        assert!(!partial.exists(), "partial file should be cleaned up");
+        assert!(!store.model_path(spec).exists(), "nothing is finalized");
+        assert!(store.inflight.lock().unwrap().is_none());
+        assert_eq!(store.status("whisper-base.en").unwrap().status, "missing");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn failed_download_removes_partial_file_so_retry_starts_clean() {
         let (store, dir) = temp_store("failed-partial");
