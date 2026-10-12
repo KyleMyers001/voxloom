@@ -84,7 +84,7 @@ describe('overlayBridge.showResult', () => {
     await bridge.showResult('copied');
     await bridge.sync({ kind: 'listening', runId: 2, waveform: 'silent' });
     expect(window.setWaveform).toHaveBeenLastCalledWith('silent');
-    expect(window.showBottomCenter).toHaveBeenLastCalledWith({ height: 28, width: 84 });
+    expect(window.showBottomCenter).toHaveBeenLastCalledWith({ height: 28, width: 142 });
     await vi.advanceTimersByTimeAsync(3000);
     expect(window.hide).not.toHaveBeenCalled();
   });
@@ -97,5 +97,13 @@ describe('HUD motion (Option A)', () => {
   });
   it('falls back to a slow 3 s opacity breathe under Reduce Motion', () => {
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.hud-transcribing i \{ animation: hud-breathe 3s ease-in-out infinite; \}/);
+  });
+});
+
+describe('HUD sizing (no jump between listening and transcribing)', () => {
+  const css = readFileSync('src/styles/hud.css', 'utf8');
+  it('uses one 118px row for the waveform and the transcribing row', () => {
+    expect(css).toMatch(/\.recording--overlay \.wave \{[^}]*width: 118px/);
+    expect(css).toMatch(/\.hud-transcribing \{[^}]*width: 118px/);
   });
 });

@@ -3,12 +3,16 @@
 .recording--overlay[data-waveform="processing"] { border-color: color-mix(in srgb, #3cf0ff 45%, transparent); }
 
 /* Option A: the bars settle into an even row; the gradient shimmers and pulses (1.6 s). */
+/* Listening and transcribing share one 118px row in a 136px pill, so nothing jumps. */
+.recording--overlay .wave { gap: 2px; width: 118px; }
+.recording--overlay .wave i { flex-basis: 3px; }
+
 .hud-transcribing {
   height: 14px;
-  -webkit-mask: repeating-linear-gradient(90deg, #000 0 2px, transparent 2px 3.5px);
-  mask: repeating-linear-gradient(90deg, #000 0 2px, transparent 2px 3.5px);
+  -webkit-mask: repeating-linear-gradient(90deg, #000 0 3px, transparent 3px 5px);
+  mask: repeating-linear-gradient(90deg, #000 0 3px, transparent 3px 5px);
   position: relative;
-  width: 60px;
+  width: 118px;
 }
 
 .hud-transcribing i {
