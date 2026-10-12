@@ -19,7 +19,9 @@ export function CaptureTab({ onSetup }: { onSetup: (opener: HTMLElement) => void
   const isNative = isTauriEnv();
   const update = settings.update;
 
-  const [editingShortcut, setEditingShortcut] = useState(false);
+  /** Combo frozen at focus: the hidden caps keep that exact width while typing, so the field never moves. */
+  const [frozenCombo, setFrozenCombo] = useState<string | null>(null);
+  const editingShortcut = frozenCombo !== null;
   return (
     <div className="settings-rows">
       <div className="frow">
@@ -33,13 +35,13 @@ export function CaptureTab({ onSetup }: { onSetup: (opener: HTMLElement) => void
           {/* One representation at a time: key caps hide while the raw text is edited.
               visibility (not unmount) keeps their space, so the field doesn't shift. */}
           <span className="shortcut-caps" data-editing={editingShortcut || undefined}>
-            <KeyCombo combo={state.settings.shortcut} />
+            <KeyCombo combo={frozenCombo ?? state.settings.shortcut} />
           </span>
           <input
             aria-describedby="settings-shortcut-help"
             id="settings-shortcut"
-            onBlur={() => setEditingShortcut(false)}
-            onFocus={() => setEditingShortcut(true)}
+            onBlur={() => setFrozenCombo(null)}
+            onFocus={() => setFrozenCombo(state.settings.shortcut)}
             onChange={(event) => update({ key: 'shortcut', value: event.target.value })}
             value={state.settings.shortcut}
           />

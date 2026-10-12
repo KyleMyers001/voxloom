@@ -13,6 +13,7 @@ import type {
   InsertReport,
   TargetSnapshot,
 } from './types';
+import { InsertError } from './types';
 
 interface NativeTargetDto {
   appName: string | null;
@@ -68,10 +69,17 @@ export function createTauriDeliveryAdapter(
     clipboardRestore: (prior) => stub.clipboardRestore(prior),
     clipboardWrite: (text) => stub.clipboardWrite(text),
     async insertText(text, intended) {
-      return await invoke<InsertReport | null>('delivery_insert_text', {
-        text,
-        intended,
-      }) ?? undefined;
+      try {
+        return await invoke<InsertReport | null>('delivery_insert_text', {
+          text,
+          intended,
+        }) ?? undefined;
+      } catch (error: unknown) {
+        // A string is the command's own Err: refused or verified unchanged, so
+        // nothing landed. Anything else (IPC failure) may have hit mid-write.
+        if (typeof error === 'string') throw new InsertError(error, false);
+        throw new InsertError(error instanceof Error ? error.message : String(error), true);
+      }
     },
     async snapshotTarget() {
       try {

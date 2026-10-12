@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { IconButton } from '../../../src/components/IconButton';
-import { comboKeys, isMacPlatform, KeyCombo } from '../../../src/components/KeyCombo';
+import { comboKeys, comboLabel, isMacPlatform, KeyCombo } from '../../../src/components/KeyCombo';
 import { SearchField } from '../../../src/components/SearchField';
 import { SegmentedControl } from '../../../src/components/SegmentedControl';
 import { Switch } from '../../../src/components/Switch';
@@ -102,7 +102,16 @@ describe('KeyCombo', () => {
   it('maps modifier names to Mac symbols', () => {
     expect(comboKeys('Ctrl + Shift + Space')).toEqual(['⌃', '⇧', 'Space']);
     expect(comboKeys('CommandOrControl+Alt+k', true)).toEqual(['⌘', '⌥', 'K']);
-    expect(comboKeys('CmdOrCtrl+Shift+Space', false)).toEqual(['Ctrl', '⇧', 'Space']);
+    expect(comboKeys('CmdOrCtrl+Shift+Space', false)).toEqual(['Ctrl', 'Shift', 'Space']);
+  });
+
+  it('spells modifiers out off macOS (QA #45)', () => {
+    expect(comboKeys('Ctrl + Shift + Space', false)).toEqual(['Ctrl', 'Shift', 'Space']);
+    expect(comboKeys('Alt+1', false)).toEqual(['Alt', '1']);
+    expect(comboLabel('Control+Shift+Space', false)).toBe('Ctrl+Shift+Space');
+    expect(comboLabel('Control+Shift+Space', true)).toBe('⌃⇧Space');
+    expect(comboLabel('CommandOrControl+,', false)).toBe('Ctrl+,');
+    expect(comboLabel('CommandOrControl+,', true)).toBe('⌘,');
     expect(comboKeys('Cmd+k', false)).toEqual(['⌘', 'K']);
     expect(comboKeys('Option + Cmd + 1')).toEqual(['⌥', '⌘', '1']);
   });

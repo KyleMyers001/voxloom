@@ -1,6 +1,6 @@
 import { AppTile } from '../../components/AppTile';
 import { Icon } from '../../components/Icon';
-import { comboKeys } from '../../components/KeyCombo';
+import { comboLabel, isMacPlatform } from '../../components/KeyCombo';
 import { ScenarioPanel, type OnboardingScenario } from '../../dev/ScenarioPanel';
 import type { Screen } from '../../domain/types';
 import { navScreens } from './screens';
@@ -22,7 +22,7 @@ export function Sidebar({ screen, shortcut, status, onNavigate, onScenario, onRe
         <div>
           <b className="brand__name">Voxloom</b>
           <small className="brand__status">
-            {status} · {comboKeys(shortcut).join('')}
+            {status} · {comboLabel(shortcut)}
           </small>
         </div>
       </div>
@@ -39,7 +39,7 @@ export function Sidebar({ screen, shortcut, status, onNavigate, onScenario, onRe
           >
             <Icon name={icon} />
             <span>{label}</span>
-            <kbd aria-hidden="true">⌥{index + 1}</kbd>
+            <kbd aria-hidden="true">{isMacPlatform() ? '⌥' : 'Alt+'}{index + 1}</kbd>
           </button>
         ))}
       </nav>
