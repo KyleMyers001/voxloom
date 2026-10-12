@@ -106,7 +106,7 @@
 }
 
 .search:focus-within {
-  outline: 3px solid color-mix(in srgb, var(--accfg) 42%, transparent);
+  outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
 
