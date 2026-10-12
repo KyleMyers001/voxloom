@@ -158,6 +158,7 @@ describe('deliverTranscript', () => {
     });
     expect(outcome.status).toBe('copied');
     expect(outcome.message).toBe('May have been inserted — also copied');
+    expect(outcome.mayHaveInserted).toBe(true);
     expect(platform.clipboardWrite).toHaveBeenCalledWith('hello');
   });
 
@@ -178,6 +179,7 @@ describe('deliverTranscript', () => {
     });
     expect(outcome.status).toBe('failed');
     expect(outcome.message).toMatch(/^May have been inserted — Failed/);
+    expect(outcome.mayHaveInserted).toBe(true);
   });
 
   it('keeps the warning when Copy fallback is disabled', async () => {
@@ -196,6 +198,7 @@ describe('deliverTranscript', () => {
     });
     expect(outcome.status).toBe('failed');
     expect(outcome.message).toMatch(/^May have been inserted — Failed/);
+    expect(outcome.mayHaveInserted).toBe(true);
     expect(platform.clipboardWrite).not.toHaveBeenCalled();
   });
 

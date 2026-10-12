@@ -8,12 +8,12 @@ export function ShortcutsDialog({ shortcut, opener, onClose }: ShortcutsProps) {
     <Dialog label="Keyboard shortcuts" onClose={onClose} opener={opener}>
       <h2>Keyboard shortcuts</h2>
       <p>Hold or double-tap the shortcut in any app (global in the desktop app; only while focused in the browser preview).</p>
-      <div className="kv"><span>Dictate (hold / double-tap to latch)</span><KeyCombo combo={shortcut} /></div>
+      <div className="kv"><span>Dictate (hold / double-tap to latch)</span><KeyCombo altWord combo={shortcut} /></div>
       <div className="kv">
         <span>Go to Home · History · Dictionary</span>
-        <span><KeyCombo combo="Alt+1" /> … <KeyCombo combo="Alt+3" /></span>
+        <span><KeyCombo altWord combo="Alt+1" /> … <KeyCombo altWord combo="Alt+3" /></span>
       </div>
-      <div className="kv"><span>Settings</span><span><KeyCombo combo="CommandOrControl+," /> or <KeyCombo combo="Alt+4" /></span></div>
+      <div className="kv"><span>Settings</span><span><KeyCombo combo="CommandOrControl+," /> or <KeyCombo altWord combo="Alt+4" /></span></div>
       <div className="kv"><span>Show this sheet</span><KeyCombo combo="?" /></div>
       <div className="sheet-acts">
         <button className="btn primary" onClick={onClose} type="button">Done</button>

@@ -233,10 +233,12 @@ describe('Shortcut field (one representation at a time)', () => {
   it('hides the key caps while the raw text is being edited', async () => {
     const user = userEvent.setup();
     const { container } = renderWithApp(<Settings onSetup={vi.fn()} />);
-    expect(container.querySelector('.frow__control .key-combo')).not.toBeNull();
+    const caps = () => container.querySelector('.frow__control .shortcut-caps');
+    expect(caps()).not.toHaveAttribute('data-editing');
     await user.click(screen.getByLabelText('Shortcut'));
-    expect(container.querySelector('.frow__control .key-combo')).toBeNull();
+    // Still mounted (keeps its space, so the field doesn't shift) but visibility: hidden.
+    expect(caps()).toHaveAttribute('data-editing');
     await user.tab();
-    expect(container.querySelector('.frow__control .key-combo')).not.toBeNull();
+    expect(caps()).not.toHaveAttribute('data-editing');
   });
 });

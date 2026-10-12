@@ -159,13 +159,13 @@ async function mayHaveInserted(
   const detail = `unverified insert: ${report.detail ?? 'read-back failed'}`;
   if (!clipboardFallback) {
     const failed = failOutcome(text, detail);
-    return { ...failed, message: `May have been inserted — ${failed.message}` };
+    return { ...failed, mayHaveInserted: true, message: `May have been inserted — ${failed.message}` };
   }
   const copied = await copyFallback(platform, text, detail);
   if (copied.status === 'copied') {
-    return { ...copied, message: 'May have been inserted — also copied' };
+    return { ...copied, mayHaveInserted: true, message: 'May have been inserted — also copied' };
   }
-  return { ...copied, message: `May have been inserted — ${copied.message}` };
+  return { ...copied, mayHaveInserted: true, message: `May have been inserted — ${copied.message}` };
 }
 
 /**
