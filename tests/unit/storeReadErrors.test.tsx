@@ -100,6 +100,8 @@ describe('store read errors (BUS-42)', () => {
     await settle();
     expect(historyIo.snapshot()).toBe(v1);
     expect(settingsIo.writes).toEqual([]);
+    // Writes are still blocked, so the notice survives a new dictation.
+    expect(api!.state.historyError).toMatch(/read-only until settings/);
   });
 
   it('settings reset: history.json is backed up byte-identical before any prune', async () => {
@@ -175,6 +177,40 @@ describe('store read errors (BUS-42)', () => {
     await settle();
     expect(writes).toEqual([]);
   });
+
+  for (const msg of [
+    'read history.json: not a regular file',
+    'stat history.json: Permission denied (os error 13)',
+    'stat history.json: No such file or directory (broken symlink)',
+  ]) {
+    it(`history "${msg}": backup attempted, message matches, notice stays, no writes`, async () => {
+      const writes: string[] = [];
+      let backups = 0;
+      const io = {
+        backup: async () => { backups += 1; return null; },
+        read: async () => { throw new Error(msg); },
+        write: async (c: string) => { writes.push(c); },
+      };
+      api = null;
+      render(
+        <AppProvider clock={() => NOW} historyPersistence={{ enabled: true, store: createHistoryStore(io) }}>
+          <Probe />
+        </AppProvider>,
+      );
+      await waitFor(() => expect(api?.bootReady).toBe(true));
+      await settle();
+      const expected = `Failed to read history store: ${msg} (backup failed: no file was backed up; file left untouched)`;
+      expect(api!.state.historyError).toBe(expected);
+      expect(backups).toBe(1);
+      act(() => api!.dispatch({
+        record: { createdAt: NOW, durationSeconds: 1, id: 'n', model: null, recoveryExpiresAt: null, status: 'copied', style: 'formal', text: 'x' },
+        type: 'append-record',
+      }));
+      await settle();
+      expect(api!.state.historyError).toBe(expected);
+      expect(writes).toEqual([]);
+    });
+  }
 
   it('dictionary read error without a backup stays blocked', async () => {
     const io: DictionaryFileIo = {
