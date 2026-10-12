@@ -161,6 +161,16 @@ test('settings.html (the native Settings window entry) renders and passes axe', 
   await expectAccessible(page);
 });
 
+test('the 760×600 Settings window keeps two-column rows and a two-column recovery grid (QA #42)', async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 760 });
+  await page.goto('/settings.html');
+  const cols = (sel: string) => page.locator(sel).first().evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ').length);
+  expect(await cols('.settings-rows .frow')).toBe(2);
+  await page.getByRole('tab', { name: 'Privacy' }).click();
+  expect(await cols('.settings-rows .frow')).toBe(2);
+  expect(await cols('.recovery-grid')).toBe(2);
+});
+
 test('the shortcut field does not move while typing (QA #41)', async ({ page }) => {
   await page.goto('/');
   await skipOnboarding(page);

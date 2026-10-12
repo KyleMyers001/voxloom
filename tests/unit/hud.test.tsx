@@ -52,8 +52,14 @@ describe('HUD view', () => {
     expect(resultText('unverified', true)).toBe('Not verified');
     expect(resultText('maybe-inserted', true)).toBe('Maybe inserted · check field');
     // Full sentences go to screen readers only.
-    expect(spokenResultText('maybe-copied', true)).toBe('May not have been inserted. The text was also copied; press Command V to paste.');
-    expect(spokenResultText('maybe-inserted', false)).toBe('May have been inserted. Check the field; nothing was copied.');
+    expect(spokenResultText('maybe-copied', true)).toBe('May have been inserted; also copied. If it\'s missing, press Command V to paste.');
+    expect(spokenResultText('maybe-inserted', false)).toBe('May have been inserted; check the field. Nothing was copied.');
+    // The spoken text keeps the pill's meaning (QA #44).
+    for (const r of ['maybe-copied', 'maybe-inserted'] as const) {
+      expect(resultText(r)).toMatch(/^Maybe inserted/);
+      expect(spokenResultText(r)).toMatch(/^May have been inserted/);
+    }
+    expect(spokenResultText('unverified')).toMatch(/not verified/);
     expect(resultText('transcribe-failed')).toBe('Couldn’t transcribe');
     expect(resultText('insert-failed')).toBe('Couldn’t insert');
     const { container, rerender } = render(<OverlayWaveformView levels={levels} mac={false} result="unverified" waveform="result-unverified" />);
