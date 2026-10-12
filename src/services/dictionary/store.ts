@@ -1,14 +1,29 @@
 import {
+  DICTIONARY_FILE_VERSION,
   defaultDictionaryFile,
   parseDictionaryJson,
   serializeDictionaryFile,
   type DictionaryFile,
 } from './format';
 import type { DictionaryFileIo } from './io';
+import {
+  describeBackup,
+  hasUnknownVersion,
+  runBackup,
+} from '../storeBackup';
 
 export type DictionaryLoadResult =
   | { ok: true; file: DictionaryFile }
-  | { ok: false; error: string; file: DictionaryFile };
+  | {
+    ok: false;
+    error: string;
+    file: DictionaryFile;
+    /**
+     * True when the unreadable file could not be backed up: the caller must
+     * not write defaults over it (BUS-42).
+     */
+    writeBlocked: boolean;
+  };
 
 export interface DurableDictionaryStore {
   /**
@@ -21,6 +36,11 @@ export interface DurableDictionaryStore {
   save(words: string[]): Promise<void>;
 }
 
+/** Shown after an unreadable dictionary.json was backed up and reset. */
+export function dictionaryResetNotice(path: string): string {
+  return `Your word dictionary couldn't be read and was reset to empty. Your original file is saved at ${path}.`;
+}
+
 export function createDictionaryStore(
   io: DictionaryFileIo,
 ): DurableDictionaryStore {
@@ -31,10 +51,16 @@ export function createDictionaryStore(
         raw = await io.read();
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
+        const backup = await runBackup(io.backup);
         return {
-          error: `Failed to read dictionary store: ${message}`,
+          error: backup.ok
+            ? dictionaryResetNotice(backup.path)
+            : `Failed to read dictionary store: ${message}${describeBackup(backup)}`,
           file: defaultDictionaryFile(),
           ok: false,
+          // Replace an unreadable file only when its raw bytes were preserved
+          // first (store_backup copies bytes, no decoding); otherwise block.
+          writeBlocked: !(backup.ok && backup.path),
         };
       }
       if (raw === null || raw.trim() === '') {
@@ -42,10 +68,17 @@ export function createDictionaryStore(
       }
       const parsed = parseDictionaryJson(raw);
       if (!parsed.ok) {
+        const backup = await runBackup(io.backup);
+        // Future / unknown version from another build: never replace it.
+        // Only truly corrupt JSON may be replaced, and only after a backup.
+        const unknownVersion = hasUnknownVersion(raw, [DICTIONARY_FILE_VERSION]);
         return {
-          error: parsed.error,
+          error: backup.ok && !unknownVersion
+            ? dictionaryResetNotice(backup.path)
+            : `${parsed.error}${describeBackup(backup)}`,
           file: defaultDictionaryFile(),
           ok: false,
+          writeBlocked: unknownVersion || !(backup.ok && backup.path),
         };
       }
       return { file: parsed.file, ok: true };

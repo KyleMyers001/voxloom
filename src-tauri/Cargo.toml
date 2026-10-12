@@ -47,3 +47,7 @@ objc2-core-audio = { version = "0.3.2", features = [
 objc2-core-foundation = { version = "0.3.2", features = ["CFString"] }
 objc2-foundation = "0.3.2"
 dispatch2 = "0.3.1"
+
+# Mock runtime for the command-ACL test (src/acl_tests.rs); test builds only.
+[dev-dependencies]
+tauri = { version = "2", features = ["macos-private-api", "test"] }

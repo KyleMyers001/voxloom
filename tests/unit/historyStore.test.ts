@@ -27,7 +27,7 @@ describe('parseHistoryJson', () => {
   it('round-trips optional BUS-23 rawText and rejects a non-string rawText', () => {
     const row = sample({ rawText: '[Music] hello' });
     const parsed = parseHistoryJson(serializeHistoryFile([row]));
-    expect(parsed).toEqual({ file: { records: [row], version: 1 }, ok: true });
+    expect(parsed).toEqual({ file: { records: [row], version: 1 }, ok: true, sourceVersion: 1 });
 
     const bad = JSON.stringify({ records: [{ ...sample(), rawText: 5 }], version: 1 });
     const badParsed = parseHistoryJson(bad);
@@ -36,7 +36,7 @@ describe('parseHistoryJson', () => {
 
   it('round-trips the may-have-inserted flag on Unverified rows (Review #44)', () => {
     const row = sample({ mayHaveInserted: { copied: true }, status: 'unverified' });
-    expect(parseHistoryJson(serializeHistoryFile([row]))).toEqual({ file: { records: [row], version: 1 }, ok: true });
+    expect(parseHistoryJson(serializeHistoryFile([row]))).toEqual({ file: { records: [row], version: 1 }, ok: true, sourceVersion: 1 });
   });
 
   it('applies transcript retention to rows carrying rawText', () => {
@@ -47,7 +47,7 @@ describe('parseHistoryJson', () => {
   it('preserves unverified delivery rather than claiming insertion or dropping recovery text', () => {
     const row = sample({ status: 'unverified' });
     const parsed = parseHistoryJson(serializeHistoryFile([row]));
-    expect(parsed).toEqual({ file: { records: [row], version: 1 }, ok: true });
+    expect(parsed).toEqual({ file: { records: [row], version: 1 }, ok: true, sourceVersion: 1 });
   });
 
   it('accepts a valid v1 document', () => {

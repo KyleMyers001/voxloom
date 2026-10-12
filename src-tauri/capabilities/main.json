@@ -47,6 +47,7 @@
     "allow-settings-load",
     "allow-settings-save",
     "allow-settings-window-open",
+    "allow-store-backup",
     "allow-stt-cancel-download",
     "allow-stt-download-model",
     "allow-stt-list-models",

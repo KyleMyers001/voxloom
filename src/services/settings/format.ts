@@ -108,7 +108,9 @@ export function parseSettingsJson(raw: string): ParseSettingsResult {
   if (!isObject(parsed)) {
     return { error: 'Settings file root must be an object', ok: false };
   }
-  if (parsed.version !== SETTINGS_FILE_VERSION) {
+  // v2 was written by the BUS-16 cleanup branch (#24): same envelope plus
+  // cleanup fields this build ignores (BUS-42).
+  if (parsed.version !== SETTINGS_FILE_VERSION && parsed.version !== 2) {
     return {
       error: `Unsupported settings file version: ${String(parsed.version)}`,
       ok: false,
@@ -126,13 +128,37 @@ export function parseSettingsJson(raw: string): ParseSettingsResult {
   };
 }
 
+/**
+ * Keys of the on-disk `settings` object this build does not know (e.g. #24's
+ * `cleanupEnabled` / `cleanupModelId`). They never reach app state, but are
+ * written back on save so another build's settings are not lost (BUS-42).
+ */
+export function unknownSettingsKeys(raw: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    return {};
+  }
+  if (!isObject(parsed) || !isObject(parsed.settings)) return {};
+  const known = new Set(Object.keys(initialSettings));
+  // Null prototype: a `__proto__` key is stored as data, not swallowed.
+  const extras = Object.create(null) as Record<string, unknown>;
+  for (const [key, value] of Object.entries(parsed.settings)) {
+    if (!known.has(key)) extras[key] = value;
+  }
+  return extras;
+}
+
 export function serializeSettingsFile(
   settings: Settings,
   onboardingComplete: boolean,
+  extras: Record<string, unknown> = {},
 ): string {
-  const file: SettingsFile = {
+  const file = {
     onboardingComplete,
-    settings,
+    // Coerced values are authoritative for every key this build knows.
+    settings: { ...extras, ...settings },
     version: SETTINGS_FILE_VERSION,
   };
   return `${JSON.stringify(file, null, 2)}\n`;

@@ -1,5 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 
+import { tauriBackup } from '../storeBackup';
 import type { SettingsFileIo } from './io';
 
 /**
@@ -8,6 +9,7 @@ import type { SettingsFileIo } from './io';
  */
 export function createTauriSettingsIo(): SettingsFileIo {
   return {
+    backup: tauriBackup('settings'),
     async read() {
       const raw = await invoke<string | null>('settings_load');
       return raw;

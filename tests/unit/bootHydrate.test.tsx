@@ -195,7 +195,7 @@ describe('boot hydrate polish', () => {
       expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
     });
     await waitFor(() => {
-      expect(screen.getByText(/not valid JSON|Settings file|Dictionary file/i))
+      expect(screen.getByText(/not valid JSON|Settings file|Dictionary file|reset to (defaults|empty)/i))
         .toBeInTheDocument();
     });
 

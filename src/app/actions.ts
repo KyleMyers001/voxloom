@@ -45,7 +45,12 @@ export type AppAction =
   | { type: 'scenario-empty' }
   | { type: 'set-clipboard-failure'; value: boolean }
   | { type: 'set-dictionary-error'; message: string | null }
-  | { type: 'set-history-error'; message: string | null }
+  | {
+    type: 'set-history-error';
+    message: string | null;
+    /** Writes are blocked: keep the notice until the next load. */
+    sticky?: boolean;
+  }
   | { type: 'set-settings-error'; message: string | null }
   | { type: 'set-onboarding'; value: OnboardingState }
   | { changes: Partial<OnboardingState>; type: 'update-onboarding' }

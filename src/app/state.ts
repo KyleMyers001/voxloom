@@ -25,6 +25,8 @@ export interface AppState {
   dictionaryError: string | null;
   /** Load/save failure message for durable history; null when healthy. */
   historyError: string | null;
+  /** True while history writes are blocked: new records keep the notice. */
+  historyErrorSticky: boolean;
   /** Load/save failure message for durable settings; null when healthy. */
   settingsError: string | null;
   nextRunId: number;
@@ -127,7 +129,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
   if (action.type === 'append-record') {
     return {
       ...state,
-      historyError: null,
+      historyError: state.historyErrorSticky ? state.historyError : null,
       records: [action.record, ...state.records],
     };
   }
@@ -135,12 +137,16 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     return {
       ...state,
       historyError: null,
+      historyErrorSticky: false,
       records: action.records,
     };
   }
   if (action.type === 'set-history-error') {
-    if (state.historyError === action.message) return state;
-    return { ...state, historyError: action.message };
+    const sticky = action.sticky === true;
+    if (state.historyError === action.message && state.historyErrorSticky === sticky) {
+      return state;
+    }
+    return { ...state, historyError: action.message, historyErrorSticky: sticky };
   }
   if (action.type === 'hydrate-settings') {
     return {

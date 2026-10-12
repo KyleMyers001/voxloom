@@ -1,5 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 
+import { tauriBackup } from '../storeBackup';
 import type { DictionaryFileIo } from './io';
 
 /**
@@ -8,6 +9,7 @@ import type { DictionaryFileIo } from './io';
  */
 export function createTauriDictionaryIo(): DictionaryFileIo {
   return {
+    backup: tauriBackup('dictionary'),
     async read() {
       const raw = await invoke<string | null>('dictionary_load');
       return raw;

@@ -20,15 +20,12 @@ fn dictionary_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join(DICTIONARY_FILE_NAME))
 }
 
-/// Read raw dictionary JSON. Returns `null` when the file does not exist.
+/// Read raw dictionary JSON. Returns `null` only when the file does not exist;
+/// a directory or unreadable path is an error (BUS-42).
 #[tauri::command]
 pub fn dictionary_load(app: AppHandle) -> Result<Option<String>, String> {
     let path = dictionary_path(&app)?;
-    if !path.is_file() {
-        return Ok(None);
-    }
-    let raw = fs::read_to_string(&path).map_err(|e| format!("read dictionary.json: {e}"))?;
-    Ok(Some(raw))
+    crate::store_read::read_store(&path, "dictionary.json")
 }
 
 /// Atomically replace `dictionary.json` with `contents`.

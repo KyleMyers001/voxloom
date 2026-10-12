@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod acl_tests;
 mod capture;
 mod delivery;
 mod dictionary;
@@ -6,6 +8,8 @@ mod hold_release;
 mod overlay;
 mod settings;
 mod settings_window;
+mod store_backup;
+mod store_read;
 mod stt;
 
 use std::sync::Arc;
@@ -169,6 +173,7 @@ pub fn run() {
             settings::settings_save,
             settings_window::settings_request_onboarding,
             settings_window::settings_window_open,
+            store_backup::store_backup,
             stt::stt_cancel_download,
             stt::stt_download_model,
             stt::stt_list_models,

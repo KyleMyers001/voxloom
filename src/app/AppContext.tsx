@@ -167,8 +167,29 @@ export function AppProvider({
   useEffect(() => {
     let cancelled = false;
 
+    // BUS-42: a migrated (older-version) or backed-up corrupt settings.json
+    // is rewritten as the current version during boot, so every later reader
+    // (including other windows) sees a current file.
+    const rewriteSettings = async (file: SettingsFile) => {
+      try {
+        await settingsPers.store.save(file.settings, file.onboardingComplete);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        dispatch({
+          message: `Failed to save settings: ${message}`,
+          type: 'set-settings-error',
+        });
+      }
+    };
+
     void (async () => {
       let retention = initialSettings.transcriptRetention;
+      // Settings unreadable and not backed up: retention is unknown, so an
+      // older history.json must not be migrated (rewritten) yet. BUS-42.
+      let settingsBlocked = false;
+      // Settings were unreadable, backed up and reset: retention fell back to
+      // the default, so history.json must be backed up before any prune.
+      let settingsReset = false;
 
       if (settingsPers.enabled) {
         const result = await settingsPers.store.load();
@@ -183,16 +204,34 @@ export function AppProvider({
           lastRequestedSettingsRef.current = result.file;
           allowSettingsPersistRef.current = true;
           retention = result.file.settings.transcriptRetention;
+          if (result.needsRewrite) {
+            await rewriteSettings(result.file);
+            if (cancelled) return;
+          }
         } else {
-          // Safe defaults already in state; surface error; still allow
-          // first successful write of defaults so the user can recover.
-          allowSettingsPersistRef.current = true;
+          // Safe defaults already in state; surface error. Writing defaults
+          // is allowed only once the unreadable file was backed up.
+          allowSettingsPersistRef.current = !result.writeBlocked;
+          settingsBlocked = result.writeBlocked;
+          settingsReset = !result.writeBlocked;
+          // Defaults, or the parsed values of a file this window may not
+          // migrate (Settings window, BUS-42) so it shows the real values.
+          dispatch({
+            onboardingComplete: result.file.onboardingComplete,
+            settings: result.file.settings,
+            type: 'hydrate-settings',
+          });
           lastSavedSettingsRef.current = result.file;
           lastRequestedSettingsRef.current = result.file;
           dispatch({
             message: result.error,
             type: 'set-settings-error',
           });
+          if (!result.writeBlocked) {
+            // Corrupt file already backed up: replace it with defaults now.
+            await rewriteSettings(result.file);
+            if (cancelled) return;
+          }
         }
         settingsHydratedRef.current = true;
         settingsPersistGenRef.current += 1;
@@ -212,12 +251,22 @@ export function AppProvider({
           // Safe empty already in state; surface error; still allow first
           // successful write so the user can recover without touching
           // settings.json / history.json.
-          allowDictionaryPersistRef.current = true;
+          allowDictionaryPersistRef.current = !dictResult.writeBlocked;
           lastSavedWordsRef.current = dictResult.file.words;
           dispatch({
             message: dictResult.error,
             type: 'set-dictionary-error',
           });
+          if (!dictResult.writeBlocked) {
+            // Unreadable file already backed up: replace it with a valid
+            // empty file now so the error does not recur every launch.
+            try {
+              await dictionaryPers.store.save(dictResult.file.words);
+            } catch {
+              // Original is backed up; the next edit retries the write.
+            }
+            if (cancelled) return;
+          }
         }
         dictionaryHydratedRef.current = true;
         dictionaryPersistGenRef.current += 1;
@@ -235,13 +284,36 @@ export function AppProvider({
 
       const historyResult = await historyPers.store.load(retention, clock());
       if (cancelled) return;
-      if (historyResult.ok) {
+      let historyBackupFailed = false;
+      if (historyResult.ok && settingsReset && !settingsBlocked) {
+        const outcome = historyPers.store.backup
+          ? await historyPers.store.backup()
+          : 'failed';
+        if (cancelled) return;
+        historyBackupFailed = outcome === 'failed';
+      }
+      if (historyResult.ok && (settingsBlocked || historyBackupFailed)) {
+        // Any history version: show it, but never rewrite or prune it on
+        // default retention while settings writes are blocked.
+        dispatch({ records: historyResult.records, type: 'hydrate-records' });
+        allowHistoryPersistRef.current = false;
+        dispatch({
+          message: settingsBlocked
+            ? 'History is read-only until settings can be read. Your history file was left untouched.'
+            : 'History is read-only because it couldn\'t be backed up after settings were reset. Your history file was left untouched.',
+          sticky: true,
+          type: 'set-history-error',
+        });
+      } else if (historyResult.ok) {
         dispatch({ records: historyResult.records, type: 'hydrate-records' });
         allowHistoryPersistRef.current = true;
       } else {
+        // Unreadable / unknown-version history.json: never write over it
+        // (the store already tried to back it up). BUS-42.
         allowHistoryPersistRef.current = false;
         dispatch({
           message: historyResult.error,
+          sticky: true,
           type: 'set-history-error',
         });
       }
@@ -257,6 +329,7 @@ export function AppProvider({
   }, [clock, dictionaryPers, historyPers, settingsPers]);
 
   useSettingsSync({
+    allowRef: allowSettingsPersistRef,
     current: { onboardingComplete: state.onboarding.complete, settings: state.settings },
     dispatch,
     enabled: settingsPers.enabled,
