@@ -23,7 +23,7 @@
   box-shadow: 0 1px 2px rgba(0, 0, 0, .15);
 }
 
-.seg--sm .seg__item { font-size: 12px; padding: 3px 10px; }
+.seg--sm .seg__item { font-size: var(--fs-secondary); padding: 3px 10px; }
 
 .switch {
   align-items: center;
@@ -121,7 +121,7 @@
   border-radius: var(--r-kbd);
   color: var(--fg);
   font-family: var(--font);
-  font-size: 11.5px;
+  font-size: var(--fs-secondary);
   font-weight: 600;
   line-height: 1;
   min-width: 22px;

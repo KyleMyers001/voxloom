@@ -18,7 +18,7 @@
   padding: var(--s-5) var(--s-8) var(--s-4);
 }
 
-.settings-window__bar h1 { color: var(--mut); font-size: 12px; font-weight: 600; letter-spacing: 0; margin: 0; }
+.settings-window__bar h1 { color: var(--mut); font-size: var(--fs-secondary); font-weight: 600; letter-spacing: 0; margin: 0; }
 .settings-tabs { display: flex; gap: var(--s-2); }
 
 .settings-tab {
@@ -28,7 +28,7 @@
   color: var(--mut);
   display: flex;
   flex-direction: column;
-  font-size: 11.5px;
+  font-size: var(--fs-secondary);
   font-weight: 500;
   gap: 3px;
   min-width: 84px;
@@ -39,7 +39,7 @@
 .settings-tab[aria-selected="true"] .icon { color: var(--accfg); }
 .settings-panel { padding: var(--s-9) var(--pad-x) var(--pad-x); }
 .settings-panel:focus-visible { outline-offset: -3px; }
-.settings-panel > h2 { font-size: 15px; font-weight: 700; margin-bottom: var(--s-7); }
+.settings-panel > h2 { font-size: var(--fs-sheet); font-weight: 700; margin-bottom: var(--s-7); }
 /* Two-column FormRow rows (designer #42): label | control, hairline dividers, no filled cards. */
 .settings-rows { display: grid; }
 .settings-rows .frow {
@@ -84,7 +84,7 @@
 }
 
 .callout > .icon { color: var(--ok); flex: none; }
-.callout p { color: var(--fg); font-size: 12px; margin: 4px 0 0; }
+.callout p { color: var(--fg); font-size: var(--fs-secondary); margin: 4px 0 0; }
 .settings-subhead { font-size: var(--fs-section); margin: var(--s-9) 0 var(--s-4); }
 .recovery-grid { display: grid; gap: var(--s-4); grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
@@ -94,7 +94,7 @@
   border: 0; /* the icon carries the warning, not the legacy red rule */
   border-radius: var(--r-tile);
   display: flex;
-  font-size: 12px;
+  font-size: var(--fs-secondary);
   gap: var(--s-4);
   padding: var(--s-4) var(--s-5);
 }
