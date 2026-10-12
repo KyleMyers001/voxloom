@@ -38,7 +38,7 @@ describe('App shell (UI PR 3)', () => {
     const status = document.querySelector('.brand__status')!;
     expect(status).toHaveTextContent('Ready · ⌃⇧Space');
     expect(status).not.toHaveAttribute('aria-label');
-    // <=780px: the shortcut moves to its own line as key caps (BUS-41 PR 2).
+    // <=909px: the shortcut moves to its own line as key caps (BUS-41 PR 2).
     expect([...document.querySelectorAll('.brand__caps .kbd')].map((k) => k.textContent)).toEqual(['⌃', '⇧', 'Space']);
     expect(screen.getByText(/Hold the shortcut in any app to dictate/)).toBeInTheDocument();
     expect(screen.queryByText(/Global hold\/latch snapshots/)).not.toBeInTheDocument();

@@ -44,10 +44,10 @@
 .brand { min-width: 0; }
 .brand > div { min-width: 0; }
 .brand__status { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* At <=780px the one-line status can't fit the 184px sidebar: the shortcut
+/* Below 910px the one-line status clips in the 184-200px sidebar: the shortcut
    moves to its own line as small key caps. */
 .brand__caps { display: none; }
-@media (max-width: 780px) {
+@media (max-width: 909px) {
   .brand__label { display: none; }
   .brand__caps { display: flex; margin-top: 3px; }
   .brand__caps .kbd { font-size: var(--fs-micro); min-width: 18px; padding: 2px 4px; }
