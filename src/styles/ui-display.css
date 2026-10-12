@@ -99,9 +99,9 @@
 .frow__help { color: var(--mut); font-size: var(--fs-caption); }
 
 .tag {
-  background: var(--seg);
+  background: var(--tag-bg);
   border-radius: var(--r-pill);
-  color: var(--mut);
+  color: var(--tag-fg);
   font-size: 10.5px;
   justify-self: start;
   padding: 1px 7px;
