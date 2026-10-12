@@ -117,3 +117,25 @@ describe('designer #37: focus ring, tag pill, disabled ON switch', () => {
     expect(readFileSync('src/styles/ui-controls.css', 'utf8')).toMatch(/\.switch\.on:disabled i \{ background: var\(--brand\); \}/);
   });
 });
+
+describe('app focus ring reaches every focusable (QA #38)', () => {
+  it('the Developer disclosure and search field use --focus', async () => {
+    const { readFileSync } = await import('node:fs');
+    expect(readFileSync('src/styles/base.css', 'utf8')).toMatch(/summary:focus-visible,[^{]*\{\s*outline: 3px solid var\(--focus\)/);
+    expect(readFileSync('src/styles/ui-controls.css', 'utf8')).not.toMatch(/42%, transparent\);\s*outline-offset/);
+  });
+});
+
+describe('History rows take the app focus ring (QA)', () => {
+  it('styles .history-row:focus-visible with --focus', async () => {
+    const { readFileSync } = await import('node:fs');
+    expect(readFileSync('src/styles/base.css', 'utf8')).toMatch(/\.history-row:focus-visible,[^{]*\{\s*outline: 3px solid var\(--focus\)/);
+  });
+});
+
+describe('Dictionary rows take the app focus ring (QA)', () => {
+  it('styles .term-row:focus-visible with --focus', async () => {
+    const { readFileSync } = await import('node:fs');
+    expect(readFileSync('src/styles/base.css', 'utf8')).toMatch(/\.term-row:focus-visible,[^{]*\{\s*outline: 3px solid var\(--focus\)/);
+  });
+});
