@@ -30,8 +30,11 @@ export function CaptureTab({ onSetup }: { onSetup: (opener: HTMLElement) => void
           </small>
         </span>
         <span className="frow__control">
-          {/* One representation at a time: key caps hide while the raw text is edited. */}
-          {!editingShortcut && <KeyCombo combo={state.settings.shortcut} />}
+          {/* One representation at a time: key caps hide while the raw text is edited.
+              visibility (not unmount) keeps their space, so the field doesn't shift. */}
+          <span className="shortcut-caps" data-editing={editingShortcut || undefined}>
+            <KeyCombo combo={state.settings.shortcut} />
+          </span>
           <input
             aria-describedby="settings-shortcut-help"
             id="settings-shortcut"
