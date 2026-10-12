@@ -161,30 +161,37 @@ describe('BUS-45 dictations made before history hydrate', () => {
     expect(api!.state.historyError).not.toBeNull();
   });
 
-  it('keeps early rows and prunes an old loaded row under 30-day retention', async () => {
+  it('backs up history after a settings reset, keeps early rows, prunes 400-day rows', async () => {
+    // Unreadable settings are backed up and reset to defaults (30-day
+    // retention), which forces a history backup before the first prune.
     const DAY = 24 * 60 * 60 * 1000;
     const old = { ...early, createdAt: NOW - 400 * DAY, id: 'old-400d' };
     const recent = { ...early, createdAt: NOW - DAY, id: 'recent-1d' };
-    const io = createMemoryHistoryIo(serializeHistoryFile([recent, old]));
+    const original = serializeHistoryFile([recent, old]);
+    const io = createMemoryHistoryIo(original);
     const gated = gatedStore(createHistoryStore(io));
-    boot(
-      gated.store,
-      createMemorySettingsIo(serializeSettingsFile(
-        { ...initialSettings, transcriptRetention: '30-days' },
-        true,
-      )),
-    );
+    const settingsIo = createMemorySettingsIo('{not json');
+    expect(initialSettings.transcriptRetention).toBe('30-days');
+    boot(gated.store, settingsIo);
     await settle();
 
     const early2 = { ...early, id: 'before-hydrate-2' };
+    // A stale queued row only the save-time prune can drop.
+    const staleEarly = { ...early, createdAt: NOW - 400 * DAY, id: 'stale-early' };
+    act(() => api!.dispatch({ record: staleEarly, type: 'append-record' }));
     act(() => api!.dispatch({ record: early, type: 'append-record' }));
     act(() => api!.dispatch({ record: early2, type: 'append-record' }));
+    await settle();
+    expect(io.snapshot()).toBe(original);
+    expect(io.backups()).toEqual([]);
+
     await act(async () => gated.release());
     await waitFor(() => expect(api?.bootReady).toBe(true));
+    expect(settingsIo.backups()).toEqual(['{not json']);
+    // Backup holds the original byte for byte, taken before any write.
+    expect(io.backups()).toEqual([original]);
+    expect(api!.state.historyError).toBeNull();
 
-    expect(api!.state.records.map((r) => r.id)).toEqual(
-      ['before-hydrate-2', 'before-hydrate', 'recent-1d'],
-    );
     await waitFor(() => expect(io.snapshot() ?? '').toContain('before-hydrate-2'));
     const disk = JSON.parse(io.snapshot()!) as { records: { id: string }[] };
     expect(disk.records.map((r) => r.id).sort()).toEqual(
