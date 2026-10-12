@@ -11,7 +11,6 @@ mod focus;
 mod host;
 mod registry;
 mod typing;
-mod unreadable;
 mod web_ax;
 mod web_ctx;
 
@@ -104,14 +103,9 @@ pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<InsertRep
     let validated = validate_snapshots(intended, build_snapshot(element, app_name, false));
     let before = copy_string_attr(element, "AXValue");
     let terminal = validated.app_pid.and_then(host::apple_terminal_identity);
-    let messages_host = super::decide::messages::unreadable_value_allowed(
-        validated.app_pid.and_then(host::bundle_id).as_deref(),
-    );
-    let path =
-        super::decide::terminal::choose_path(&validated, before.is_some(), messages_host, terminal);
-    let result = match path {
+    let result = match super::decide::terminal::choose_path(&validated, before.is_some(), terminal)
+    {
         InsertPath::Refuse(reason) => Err(reason),
-        InsertPath::MessagesGuarded => unreadable::insert_without_value(element, &validated, text),
         InsertPath::TerminalUnicode => {
             typing::type_terminal(text, || terminal_still_matches(&validated, element))
         }

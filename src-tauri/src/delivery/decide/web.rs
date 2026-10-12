@@ -23,23 +23,11 @@ pub fn is_web_content_field<S: AsRef<str>>(
 #[derive(Debug, PartialEq, Eq)]
 pub enum InsertPath {
     AxSelectedText,
-    /// Apple Messages only (readable or unreadable AXValue): the guarded
-    /// AX-write → spaced reads → typing flow in `decide::messages`. Never used
-    /// for secure fields.
-    MessagesGuarded,
     TerminalUnicode,
     Refuse(String),
 }
 
-/// `messages_host`: Apple Messages (`decide::messages::unreadable_value_allowed`).
-/// Messages ignores AXSelectedText sets while reporting success whether or not
-/// its AXValue is readable (empty composer: unreadable; after text: readable),
-/// so it ALWAYS takes the guarded Messages flow.
-pub fn choose_insert_path(
-    validated: &TargetSnapshotDto,
-    value_readable: bool,
-    messages_host: bool,
-) -> InsertPath {
+pub fn choose_insert_path(validated: &TargetSnapshotDto, value_readable: bool) -> InsertPath {
     if !validated.insertable || validated.kind != "insertable" {
         return InsertPath::Refuse(format!(
             "refusing insert: {}",
@@ -49,16 +37,8 @@ pub fn choose_insert_path(
                 .unwrap_or_else(|| validated.kind.clone())
         ));
     }
-    // The secure-field guard is absolute and checked first, independently.
-    let role = validated.element_role.as_deref().unwrap_or_default();
-    if validated.kind == "secure" || role == "AXSecureTextField" {
-        return InsertPath::Refuse("secure field — insert skipped".into());
-    }
-    if messages_host {
-        return InsertPath::MessagesGuarded;
-    }
-    // Without a readable value we cannot prove the exact text landed
-    // (BUS-14; docs/decisions/unreadable-axvalue.md).
+    // A readable value is needed to prove the text actually landed; without
+    // it we refuse before mutating anything (no double insert).
     if !value_readable {
         return InsertPath::Refuse("AXValue unreadable before insert — insert skipped".into());
     }

@@ -2,8 +2,6 @@
 //! The macOS adapter gathers AX facts and delegates every policy choice here.
 
 pub mod host;
-pub mod length;
-pub mod messages;
 pub mod report;
 pub mod retry;
 pub mod target;

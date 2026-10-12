@@ -83,27 +83,3 @@ pub fn frontmost_pid() -> Option<i32> {
         }
     })
 }
-
-/// Bundle identifier of a running process (NSRunningApplication), if any.
-pub fn bundle_id(pid: i32) -> Option<String> {
-    use objc2::{class, msg_send, runtime::AnyObject};
-    objc2::rc::autoreleasepool(|_| unsafe {
-        let app: *mut AnyObject = msg_send![
-            class!(NSRunningApplication),
-            runningApplicationWithProcessIdentifier: pid
-        ];
-        if app.is_null() {
-            return None;
-        }
-        let id: *mut AnyObject = msg_send![app, bundleIdentifier];
-        if id.is_null() {
-            return None;
-        }
-        let utf8: *const std::ffi::c_char = msg_send![id, UTF8String];
-        (!utf8.is_null()).then(|| {
-            std::ffi::CStr::from_ptr(utf8)
-                .to_string_lossy()
-                .into_owned()
-        })
-    })
-}
