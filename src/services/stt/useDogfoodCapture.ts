@@ -6,6 +6,7 @@
 /// Never silent-downloads missing models — surfaces a clear UI error instead.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { OverlayResult } from '../shortcut/overlayVisibility';
 
 import { createDogfoodRecord } from '../../domain/records';
 import type { DictationRecord, WritingStyle } from '../../domain/types';
@@ -75,12 +76,21 @@ export interface UseDogfoodCaptureResult {
   captureState: CaptureState;
   /** Completion-time target (null until final transcription / if unavailable). */
   intendedTarget: TargetSnapshot | null;
+  /** HUD result of the last run: Copied / Couldn't insert / Couldn't transcribe; null shows nothing. */
+  hudResult: OverlayResult | null;
   message: string | null;
   origin: 'home' | 'gesture' | null;
   phase: DogfoodPhase;
   start: (origin?: 'home' | 'gesture') => Promise<void>;
   stop: () => Promise<void>;
   transcript: Transcript | null;
+}
+
+/** HUD rules 3–6: only Copied and a failed insert show anything after delivery. */
+export function hudResultFor(status: string): OverlayResult | null {
+  if (status === 'copied') return 'copied';
+  if (status === 'failed') return 'insert-failed';
+  return null; // inserted, unverified (toast + History only)
 }
 
 function errorText(error: unknown): string {
@@ -125,6 +135,7 @@ export function useDogfoodCapture(
   const capture = options.captureApi ?? liveCapture;
 
   const [phase, setPhase] = useState<DogfoodPhase>('idle');
+  const [hudResult, setHudResult] = useState<OverlayResult | null>(null);
   const [origin, setOrigin] = useState<'home' | 'gesture' | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<Transcript | null>(null);
@@ -210,6 +221,7 @@ export function useDogfoodCapture(
       });
       if (current()) {
         setTranscript(result.transcript);
+        setHudResult(hudResultFor(result.delivery.status));
         setPhase('success');
       }
       const record = createDogfoodRecord({
@@ -230,6 +242,7 @@ export function useDogfoodCapture(
       else toastRef.current?.(result.delivery.message);
     } catch (error: unknown) {
       if (current()) {
+        setHudResult('transcribe-failed');
         setPhase('error');
         announce(errorText(error));
       } else {
@@ -269,6 +282,7 @@ export function useDogfoodCapture(
     setOrigin(source);
     const superseded = () => session !== sessionRef.current;
     setTranscript(null);
+    setHudResult(null);
     setMessage(null);
     handledAudioIdRef.current = null;
     stopRequestedRef.current = false;
@@ -352,6 +366,7 @@ export function useDogfoodCapture(
     intendedTarget,
     message,
     origin,
+    hudResult,
     phase,
     start,
     stop,

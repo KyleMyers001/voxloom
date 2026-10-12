@@ -1,0 +1,57 @@
+/* HUD (UI PR 8, SPEC § HUD behavior rules; mocks hud.html, hud-transcribing.html).
+   The HUD is the same dark pill on any wallpaper, so it doesn't follow the app theme. */
+.recording--overlay[data-waveform="processing"] { border-color: color-mix(in srgb, #3cf0ff 45%, transparent); }
+
+/* Option A: the bars settle into an even row; the gradient shimmers and pulses (1.6 s). */
+.hud-transcribing {
+  height: 14px;
+  -webkit-mask: repeating-linear-gradient(90deg, #000 0 2px, transparent 2px 3.5px);
+  mask: repeating-linear-gradient(90deg, #000 0 2px, transparent 2px 3.5px);
+  position: relative;
+  width: 60px;
+}
+
+.hud-transcribing i {
+  animation: hud-shimmer 1.6s linear infinite, hud-pulse 1.6s ease-in-out infinite;
+  background: linear-gradient(90deg, #b6ff3c, #3cf0ff, #b6ff3c, #3cf0ff);
+  background-size: 200% 100%;
+  border-radius: 2px;
+  height: 6px;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 4px;
+}
+
+@keyframes hud-shimmer { to { background-position: -200% 0; } }
+@keyframes hud-pulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+@keyframes hud-breathe { 0%, 100% { opacity: .6; } 50% { opacity: .9; } }
+
+/* Reduce Motion: no shimmer, a slow 3 s opacity breathe. */
+@media (prefers-reduced-motion: reduce) {
+  .hud-transcribing i { animation: hud-breathe 3s ease-in-out infinite; }
+}
+
+/* Result states: Copied ~1.5 s, failure ~2.5 s (timed by overlayBridge). */
+.hud-result {
+  align-items: center;
+  background: #0e0e14;
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 1px rgba(182, 255, 60, .35), 0 0 0 .5px rgba(0, 0, 0, .6), 0 0 18px rgba(60, 240, 255, .14);
+  color: #ececf1;
+  display: flex;
+  font-size: 12.5px;
+  font-weight: 600;
+  gap: 7px;
+  height: 30px;
+  left: 50%;
+  padding: 0 14px;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+}
+
+.hud-result--copied .icon { color: #b6ff3c; }
+.hud-result--failed { box-shadow: inset 0 0 0 1px rgba(255, 107, 107, .5), 0 0 0 .5px rgba(0, 0, 0, .6); }
+.hud-result--failed .icon { color: #ff6b6b; }

@@ -1,4 +1,5 @@
 import { isTauri } from '@tauri-apps/api/core';
+import type { OverlayResult } from '../services/shortcut/overlayVisibility';
 import { useEffect, useRef } from 'react';
 import { hasOpenModal, subscribeModal } from './modalState';
 import type { AppState } from './state';
@@ -43,6 +44,8 @@ import type {
  */
 export interface GestureDogfoodBridge {
   cancel: () => void;
+  /** Result HUD for the finished run (Copied / failure); null or absent shows nothing. */
+  hudResult?: OverlayResult | null;
   origin?: 'home' | 'gesture' | null;
   phase: DogfoodPhase;
   start: () => Promise<void>;
@@ -289,10 +292,16 @@ export function useShortcutGestures(options: GestureOptions) {
     if (phase === guard.seen) return;
     guard.seen = phase;
     if (!isDogfoodTerminal(phase)) return;
+    const { hudResult, origin } = optionsRef.current.dogfood;
+    // HUD rules 3–6: Copied / failure flash briefly for gesture runs (the
+    // bridge holds off the teardown hide); everything else hides at once.
+    const overlay = overlayRef.current;
+    if (overlay && origin === 'gesture' && hudResult && phase !== 'cancelled') {
+      void overlay.showResult(hudResult);
+    }
     tearDownOverlayDictation(optionsRef.current);
     // Force hide even if cancel no-ops (runId race) or React dictation
     // commit lags — overlay sync to a non-visible kind.
-    const overlay = overlayRef.current;
     if (overlay) {
       void overlay.sync({ kind: 'ready' });
     }
@@ -381,6 +390,7 @@ export function toGestureDogfoodBridge(
 ): GestureDogfoodBridge {
   return {
     cancel: dogfood.cancel,
+    hudResult: dogfood.hudResult,
     origin: dogfood.origin,
     phase: dogfood.phase,
     start: () => dogfood.start('gesture'),
