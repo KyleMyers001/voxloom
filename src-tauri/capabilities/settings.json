@@ -1,10 +1,27 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "settings",
-  "description": "Settings window: listen for settings/capture/STT events; app commands (settings_save, capture_*, stt_*) are app-level.",
-  "windows": ["settings"],
+  "description": "Settings window: settings.json, model list/download/cancel, and the microphone test (capture_*). Not allowed: stt_transcribe, delivery_*, history_*, dictionary_*, hold_release_*, overlay_*.",
+  "windows": [
+    "settings"
+  ],
   "permissions": [
     "core:event:allow-listen",
-    "core:event:allow-unlisten"
+    "core:event:allow-unlisten",
+    "allow-settings-load",
+    "allow-settings-save",
+    "allow-settings-window-open",
+    "allow-settings-request-onboarding",
+    "allow-capture-query-permission",
+    "allow-capture-request-permission",
+    "allow-capture-list-devices",
+    "allow-capture-start",
+    "allow-capture-stop",
+    "allow-capture-status",
+    "allow-capture-cancel",
+    "allow-stt-list-models",
+    "allow-stt-model-status",
+    "allow-stt-download-model",
+    "allow-stt-cancel-download"
   ]
 }
