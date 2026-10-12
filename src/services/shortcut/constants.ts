@@ -6,7 +6,7 @@ export const OVERLAY_WINDOW_LABEL = 'dictation-overlay';
 export const OVERLAY_WIDTH = 142;
 export const OVERLAY_HEIGHT = 28;
 export const OVERLAY_BOTTOM_MARGIN = 28;
-/** Result HUD ("Copied. Press ⌘V to paste" / short error) needs a wider window. */
+/** Result HUD ("Copied · ⌘V to paste" / short error) needs a wider window. */
 export const OVERLAY_RESULT_WIDTH = 248;
 export const OVERLAY_RESULT_HEIGHT = 40;
 
