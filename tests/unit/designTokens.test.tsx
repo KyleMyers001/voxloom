@@ -59,6 +59,10 @@ describe('Switch styling (UI PR 2)', () => {
     // Per-theme literal values so each theme resolves its own track (no :root-only var() mixing).
     expect(tokens).toMatch(/:root \{[^}]*--switch-off: #66667a;/);
     expect(tokens).toMatch(/\[data-appearance-resolved="light"\] \{[^}]*--switch-off: #808389;/);
+    // Designer: solid ON track in light only; dark keeps the brand gradient.
+    expect(tokens).toMatch(/\[data-appearance-resolved="light"\] \{[^}]*--switch-on: #4c8a00;/);
+    expect(tokens).not.toMatch(/:root \{[^}]*--switch-on:/);
+    expect(controls).toMatch(/\.switch\.on i \{[^}]*background: var\(--switch-on, var\(--brand\)\)/);
     expect(tokens).toMatch(/\[data-appearance-resolved="sodium-rain"\] \{[^}]*--switch-off: #7a909a;/);
   });
 });

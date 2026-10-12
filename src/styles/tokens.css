@@ -59,6 +59,7 @@
 }
 
 [data-appearance-resolved="light"] {
+  --switch-on: #4c8a00; /* solid ON track (designer): 3.81 side, 3.84 field, 4.10 bg, 4.25 panel; white knob 4.25 */
   color-scheme: light;
   --bg: #fbfbf8;
   --side: #f2f3ee;
