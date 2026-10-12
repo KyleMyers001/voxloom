@@ -12,6 +12,7 @@ import type { DictationRecord } from '../../src/domain/types';
 import {
   createHistoryStore,
   createMemoryHistoryIo,
+  serializeHistoryFile,
   type HistoryStore,
 } from '../../src/services/history';
 import {
@@ -149,5 +150,45 @@ describe('BUS-45 dictations made before history hydrate', () => {
     );
     expect(api!.state.historyError).toMatch(/read-only/);
     expect(io.snapshot()).toBe(V2);
+  });
+
+  it('marks history hydrated after booting with an unreadable history file', async () => {
+    const io = createMemoryHistoryIo('{not json');
+    boot(createHistoryStore(io));
+    await waitFor(() => expect(api?.bootReady).toBe(true));
+    await settle();
+    expect(api!.state.historyHydrated).toBe(true);
+    expect(api!.state.historyError).not.toBeNull();
+  });
+
+  it('keeps early rows and prunes an old loaded row under 30-day retention', async () => {
+    const DAY = 24 * 60 * 60 * 1000;
+    const old = { ...early, createdAt: NOW - 400 * DAY, id: 'old-400d' };
+    const recent = { ...early, createdAt: NOW - DAY, id: 'recent-1d' };
+    const io = createMemoryHistoryIo(serializeHistoryFile([recent, old]));
+    const gated = gatedStore(createHistoryStore(io));
+    boot(
+      gated.store,
+      createMemorySettingsIo(serializeSettingsFile(
+        { ...initialSettings, transcriptRetention: '30-days' },
+        true,
+      )),
+    );
+    await settle();
+
+    const early2 = { ...early, id: 'before-hydrate-2' };
+    act(() => api!.dispatch({ record: early, type: 'append-record' }));
+    act(() => api!.dispatch({ record: early2, type: 'append-record' }));
+    await act(async () => gated.release());
+    await waitFor(() => expect(api?.bootReady).toBe(true));
+
+    expect(api!.state.records.map((r) => r.id)).toEqual(
+      ['before-hydrate-2', 'before-hydrate', 'recent-1d'],
+    );
+    await waitFor(() => expect(io.snapshot() ?? '').toContain('before-hydrate-2'));
+    const disk = JSON.parse(io.snapshot()!) as { records: { id: string }[] };
+    expect(disk.records.map((r) => r.id).sort()).toEqual(
+      ['before-hydrate', 'before-hydrate-2', 'recent-1d'],
+    );
   });
 });
