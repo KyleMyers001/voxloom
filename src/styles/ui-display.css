@@ -1,0 +1,108 @@
+/* Shared display components (UI PR 2): badge, banner, empty state, progress, form row. */
+.badge {
+  border-radius: var(--r-pill);
+  display: inline-block;
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 1px 7px;
+}
+
+.badge--inserted,
+.badge--available { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.badge--copied,
+.badge--downloading { background: color-mix(in srgb, var(--info) 16%, transparent); color: var(--info); }
+.badge--failed { background: color-mix(in srgb, var(--err) 15%, transparent); color: var(--err); }
+.badge--unverified,
+.badge--missing { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+
+.banner {
+  align-items: center;
+  border-radius: var(--r-tile);
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.banner > :last-child:not(.banner__text) { margin-left: auto; }
+.banner--info { background: color-mix(in srgb, var(--info) 12%, transparent); color: var(--info); }
+.banner--ok { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); }
+.banner--warn { background: color-mix(in srgb, var(--warn) 13%, transparent); color: var(--warn); }
+.banner--error { background: color-mix(in srgb, var(--err) 13%, transparent); color: var(--err); }
+
+.empty {
+  align-items: center;
+  color: var(--mut);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 40px 10px;
+  text-align: center;
+}
+
+.empty b { color: var(--fg); font-size: 14px; }
+
+.empty--sm {
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  flex-direction: row;
+  font-size: 12px;
+  padding: 14px;
+}
+
+.empty--sm b { font-size: 12px; }
+
+.prog {
+  color: var(--mut);
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+  gap: 3px;
+  width: 150px;
+}
+
+.bar {
+  background: var(--seg);
+  border-radius: var(--r-tile);
+  height: 5px;
+  overflow: hidden;
+}
+
+.bar i {
+  background: var(--brand);
+  display: block;
+  height: 100%;
+  transition: width 200ms ease;
+}
+
+.frow {
+  align-items: center;
+  background: var(--field);
+  border-radius: var(--r-tile);
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 10px 12px;
+}
+
+.frow__label { display: grid; gap: 2px; }
+
+.frow__label > label {
+  color: var(--fg);
+  font-size: var(--fs-body);
+  font-weight: 550;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.frow__help { color: var(--mut); font-size: var(--fs-caption); }
+
+.tag {
+  background: var(--tag-bg);
+  border-radius: var(--r-pill);
+  color: var(--tag-fg);
+  font-size: 10.5px;
+  justify-self: start;
+  padding: 1px 7px;
+}

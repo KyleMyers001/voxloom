@@ -21,6 +21,12 @@
   --err: #ff6b6b;
   --brand: linear-gradient(90deg, #b6ff3c, #3cf0ff);
   --on-brand: #08080c;
+  --knob: #ffffff; /* switch knob, both themes */
+  --focus: color-mix(in srgb, #b6ff3c 42%, transparent); /* dark focus ring */
+  --tag-bg: #2c2c3a; /* visible pill on dark panels (1.36:1 vs panel) */
+  --tag-fg: #9a9aa8; /* 4.95:1 on --tag-bg */
+  /* Switch off track: >=3:1 vs bg 3.5, panel 3.33, sheet 3.27, field 3.08, side 3.43; knob on it 5.61 */
+  --switch-off: #66667a;
 
   --r-kbd: 5px;
   --r-ctl: 7px;
@@ -56,6 +62,10 @@
 }
 
 [data-appearance-resolved="light"] {
+  --focus: #376b00; /* solid light focus ring: 5.25 seg, 5.77 side, 5.82 field, 6.2 bg, 6.43 panel (was 42% lime, ~1.9:1) */
+  --tag-bg: var(--seg);
+  --tag-fg: var(--mut);
+  --switch-on: #4c8a00; /* solid ON track (designer): 3.81 side, 3.84 field, 4.10 bg, 4.25 panel; white knob 4.25 */
   color-scheme: light;
   --bg: #fbfbf8;
   --side: #f2f3ee;
@@ -75,6 +85,8 @@
   --warn: #945600; /* AA: 4.77 seg, 4.8 navon, 5.29 field, 5.64 bg, 5.85 panel */
   --err: #bf2c32; /* AA: 4.73 seg, 4.76 navon, 5.25 field, 5.59 bg, 5.8 panel */
   --accent-text: #ffffff;
+  /* >=3:1 vs bg 3.67, panel 3.8, field 3.44, side 3.41; white knob on it 3.8 */
+  --switch-off: #808389;
 }
 
 /* Sodium Rain is dropped; its removal is PR 10 (approved, comes later). */
@@ -95,6 +107,7 @@
   --info: #79b8c9;
   --err: #ff9b9b;
   --action: #8a6500;
+  --switch-off: #7a909a; /* 4.05+ vs surfaces; knob 3.34 */
   --accent-text: #ffffff;
 }
 

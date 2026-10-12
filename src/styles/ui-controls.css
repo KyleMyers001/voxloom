@@ -1,0 +1,130 @@
+/* Shared controls (UI PR 2): segmented control, switch, icon button, search, key caps. */
+.icon { flex: none; }
+
+.seg {
+  background: var(--seg);
+  border-radius: 8px;
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+}
+
+.seg__item {
+  border: 0;
+  border-radius: 6px;
+  color: var(--fg);
+  font-weight: 500;
+  min-height: 0;
+  padding: 4px 12px;
+}
+
+.seg__item.on {
+  background: var(--segon);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .15);
+}
+
+.seg--sm .seg__item { font-size: 12px; padding: 3px 10px; }
+
+.switch {
+  align-items: center;
+  border: 0;
+  display: inline-flex;
+  gap: 8px;
+  padding: 0;
+}
+
+.switch i {
+  background: var(--switch-off);
+  border-radius: var(--r-pill);
+  box-shadow: inset 0 0 0 1px var(--line);
+  flex: none;
+  height: 20px;
+  position: relative;
+  transition: background 140ms ease;
+  width: 34px;
+}
+
+.switch i::after {
+  background: var(--knob);
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .3);
+  content: "";
+  height: 16px;
+  left: 2px;
+  position: absolute;
+  top: 2px;
+  transition: left 140ms ease;
+  width: 16px;
+}
+
+.switch.on i { background: var(--switch-on, var(--brand)); box-shadow: none; }
+.switch.on i::after { left: 16px; }
+/* Disabled ON: the brand gradient, dimmed by the shared disabled opacity (not the olive solid). */
+.switch.on:disabled i { background: var(--brand); }
+
+.ib {
+  border: 0;
+  border-radius: var(--r-ctl);
+  color: var(--mut);
+  display: inline-grid;
+  height: 28px;
+  padding: 0;
+  place-items: center;
+  width: 28px;
+}
+
+.ib:hover,
+.ib:focus-visible { background: var(--navon); color: var(--fg); }
+.ib--danger:hover,
+.ib--danger:focus-visible { color: var(--err); }
+
+.search {
+  align-items: center;
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--mut);
+  display: flex;
+  flex: 1;
+  font-size: inherit;
+  font-weight: 400;
+  gap: 8px;
+  height: 30px;
+  letter-spacing: 0;
+  padding: 0 10px;
+  text-transform: none;
+}
+
+.search input {
+  background: transparent;
+  border: 0;
+  color: var(--fg);
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.search:focus-within {
+  outline: 3px solid color-mix(in srgb, var(--accfg) 42%, transparent);
+  outline-offset: 2px;
+}
+
+.search input:focus-visible { outline: 0; }
+
+.key-combo { display: inline-flex; gap: 4px; }
+
+.kbd {
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: var(--r-kbd);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1;
+  min-width: 22px;
+  padding: 4px 6px;
+  text-align: center;
+}
