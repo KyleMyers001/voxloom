@@ -1,4 +1,5 @@
 import { Icon } from '../../components/Icon';
+import { isTauriEnv } from '../../services/capture/captureService';
 
 type Props = {
   settingsOpen: boolean;
@@ -6,11 +7,15 @@ type Props = {
   onHelp: (opener: HTMLElement) => void;
 };
 
-/** Window toolbar: Settings… ⌘, and the keyboard-shortcuts "?" button. */
+/**
+ * Window toolbar: Settings… ⌘, and the keyboard-shortcuts "?" button.
+ * The standard macOS title bar stays (designer), so the app name is only drawn
+ * in the browser preview; no overlay title bar or traffic-light inset.
+ */
 export function TitleBar({ settingsOpen, onSettings, onHelp }: Props) {
   return (
     <header className="titlebar">
-      <span className="titlebar__title">Voxloom</span>
+      {!isTauriEnv() && <span className="titlebar__title">Voxloom</span>}
       <button
         aria-current={settingsOpen ? 'page' : undefined}
         aria-label="Settings"
