@@ -67,7 +67,7 @@
   padding: var(--s-6) var(--s-7);
 }
 
-.callout p { color: var(--mut); font-size: 12px; margin: 4px 0 0; }
+.callout p { color: var(--fg); font-size: 12px; margin: 4px 0 0; }
 .settings-subhead { font-size: var(--fs-section); margin: var(--s-9) 0 var(--s-4); }
 .recovery-grid { display: grid; gap: var(--s-4); grid-template-columns: repeat(2, minmax(0, 1fr)); }
 

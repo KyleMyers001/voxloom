@@ -140,6 +140,21 @@ test('screens, settings, themes, and baselines stay synchronized', async (
     .toHaveAttribute('aria-checked', 'true');
 });
 
+test('every Settings tab passes axe in light and dark', async ({ page }) => {
+  await page.goto('/');
+  await skipOnboarding(page);
+  for (const theme of ['Light', 'Dark']) {
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await page.getByRole('tab', { name: 'Appearance' }).click();
+    await page.getByLabel(theme, { exact: true }).check();
+    for (const tab of ['Capture', 'Models', 'Appearance', 'Privacy']) {
+      await page.getByRole('tab', { name: tab }).click();
+      await expect(page.getByRole('tabpanel', { name: tab })).toBeVisible();
+      await expectAccessible(page);
+    }
+  }
+});
+
 test('dialogs, reduced motion, narrow and coarse layouts work', async (
   { browser, page },
 ) => {
