@@ -3,7 +3,7 @@
  * broadcasts the result so the Settings recorder announces success only once
  * the OS accepted the combo, and the honest failure otherwise.
  */
-import { emit, listen } from '@tauri-apps/api/event';
+import { listen } from '@tauri-apps/api/event';
 import { isTauri } from '@tauri-apps/api/core';
 
 export const SHORTCUT_BOUND_EVENT = 'shortcut:bound';
@@ -17,7 +17,10 @@ export interface ShortcutBoundPayload {
 
 export function emitShortcutBound(payload: ShortcutBoundPayload): void {
   if (!isTauri()) return;
-  void emit(SHORTCUT_BOUND_EVENT, payload).catch(() => {});
+  // Best-effort: a lost event only leaves the recorder on "Setting…".
+  void import('@tauri-apps/api/event')
+    .then(({ emit }) => emit(SHORTCUT_BOUND_EVENT, payload))
+    .catch(() => {});
 }
 
 export async function listenShortcutBound(
