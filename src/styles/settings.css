@@ -91,6 +91,7 @@
 .recovery-grid .recovery-item {
   align-items: flex-start;
   background: var(--field);
+  border: 0; /* the icon carries the warning, not the legacy red rule */
   border-radius: var(--r-tile);
   display: flex;
   font-size: 12px;
