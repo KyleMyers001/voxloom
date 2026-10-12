@@ -83,7 +83,8 @@ describe('light --ok on its 10% badge tint (review #43)', () => {
     const { readFileSync } = await import('node:fs');
     const light = readFileSync('src/styles/tokens.css', 'utf8').split('[data-appearance-resolved="light"]')[1];
     const ok = hex(/--ok: (#[0-9a-f]{6})/.exec(light)![1]);
-    for (const surface of ['#f3f4ef', '#fbfbf8', '#ffffff', '#e7e9e1']) {
+    // field, bg, panel, seg, navon (selected row)
+    for (const surface of ['#f3f4ef', '#fbfbf8', '#ffffff', '#e7e9e1', '#e7eadf']) {
       const s = hex(surface);
       const tint = s.map((c, i) => Math.round(0.1 * ok[i] + 0.9 * c));
       expect(ratio(ok, tint)).toBeGreaterThanOrEqual(4.5);
