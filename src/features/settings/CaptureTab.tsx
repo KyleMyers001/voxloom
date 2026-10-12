@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useApp } from '../../app/AppContext';
 import { KeyCombo } from '../../components/KeyCombo';
 import { SegmentedControl } from '../../components/SegmentedControl';
@@ -18,6 +19,7 @@ export function CaptureTab({ onSetup }: { onSetup: (opener: HTMLElement) => void
   const isNative = isTauriEnv();
   const update = settings.update;
 
+  const [editingShortcut, setEditingShortcut] = useState(false);
   return (
     <div className="settings-rows">
       <div className="frow">
@@ -28,10 +30,13 @@ export function CaptureTab({ onSetup }: { onSetup: (opener: HTMLElement) => void
           </small>
         </span>
         <span className="frow__control">
-          <KeyCombo combo={state.settings.shortcut} />
+          {/* One representation at a time: key caps hide while the raw text is edited. */}
+          {!editingShortcut && <KeyCombo combo={state.settings.shortcut} />}
           <input
             aria-describedby="settings-shortcut-help"
             id="settings-shortcut"
+            onBlur={() => setEditingShortcut(false)}
+            onFocus={() => setEditingShortcut(true)}
             onChange={(event) => update({ key: 'shortcut', value: event.target.value })}
             value={state.settings.shortcut}
           />
