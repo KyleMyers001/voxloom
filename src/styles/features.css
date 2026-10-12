@@ -70,7 +70,7 @@
 .appearance-swatch[data-preview="system"] {
   --preview-accent: #b6ff3c;
   --preview-border: #8b8b99;
-  --preview-surface: linear-gradient(90deg, #ffffff 50%, #121219 50%);
+  --preview-surface: transparent; /* let the split background show */
   background: linear-gradient(90deg, #fbfbf8 50%, #0b0b10 50%);
 }
 
