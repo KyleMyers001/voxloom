@@ -31,6 +31,7 @@ function parseRecord(value: unknown): DictationRecord | null {
     createdAt,
     durationSeconds,
     id,
+    mayHaveInserted,
     model,
     rawText,
     recoveryExpiresAt,
@@ -55,11 +56,15 @@ function parseRecord(value: unknown): DictationRecord | null {
   }
   if (typeof text !== 'string') return null;
   if (!(rawText === undefined || typeof rawText === 'string')) return null;
+  const maybe = isObject(mayHaveInserted) && typeof mayHaveInserted.copied === 'boolean'
+    ? { mayHaveInserted: { copied: mayHaveInserted.copied } }
+    : {};
   return {
     createdAt,
     durationSeconds,
     id,
     model,
+    ...maybe,
     ...(rawText === undefined ? {} : { rawText }),
     recoveryExpiresAt,
     status: status as HistoryStatus,

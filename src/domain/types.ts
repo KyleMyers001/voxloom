@@ -14,6 +14,11 @@ export interface DictationRecord {
    * Lives in the same row, so transcript retention applies to it too.
    */
   rawText?: string;
+  /**
+   * Set with status `unverified` when delivery could not tell whether the
+   * text landed (Review #44): `copied` says whether it was also copied.
+   */
+  mayHaveInserted?: { copied: boolean };
   recoveryExpiresAt: number | null;
   status: HistoryStatus;
   style: WritingStyle;
