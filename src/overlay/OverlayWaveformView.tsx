@@ -19,8 +19,6 @@ export function resultText(result: OverlayResult | null, mac = isMacPlatform()):
   switch (result) {
     case 'copied': return `Copied. Press ${paste} to paste`;
     case 'maybe-copied': return 'Maybe inserted · copied';
-    case 'maybe-inserted': return 'Maybe inserted · check field';
-    case 'unverified': return 'Not verified';
     case 'insert-failed': return 'Couldn’t insert';
     default: return 'Couldn’t transcribe';
   }
@@ -30,8 +28,6 @@ export function resultText(result: OverlayResult | null, mac = isMacPlatform()):
 export function spokenResultText(result: OverlayResult | null, mac = isMacPlatform()): string {
   const paste = mac ? 'Command V' : 'Control V';
   if (result === 'maybe-copied') return `May have been inserted; also copied. If it's missing, press ${paste} to paste.`;
-  if (result === 'maybe-inserted') return 'May have been inserted; check the field. Nothing was copied.';
-  if (result === 'unverified') return 'Sent, but not verified.';
   return resultText(result, mac);
 }
 
@@ -40,7 +36,7 @@ const isResult = (w: OverlayWaveform) => w.startsWith('result-');
 /**
  * Non-focusable desktop HUD (SPEC § HUD behavior rules). Listening: waveform
  * only. Transcribing: Option A (pulsing, shimmering lime→cyan bar row; slow
- * breathe under Reduce Motion). Results: a brief Copied / unverified / error.
+ * breathe under Reduce Motion). Results: a brief Copied / maybe-copied / error.
  * One permanent role=status node announces "Transcribing" and results.
  */
 export function OverlayWaveformView({ levels, waveform, result = null, mac = isMacPlatform() }: Props) {
@@ -52,7 +48,7 @@ export function OverlayWaveformView({ levels, waveform, result = null, mac = isM
       <div aria-atomic="true" className="sr-only" role="status">{spoken}</div>
       {isResult(waveform) ? (
         <div aria-hidden="true" className={`hud-result hud-result--${kind}`} data-waveform={waveform}>
-          <Icon name={kind === 'copied' || result === 'maybe-copied' ? 'copy' : kind === 'unverified' ? 'info' : 'warn'} size={14} />
+          <Icon name={kind === 'failed' ? 'warn' : 'copy'} size={14} />
           <span>{text}</span>
         </div>
       ) : (

@@ -5,8 +5,6 @@ const texts = [
   'Copied. Press ⌘V to paste',
   'Copied. Press Ctrl+V to paste',
   'Maybe inserted · copied',
-  'Maybe inserted · check field',
-  'Not verified',
   'Couldn’t transcribe',
   'Couldn’t insert',
 ];

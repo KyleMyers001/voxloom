@@ -17,14 +17,11 @@ export type OverlayWaveform =
 /**
  * What the HUD shows after a gesture run. Inserted and cancelled show nothing.
  * `maybe-copied`: the write could not be confirmed and the text was also copied.
- * `maybe-inserted`: the write could not be confirmed and nothing was copied.
- * `unverified`: sent to Terminal, not confirmed and not copied.
+ * Unverified and may-have-inserted-without-copy dismiss silently (no result).
  */
 export type OverlayResult =
   | 'copied'
   | 'maybe-copied'
-  | 'maybe-inserted'
-  | 'unverified'
   | 'insert-failed'
   | 'transcribe-failed';
 
@@ -33,15 +30,13 @@ export const RESULT_HOLD_MS: Record<OverlayResult, number> = {
   copied: 2500,
   'insert-failed': 2500,
   'maybe-copied': 2500,
-  'maybe-inserted': 2500,
   'transcribe-failed': 2500,
-  unverified: 2500,
 };
 
 export function resultWaveform(result: OverlayResult): OverlayWaveform {
   if (result === 'copied') return 'result-copied';
-  // Uncertain outcomes share the amber style.
-  if (result === 'maybe-copied' || result === 'maybe-inserted' || result === 'unverified') return 'result-unverified';
+  // The uncertain outcome (maybe inserted, also copied) is amber.
+  if (result === 'maybe-copied') return 'result-unverified';
   return 'result-failed';
 }
 

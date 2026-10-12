@@ -87,14 +87,18 @@ export interface UseDogfoodCaptureResult {
   transcript: Transcript | null;
 }
 
-/** HUD rules 3–6: only Copied and a failed insert show anything after delivery. */
+/**
+ * HUD rules 3–6: only Copied (or maybe-copied) and a definite failure show
+ * anything after delivery. Unverified and "may have been inserted, nothing
+ * copied" dismiss silently like a success (Kyle); History keeps the
+ * Unverified badge.
+ */
 export function hudResultFor(
   { mayHaveInserted = false, status }: Pick<DeliveryOutcome, 'mayHaveInserted' | 'status'>,
 ): OverlayResult | null {
   if (status === 'copied') return mayHaveInserted ? 'maybe-copied' : 'copied';
-  if (status === 'failed') return mayHaveInserted ? 'maybe-inserted' : 'insert-failed';
-  if (status === 'unverified') return 'unverified';
-  return null; // inserted: silent dismiss
+  if (status === 'failed') return mayHaveInserted ? null : 'insert-failed';
+  return null; // inserted, unverified, or may-have-inserted: silent dismiss
 }
 
 function errorText(error: unknown): string {
