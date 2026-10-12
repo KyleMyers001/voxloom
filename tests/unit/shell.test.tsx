@@ -73,9 +73,24 @@ describe('App shell (UI PR 3)', () => {
     select.remove();
   });
 
+  it('⌥-digits still navigate from non-text inputs (radio, checkbox)', async () => {
+    await renderShell();
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    document.body.append(radio, checkbox);
+    fireEvent.keyDown(radio, { altKey: true, code: 'Digit2', key: '™' });
+    expect(current()).toBe('History');
+    fireEvent.keyDown(checkbox, { altKey: true, code: 'Digit3', key: '£' });
+    expect(current()).toBe('Dictionary');
+    radio.remove();
+    checkbox.remove();
+  });
+
   it('⌥2 still navigates while a SegmentedControl radio or a Switch has focus', async () => {
     const user = await renderShell();
-    const casual = screen.getByRole('radio', { exact: true, name: 'Casual' });
+    const casual = screen.getByRole('radio', { name: /^Casual$/ });
     casual.focus();
     await user.keyboard('{Alt>}2{/Alt}');
     expect(current()).toBe('History');
