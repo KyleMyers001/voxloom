@@ -3,7 +3,7 @@
   font-family: var(--font);
 }
 
-/* Body text is 13px per spec; set on body so 1rem stays 16px. */
+/* Body text uses --fs-body (type scale); set on body so 1rem stays 16px. */
 body {
   font-size: var(--fs-body);
   line-height: var(--lh-body);

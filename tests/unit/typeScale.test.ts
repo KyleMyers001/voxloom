@@ -1,9 +1,24 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const dir = join(__dirname, '../../src/styles');
 const css = (name: string) => readFileSync(join(dir, name), 'utf8');
+const walk = (d: string): string[] => readdirSync(d, { withFileTypes: true }).flatMap((e) =>
+  e.isDirectory() ? walk(join(d, e.name)) : e.name.endsWith('.css') ? [join(d, e.name)] : []);
+// font-size or the font shorthand with any literal length (px, rem, em, pt).
+const LITERAL = /font(?:-size)?\s*:[^;}]*\b\d*\.?\d+(px|rem|em|pt)\b/;
+/** [selector, declaration] pairs that set a literal font size. */
+export function literalFontSizes(source: string): [string, string][] {
+  const out: [string, string][] = [];
+  const text = source.replace(/\/\*[\s\S]*?\*\//g, '');
+  for (const m of text.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    for (const decl of m[2].split(';')) {
+      if (LITERAL.test(decl)) out.push([m[1].trim(), decl.trim()]);
+    }
+  }
+  return out;
+}
 
 describe('BUS-41 type scale tokens', () => {
   it('defines each size as windowed (≤1280px) growing linearly to fullscreen (≥1920px)', () => {
@@ -34,11 +49,28 @@ describe('BUS-41 type scale tokens', () => {
   });
 
   it('uses tokens instead of hard-coded font sizes (the HUD keeps its own)', () => {
-    for (const f of readdirSync(dir).filter((n) => !['hud.css', 'tokens.css'].includes(n))) {
-      const sizes = css(f).match(/font-size: \d[^;]*;/g) ?? [];
-      // .modal-close's 22px is the close glyph, not text.
-      expect(sizes.filter((s) => s !== 'font-size: 22px;'), f).toEqual([]);
+    const src = join(__dirname, '../../src');
+    const files = walk(src).filter(
+      (p) => !['styles/hud.css', 'styles/tokens.css'].includes(relative(src, p).split('\\').join('/')),
+    );
+    expect(files.length).toBeGreaterThan(10);
+    for (const f of files) {
+      const hits = literalFontSizes(readFileSync(f, 'utf8'))
+        // .modal-close's 22px is the close glyph, not text.
+        .filter(([sel, decl]) => !(sel === '.modal-close' && decl === 'font-size: 22px'));
+      expect(hits, f).toEqual([]);
     }
+  });
+
+  it('catches the ways around the guard', () => {
+    for (const bad of ['a{font-size:13px}', 'a { font: 600 13px/1.2 x; }', 'a{font-size: .8rem}',
+      'a{font-size:1em}', 'a{font-size:10pt}', '.other{font-size: 22px;}']) {
+      expect(literalFontSizes(bad), bad).not.toEqual([]);
+    }
+    expect(literalFontSizes('a{font-size: var(--fs-body); font: inherit}')).toEqual([]);
+  });
+
+  it('keeps the HUD on its own size', () => {
     expect(css('hud.css')).toContain('font-size: 12.5px;');
     expect(css('hud.css')).not.toContain('var(--fs-');
   });
