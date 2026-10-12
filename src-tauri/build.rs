@@ -26,6 +26,7 @@ const COMMANDS: &[&str] = &[
     "settings_request_onboarding",
     "settings_save",
     "settings_window_open",
+    "store_backup",
     "stt_cancel_download",
     "stt_download_model",
     "stt_list_models",

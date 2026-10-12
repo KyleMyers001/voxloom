@@ -36,7 +36,7 @@ describe('parseHistoryJson', () => {
 
   it('round-trips the may-have-inserted flag on Unverified rows (Review #44)', () => {
     const row = sample({ mayHaveInserted: { copied: true }, status: 'unverified' });
-    expect(parseHistoryJson(serializeHistoryFile([row]))).toEqual({ file: { records: [row], version: 1 }, ok: true });
+    expect(parseHistoryJson(serializeHistoryFile([row]))).toEqual({ file: { records: [row], version: 1 }, ok: true, sourceVersion: 1 });
   });
 
   it('applies transcript retention to rows carrying rawText', () => {
