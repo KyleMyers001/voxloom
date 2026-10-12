@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { IconButton } from '../../../src/components/IconButton';
-import { comboKeys, KeyCombo } from '../../../src/components/KeyCombo';
+import { comboKeys, isMacPlatform, KeyCombo } from '../../../src/components/KeyCombo';
 import { SearchField } from '../../../src/components/SearchField';
 import { SegmentedControl } from '../../../src/components/SegmentedControl';
 import { Switch } from '../../../src/components/Switch';
@@ -128,5 +128,33 @@ describe('SearchField', () => {
     expect(box.value).toBe('notes');
     await user.keyboard('{Escape}');
     expect(box.value).toBe('');
+  });
+});
+
+describe('isMacPlatform', () => {
+  function withNavigator(platform: string, userAgent: string, run: () => void) {
+    const p = vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform);
+    const u = vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(userAgent);
+    try { run(); } finally { p.mockRestore(); u.mockRestore(); }
+  }
+
+  it('detects macOS and iOS from navigator.platform', () => {
+    for (const platform of ['MacIntel', 'iPhone', 'iPad']) {
+      withNavigator(platform, '', () => expect(isMacPlatform()).toBe(true));
+    }
+  });
+
+  it('is false on Windows and Linux', () => {
+    withNavigator('Win32', 'Mozilla/5.0 (Windows NT 10.0)', () => expect(isMacPlatform()).toBe(false));
+    withNavigator('Linux x86_64', 'Mozilla/5.0 (X11; Linux x86_64)', () => expect(isMacPlatform()).toBe(false));
+  });
+
+  it('falls back to the user agent when platform is empty', () => {
+    withNavigator('', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)', () => expect(isMacPlatform()).toBe(true));
+  });
+
+  it('drives the CommandOrControl key cap', () => {
+    withNavigator('MacIntel', '', () => expect(comboKeys('CommandOrControl+,')).toEqual(['⌘', ',']));
+    withNavigator('Win32', '', () => expect(comboKeys('CommandOrControl+,')).toEqual(['Ctrl', ',']));
   });
 });
