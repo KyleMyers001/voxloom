@@ -90,6 +90,11 @@ mod tests {
     #[test]
     fn unreadable_folder_is_an_error_not_first_launch() {
         use std::os::unix::fs::PermissionsExt;
+        // Root ignores permission bits, so the case cannot be set up.
+        let uid = std::process::Command::new("id").arg("-u").output();
+        if uid.map(|o| o.stdout.starts_with(b"0\n")).unwrap_or(false) {
+            return;
+        }
         let dir = temp_dir("perm");
         let inner = dir.join("app");
         fs::create_dir_all(&inner).unwrap();
@@ -97,12 +102,8 @@ mod tests {
         fs::write(&path, "{}").unwrap();
         fs::set_permissions(&inner, fs::Permissions::from_mode(0o000)).unwrap();
         let result = read_store(&path, "settings.json");
-        // Root ignores permission bits; only assert when access is denied.
-        let denied = fs::read(&path).is_err();
         fs::set_permissions(&inner, fs::Permissions::from_mode(0o755)).unwrap();
-        if denied {
-            assert!(result.is_err(), "{result:?}");
-        }
+        assert!(result.is_err(), "{result:?}");
         let _ = fs::remove_dir_all(&dir);
     }
 }

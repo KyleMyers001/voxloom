@@ -13,7 +13,15 @@ export type HistoryLoadResult =
   | { ok: true; records: DictationRecord[]; migratedFrom?: number }
   | { ok: false; error: string };
 
+/** Result of backing up history.json before a prune may run. */
+export type HistoryBackupResult = 'saved' | 'no-file' | 'failed';
+
 export interface HistoryStore {
+  /**
+   * Copy history.json aside (raw bytes, deduped). 'no-file' when there is
+   * nothing on disk to protect. Optional for custom stores: absent → failed.
+   */
+  backup?(): Promise<HistoryBackupResult>;
   /** Load durable records (honors retention). Missing file → empty ok. */
   load(
     retention: TranscriptRetention,
@@ -33,6 +41,14 @@ export interface HistoryStore {
 
 export function createHistoryStore(io: HistoryFileIo): HistoryStore {
   return {
+    async backup() {
+      if (!io.backup) return 'failed';
+      try {
+        return (await io.backup()) ? 'saved' : 'no-file';
+      } catch {
+        return 'failed';
+      }
+    },
     async load(retention, now) {
       let raw: string | null;
       try {

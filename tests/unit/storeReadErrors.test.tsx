@@ -11,8 +11,8 @@ import {
   createMemoryDictionaryIo,
   type DictionaryFileIo,
 } from '../../src/services/dictionary';
-import { createHistoryStore, createMemoryHistoryIo } from '../../src/services/history';
-import { createSettingsStore, type SettingsFileIo } from '../../src/services/settings';
+import { createHistoryStore, createMemoryHistoryIo, serializeHistoryFile } from '../../src/services/history';
+import { createMemorySettingsIo, createSettingsStore, type SettingsFileIo } from '../../src/services/settings';
 
 const V2 = readFileSync(join(__dirname, '../fixtures/history-v2.json'), 'utf8');
 const NOW = 1_800_000_000_000;
@@ -68,6 +68,113 @@ describe('store read errors (BUS-42)', () => {
       expect(historyIo.snapshot()).toBe(V2);
     });
   }
+
+  it('v1 history + settings read error with no backup: history is never written', async () => {
+    const settingsIo = failingIo('read settings.json: not a regular file');
+    const row = {
+      createdAt: NOW - 400 * 24 * 60 * 60 * 1000,
+      durationSeconds: 1,
+      id: 'old-forever',
+      model: null,
+      recoveryExpiresAt: null,
+      status: 'copied' as const,
+      style: 'formal' as const,
+      text: 'keep',
+    };
+    const v1 = serializeHistoryFile([row]);
+    const historyIo = createMemoryHistoryIo(v1);
+    api = null;
+    render(
+      <AppProvider
+        clock={() => NOW}
+        historyPersistence={{ enabled: true, store: createHistoryStore(historyIo) }}
+        settingsPersistence={{ enabled: true, store: createSettingsStore(settingsIo) }}
+      >
+        <Probe />
+      </AppProvider>,
+    );
+    await waitFor(() => expect(api?.bootReady).toBe(true));
+    await settle();
+    expect(api!.state.historyError).toMatch(/read-only until settings/);
+    act(() => api!.dispatch({ record: { ...row, createdAt: NOW, id: 'new' }, type: 'append-record' }));
+    await settle();
+    expect(historyIo.snapshot()).toBe(v1);
+    expect(settingsIo.writes).toEqual([]);
+  });
+
+  it('settings reset: history.json is backed up byte-identical before any prune', async () => {
+    // Corrupt settings with a working backup → reset to defaults (30-day).
+    const settingsIo = createMemorySettingsIo('{corrupt');
+    const row = {
+      createdAt: NOW - 400 * 24 * 60 * 60 * 1000,
+      durationSeconds: 1,
+      id: 'old-forever',
+      model: null,
+      recoveryExpiresAt: null,
+      status: 'copied' as const,
+      style: 'formal' as const,
+      text: 'keep',
+    };
+    const v1 = serializeHistoryFile([row]);
+    const historyIo = createMemoryHistoryIo(v1);
+    const writes: string[] = [];
+    const watched = {
+      ...historyIo,
+      write: async (c: string) => {
+        // The backup must already exist when the first prune lands.
+        expect(historyIo.backups()).toEqual([v1]);
+        writes.push(c);
+        await historyIo.write(c);
+      },
+    };
+    api = null;
+    render(
+      <AppProvider
+        clock={() => NOW}
+        historyPersistence={{ enabled: true, store: createHistoryStore(watched) }}
+        settingsPersistence={{ enabled: true, store: createSettingsStore(settingsIo) }}
+      >
+        <Probe />
+      </AppProvider>,
+    );
+    await waitFor(() => expect(api?.bootReady).toBe(true));
+    await settle();
+    expect(api!.state.settingsError).toMatch(/reset to defaults/);
+    expect(api!.state.settings.transcriptRetention).not.toBe('forever');
+    expect(historyIo.backups()).toEqual([v1]);
+    act(() => api!.dispatch({ record: { ...row, createdAt: NOW, id: 'new' }, type: 'append-record' }));
+    await waitFor(() => expect(writes.length).toBeGreaterThan(0));
+    expect(historyIo.backups()).toEqual([v1]);
+  });
+
+  it('settings reset but history backup fails: history stays read-only', async () => {
+    const v1 = serializeHistoryFile([]);
+    const writes: string[] = [];
+    const io = {
+      backup: async () => { throw new Error('disk full'); },
+      read: async () => v1,
+      write: async (c: string) => { writes.push(c); },
+    };
+    api = null;
+    render(
+      <AppProvider
+        clock={() => NOW}
+        historyPersistence={{ enabled: true, store: createHistoryStore(io) }}
+        settingsPersistence={{ enabled: true, store: createSettingsStore(createMemorySettingsIo('{corrupt')) }}
+      >
+        <Probe />
+      </AppProvider>,
+    );
+    await waitFor(() => expect(api?.bootReady).toBe(true));
+    await settle();
+    expect(api!.state.historyError).toMatch(/read-only/);
+    act(() => api!.dispatch({
+      record: { createdAt: NOW, durationSeconds: 1, id: 'n', model: null, recoveryExpiresAt: null, status: 'copied', style: 'formal', text: 'x' },
+      type: 'append-record',
+    }));
+    await settle();
+    expect(writes).toEqual([]);
+  });
 
   it('dictionary read error without a backup stays blocked', async () => {
     const io: DictionaryFileIo = {
