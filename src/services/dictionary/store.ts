@@ -1,11 +1,16 @@
 import {
+  DICTIONARY_FILE_VERSION,
   defaultDictionaryFile,
   parseDictionaryJson,
   serializeDictionaryFile,
   type DictionaryFile,
 } from './format';
 import type { DictionaryFileIo } from './io';
-import { describeBackup, runBackup } from '../storeBackup';
+import {
+  describeBackup,
+  hasUnknownVersion,
+  runBackup,
+} from '../storeBackup';
 
 export type DictionaryLoadResult =
   | { ok: true; file: DictionaryFile }
@@ -55,11 +60,14 @@ export function createDictionaryStore(
       const parsed = parseDictionaryJson(raw);
       if (!parsed.ok) {
         const backup = await runBackup(io.backup);
+        // Future / unknown version from another build: never replace it.
+        // Only truly corrupt JSON may be replaced, and only after a backup.
+        const unknownVersion = hasUnknownVersion(raw, [DICTIONARY_FILE_VERSION]);
         return {
           error: `${parsed.error}${describeBackup(backup)}`,
           file: defaultDictionaryFile(),
           ok: false,
-          writeBlocked: !backup.ok,
+          writeBlocked: unknownVersion || !backup.ok,
         };
       }
       return { file: parsed.file, ok: true };

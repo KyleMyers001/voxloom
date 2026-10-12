@@ -37,7 +37,8 @@ export function memoryBackups(read: () => string | null) {
     backup: async () => {
       const data = read();
       if (data === null) return null;
-      backups.push(data);
+      // Mirror the Tauri command: an identical newest backup is reused.
+      if (backups[backups.length - 1] !== data) backups.push(data);
       return `memory-backup-${backups.length}`;
     },
     backups: () => [...backups],
@@ -47,4 +48,27 @@ export function memoryBackups(read: () => string | null) {
 export function describeBackup(outcome: BackupOutcome): string {
   if (!outcome.ok) return ` (backup failed: ${outcome.error}; file left untouched)`;
   return outcome.path ? ` (original kept at ${outcome.path})` : '';
+}
+
+/**
+ * True when `raw` is well-formed JSON carrying a `version` this build does
+ * not understand (e.g. a future v99). Such files are written by another
+ * build and must never be replaced with defaults, even after a backup.
+ * Truly corrupt JSON (or no version at all) returns false.
+ */
+export function hasUnknownVersion(
+  raw: string,
+  readable: readonly unknown[],
+): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    return false;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return false;
+  }
+  if (!('version' in parsed)) return false;
+  return !readable.includes((parsed as { version: unknown }).version);
 }
