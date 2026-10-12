@@ -5,6 +5,7 @@
  * (parse_plugin_hotkey / key_to_code in src-tauri/src/hold_release.rs):
  * A–Z, 0–9, Space, Enter, Backspace, Tab, plus at least one modifier other
  * than Shift. Esc is never bindable (BUS-12) and cancels recording.
+ * NumpadEnter is rejected: native watches only the main Return key (36).
  * Modifier-only shortcuts (Right Option, Fn) are BUS-46.
  */
 export type CaptureKeyEvent = Pick<
@@ -27,7 +28,6 @@ const MODIFIER_KEYS = new Set(['Alt', 'Control', 'Meta', 'Shift', 'OS', 'Fn', 'A
 const NAMED: Record<string, string> = {
   Backspace: 'Backspace',
   Enter: 'Enter',
-  NumpadEnter: 'Enter',
   Space: 'Space',
   Tab: 'Tab',
 };

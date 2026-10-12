@@ -1,9 +1,12 @@
-import { useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { isTauri } from '@tauri-apps/api/core';
 import { comboLabel, KeyCombo } from '../../components/KeyCombo';
 import {
   ADD_A_KEY,
   captureShortcut,
 } from '../../services/shortcut/shortcutCapture';
+import { listenShortcutBound } from '../../services/shortcut/bindingEvents';
+import { subscribe } from '../../services/settingsWindow';
 
 interface ShortcutRecorderProps {
   defaultValue: string;
@@ -31,6 +34,16 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
   const [preview, setPreview] = useState('');
   const [status, setStatus] = useState<Status>(null);
   const sawKeyRef = useRef(false);
+  /** Combo awaiting the main window's native registration result. */
+  const pendingRef = useRef<string | null>(null);
+
+  useEffect(() => subscribe(() => listenShortcutBound(({ message, ok, shortcut }) => {
+    if (pendingRef.current !== shortcut) return;
+    pendingRef.current = null;
+    setStatus(ok
+      ? { text: `Shortcut set to ${comboLabel(shortcut)}.`, tone: 'ok' }
+      : { text: message ?? `Couldn't set ${comboLabel(shortcut)}. Previous shortcut kept.`, tone: 'error' });
+  })), []);
 
   const start = () => {
     sawKeyRef.current = false;
@@ -64,8 +77,15 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
       setPreview('');
       setStatus({ text: result.message, tone: 'error' });
     } else {
+      const changed = result.combo !== value;
       onChange(result.combo);
-      stop({ text: `Shortcut set to ${comboLabel(result.combo)}.`, tone: 'ok' });
+      if (changed && isTauri()) {
+        // Native registration is async in the main window; wait for its result.
+        pendingRef.current = result.combo;
+        stop({ text: `Setting ${comboLabel(result.combo)}…`, tone: 'info' });
+      } else {
+        stop({ text: `Shortcut set to ${comboLabel(result.combo)}.`, tone: 'ok' });
+      }
     }
   };
 

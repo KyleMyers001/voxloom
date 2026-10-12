@@ -21,6 +21,7 @@ import {
   type OverlayBridge,
   type PendingFinishGate,
 } from '../services/shortcut';
+import { emitShortcutBound } from '../services/shortcut/bindingEvents';
 import type {
   DogfoodPhase,
   UseDogfoodCaptureResult,
@@ -239,6 +240,7 @@ export function useShortcutGestures(options: GestureOptions) {
     let cancelled = false;
     void (async () => {
       const outcome = await native.setShortcut(shortcut);
+      emitShortcutBound({ message: outcome.ok ? undefined : outcome.message, ok: outcome.ok, shortcut });
       if (cancelled) return;
       if (!outcome.ok && outcome.message) {
         options.onShortcutError?.(outcome.message);

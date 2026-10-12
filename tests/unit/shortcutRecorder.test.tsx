@@ -131,3 +131,39 @@ describe('ShortcutRecorder', () => {
     expect(onChange).toHaveBeenLastCalledWith(DEFAULT);
   });
 });
+
+describe('BUS-47 review follow-ups', () => {
+  it('rejects NumpadEnter instead of saving it as Enter', () => {
+    expect(keyName('NumpadEnter')).toBeNull();
+    expect(captureShortcut(ev('NumpadEnter', 'Enter', { ctrlKey: true })).kind).toBe('invalid');
+  });
+
+  it('matches a recorded chord by physical code on non-US layouts', async () => {
+    const { matchesShortcut } = await import('../../src/services/shortcut/formatHotkey');
+    const combo = (captureShortcut(ev('KeyK', 'å', { altKey: true })) as { combo: string }).combo;
+    expect(matchesShortcut(ev('KeyK', 'å', { altKey: true }), combo)).toBe(true);
+    expect(matchesShortcut(ev('KeyL', 'k', { altKey: true }), combo)).toBe(false);
+  });
+});
+
+describe('ShortcutRecorder waits for native registration', () => {
+  it('announces success or failure only after the main window reports', async () => {
+    vi.resetModules();
+    let handler: ((p: { message?: string; ok: boolean; shortcut: string }) => void) | null = null;
+    vi.doMock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), isTauri: () => true }));
+    vi.doMock('../../src/services/shortcut/bindingEvents', () => ({
+      listenShortcutBound: async (h: typeof handler) => { handler = h; return () => {}; },
+    }));
+    const { ShortcutRecorder: Recorder } = await import('../../src/features/settings/ShortcutRecorder');
+    const { act } = await import('@testing-library/react');
+    const user = userEvent.setup();
+    render(<Recorder defaultValue={DEFAULT} onChange={vi.fn()} value={DEFAULT} />);
+    await user.click(field());
+    await user.keyboard('{Control>}{Alt>}k{/Alt}{/Control}');
+    expect(screen.getByRole('status')).toHaveTextContent(/^Setting/);
+    await act(async () => handler!({ message: 'Could not bind it. Kept prior shortcut.', ok: false, shortcut: 'Ctrl + Alt + K' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Kept prior shortcut');
+    vi.doUnmock('@tauri-apps/api/core');
+    vi.doUnmock('../../src/services/shortcut/bindingEvents');
+  });
+});
