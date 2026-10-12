@@ -69,3 +69,15 @@ describe('Settings window tabs (UI PR 6a)', () => {
     expect(screen.getByRole('switch', { name: /Start at login · unavailable/ })).toBeDisabled();
   });
 });
+
+describe('Settings breakpoints (designer #41)', () => {
+  it('the 760px Settings window never hits the collapse: it starts below 640px', async () => {
+    const { readFileSync } = await import('node:fs');
+    for (const file of ['settings.css', 'responsive.css']) {
+      const css = readFileSync(`src/styles/${file}`, 'utf8');
+      for (const m of css.matchAll(/@media \(max-width: (\d+)px\) \{([\s\S]*?)\n\}/g)) {
+        if (/recovery-grid|appearance-options|settings-rows/.test(m[2])) expect(Number(m[1])).toBeLessThan(760);
+      }
+    }
+  });
+});

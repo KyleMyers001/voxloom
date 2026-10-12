@@ -83,7 +83,8 @@
 
 .appearance-options { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 
-@media (max-width: 780px) {
+/* Below 640px only: the native Settings window is fixed at 760×600 and keeps two columns. */
+@media (max-width: 640px) {
   .recovery-grid { grid-template-columns: 1fr; }
   .settings-panel { padding: var(--s-8); }
 }
