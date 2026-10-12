@@ -21,7 +21,7 @@ export function Sidebar({ screen, shortcut, status, onNavigate, onScenario, onRe
         <AppTile />
         <div>
           <b className="brand__name">Voxloom</b>
-          <small className="brand__status">
+          <small className="brand__status" title={`${status} · ${comboLabel(shortcut)}`}>
             {status} · {comboLabel(shortcut)}
           </small>
         </div>
