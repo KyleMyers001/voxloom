@@ -1,6 +1,10 @@
 /* Responsive and reduced-motion overrides; imported last. */
-@media (max-width: 780px) {
+/* Settings window (760px) keeps three swatches across; wrap only below 640px. */
+@media (max-width: 640px) {
   .appearance-options { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 780px) {
   .form-grid { grid-template-columns: 1fr; }
   .history-list .action-group,
   .term-row__actions {
