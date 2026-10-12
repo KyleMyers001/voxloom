@@ -91,10 +91,11 @@ test('screens, settings, themes, and baselines stay synchronized', async (
   await expect(page.getByText(
     'Native microphone capture is unavailable here',
   )).toBeVisible();
-  await expect(page.getByLabel('Microphone')).toBeDisabled();
+  await expect(page.getByLabel('Microphone', { exact: true })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Unavailable' }))
     .toBeDisabled();
-  await page.getByLabel('Current style').selectOption('casual');
+  await page.getByRole('radiogroup', { name: 'Current style' })
+    .getByRole('radio', { exact: true, name: 'Casual' }).click();
 
   for (const screen of screens) {
     await page.getByRole('button', { name: screen }).click();
@@ -102,6 +103,7 @@ test('screens, settings, themes, and baselines stay synchronized', async (
   }
   for (const [theme, slug] of themes) {
     await page.getByRole('button', { name: 'Settings' }).click();
+    await page.getByRole('tab', { name: 'Appearance' }).click();
     await page.getByLabel(theme).check();
     for (const screen of screens) {
       await page.getByRole('button', { name: screen }).click();
@@ -113,6 +115,7 @@ test('screens, settings, themes, and baselines stay synchronized', async (
     }
   }
   await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('tab', { name: 'Appearance' }).click();
   await page.getByLabel('Follow system').check();
   await page.emulateMedia({ colorScheme: 'dark' });
   await expect(page.locator('body')).toHaveAttribute(
@@ -135,6 +138,35 @@ test('screens, settings, themes, and baselines stay synchronized', async (
   await page.keyboard.press('Alt+1');
   await expect(page.getByRole('radio', { exact: true, name: 'Casual' }))
     .toHaveAttribute('aria-checked', 'true');
+});
+
+test('every Settings tab passes axe in light and dark', async ({ page }) => {
+  await page.goto('/');
+  await skipOnboarding(page);
+  for (const theme of ['Light', 'Dark']) {
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await page.getByRole('tab', { name: 'Appearance' }).click();
+    await page.getByLabel(theme, { exact: true }).check();
+    for (const tab of ['Capture', 'Models', 'Appearance', 'Privacy']) {
+      await page.getByRole('tab', { name: tab }).click();
+      await expect(page.getByRole('tabpanel', { name: tab })).toBeVisible();
+      await expectAccessible(page);
+    }
+  }
+});
+
+test('the shortcut field does not move while typing (QA #41)', async ({ page }) => {
+  await page.goto('/');
+  await skipOnboarding(page);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const field = page.getByLabel('Shortcut', { exact: true });
+  await field.click();
+  const before = await field.boundingBox();
+  for (const key of ['+', 'A', 'l', 't', '+', 'K']) {
+    await field.press(key);
+    expect(await field.boundingBox()).toEqual(before);
+  }
+  await field.fill('Control+Shift+Space');
 });
 
 test('dialogs, reduced motion, narrow and coarse layouts work', async (

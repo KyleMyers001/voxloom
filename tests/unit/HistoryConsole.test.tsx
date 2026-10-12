@@ -24,7 +24,7 @@ describe('History empty states (UI PR 4)', () => {
 
   it('names the real Settings section in the retention line', () => {
     renderWithApp(<History onToast={vi.fn()} />);
-    expect(screen.getByText(/\(Settings › Retention & privacy\)/)).toBeInTheDocument();
+    expect(screen.getByText(/\(Settings › Privacy\)/)).toBeInTheDocument();
   });
 });
 
