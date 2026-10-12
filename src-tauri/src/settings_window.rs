@@ -33,7 +33,6 @@ pub fn open_settings_window<R: Runtime>(app: &AppHandle<R>) -> Result<(), String
     WebviewWindowBuilder::new(app, SETTINGS_LABEL, WebviewUrl::App(SETTINGS_URL.into()))
         .title("Settings")
         .inner_size(760.0, 600.0)
-        .min_inner_size(640.0, 480.0)
         .resizable(false)
         .minimizable(false)
         .focused(true)
