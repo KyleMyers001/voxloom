@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { OverlayWaveformView } from '../../src/overlay/OverlayWaveformView';
+import { OverlayWaveformView, resultText } from '../../src/overlay/OverlayWaveformView';
 import { createOverlayBridge } from '../../src/services/shortcut/overlayBridge';
 import { hudResultFor } from '../../src/services/stt/useDogfoodCapture';
 
@@ -21,36 +21,53 @@ function api() {
 afterEach(() => vi.useRealTimers());
 
 describe('HUD view', () => {
+  const visible = (c: HTMLElement) => [...c.children].filter((n) => !n.classList.contains('sr-only'))
+    .map((n) => n.textContent).join('');
+
   it('shows no text while listening or transcribing', () => {
     const { container, rerender } = render(<OverlayWaveformView levels={levels} waveform="speaking" />);
-    expect(container.textContent).toBe('');
-    expect(screen.getByRole('img', { name: 'Microphone level' })).toBeInTheDocument();
+    expect(visible(container)).toBe('');
+    expect(screen.getByRole('status')).toHaveTextContent('');
     rerender(<OverlayWaveformView levels={levels} waveform="processing" />);
-    expect(container.textContent).toBe('');
-    expect(screen.getByRole('img', { name: 'Transcribing' })).toHaveClass('hud-transcribing');
+    expect(visible(container)).toBe('');
+    expect(container.querySelector('.hud-transcribing')).not.toBeNull();
   });
 
-  it('shows only a brief Copied or short error', () => {
-    const { rerender } = render(<OverlayWaveformView levels={levels} result="copied" waveform="result-copied" />);
-    expect(screen.getByRole('status')).toHaveTextContent('Copied. Press ⌘V to paste');
-    rerender(<OverlayWaveformView levels={levels} result="transcribe-failed" waveform="result-failed" />);
-    expect(screen.getByRole('status')).toHaveTextContent('Couldn’t transcribe');
-    rerender(<OverlayWaveformView levels={levels} result="insert-failed" waveform="result-failed" />);
-    expect(screen.getByRole('status')).toHaveTextContent('Couldn’t insert');
+  it('keeps one permanent live region that announces Transcribing and results', () => {
+    const { rerender } = render(<OverlayWaveformView levels={levels} waveform="silent" />);
+    const live = screen.getByRole('status');
+    rerender(<OverlayWaveformView levels={levels} waveform="processing" />);
+    expect(screen.getByRole('status')).toBe(live);
+    expect(live).toHaveTextContent('Transcribing');
+    rerender(<OverlayWaveformView levels={levels} mac result="copied" waveform="result-copied" />);
+    expect(screen.getByRole('status')).toBe(live);
+    expect(live).toHaveTextContent('Copied. Press ⌘V to paste');
+  });
+
+  it('shows only a brief Copied, unverified or short error, with the platform paste key', () => {
+    expect(resultText('copied', true)).toBe('Copied. Press ⌘V to paste');
+    expect(resultText('copied', false)).toBe('Copied. Press Ctrl+V to paste');
+    expect(resultText('maybe-copied', true)).toBe('May not have inserted · copied, ⌘V');
+    expect(resultText('unverified', true)).toBe('Sent · not verified');
+    expect(resultText('transcribe-failed')).toBe('Couldn’t transcribe');
+    expect(resultText('insert-failed')).toBe('Couldn’t insert');
+    const { container } = render(<OverlayWaveformView levels={levels} mac={false} result="unverified" waveform="result-unverified" />);
+    expect(container.querySelector('.hud-result--unverified')).toHaveTextContent('Sent · not verified');
   });
 });
 
-describe('hudResultFor (rules 3–6)', () => {
+describe('hudResultFor (rules 3–6 + review)', () => {
   it('maps delivery status to a HUD result', () => {
     expect(hudResultFor('inserted')).toBeNull();
-    expect(hudResultFor('unverified')).toBeNull();
+    expect(hudResultFor('unverified')).toBe('unverified');
     expect(hudResultFor('copied')).toBe('copied');
+    expect(hudResultFor('copied', 'May have been inserted — also copied')).toBe('maybe-copied');
     expect(hudResultFor('failed')).toBe('insert-failed');
   });
 });
 
 describe('overlayBridge.showResult', () => {
-  it('shows Copied wide for 1.5 s, holding off the teardown hide, then hides', async () => {
+  it('shows Copied wide for 2.5 s, holding off the teardown hide, then hides', async () => {
     vi.useFakeTimers();
     const window = api();
     const bridge = createOverlayBridge(window);
@@ -59,7 +76,7 @@ describe('overlayBridge.showResult', () => {
     expect(window.showBottomCenter).toHaveBeenCalledWith({ height: 40, width: 248 });
     await bridge.sync({ kind: 'ready' });
     expect(window.hide).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1499);
+    await vi.advanceTimersByTimeAsync(2499);
     expect(window.hide).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     expect(window.hide).toHaveBeenCalledOnce();
@@ -92,11 +109,19 @@ describe('overlayBridge.showResult', () => {
 
 describe('HUD motion (Option A)', () => {
   const css = readFileSync('src/styles/hud.css', 'utf8');
-  it('shimmers and pulses on a 1.6 s cycle', () => {
-    expect(css).toMatch(/animation: hud-shimmer 1\.6s linear infinite, hud-pulse 1\.6s ease-in-out infinite/);
+  it('pulses on 1.6 s and shimmers with a transform, not background-position', () => {
+    expect(css).toMatch(/\.hud-transcribing \{[^}]*animation: hud-pulse 1\.6s ease-in-out infinite/);
+    expect(css).toMatch(/\.hud-transcribing i \{[^}]*animation: hud-shimmer 1\.6s linear infinite/);
+    expect(css).toMatch(/@keyframes hud-shimmer \{ to \{ transform: translateX\(-50%\); \} \}/);
+    expect(css).not.toMatch(/background-position/);
+  });
+  it('uses whole rounded bars (no half cap at either end)', () => {
+    expect(css).toMatch(/rect width='3' height='6' rx='1\.5'/);
+    expect(css).toMatch(/\/ 5px 6px repeat-x/);
+    expect((118 + 2) % 5).toBe(0); // 24 bars × 3px + 23 gaps × 2px
   });
   it('falls back to a slow 3 s opacity breathe under Reduce Motion', () => {
-    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.hud-transcribing i \{ animation: hud-breathe 3s ease-in-out infinite; \}/);
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.hud-transcribing \{ animation: hud-breathe 3s ease-in-out infinite; \}\s*\.hud-transcribing i \{ animation: none; \}/);
   });
 });
 

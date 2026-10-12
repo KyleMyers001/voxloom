@@ -87,10 +87,11 @@ export interface UseDogfoodCaptureResult {
 }
 
 /** HUD rules 3–6: only Copied and a failed insert show anything after delivery. */
-export function hudResultFor(status: string): OverlayResult | null {
-  if (status === 'copied') return 'copied';
+export function hudResultFor(status: string, message = ''): OverlayResult | null {
+  if (status === 'copied') return /^May have been inserted/.test(message) ? 'maybe-copied' : 'copied';
   if (status === 'failed') return 'insert-failed';
-  return null; // inserted, unverified (toast + History only)
+  if (status === 'unverified') return 'unverified';
+  return null; // inserted: silent dismiss
 }
 
 function errorText(error: unknown): string {
@@ -221,7 +222,7 @@ export function useDogfoodCapture(
       });
       if (current()) {
         setTranscript(result.transcript);
-        setHudResult(hudResultFor(result.delivery.status));
+        setHudResult(hudResultFor(result.delivery.status, result.delivery.message));
         setPhase('success');
       }
       const record = createDogfoodRecord({
