@@ -5,6 +5,8 @@
 @import "./layout.css";
 @import "./ui-controls.css";
 @import "./ui-display.css";
+@import "./shell.css";
+@import "./home.css";
 @import "./features.css";
 @import "./models.css";
 @import "./responsive.css";

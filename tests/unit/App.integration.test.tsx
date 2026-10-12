@@ -80,9 +80,11 @@ describe('App integration', () => {
         screen.getByLabelText('Current style'),
         'casual',
       );
+      // ⌥-digits are ignored while a form control has focus, so blur first.
+      (document.activeElement as HTMLElement | null)?.blur();
       await user.keyboard('{Alt>}1{/Alt}');
-      expect(screen.getByRole('button', { name: /^Casual$/ }))
-        .toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByRole('radio', { name: /^Casual$/ }))
+        .toHaveAttribute('aria-checked', 'true');
       await user.click(
         screen.getByRole('button', { name: 'Dictionary' }),
       );

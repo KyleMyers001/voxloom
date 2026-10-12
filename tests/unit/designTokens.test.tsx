@@ -67,6 +67,12 @@ describe('Switch styling (UI PR 2)', () => {
   });
 });
 
+describe('Disabled primary button (UI PR 3)', () => {
+  it('is solid and uses muted text instead of fading the gradient', () => {
+    expect(css('home.css')).toMatch(/\.btn\.primary:disabled \{[^}]*background: var\(--seg\);[^}]*color: var\(--mut\);[^}]*opacity: 1;/);
+  });
+});
+
 describe('designer #37: focus ring, tag pill, disabled ON switch', () => {
   const lin = (c: number) => { const v = c / 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
   const hex = (s: string) => [1, 3, 5].map((i) => parseInt(s.slice(i, i + 2), 16));
@@ -90,5 +96,13 @@ describe('designer #37: focus ring, tag pill, disabled ON switch', () => {
   it('a disabled ON switch shows the dimmed brand gradient', async () => {
     const { readFileSync } = await import('node:fs');
     expect(readFileSync('src/styles/ui-controls.css', 'utf8')).toMatch(/\.switch\.on:disabled i \{ background: var\(--brand\); \}/);
+  });
+});
+
+describe('app focus ring reaches every focusable (QA #38)', () => {
+  it('the Developer disclosure and search field use --focus', async () => {
+    const { readFileSync } = await import('node:fs');
+    expect(readFileSync('src/styles/base.css', 'utf8')).toMatch(/summary:focus-visible,[^{]*\{\s*outline: 3px solid var\(--focus\)/);
+    expect(readFileSync('src/styles/ui-controls.css', 'utf8')).not.toMatch(/42%, transparent\);\s*outline-offset/);
   });
 });
