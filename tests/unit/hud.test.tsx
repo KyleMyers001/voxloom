@@ -4,6 +4,7 @@ import { render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OverlayWaveformView, resultText } from '../../src/overlay/OverlayWaveformView';
 import { createOverlayBridge } from '../../src/services/shortcut/overlayBridge';
+import { resultWaveform } from '../../src/services/shortcut/overlayVisibility';
 import { hudResultFor } from '../../src/services/stt/useDogfoodCapture';
 
 const levels = Array<number>(24).fill(0.5);
@@ -49,20 +50,31 @@ describe('HUD view', () => {
     expect(resultText('copied', false)).toBe('Copied. Press Ctrl+V to paste');
     expect(resultText('maybe-copied', true)).toBe('May not have inserted · copied, ⌘V');
     expect(resultText('unverified', true)).toBe('Sent · not verified');
+    expect(resultText('maybe-inserted', true)).toBe('May have inserted · check the field');
     expect(resultText('transcribe-failed')).toBe('Couldn’t transcribe');
     expect(resultText('insert-failed')).toBe('Couldn’t insert');
-    const { container } = render(<OverlayWaveformView levels={levels} mac={false} result="unverified" waveform="result-unverified" />);
+    const { container, rerender } = render(<OverlayWaveformView levels={levels} mac={false} result="unverified" waveform="result-unverified" />);
     expect(container.querySelector('.hud-result--unverified')).toHaveTextContent('Sent · not verified');
+    rerender(<OverlayWaveformView levels={levels} mac result="maybe-copied" waveform={resultWaveform('maybe-copied')} />);
+    expect(container.querySelector('.hud-result--unverified')).toHaveTextContent('May not have inserted · copied, ⌘V');
+    rerender(<OverlayWaveformView levels={levels} mac result="maybe-inserted" waveform={resultWaveform('maybe-inserted')} />);
+    expect(container.querySelector('.hud-result--unverified')).toHaveTextContent('May have inserted · check the field');
   });
 });
 
 describe('hudResultFor (rules 3–6 + review)', () => {
   it('maps delivery status to a HUD result', () => {
-    expect(hudResultFor('inserted')).toBeNull();
-    expect(hudResultFor('unverified')).toBe('unverified');
-    expect(hudResultFor('copied')).toBe('copied');
-    expect(hudResultFor('copied', 'May have been inserted — also copied')).toBe('maybe-copied');
-    expect(hudResultFor('failed')).toBe('insert-failed');
+    expect(hudResultFor({ status: 'inserted' })).toBeNull();
+    expect(hudResultFor({ status: 'unverified' })).toBe('unverified');
+    expect(hudResultFor({ status: 'copied' })).toBe('copied');
+    expect(hudResultFor({ mayHaveInserted: true, status: 'copied' })).toBe('maybe-copied');
+    expect(hudResultFor({ status: 'failed' })).toBe('insert-failed');
+    // Review #44: Copy off or failed after an unconfirmed write is NOT "Couldn't insert".
+    expect(hudResultFor({ mayHaveInserted: true, status: 'failed' })).toBe('maybe-inserted');
+  });
+
+  it('reads the flag, never the message text', () => {
+    expect(hudResultFor({ message: 'May have been inserted — also copied', status: 'copied' } as never)).toBe('copied');
   });
 });
 

@@ -16,6 +16,7 @@ export function resultText(result: OverlayResult | null, mac = isMacPlatform()):
   switch (result) {
     case 'copied': return `Copied. Press ${paste} to paste`;
     case 'maybe-copied': return `May not have inserted · copied, ${paste}`;
+    case 'maybe-inserted': return 'May have inserted · check the field';
     case 'unverified': return 'Sent · not verified';
     case 'insert-failed': return 'Couldn’t insert';
     default: return 'Couldn’t transcribe';
@@ -39,7 +40,7 @@ export function OverlayWaveformView({ levels, waveform, result = null, mac = isM
       <div aria-atomic="true" className="sr-only" role="status">{spoken}</div>
       {isResult(waveform) ? (
         <div aria-hidden="true" className={`hud-result hud-result--${kind}`} data-waveform={waveform}>
-          <Icon name={kind === 'copied' ? 'copy' : kind === 'unverified' ? 'info' : 'warn'} size={14} />
+          <Icon name={kind === 'copied' || result === 'maybe-copied' ? 'copy' : kind === 'unverified' ? 'info' : 'warn'} size={14} />
           <span>{text}</span>
         </div>
       ) : (
