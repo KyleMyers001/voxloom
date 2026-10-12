@@ -23,6 +23,9 @@
   --brand: linear-gradient(90deg, #b6ff3c, #3cf0ff);
   --on-brand: #08080c;
   --knob: #ffffff; /* switch knob, both themes */
+  --focus: color-mix(in srgb, #b6ff3c 42%, transparent); /* dark focus ring */
+  --tag-bg: #2c2c3a; /* visible pill on dark panels (1.36:1 vs panel) */
+  --tag-fg: #9a9aa8; /* 4.95:1 on --tag-bg */
   /* Switch off track: >=3:1 vs bg 3.5, panel 3.33, sheet 3.27, field 3.08, side 3.43; knob on it 5.61 */
   --switch-off: #66667a;
 
@@ -59,6 +62,9 @@
 }
 
 [data-appearance-resolved="light"] {
+  --focus: #376b00; /* solid light focus ring: 5.25 seg, 5.77 side, 5.82 field, 6.2 bg, 6.43 panel (was 42% lime, ~1.9:1) */
+  --tag-bg: var(--seg);
+  --tag-fg: var(--mut);
   --switch-on: #4c8a00; /* solid ON track (designer): 3.81 side, 3.84 field, 4.10 bg, 4.25 panel; white knob 4.25 */
   color-scheme: light;
   --bg: #fbfbf8;
