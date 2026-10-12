@@ -181,6 +181,9 @@ export function AppProvider({
 
     void (async () => {
       let retention = initialSettings.transcriptRetention;
+      // Settings unreadable and not backed up: retention is unknown, so an
+      // older history.json must not be migrated (rewritten) yet. BUS-42.
+      let settingsBlocked = false;
 
       if (settingsPers.enabled) {
         const result = await settingsPers.store.load();
@@ -202,6 +205,7 @@ export function AppProvider({
           // Safe defaults already in state; surface error. Writing defaults
           // is allowed only once the unreadable file was backed up.
           allowSettingsPersistRef.current = !result.writeBlocked;
+          settingsBlocked = result.writeBlocked;
           lastSavedSettingsRef.current = result.file;
           dispatch({
             message: result.error,
@@ -237,6 +241,16 @@ export function AppProvider({
             message: dictResult.error,
             type: 'set-dictionary-error',
           });
+          if (!dictResult.writeBlocked) {
+            // Unreadable file already backed up: replace it with a valid
+            // empty file now so the error does not recur every launch.
+            try {
+              await dictionaryPers.store.save(dictResult.file.words);
+            } catch {
+              // Original is backed up; the next edit retries the write.
+            }
+            if (cancelled) return;
+          }
         }
         dictionaryHydratedRef.current = true;
         dictionaryPersistGenRef.current += 1;
@@ -254,7 +268,15 @@ export function AppProvider({
 
       const historyResult = await historyPers.store.load(retention, clock());
       if (cancelled) return;
-      if (historyResult.ok) {
+      if (historyResult.ok && historyResult.migratedFrom && settingsBlocked) {
+        // Show it, but never rewrite it on default retention.
+        dispatch({ records: historyResult.records, type: 'hydrate-records' });
+        allowHistoryPersistRef.current = false;
+        dispatch({
+          message: 'History is read-only until settings can be read. Your history file was left untouched.',
+          type: 'set-history-error',
+        });
+      } else if (historyResult.ok) {
         dispatch({ records: historyResult.records, type: 'hydrate-records' });
         allowHistoryPersistRef.current = true;
       } else {

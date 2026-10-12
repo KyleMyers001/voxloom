@@ -36,6 +36,11 @@ export interface DurableDictionaryStore {
   save(words: string[]): Promise<void>;
 }
 
+/** Shown after an unreadable dictionary.json was backed up and reset. */
+export function dictionaryResetNotice(path: string): string {
+  return `Your word dictionary couldn't be read and was reset to empty. Your original file is saved at ${path}.`;
+}
+
 export function createDictionaryStore(
   io: DictionaryFileIo,
 ): DurableDictionaryStore {
@@ -48,7 +53,9 @@ export function createDictionaryStore(
         const message = error instanceof Error ? error.message : String(error);
         const backup = await runBackup(io.backup);
         return {
-          error: `Failed to read dictionary store: ${message}${describeBackup(backup)}`,
+          error: backup.ok
+            ? dictionaryResetNotice(backup.path)
+            : `Failed to read dictionary store: ${message}${describeBackup(backup)}`,
           file: defaultDictionaryFile(),
           ok: false,
           // Replace an unreadable file only when its raw bytes were preserved
@@ -66,7 +73,9 @@ export function createDictionaryStore(
         // Only truly corrupt JSON may be replaced, and only after a backup.
         const unknownVersion = hasUnknownVersion(raw, [DICTIONARY_FILE_VERSION]);
         return {
-          error: `${parsed.error}${describeBackup(backup)}`,
+          error: backup.ok && !unknownVersion
+            ? dictionaryResetNotice(backup.path)
+            : `${parsed.error}${describeBackup(backup)}`,
           file: defaultDictionaryFile(),
           ok: false,
           writeBlocked: unknownVersion || !(backup.ok && backup.path),

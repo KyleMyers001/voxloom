@@ -6,6 +6,7 @@ mod hold_release;
 mod overlay;
 mod settings;
 mod store_backup;
+mod store_read;
 mod stt;
 
 use std::sync::Arc;
