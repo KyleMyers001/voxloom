@@ -77,6 +77,10 @@ h3 {
   margin-bottom: 6px;
 }
 
+/* Radios and checkboxes take the Console accent, not browser blue (designer #43). */
+input[type="radio"],
+input[type="checkbox"] { accent-color: var(--accent); }
+
 input,
 select,
 textarea {
