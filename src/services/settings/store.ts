@@ -50,6 +50,14 @@ function fileVersion(raw: string): unknown {
   }
 }
 
+/**
+ * Durable settings.json store.
+ *
+ * Each window (main, Settings) has its own store instance and therefore its
+ * own copy of the unknown settings keys, taken from its own last load(); a
+ * window does not pick up unknown keys changed on disk by another build
+ * until it loads again.
+ */
 export function createSettingsStore(io: SettingsFileIo): DurableSettingsStore {
   // Unknown `settings` keys from the last successful load, carried through
   // every save so they are never dropped (BUS-42).

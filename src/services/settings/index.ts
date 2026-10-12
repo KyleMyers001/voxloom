@@ -34,6 +34,11 @@ export {
  * file is therefore loaded write-blocked with a calm "main is upgrading it"
  * notice; main rewrites it as v1 at boot and its settings:changed broadcast
  * re-enables writes here.
+ *
+ * Each window (main, Settings) has its own store instance and therefore its
+ * own copy of the unknown settings keys, taken from its own last load(); a
+ * window does not pick up unknown keys changed on disk by another build
+ * until it loads again.
  */
 export function createSettingsWindowSettingsStore(): {
   enabled: boolean;
