@@ -239,4 +239,17 @@ describe('Shortcut field (one representation at a time)', () => {
     await user.tab();
     expect(caps()).not.toHaveAttribute('data-editing');
   });
+
+  it('freezes the hidden caps while typing so the field never moves', async () => {
+    const user = userEvent.setup();
+    const { container } = renderWithApp(<Settings onSetup={vi.fn()} />);
+    const caps = () => container.querySelector('.frow__control .shortcut-caps')!;
+    const before = caps().innerHTML;
+    const field = screen.getByLabelText('Shortcut');
+    await user.click(field);
+    await user.type(field, '+Alt+K');
+    expect(caps().innerHTML).toBe(before);
+    await user.tab();
+    expect(caps().innerHTML).not.toBe(before);
+  });
 });
