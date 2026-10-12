@@ -5,6 +5,7 @@ import {
   useRef,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { Icon } from './Icon';
 import { beginModal } from '../app/modalState';
 
 interface DialogProps {
@@ -89,10 +90,11 @@ export function Dialog({ children, initialFocus, label, onClose, opener }: Dialo
         event.stopPropagation()} ref={panel}>
         <button
           aria-label={`Close ${label}`}
-          className="icon-btn modal-close"
+          className="xbtn modal-close"
           onClick={onClose}
+          type="button"
         >
-          ×
+          <Icon name="x" size={12} />
         </button>
         {children}
       </div>

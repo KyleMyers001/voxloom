@@ -1,62 +1,48 @@
 import { useState } from 'react';
 import { useApp } from '../../app/AppContext';
 import { Dialog } from '../../components/Dialog';
+import { Icon } from '../../components/Icon';
+import { KeyCombo } from '../../components/KeyCombo';
 import { isTauriEnv } from '../../services/capture/captureService';
-import { useCaptureState } from
-  '../../services/capture/useCaptureState';
+import { useCaptureState } from '../../services/capture/useCaptureState';
+import { MicStep } from './MicStep';
+import { StepDots } from './StepDots';
 
 interface OnboardingProps {
   onClose: () => void;
   opener?: HTMLElement | null;
 }
 
+/** Set-up sheet (SPEC § Onboarding; mocks onboarding-*). Simulate buttons are DEV-only. */
 export function Onboarding({ onClose, opener }: OnboardingProps) {
   const { settings, setup, state } = useApp();
   const [error, setError] = useState('');
   const onboarding = state.onboarding;
   const update = setup.update;
-
-  const {
-    captureState,
-    permissionStatus,
-    requestMicPermission,
-    runMicTest,
-    stopMicTest,
-  } = useCaptureState();
-
+  const capture = useCaptureState();
   const isNative = isTauriEnv();
-  // In a browser context native capture is unavailable;
-  // allow Next without blocking on permission.
-  const micAuthorized =
-    !isNative || permissionStatus === 'authorized';
-  const micTesting = captureState.kind === 'test-running';
-  const micTestDone = captureState.kind === 'test-complete';
-  const micError =
-    captureState.kind === 'error' ? captureState.message : null;
+  // In a browser context native capture is unavailable; allow Next without permission.
+  const micAuthorized = !isNative || capture.permissionStatus === 'authorized';
+  const shortcut = state.settings.shortcut;
 
   function next() {
     setError('');
     if (onboarding.step === 1 && !micAuthorized) {
-      setError(
-        'Enable microphone access to continue, or choose Skip.',
-      );
+      setError('Enable microphone access to continue, or choose Skip.');
       return;
     }
     if (onboarding.step === 2) {
-      if (!state.settings.shortcut.trim()) {
+      if (!shortcut.trim()) {
         setError('Enter a shortcut.');
         return;
       }
-      if (!isNative && state.settings.shortcut.toLowerCase() === 'ctrl + space') {
+      if (!isNative && shortcut.toLowerCase() === 'ctrl + space') {
         update({ shortcutCollision: true });
-        setError('Ctrl + Space has a simulated collision.');
+        setError('“Ctrl + Space” is already in use (simulated). Choose another combo; your previous one is kept.');
         return;
       }
     }
-    update({
-      shortcutCollision: false,
-      step: (onboarding.step + 1) as 2 | 3,
-    });
+    update({ shortcutCollision: false, step: (onboarding.step + 1) as 2 | 3 });
   }
 
   function finish() {
@@ -68,189 +54,79 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
     onClose();
   }
 
-  function handleTestMic() {
-    if (micTesting) {
-      stopMicTest();
-    } else {
-      void runMicTest();
-    }
-  }
-
-  function permissionLabel(): string {
-    if (!isNative) {
-      return 'Native capture unavailable in this environment';
-    }
-    switch (permissionStatus) {
-      case 'authorized':
-        return 'Microphone access granted';
-      case 'denied':
-        return 'Microphone access denied \u2014 enable in System Settings';
-      case 'restricted':
-        return 'Microphone access restricted by system policy';
-      case 'not-determined':
-        return 'Microphone access not yet granted';
-      default:
-        return 'Checking microphone permission\u2026';
-    }
-  }
+  const simulate = (label: string, patch: Parameters<typeof update>[0]) => import.meta.env.DEV && (
+    <button className="btn" onClick={() => update(patch)} type="button">{label}</button>
+  );
 
   return (
     <Dialog label="Set up Voxloom" onClose={onClose} opener={opener}>
-      <h2>Set up Voxloom</h2>
-      <div className="onboarding-progress">
-        <span>Step {onboarding.step} of 3</span>
-        <progress max="3" value={onboarding.step} />
-      </div>
+      <div className="sheet ob">
+        <h2>Set up Voxloom</h2>
+        <StepDots step={onboarding.step} />
 
-      {onboarding.step === 1 && (
-        <section className="onboarding-step">
-          <h3>Microphone access</h3>
-          <p>
-            Voxloom captures audio locally.
-            No audio leaves your device.
-          </p>
-          <div className="onboarding-status">
-            <span>{permissionLabel()}</span>
-            {isNative && permissionStatus !== 'authorized' && (
-              <button className="btn" onClick={requestMicPermission}>
-                Enable Microphone
-              </button>
-            )}
-          </div>
-          {isNative && permissionStatus === 'authorized' && (
-            <div className="onboarding-test">
-              <span>
-                {micTestDone
-                  && captureState.kind === 'test-complete'
-                  ? captureState.metadata.detected_activity
-                    ? 'Audio activity detected \u2014 mic is working'
-                    : 'No audio activity detected \u2014 check your mic'
-                  : micTesting
-                    ? 'Listening\u2026 (10\u202fs auto-stop)'
-                    : 'Test your microphone'}
-              </span>
-              <button className="btn" onClick={handleTestMic}>
-                {micTesting ? 'Stop test' : 'Test Microphone'}
-              </button>
-            </div>
-          )}
-          {micError && (
-            <p className="form-error" role="alert">{micError}</p>
-          )}
-          {isNative && permissionStatus === 'denied' && (
-            <p className="empty-note">
-              Open System Settings &rsaquo;{' '}
-              Privacy &amp; Security &rsaquo; Microphone and enable Voxloom.
-            </p>
-          )}
-        </section>
-      )}
+        {onboarding.step === 1 && <MicStep capture={capture} isNative={isNative} />}
 
-      {onboarding.step === 2 && (
-        <section className="onboarding-step">
-          <h3>Choose your shortcut</h3>
-          <p>{isNative
-            ? 'Desktop gestures use a global shortcut; registration failures are shown in Settings.'
-            : 'Browser prototype gestures work only while this tab is focused.'}</p>
-          <label className="field">
-            {isNative ? 'Preferred global shortcut' : 'Preferred app-local shortcut'}
-            <input
-              onChange={(event) => settings.update({
-                key: 'shortcut',
-                value: event.target.value,
-              })}
-              value={state.settings.shortcut}
-            />
-          </label>
-        </section>
-      )}
-
-      {onboarding.step === 3 && (
-        <section className="onboarding-step">
-          <h3>Quick test</h3>
-          <p>
-            Hold and release the configured shortcut, then rapidly
-            double-tap to latch and activate it once more to finish.
-            This tests gesture recognition, not microphone transcription.
-          </p>
-          <label className="field">Gesture feedback (not a speech transcript)
-            <textarea
-              placeholder="Gesture feedback appears here."
-              readOnly
-              value={onboarding.recognizedText}
-            />
-          </label>
-          <div className="onboarding-test">
-            <span>
-              Press-and-hold &middot;{' '}
-              {onboarding.holdTested ? 'recognized' : 'not tested'}
-            </span>
-            {import.meta.env.DEV && (
-              <button
-                className="btn"
-                onClick={() => update({
-                  holdTested: true,
-                  recognizedText: 'Simulated hold gesture detected.',
-                })}
-              >
-                Simulate hold
-              </button>
-            )}
-          </div>
-          <div className="onboarding-test">
-            <span>
-              Rapid double-tap &middot;{' '}
-              {onboarding.tapTested ? 'recognized' : 'not tested'}
-            </span>
-            {import.meta.env.DEV && (
-              <button
-                className="btn"
-                onClick={() => update({
-                  recognizedText: 'Simulated double-tap gesture detected.',
-                  tapTested: true,
-                })}
-              >
-                Simulate double-tap
-              </button>
-            )}
-          </div>
-        </section>
-      )}
-
-      {error && (
-        <p className="form-error" role="alert">{error}</p>
-      )}
-
-      <div className="onboarding-actions">
-        <button
-          className="btn skip"
-          onClick={() => {
-            update({ complete: true });
-            onClose();
-          }}
-        >
-          Skip
-        </button>
-        {onboarding.step > 1 && (
-          <button
-            className="btn"
-            onClick={() =>
-              update({ step: (onboarding.step - 1) as 1 | 2 })
-            }
-          >
-            Back
-          </button>
+        {onboarding.step === 2 && (
+          <section className="onboarding-step">
+            <h3>Choose your shortcut</h3>
+            <p>{isNative
+              ? 'Desktop gestures use a global shortcut. Registration problems are shown in Settings.'
+              : 'Browser prototype gestures work only while this tab is focused.'}</p>
+            {shortcut.trim() && <div className="bigkeys"><KeyCombo combo={shortcut.replace(/\s*\+\s*/g, '+')} /></div>}
+            <label className="field">
+              {isNative ? 'Preferred global shortcut' : 'Preferred app-local shortcut'}
+              <input
+                aria-invalid={onboarding.shortcutCollision || undefined}
+                onChange={(event) => settings.update({ key: 'shortcut', value: event.target.value })}
+                value={shortcut}
+              />
+            </label>
+          </section>
         )}
-        {onboarding.step < 3 && (
-          <button className="btn accent" onClick={next}>
-            Next
-          </button>
-        )}
+
         {onboarding.step === 3 && (
-          <button className="btn accent" onClick={finish}>
-            Finish
-          </button>
+          <section className="onboarding-step">
+            <h3>Quick test</h3>
+            <p>
+              Hold and release the shortcut, then double-tap to latch and press once more to finish.
+              This tests the gesture, not transcription.
+            </p>
+            <label className="field">Gesture feedback (not a speech transcript)
+              <textarea placeholder="Gesture feedback appears here." readOnly value={onboarding.recognizedText} />
+            </label>
+            <div className="frow">
+              <span>
+                {onboarding.holdTested && <Icon name="check" size={14} />}
+                Press-and-hold · {onboarding.holdTested ? 'recognized' : 'not tested'}
+              </span>
+              {simulate('Simulate hold', { holdTested: true, recognizedText: 'Simulated hold gesture detected.' })}
+            </div>
+            <div className="frow">
+              <span>
+                {onboarding.tapTested && <Icon name="check" size={14} />}
+                Rapid double-tap · {onboarding.tapTested ? 'recognized' : 'not tested'}
+              </span>
+              {simulate('Simulate double-tap', { recognizedText: 'Simulated double-tap gesture detected.', tapTested: true })}
+            </div>
+          </section>
         )}
+
+        {error && <p className="form-error ferr" role="alert"><Icon name="warn" size={14} />{error}</p>}
+
+        <div className="sheet-acts">
+          <button className="btn ghost" onClick={() => { update({ complete: true }); onClose(); }} type="button">
+            Skip
+          </button>
+          <span className="sp" />
+          {onboarding.step > 1 && (
+            <button className="btn" onClick={() => update({ step: (onboarding.step - 1) as 1 | 2 })} type="button">
+              Back
+            </button>
+          )}
+          {onboarding.step < 3
+            ? <button className="btn primary" onClick={next} type="button">Next</button>
+            : <button className="btn primary" onClick={finish} type="button">Finish</button>}
+        </div>
       </div>
     </Dialog>
   );

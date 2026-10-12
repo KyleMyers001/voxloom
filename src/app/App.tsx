@@ -26,7 +26,7 @@ export function App() {
   const [shortcutOpen, setShortcutOpen] = useState(false);
   const modalOpener = useRef<HTMLElement | null>(null);
   useTheme(state.settings.appearance);
-  const { toast, announce, announceError } = useToastMessages([
+  const { toast, toastTone, announce, announceError } = useToastMessages([
     state.historyError, state.settingsError, state.dictionaryError,
   ]);
 
@@ -118,6 +118,6 @@ export function App() {
       opener={modalOpener.current} shortcut={state.settings.shortcut} />}
     {dev.resetPromptOpen && <ResetSessionDialog onClose={dev.closeResetPrompt}
       onReset={dev.performReset} opener={modalOpener.current} />}
-    <Toast message={toast} />
+    <Toast message={toast} tone={toastTone} />
   </>;
 }

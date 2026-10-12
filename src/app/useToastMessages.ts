@@ -6,7 +6,9 @@ const ERROR_MS = 4_000;
 /** App toast: info for 1.8 s; store errors (history/settings/dictionary) for 4 s. */
 export function useToastMessages(errors: (string | null | undefined)[]) {
   const [toast, setToast] = useState('');
+  const [errorTone, setErrorTone] = useState(false);
   const show = (message: string, ms: number) => {
+    setErrorTone(ms === ERROR_MS);
     setToast(message);
     window.setTimeout(() => setToast(''), ms);
   };
@@ -16,6 +18,8 @@ export function useToastMessages(errors: (string | null | undefined)[]) {
   useErrorToast(dictionaryError, setToast);
   return {
     toast,
+    /** announceError and store errors force the error tone; others are inferred from text. */
+    toastTone: errorTone || errors.some((e) => e && e === toast) ? 'err' as const : undefined,
     announce: (message: string) => show(message, INFO_MS),
     announceError: (message: string) => show(message, ERROR_MS),
   };
