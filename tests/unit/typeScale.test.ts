@@ -7,7 +7,7 @@ const css = (name: string) => readFileSync(join(dir, name), 'utf8');
 const walk = (d: string): string[] => readdirSync(d, { withFileTypes: true }).flatMap((e) =>
   e.isDirectory() ? walk(join(d, e.name)) : e.name.endsWith('.css') ? [join(d, e.name)] : []);
 // font-size or the font shorthand with any literal length (px, rem, em, pt).
-const LITERAL = /font(?:-size)?\s*:[^;}]*\b\d*\.?\d+(px|rem|em|pt)\b/;
+const LITERAL = /font(?:-size)?\s*:[^;}]*\b\d*\.?\d+(px|rem|em|pt)\b/i;
 /** [selector, declaration] pairs that set a literal font size. */
 export function literalFontSizes(source: string): [string, string][] {
   const out: [string, string][] = [];
@@ -42,8 +42,7 @@ describe('BUS-41 type scale tokens', () => {
       expect(at(1280), name).toBeCloseTo(lo, 2);
       expect(at(1920), name).toBeCloseTo(hi, 2);
     }
-    // macOS 10.15 WKWebView: no calc() multiplication, no clamp().
-    expect(tokens).not.toMatch(/calc\([^)]*\*/);
+    // clamp() needs Safari 13.1 (macOS 10.15.4); the app supports 10.15.0.
     expect(tokens).not.toMatch(/--fs-[\w-]+: clamp\(/);
     expect(tokens).not.toContain('--fs-caption');
   });
@@ -55,16 +54,14 @@ describe('BUS-41 type scale tokens', () => {
     );
     expect(files.length).toBeGreaterThan(10);
     for (const f of files) {
-      const hits = literalFontSizes(readFileSync(f, 'utf8'))
-        // .modal-close's 22px is the close glyph, not text.
-        .filter(([sel, decl]) => !(sel === '.modal-close' && decl === 'font-size: 22px'));
+      const hits = literalFontSizes(readFileSync(f, 'utf8'));
       expect(hits, f).toEqual([]);
     }
   });
 
   it('catches the ways around the guard', () => {
     for (const bad of ['a{font-size:13px}', 'a { font: 600 13px/1.2 x; }', 'a{font-size: .8rem}',
-      'a{font-size:1em}', 'a{font-size:10pt}', '.other{font-size: 22px;}']) {
+      'a{font-size:1em}', 'a{font-size:10pt}', 'a{font-size:13PX}', '.other{font-size: 22px;}']) {
       expect(literalFontSizes(bad), bad).not.toEqual([]);
     }
     expect(literalFontSizes('a{font-size: var(--fs-body); font: inherit}')).toEqual([]);

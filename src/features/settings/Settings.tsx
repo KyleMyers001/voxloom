@@ -33,7 +33,8 @@ export function Settings({ onSetup, initialTab = 'capture', onTabTitle }: Settin
         role="tabpanel"
         tabIndex={0}
       >
-        <h2>{title}</h2>
+        {/* BUS-41: the window title already names the tab; keep the heading for screen readers. */}
+        <h2 className="sr-only">{title}</h2>
         {tab === 'capture' && <CaptureTab onSetup={onSetup} />}
         {tab === 'models' && <ModelsTab />}
         {tab === 'appearance' && <AppearanceTab />}
