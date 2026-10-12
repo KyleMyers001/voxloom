@@ -1,0 +1,78 @@
+/**
+ * Settings window bridge (UI PR 6b). Labels/events mirror
+ * src-tauri/src/settings_window.rs. Every call no-ops outside Tauri.
+ */
+import { invoke, isTauri } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
+
+export const SETTINGS_WINDOW_LABEL = 'settings';
+export const SETTINGS_CHANGED_EVENT = 'settings:changed';
+export const ONBOARDING_OPEN_EVENT = 'onboarding:open';
+
+export interface SettingsChangedPayload {
+  contents: string;
+  /** Label of the window that saved. A window must ignore its own saves. */
+  source: string;
+}
+
+/** This webview's label ('main', 'settings'), or null outside Tauri. */
+export function currentWindowLabel(): string | null {
+  if (!isTauri()) return null;
+  return getCurrentWebviewWindow().label;
+}
+
+type Unlisten = () => void;
+
+/** Open the native Settings window, or focus it if it is already open. */
+export async function openSettingsWindow(): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('settings_window_open');
+}
+
+/** From the Settings window: focus main and open onboarding there. */
+export async function requestOnboarding(): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('settings_request_onboarding');
+}
+
+async function listenTo<T>(event: string, handler: (payload: T) => void): Promise<Unlisten> {
+  if (!isTauri()) return () => {};
+  return listen<T>(event, (e) => handler(e.payload));
+}
+
+/**
+ * Another window saved settings.json. Events whose `source` is this window are
+ * dropped, so an echo can never rehydrate the sender: an any-target listener
+ * receives every emit whatever the Rust side does.
+ */
+export function listenSettingsChanged(
+  handler: (payload: SettingsChangedPayload) => void,
+  ownLabel: string | null = currentWindowLabel(),
+) {
+  return listenTo<SettingsChangedPayload>(SETTINGS_CHANGED_EVENT, (payload) => {
+    if (isForeignSave(payload, ownLabel)) handler(payload);
+  });
+}
+
+export function isForeignSave(payload: SettingsChangedPayload | null, ownLabel: string | null): boolean {
+  return typeof payload?.contents === 'string' && payload.source !== ownLabel;
+}
+
+export function listenOnboardingOpen(handler: () => void) {
+  return listenTo<null>(ONBOARDING_OPEN_EVENT, () => handler());
+}
+
+/** Subscribe in an effect; returns the effect cleanup. Handles unmount-before-resolve. */
+export function subscribe(start: () => Promise<Unlisten>): () => void {
+  let unlisten: Unlisten | null = null;
+  let disposed = false;
+  void start().then((fn) => {
+    if (disposed) fn();
+    else unlisten = fn;
+  }).catch(() => {});
+  return () => {
+    disposed = true;
+    unlisten?.();
+  };
+}

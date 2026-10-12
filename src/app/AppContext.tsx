@@ -28,11 +28,12 @@ import {
   type HistoryStore,
 } from '../services/history';
 import {
-  SETTINGS_FILE_VERSION,
   createDefaultSettingsStore,
   type DurableSettingsStore,
   type SettingsFile,
 } from '../services/settings';
+import { useSettingsPersist } from './useSettingsPersist';
+import { useSettingsSync } from './useSettingsSync';
 import {
   createDictionaryService,
   createHistoryService,
@@ -140,6 +141,8 @@ export function AppProvider({
   const settingsPersistGenRef = useRef(0);
   /** Last successfully saved snapshot — used to roll back UI on save failure. */
   const lastSavedSettingsRef = useRef<SettingsFile | null>(null);
+  /** Last value handed to save() (not yet necessarily on disk). */
+  const lastRequestedSettingsRef = useRef<SettingsFile | null>(null);
 
   const historyHydratedRef = useRef(!historyPers.enabled);
   /** False after a corrupt-load so we never overwrite the broken file. */
@@ -177,6 +180,7 @@ export function AppProvider({
             type: 'hydrate-settings',
           });
           lastSavedSettingsRef.current = result.file;
+          lastRequestedSettingsRef.current = result.file;
           allowSettingsPersistRef.current = true;
           retention = result.file.settings.transcriptRetention;
         } else {
@@ -184,6 +188,7 @@ export function AppProvider({
           // first successful write of defaults so the user can recover.
           allowSettingsPersistRef.current = true;
           lastSavedSettingsRef.current = result.file;
+          lastRequestedSettingsRef.current = result.file;
           dispatch({
             message: result.error,
             type: 'set-settings-error',
@@ -251,62 +256,26 @@ export function AppProvider({
     // Intentional once-on-mount boot load (persistence identity is stable).
   }, [clock, dictionaryPers, historyPers, settingsPers]);
 
-  // Persist settings after hydrate whenever settings or onboarding-complete
-  // change. Strategy: optimistic UI (reducer updates immediately) with
-  // rollback to last successful save on write failure.
-  useEffect(() => {
-    if (
-      !settingsPers.enabled
-      || !settingsHydratedRef.current
-      || !allowSettingsPersistRef.current
-    ) {
-      return;
-    }
-    const snapshot: SettingsFile = {
-      onboardingComplete: state.onboarding.complete,
-      settings: state.settings,
-      version: SETTINGS_FILE_VERSION,
-    };
-    const last = lastSavedSettingsRef.current;
-    if (
-      last
-      && last.onboardingComplete === snapshot.onboardingComplete
-      && JSON.stringify(last.settings) === JSON.stringify(snapshot.settings)
-    ) {
-      return;
-    }
-    const gen = settingsPersistGenRef.current;
-    void (async () => {
-      try {
-        await settingsPers.store.save(
-          snapshot.settings,
-          snapshot.onboardingComplete,
-        );
-        if (gen !== settingsPersistGenRef.current) return;
-        lastSavedSettingsRef.current = snapshot;
-        dispatch({ message: null, type: 'set-settings-error' });
-      } catch (error: unknown) {
-        if (gen !== settingsPersistGenRef.current) return;
-        const message = error instanceof Error ? error.message : String(error);
-        const rollback = lastSavedSettingsRef.current;
-        if (rollback) {
-          dispatch({
-            onboardingComplete: rollback.onboardingComplete,
-            settings: rollback.settings,
-            type: 'hydrate-settings',
-          });
-        }
-        dispatch({
-          message: `Failed to save settings: ${message}`,
-          type: 'set-settings-error',
-        });
-      }
-    })();
-  }, [
-    settingsPers,
-    state.onboarding.complete,
-    state.settings,
-  ]);
+  useSettingsSync({
+    current: { onboardingComplete: state.onboarding.complete, settings: state.settings },
+    dispatch,
+    enabled: settingsPers.enabled,
+    lastRequestedRef: lastRequestedSettingsRef,
+    lastSavedRef: lastSavedSettingsRef,
+    persistGenRef: settingsPersistGenRef,
+  });
+
+  useSettingsPersist({
+    allowRef: allowSettingsPersistRef,
+    dispatch,
+    hydratedRef: settingsHydratedRef,
+    lastRequestedRef: lastRequestedSettingsRef,
+    lastSavedRef: lastSavedSettingsRef,
+    onboardingComplete: state.onboarding.complete,
+    persistence: settingsPers,
+    persistGenRef: settingsPersistGenRef,
+    settings: state.settings,
+  });
 
   // Persist dictionary after hydrate whenever words change. Optimistic UI
   // with rollback to last successful save on write failure.

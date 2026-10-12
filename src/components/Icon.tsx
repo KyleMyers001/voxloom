@@ -15,6 +15,7 @@ const paths: Record<string, ReactElement> = {
   plus: <path d="M12 5v14M5 12h14" />,
   x: <path d="M6 6l12 12M18 6L6 18" />,
   down: <path d="M6 9l6 6 6-6" />,
+  download: <path d="M12 4v11M7 10l5 5 5-5M5 20h14" />,
   check: <path d="M5 12l5 5 9-10" />,
   warn: <><path d="M12 3l10 18H2z" /><path d="M12 10v5M12 18v.01" /></>,
   keyboard: <><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" /></>,

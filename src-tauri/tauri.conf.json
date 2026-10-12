@@ -14,7 +14,8 @@
     "security": {
       "capabilities": [
         "main",
-        "overlay"
+        "overlay",
+        "settings"
       ]
     },
     "windows": [

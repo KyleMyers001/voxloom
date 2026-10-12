@@ -1,8 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Main window: capture, clipboard, global shortcut, overlay control.",
-  "windows": ["main"],
+  "description": "Main window: capture, clipboard, global shortcut, overlay control, every app command except settings_request_onboarding.",
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
@@ -22,6 +24,33 @@
     "global-shortcut:allow-is-registered",
     "global-shortcut:allow-register",
     "global-shortcut:allow-unregister",
-    "global-shortcut:allow-unregister-all"
+    "global-shortcut:allow-unregister-all",
+    "allow-capture-cancel",
+    "allow-capture-list-devices",
+    "allow-capture-query-permission",
+    "allow-capture-request-permission",
+    "allow-capture-start",
+    "allow-capture-status",
+    "allow-capture-stop",
+    "allow-delivery-insert-text",
+    "allow-delivery-snapshot-target",
+    "allow-delivery-validate-target",
+    "allow-dictionary-load",
+    "allow-dictionary-save",
+    "allow-history-load",
+    "allow-history-save",
+    "allow-hold-release-arm",
+    "allow-hold-release-disarm",
+    "allow-overlay-ensure",
+    "allow-overlay-hide",
+    "allow-overlay-show",
+    "allow-settings-load",
+    "allow-settings-save",
+    "allow-settings-window-open",
+    "allow-stt-cancel-download",
+    "allow-stt-download-model",
+    "allow-stt-list-models",
+    "allow-stt-model-status",
+    "allow-stt-transcribe"
   ]
 }

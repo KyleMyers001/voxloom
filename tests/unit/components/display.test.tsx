@@ -11,7 +11,7 @@ import { Switch } from '../../../src/components/Switch';
 describe('Icon', () => {
   it('ships the full spec set and is decorative unless labelled', () => {
     expect(iconNames).toEqual(['house', 'clock', 'book', 'info', 'gear', 'copy', 'trash', 'retry', 'edit',
-      'search', 'mic', 'plus', 'x', 'down', 'check', 'warn', 'keyboard']);
+      'search', 'mic', 'plus', 'x', 'down', 'download', 'check', 'warn', 'keyboard']);
     const { container } = render(<><Icon name="mic" /><Icon label="Warning" name="warn" /></>);
     expect(container.querySelector('[data-icon="mic"]')?.getAttribute('aria-hidden')).toBe('true');
     expect(screen.getByRole('img', { name: 'Warning' })).toBeTruthy();

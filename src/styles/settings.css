@@ -40,9 +40,21 @@
 .settings-panel { padding: var(--s-9) var(--pad-x) var(--pad-x); }
 .settings-panel:focus-visible { outline-offset: -3px; }
 .settings-panel > h2 { font-size: 15px; font-weight: 700; margin-bottom: var(--s-7); }
-.settings-rows { display: grid; gap: var(--s-4); }
-.settings-rows .frow { flex-wrap: wrap; }
-.frow__control { align-items: center; display: flex; flex-wrap: wrap; gap: var(--s-4); justify-content: flex-end; }
+/* Two-column FormRow rows (designer #42): label | control, hairline dividers, no filled cards. */
+.settings-rows { display: grid; }
+.settings-rows .frow {
+  align-items: center;
+  background: none;
+  border-radius: 0;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: var(--s-4) var(--s-8);
+  grid-template-columns: 190px minmax(0, 1fr);
+  padding: var(--s-6) 0;
+}
+.settings-rows .frow:first-child { border-top: 0; }
+.frow__control { align-items: center; display: flex; flex-wrap: wrap; gap: var(--s-4); justify-content: flex-start; }
+.settings-rows .frow > :not(.frow__label) { justify-self: start; }
 .frow__control input:not([type]) { max-width: 190px; }
 .shortcut-caps[data-editing] { visibility: hidden; }
 
@@ -62,29 +74,45 @@
 .mini-hud i:nth-child(2n) { height: 13px; }
 
 .callout {
-  background: color-mix(in srgb, var(--info) 8%, var(--field));
+  align-items: flex-start;
+  background: var(--field); /* neutral box (designer) */
   border-radius: var(--r-tile);
+  display: flex;
+  gap: var(--s-5);
   margin-top: var(--s-8);
   padding: var(--s-6) var(--s-7);
 }
 
+.callout > .icon { color: var(--ok); flex: none; }
 .callout p { color: var(--fg); font-size: 12px; margin: 4px 0 0; }
 .settings-subhead { font-size: var(--fs-section); margin: var(--s-9) 0 var(--s-4); }
 .recovery-grid { display: grid; gap: var(--s-4); grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
 .recovery-grid .recovery-item {
+  align-items: flex-start;
   background: var(--field);
-  border-left: 2px solid var(--warn);
-  border-radius: 0 var(--r-tile) var(--r-tile) 0;
+  border: 0; /* the icon carries the warning, not the legacy red rule */
+  border-radius: var(--r-tile);
+  display: flex;
   font-size: 12px;
-  margin: 0;
+  gap: var(--s-4);
   padding: var(--s-4) var(--s-5);
 }
+
+.recovery-item > .icon { color: var(--warn); flex: none; margin-top: 1px; }
+.recovery-item p { display: grid; gap: 2px; margin: 0; }
+.recovery-item span { color: var(--mut); }
 
 .appearance-options { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 
 /* Below 640px only: the native Settings window is fixed at 760×600 and keeps two columns. */
 @media (max-width: 640px) {
   .recovery-grid { grid-template-columns: 1fr; }
+  .settings-rows .frow { grid-template-columns: 1fr; }
   .settings-panel { padding: var(--s-8); }
 }
+
+/* Native Settings window (UI PR 6b): the card fills its own window. */
+.settings-window-root { background: var(--panel); min-height: 100vh; }
+.settings-window-root > .banner { margin: var(--s-4) var(--s-8) 0; }
+.settings-window-root .settings-window { border: 0; border-radius: 0; box-shadow: none; max-width: none; }
