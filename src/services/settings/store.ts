@@ -4,6 +4,7 @@ import {
   defaultSettingsFile,
   parseSettingsJson,
   serializeSettingsFile,
+  unknownSettingsKeys,
   type SettingsFile,
 } from './format';
 import type { SettingsFileIo } from './io';
@@ -50,6 +51,9 @@ function fileVersion(raw: string): unknown {
 }
 
 export function createSettingsStore(io: SettingsFileIo): DurableSettingsStore {
+  // Unknown `settings` keys from the last successful load, carried through
+  // every save so they are never dropped (BUS-42).
+  let extras: Record<string, unknown> = {};
   return {
     async load() {
       let raw: string | null;
@@ -70,6 +74,7 @@ export function createSettingsStore(io: SettingsFileIo): DurableSettingsStore {
         return { file: defaultSettingsFile(), ok: true };
       }
       const parsed = parseSettingsJson(raw);
+      if (parsed.ok) extras = unknownSettingsKeys(raw);
       if (!parsed.ok) {
         const backup = await runBackup(io.backup);
         // Future / unknown version from another build: never replace it.
@@ -104,7 +109,7 @@ export function createSettingsStore(io: SettingsFileIo): DurableSettingsStore {
       return { file: parsed.file, ok: true };
     },
     async save(settings, onboardingComplete) {
-      const contents = serializeSettingsFile(settings, onboardingComplete);
+      const contents = serializeSettingsFile(settings, onboardingComplete, extras);
       await io.write(contents);
     },
   };

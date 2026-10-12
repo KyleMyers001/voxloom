@@ -258,5 +258,62 @@ describe('BUS-42 history file version compatibility', () => {
     const result = await createSettingsStore(failing).load();
     expect(result).toMatchObject({ ok: false, writeBlocked: true });
   });
+
+  it('keeps #24 cleanup keys through the boot rewrite and a later edit, out of app state', async () => {
+    const v2 = JSON.stringify({
+      onboardingComplete: true,
+      settings: {
+        ...initialSettings,
+        cleanupEnabled: true,
+        cleanupModelId: 'local-cleanup-small',
+        style: 'casual',
+      },
+      version: 2,
+    });
+    const settingsIo = createMemorySettingsIo(v2);
+    api = null;
+    render(
+      <AppProvider
+        clock={() => NOW}
+        historyPersistence={{ enabled: true, store: createHistoryStore(createMemoryHistoryIo(null)) }}
+        settingsPersistence={{ enabled: true, store: createSettingsStore(settingsIo) }}
+      >
+        <Probe />
+      </AppProvider>,
+    );
+    await waitFor(() => expect(api?.bootReady).toBe(true));
+    type Disk = { settings: Record<string, unknown>; version: number };
+    const afterBoot = JSON.parse(settingsIo.snapshot()!) as Disk;
+    expect(afterBoot.version).toBe(1);
+    expect(afterBoot.settings).toMatchObject({
+      cleanupEnabled: true,
+      cleanupModelId: 'local-cleanup-small',
+      style: 'casual',
+    });
+    expect(api!.state.settings).not.toHaveProperty('cleanupEnabled');
+    expect(api!.state.settings).not.toHaveProperty('cleanupModelId');
+
+    act(() => api!.dispatch({ key: 'style', type: 'set-setting', value: 'formal' }));
+    await waitFor(() => expect((JSON.parse(settingsIo.snapshot()!) as Disk).settings.style).toBe('formal'));
+    expect((JSON.parse(settingsIo.snapshot()!) as Disk).settings).toMatchObject({
+      cleanupEnabled: true,
+      cleanupModelId: 'local-cleanup-small',
+    });
+  });
+
+  it('known keys stay authoritative over raw values when extras are merged', async () => {
+    const raw = JSON.stringify({
+      onboardingComplete: true,
+      settings: { ...initialSettings, cleanupEnabled: false, style: 'not-a-style' },
+      version: 1,
+    });
+    const io = createMemorySettingsIo(raw);
+    const store = createSettingsStore(io);
+    const loaded = await store.load();
+    await store.save(loaded.file.settings, true);
+    const disk = JSON.parse(io.snapshot()!) as { settings: Record<string, unknown> };
+    expect(disk.settings.style).toBe(initialSettings.style);
+    expect(disk.settings.cleanupEnabled).toBe(false);
+  });
 });
 
