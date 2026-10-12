@@ -85,12 +85,16 @@ describe('History row actions (designer: reachable by keyboard and VoiceOver)', 
     renderWithApp(<History onToast={() => {}} />);
     const row = screen.getAllByRole('article')[0];
     const text = within(row).getByRole('heading', { level: 2 }).textContent ?? '';
-    expect(row).toHaveAccessibleName(text);
+    // No aria-labelledby on the row: VoiceOver would read the transcript twice.
+    expect(row).not.toHaveAttribute('aria-labelledby');
     row.focus();
     await user.tab();
     const first = within(row).getByRole('button', { name: 'Copy transcript' });
     expect(first).toHaveFocus();
     expect(first).toHaveAccessibleDescription(text);
+    for (const other of within(row).getAllByRole('button').filter((b) => b !== first)) {
+      expect(other).not.toHaveAttribute('aria-describedby');
+    }
     expect(within(row).getByRole('group', { name: 'Transcript actions' })).toBeVisible();
   });
 
