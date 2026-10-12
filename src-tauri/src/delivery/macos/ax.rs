@@ -49,7 +49,7 @@ pub fn cfstr(s: &str) -> CFStringRef {
     unsafe { CFStringCreateWithCString(ptr::null(), c.as_ptr(), K_CF_STRING_ENCODING_UTF8) }
 }
 
-fn cfstring_to_rust(cf: CFStringRef) -> Option<String> {
+pub fn cfstring_to_rust(cf: CFStringRef) -> Option<String> {
     if cf.is_null() {
         return None;
     }

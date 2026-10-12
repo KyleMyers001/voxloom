@@ -1,13 +1,41 @@
 //! Read-back verification and the post-AX delivery decision.
 
+/// Normalize AX text for comparison only: hosts (notably Chromium
+/// contenteditable) report spaces as U+00A0, line breaks as `\r\n`/`\r`, and
+/// embeds as U+FFFC. Nothing else is folded, so transformed writes still fail.
+pub fn normalize_ax_text(s: &str) -> Vec<char> {
+    let mut out = Vec::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\u{FFFC}' => {}
+            '\u{A0}' => out.push(' '),
+            '\r' => {
+                if chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                out.push('\n');
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// Equal after `normalize_ax_text`.
+pub fn same_ax_text(a: &str, b: &str) -> bool {
+    normalize_ax_text(a) == normalize_ax_text(b)
+}
+
 /// Proof that `after` is exactly `before` with one span (the selection,
-/// possibly empty) replaced by the complete `text`. A pre-existing occurrence
-/// of `text`, a truncated/partial write, or a transformed write never counts.
+/// possibly empty) replaced by the complete `text`, compared after
+/// `normalize_ax_text`. A pre-existing occurrence of `text`, a
+/// truncated/partial write, or a transformed write never counts.
 pub fn value_confirms_insert(before: &str, after: &str, text: &str) -> bool {
-    let (b, a, t): (Vec<char>, Vec<char>, Vec<char>) = (
-        before.chars().collect(),
-        after.chars().collect(),
-        text.chars().collect(),
+    let (b, a, t) = (
+        normalize_ax_text(before),
+        normalize_ax_text(after),
+        normalize_ax_text(text),
     );
     if t.is_empty() || a == b || a.len() < t.len() || a.len() > b.len() + t.len() {
         return false;
@@ -45,8 +73,8 @@ pub fn after_ax(
         Some(after) if value_confirms_insert(before, after, text) => AfterAx::Inserted,
         // Chromium web content often reports AX success (or an error) while
         // leaving the DOM untouched; only then is typing safe.
-        Some(after) if after == before && may_type => AfterAx::TypeFallback,
-        Some(after) if after == before => match ax_result {
+        Some(after) if same_ax_text(after, before) && may_type => AfterAx::TypeFallback,
+        Some(after) if same_ax_text(after, before) => match ax_result {
             Err(err) => AfterAx::Failed(err),
             Ok(()) => AfterAx::Failed("AXSelectedText reported success but nothing changed".into()),
         },
