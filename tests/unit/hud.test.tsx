@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { OverlayWaveformView, resultText } from '../../src/overlay/OverlayWaveformView';
+import { OverlayWaveformView, resultText, spokenResultText } from '../../src/overlay/OverlayWaveformView';
 import { createOverlayBridge } from '../../src/services/shortcut/overlayBridge';
 import { resultWaveform } from '../../src/services/shortcut/overlayVisibility';
 import { hudResultFor } from '../../src/services/stt/useDogfoodCapture';
@@ -48,17 +48,21 @@ describe('HUD view', () => {
   it('shows only a brief Copied, unverified or short error, with the platform paste key', () => {
     expect(resultText('copied', true)).toBe('Copied. Press ⌘V to paste');
     expect(resultText('copied', false)).toBe('Copied. Press Ctrl+V to paste');
-    expect(resultText('maybe-copied', true)).toBe('May not have inserted · copied, ⌘V');
-    expect(resultText('unverified', true)).toBe('Sent · not verified');
-    expect(resultText('maybe-inserted', true)).toBe('May have inserted · check the field');
+    expect(resultText('maybe-copied', true)).toBe('Maybe inserted · copied');
+    expect(resultText('unverified', true)).toBe('Not verified');
+    expect(resultText('maybe-inserted', true)).toBe('Maybe inserted · check field');
+    // Full sentences go to screen readers only.
+    expect(spokenResultText('maybe-copied', true)).toBe('May not have been inserted. The text was also copied; press Command V to paste.');
+    expect(spokenResultText('maybe-inserted', false)).toBe('May have been inserted. Check the field; nothing was copied.');
     expect(resultText('transcribe-failed')).toBe('Couldn’t transcribe');
     expect(resultText('insert-failed')).toBe('Couldn’t insert');
     const { container, rerender } = render(<OverlayWaveformView levels={levels} mac={false} result="unverified" waveform="result-unverified" />);
-    expect(container.querySelector('.hud-result--unverified')).toHaveTextContent('Sent · not verified');
+    expect(container.querySelector('.hud-result--unverified')).toHaveTextContent('Not verified');
     rerender(<OverlayWaveformView levels={levels} mac result="maybe-copied" waveform={resultWaveform('maybe-copied')} />);
-    expect(container.querySelector('.hud-result--unverified')).toHaveTextContent('May not have inserted · copied, ⌘V');
+    expect(container.querySelector('.hud-result--unverified')).toHaveTextContent('Maybe inserted · copied');
+    expect(screen.getByRole('status')).toHaveTextContent('press Command V to paste');
     rerender(<OverlayWaveformView levels={levels} mac result="maybe-inserted" waveform={resultWaveform('maybe-inserted')} />);
-    expect(container.querySelector('.hud-result--unverified')).toHaveTextContent('May have inserted · check the field');
+    expect(container.querySelector('.hud-result--unverified')).toHaveTextContent('Maybe inserted · check field');
   });
 });
 

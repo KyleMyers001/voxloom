@@ -57,6 +57,21 @@ export interface DeliveryOutcome {
   text: string;
 }
 
+/**
+ * insertText failed after the write may already have started (e.g. the IPC
+ * call died mid-flight). Plain errors mean nothing was written: the native
+ * side reports refusals and verified no-ops as errors, and unconfirmed
+ * mutations as `InsertReport.unverified`.
+ */
+export class InsertError extends Error {
+  readonly writeStarted: boolean;
+  constructor(message: string, writeStarted: boolean) {
+    super(message);
+    this.name = 'InsertError';
+    this.writeStarted = writeStarted;
+  }
+}
+
 /** Structured native insert result (macOS). */
 export interface InsertReport {
   /** Events posted to Terminal, never proof of input-buffer contents. */
