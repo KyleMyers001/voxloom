@@ -23,6 +23,7 @@ type Props = {
 
 /** One History row: time · text · badge + meta · amber note · Copy / Retry (browser) / Delete. */
 export function HistoryRow({ record, isNative, currentTime, canStart, onCopy, onRetry, onDelete }: Props) {
+  const textId = `history-text-${record.id}`;
   const retryable = !isNative && canRetry(record, currentTime);
   const failedNote = isNative
     ? 'No audio retry available; copy the text to recover it.'
@@ -34,10 +35,10 @@ export function HistoryRow({ record, isNative, currentTime, canStart, onCopy, on
     : record.status === 'failed' ? failedNote : null;
 
   return (
-    <article className="recent-row history-row" tabIndex={0}>
+    <article aria-labelledby={textId} className="recent-row history-row" tabIndex={0}>
       <span className="timestamp">{formatTime(record.createdAt)}</span>
       <div className="history-row__body">
-        <h2 className="history-row__text">{record.text}</h2>
+        <h2 className="history-row__text" id={textId}>{record.text}</h2>
         <p className="history-row__meta">
           <Badge status={record.status} />
           <span>{record.durationSeconds}s · {record.model ?? 'Local STT'} · {styleLabel(record.style)}</span>
@@ -48,14 +49,14 @@ export function HistoryRow({ record, isNative, currentTime, canStart, onCopy, on
           </p>
         )}
       </div>
-      <div className="action-group">
+      <div aria-label="Transcript actions" className="action-group" role="group">
         {record.text.trim() && (
-          <IconButton icon="copy" label="Copy transcript" onClick={() => onCopy(record.text)} />
+          <IconButton icon="copy" aria-describedby={textId} label="Copy transcript" onClick={() => onCopy(record.text)} />
         )}
         {retryable && (
-          <IconButton disabled={!canStart} icon="retry" label="Retry transcription" onClick={() => onRetry(record)} />
+          <IconButton disabled={!canStart} icon="retry" aria-describedby={textId} label="Retry transcription" onClick={() => onRetry(record)} />
         )}
-        <IconButton icon="trash" label="Delete transcript" onClick={() => onDelete(record.id)} tone="danger" />
+        <IconButton icon="trash" aria-describedby={textId} label="Delete transcript" onClick={() => onDelete(record.id)} tone="danger" />
       </div>
     </article>
   );
