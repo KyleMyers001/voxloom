@@ -289,6 +289,7 @@ export function AppProvider({
           message: settingsBlocked
             ? 'History is read-only until settings can be read. Your history file was left untouched.'
             : 'History is read-only because it couldn\'t be backed up after settings were reset. Your history file was left untouched.',
+          sticky: true,
           type: 'set-history-error',
         });
       } else if (historyResult.ok) {
@@ -300,6 +301,7 @@ export function AppProvider({
         allowHistoryPersistRef.current = false;
         dispatch({
           message: historyResult.error,
+          sticky: true,
           type: 'set-history-error',
         });
       }
