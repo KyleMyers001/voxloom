@@ -1,0 +1,122 @@
+/* Waveform, speech-model list, dogfood capture. */
+.wave {
+  align-items: center;
+  display: flex;
+  gap: 1px;
+  height: 14px;
+  justify-content: center;
+  width: 60px;
+}
+
+.wave i {
+  background: var(--accent);
+  border-radius: 2px;
+  flex: 0 0 1.5px;
+  height: var(--h);
+  opacity: .9;
+  transition: height 85ms ease-out;
+}
+
+[data-waveform="processing"] .wave i {
+  animation: waveform-processing 850ms ease-in-out infinite alternate;
+}
+
+@keyframes waveform-processing {
+  from { opacity: .35; }
+  to { opacity: .9; }
+}
+
+.stt-model-list {
+  display: grid;
+  gap: 12px;
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.stt-model-row {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.stt-model-select {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+}
+
+.stt-model-select span {
+  display: grid;
+  gap: 2px;
+}
+
+.stt-model-id {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stt-model-status {
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  width: fit-content;
+}
+
+.stt-model-status[data-status="available"] {
+  color: var(--accent, #3d8f6e);
+}
+
+.stt-model-status[data-status="missing"],
+.stt-model-status[data-status="failed"] {
+  color: var(--danger);
+}
+
+.stt-model-status[data-status="downloading"] {
+  color: var(--muted);
+}
+
+.stt-model-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.stt-model-progress {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stt-model-selected-note {
+  margin: 0;
+}
+
+.dogfood-capture-actions {
+  margin-top: 12px;
+}
+
+.dogfood-transcript {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 12px;
+}
+
+.dogfood-transcript__label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.dogfood-transcript p {
+  margin: 0;
+}
+

@@ -18,6 +18,7 @@ import {
   useShortcutGestures,
 } from './useShortcutGestures';
 import { useTheme } from './useTheme';
+import { AppTile } from '../components/AppTile';
 
 const screens: { glyph: string; label: string; value: Screen }[] = [
   { glyph: '⌂', label: 'Home', value: 'home' },
@@ -183,7 +184,7 @@ export function App() {
   return <>
     <div className="app" id="app-shell">
       <header className="topbar">
-        <div className="topbar__mark">Voxloom</div>
+        <div className="topbar__mark"><AppTile size="sm" />Voxloom</div>
         <button aria-label="Open keyboard shortcuts" className="icon-btn"
           onClick={(event) => {
             modalOpener.current = event.currentTarget;

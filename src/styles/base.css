@@ -1,0 +1,135 @@
+/* Element defaults. System font only (no bundled fonts). */
+:root {
+  font-family: var(--font);
+}
+
+/* Body text is 13px per spec; set on body so 1rem stays 16px. */
+body {
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  margin: 0;
+  min-height: 100vh;
+}
+
+.overlay-document body {
+  background: transparent;
+  min-height: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: .45;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 42%, transparent);
+  outline-offset: 2px;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  font-size: clamp(24px, 3vw, 38px);
+  letter-spacing: -.04em;
+  line-height: 1.05;
+  margin-bottom: 8px;
+}
+
+h2 {
+  font-size: 17px;
+  letter-spacing: -.01em;
+}
+
+h3 {
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+
+input,
+select,
+textarea {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: inherit;
+  min-height: 40px;
+  padding: 0 11px;
+}
+
+label,
+legend {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+textarea {
+  line-height: 1.5;
+  min-height: 88px;
+  padding-bottom: 9px;
+  padding-top: 9px;
+  resize: vertical;
+}
+
+.app-tile {
+  align-items: center;
+  background: var(--tile-bg);
+  border-radius: var(--r-tile);
+  box-shadow: var(--tile-shadow);
+  display: inline-grid;
+  flex: none;
+  height: 36px;
+  place-items: center;
+  width: 36px;
+}
+
+.app-tile svg {
+  height: 61%;
+  width: 61%;
+}
+
+.app-tile--sm {
+  border-radius: var(--r-ctl);
+  height: 24px;
+  width: 24px;
+}
+
+.app-tile--lg {
+  border-radius: var(--r-card);
+  height: 56px;
+  width: 56px;
+}
