@@ -141,4 +141,16 @@ describe('createDogfoodRecord rawText (BUS-23)', () => {
     const record = createDogfoodRecord({ ...base, rawText: 'Thank you.', text: '' });
     expect(record).toBeNull();
   });
+
+  it('may-have-inserted deliveries become Unverified with the flag (Review #44)', () => {
+    const base = { durationMs: 1_000, id: 'm', now: 1, style: 'formal' as const, text: 'hi' };
+    expect(createDogfoodRecord({ ...base, mayHaveInserted: true, status: 'failed' })).toMatchObject({
+      mayHaveInserted: { copied: false }, status: 'unverified',
+    });
+    expect(createDogfoodRecord({ ...base, mayHaveInserted: true, status: 'copied' })).toMatchObject({
+      mayHaveInserted: { copied: true }, status: 'unverified',
+    });
+    expect(createDogfoodRecord({ ...base, status: 'failed' })).not.toHaveProperty('mayHaveInserted');
+  });
 });
+

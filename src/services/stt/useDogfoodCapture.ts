@@ -235,6 +235,7 @@ export function useDogfoodCapture(
       const record = createDogfoodRecord({
         durationMs: audio.duration_ms,
         id: `dogfood-${audio.id}`,
+        mayHaveInserted: result.delivery.mayHaveInserted,
         model: modelId,
         now: nowRef.current(),
         rawText: result.transcript.rawText,
