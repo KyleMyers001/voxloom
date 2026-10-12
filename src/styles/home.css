@@ -28,11 +28,11 @@
   margin-bottom: 6px;
 }
 
-.home-hero h1 .kbd { font-size: 14px; min-width: 30px; padding: 7px 8px; }
-.home-hero p { color: var(--mut); font-size: 14px; margin: 0 0 var(--s-6); }
+.home-hero h1 .kbd { font-size: var(--fs-emph); min-width: 30px; padding: 7px 8px; }
+.home-hero p { color: var(--mut); font-size: var(--fs-emph); margin: 0 0 var(--s-6); }
 .home-hero__style { align-items: center; display: flex; flex-wrap: wrap; gap: var(--s-5); }
 
-.fine { color: var(--mut); font-size: var(--fs-caption); }
+.fine { color: var(--mut); font-size: var(--fs-secondary); }
 
 .home-card { border-radius: var(--r-hero); margin-bottom: var(--s-7); }
 .home-card h2 { font-size: var(--fs-section); font-weight: 650; margin-bottom: var(--s-5); }
@@ -41,7 +41,7 @@
 
 .capline { align-items: center; display: flex; flex-wrap: wrap; gap: var(--s-8); justify-content: space-between; }
 .capline .dogfood-capture-actions { margin-top: 0; }
-.cap-meta { color: var(--mut); display: grid; font-size: 12px; gap: 2px; text-align: right; }
+.cap-meta { color: var(--mut); display: grid; font-size: var(--fs-secondary); gap: 2px; text-align: right; }
 .cap-meta b { color: var(--fg); font-weight: 600; }
 
 .btn.primary {
@@ -58,7 +58,7 @@
 
 @keyframes rec-pulse { from { opacity: .4; } to { opacity: 1; } }
 
-.note { color: var(--mut); font-size: 12px; margin: var(--s-6) 0 0; }
+.note { color: var(--mut); font-size: var(--fs-secondary); margin: var(--s-6) 0 0; }
 
 .home-card .dogfood-transcript {
   align-items: center;
@@ -74,7 +74,7 @@
 .status { align-items: center; display: flex; font-weight: 500; gap: 6px; margin: var(--s-5) 0 0; }
 .status:not(.form-error) { color: var(--ok); }
 
-.link-button { border: 0; color: var(--accfg); font-size: 12px; min-height: 0; padding: 2px 4px; }
+.link-button { border: 0; color: var(--accfg); font-size: var(--fs-secondary); min-height: 0; padding: 2px 4px; }
 
 .home .recent-row {
   border-top: 1px solid var(--line);

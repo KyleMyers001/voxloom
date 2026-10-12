@@ -161,8 +161,8 @@ test('settings.html (the native Settings window entry) renders and passes axe', 
   await expectAccessible(page);
 });
 
-test('the 760×600 Settings window keeps two-column rows and a two-column recovery grid (QA #42)', async ({ page }) => {
-  await page.setViewportSize({ height: 600, width: 760 });
+test('the 760×660 Settings window keeps two-column rows and a two-column recovery grid (QA #42)', async ({ page }) => {
+  await page.setViewportSize({ height: 660, width: 760 });
   await page.goto('/settings.html');
   const cols = (sel: string) => page.locator(sel).first().evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ').length);
   expect(await cols('.settings-rows .frow')).toBe(2);

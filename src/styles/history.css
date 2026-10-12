@@ -39,7 +39,7 @@
   color: var(--mut);
   display: flex;
   flex-wrap: wrap;
-  font-size: var(--fs-caption);
+  font-size: var(--fs-secondary);
   gap: 6px;
   margin: 3px 0 0;
 }
@@ -48,7 +48,7 @@
   align-items: flex-start;
   color: var(--warn);
   display: flex;
-  font-size: var(--fs-caption);
+  font-size: var(--fs-secondary);
   gap: 6px;
   margin-top: 6px;
 }

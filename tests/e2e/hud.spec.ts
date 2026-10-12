@@ -18,7 +18,6 @@ test('HUD result pills fit the 248px result window', async ({ page }) => {
       root.innerHTML = `<div class="hud-result hud-result--unverified"><svg class="icon" width="14" height="14"></svg><span>${t}</span></div>`;
       return root.querySelector<HTMLElement>('.hud-result')!.getBoundingClientRect().width;
     }, text);
-    console.log(`HUD pill width: ${text} = ${width}px`);
     expect(width, text).toBeLessThanOrEqual(248 - 8);
   }
 });
