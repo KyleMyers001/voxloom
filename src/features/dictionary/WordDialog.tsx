@@ -27,7 +27,7 @@ export function WordDialog({ editing, words, opener, onClose, onSave }: Props) {
   }
 
   return (
-    <Dialog label={title} onClose={onClose} opener={opener}>
+    <Dialog initialFocus="#dictionary-word" label={title} onClose={onClose} opener={opener}>
       <h2>{title}</h2>
       <form className="editor-form" onSubmit={save}>
         <label htmlFor="dictionary-word">Word</label>

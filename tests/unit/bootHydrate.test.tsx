@@ -131,7 +131,7 @@ describe('boot hydrate polish', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Loading…');
     expect(screen.queryByText('JSON')).not.toBeInTheDocument();
     expect(screen.queryByText('PersistedWord')).not.toBeInTheDocument();
-    expect(screen.queryByText('No words found.')).not.toBeInTheDocument();
+    expect(screen.queryByText('No words yet')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'History' }));
     expect(screen.getByRole('status')).toHaveTextContent('Loading…');
