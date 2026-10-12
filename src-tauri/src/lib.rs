@@ -5,6 +5,7 @@ mod history;
 mod hold_release;
 mod overlay;
 mod settings;
+mod store_backup;
 mod stt;
 
 use std::sync::Arc;
@@ -159,6 +160,7 @@ pub fn run() {
             overlay::overlay_show,
             settings::settings_load,
             settings::settings_save,
+            store_backup::store_backup,
             stt::stt_cancel_download,
             stt::stt_download_model,
             stt::stt_list_models,

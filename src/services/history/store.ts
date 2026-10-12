@@ -1,14 +1,16 @@
 import type { DictationRecord } from '../../domain/types';
 import {
+  HISTORY_FILE_VERSION,
   applyTranscriptRetention,
   parseHistoryJson,
   serializeHistoryFile,
   type TranscriptRetention,
 } from './format';
 import type { HistoryFileIo } from './io';
+import { describeBackup, runBackup } from '../storeBackup';
 
 export type HistoryLoadResult =
-  | { ok: true; records: DictationRecord[] }
+  | { ok: true; records: DictationRecord[]; migratedFrom?: number }
   | { ok: false; error: string };
 
 export interface HistoryStore {
@@ -47,7 +49,26 @@ export function createHistoryStore(io: HistoryFileIo): HistoryStore {
       }
       const parsed = parseHistoryJson(raw);
       if (!parsed.ok) {
-        return { error: parsed.error, ok: false };
+        // Unreadable / unknown version: preserve a copy. The caller keeps
+        // history writes disabled, so the original is never clobbered.
+        const backup = await runBackup(io.backup);
+        return { error: `${parsed.error}${describeBackup(backup)}`, ok: false };
+      }
+      if (parsed.sourceVersion !== HISTORY_FILE_VERSION) {
+        // Migration: the next save rewrites the file in the current format,
+        // so keep the original first. No backup → refuse to migrate.
+        const backup = await runBackup(io.backup);
+        if (!backup.ok) {
+          return {
+            error: `History file version ${parsed.sourceVersion} needs migration${describeBackup(backup)}`,
+            ok: false,
+          };
+        }
+        return {
+          migratedFrom: parsed.sourceVersion,
+          ok: true,
+          records: applyTranscriptRetention(parsed.file.records, retention, now),
+        };
       }
       return {
         ok: true,

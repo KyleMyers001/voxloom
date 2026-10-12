@@ -102,7 +102,9 @@ export function parseSettingsJson(raw: string): ParseSettingsResult {
   if (!isObject(parsed)) {
     return { error: 'Settings file root must be an object', ok: false };
   }
-  if (parsed.version !== SETTINGS_FILE_VERSION) {
+  // v2 was written by the BUS-16 cleanup branch (#24): same envelope plus
+  // cleanup fields this build ignores (BUS-42).
+  if (parsed.version !== SETTINGS_FILE_VERSION && parsed.version !== 2) {
     return {
       error: `Unsupported settings file version: ${String(parsed.version)}`,
       ok: false,
