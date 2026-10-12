@@ -39,7 +39,14 @@ export function useAppKeys({ blocked, onHelp, onNavigate }: Options) {
   }, [blocked, onHelp, onNavigate]);
 }
 
+// Inputs that don't take typed text: ⌥-digit and ? still work while these are focused.
+const nonTextInputs = new Set([
+  'radio', 'checkbox', 'range', 'button', 'submit', 'reset', 'color', 'file', 'image', 'hidden',
+]);
+
 function isEditable(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
-  return target.isContentEditable || target.matches('input, textarea, select, [contenteditable]:not([contenteditable="false"])');
+  if (target.isContentEditable) return true;
+  if (target instanceof HTMLInputElement) return !nonTextInputs.has(target.type);
+  return target.matches('textarea, select, [contenteditable]:not([contenteditable="false"])');
 }
