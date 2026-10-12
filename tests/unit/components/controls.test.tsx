@@ -101,7 +101,9 @@ describe('IconButton', () => {
 describe('KeyCombo', () => {
   it('maps modifier names to Mac symbols', () => {
     expect(comboKeys('Ctrl + Shift + Space')).toEqual(['⌃', '⇧', 'Space']);
-    expect(comboKeys('CommandOrControl+Alt+k')).toEqual(['⌘', '⌥', 'K']);
+    expect(comboKeys('CommandOrControl+Alt+k', true)).toEqual(['⌘', '⌥', 'K']);
+    expect(comboKeys('CmdOrCtrl+Shift+Space', false)).toEqual(['Ctrl', '⇧', 'Space']);
+    expect(comboKeys('Cmd+k', false)).toEqual(['⌘', 'K']);
     expect(comboKeys('Option + Cmd + 1')).toEqual(['⌥', '⌘', '1']);
   });
 

@@ -78,3 +78,27 @@ describe('History heading order', () => {
     expect(screen.getAllByRole('heading', { level: 2 }).length).toBeGreaterThan(0);
   });
 });
+
+describe('History row actions (designer: reachable by keyboard and VoiceOver)', () => {
+  it('keeps actions in the tab order and names them with the row text', async () => {
+    const user = userEvent.setup();
+    renderWithApp(<History onToast={() => {}} />);
+    const row = screen.getAllByRole('article')[0];
+    const text = within(row).getByRole('heading', { level: 2 }).textContent ?? '';
+    expect(row).toHaveAccessibleName(text);
+    row.focus();
+    await user.tab();
+    const first = within(row).getByRole('button', { name: 'Copy transcript' });
+    expect(first).toHaveFocus();
+    expect(first).toHaveAccessibleDescription(text);
+    expect(within(row).getByRole('group', { name: 'Transcript actions' })).toBeVisible();
+  });
+
+  it('never hides actions with visibility/display (opacity only, shown on focus-within)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const css = readFileSync('src/styles/lists.css', 'utf8');
+    expect(css).toMatch(/\.history-list \.action-group \{ opacity: 0; \}/);
+    expect(css).toMatch(/\.recent-row:focus-within \.action-group/);
+    expect(css).not.toMatch(/\.history-list \.action-group \{[^}]*visibility: hidden/);
+  });
+});
