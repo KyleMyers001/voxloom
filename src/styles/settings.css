@@ -57,6 +57,9 @@
 .settings-rows .frow > :not(.frow__label) { justify-self: start; }
 .frow__control input:not([type]) { max-width: 190px; }
 .shortcut-recorder { display: contents; }
+/* Top-align the recorder row: a status that wraps grows it downward only, so
+   the field never moves under the pointer. */
+.settings-rows .frow--recorder { align-items: start; }
 .shortcut-recorder__field {
   align-items: center;
   background: var(--panel-2);

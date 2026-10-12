@@ -21,7 +21,7 @@ export function CaptureTab({ onSetup }: { onSetup: (opener: HTMLElement) => void
   const update = settings.update;
   return (
     <div className="settings-rows">
-      <div className="frow">
+      <div className="frow frow--recorder">
         <span className="frow__label">
           <span id="settings-shortcut-label">Shortcut</span>
           <small className="frow__help" id="settings-shortcut-help">
