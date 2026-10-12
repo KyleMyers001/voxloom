@@ -200,7 +200,8 @@ test('mock scenarios cover retry cancellation and expiry', async ({ page }) => {
   await page.getByRole('button', { name: 'Processing' }).click();
   await page.getByRole('button', { name: 'Complete error' }).click();
   await page.getByRole('button', { name: 'History' }).click();
-  await page.getByLabel('History status').selectOption('failed');
+  await page.getByRole('radiogroup', { name: 'History status' })
+    .getByRole('radio', { name: 'Failed' }).click();
   await expect(page.getByText(/Temporary recovery buffer · expires/).first())
     .toBeVisible();
   await page.getByRole('article').first().hover();
@@ -209,7 +210,8 @@ test('mock scenarios cover retry cancellation and expiry', async ({ page }) => {
   await page.getByRole('button', { name: 'Cancel' }).click();
   await page.getByRole('button', { name: 'Expire recovery buffers' }).click();
   await page.getByRole('button', { name: 'History' }).click();
-  await page.getByLabel('History status').selectOption('failed');
+  await page.getByRole('radiogroup', { name: 'History status' })
+    .getByRole('radio', { name: 'Failed' }).click();
   await expect(page.getByText('Temporary recovery buffer expired').first())
     .toBeVisible();
   await expect(page.getByRole('button', { name: 'Retry transcription' }))
@@ -224,7 +226,8 @@ test('History retry cannot interrupt an active listening run', async (
   await openDevPanel(page);
   await page.getByRole('button', { name: 'Listening · silent' }).click();
   await page.getByRole('button', { name: 'History' }).click();
-  await page.getByLabel('History status').selectOption('failed');
+  await page.getByRole('radiogroup', { name: 'History status' })
+    .getByRole('radio', { name: 'Failed' }).click();
   const failed = page.getByRole('article').first();
   await failed.hover();
   await expect(page.getByRole('button', { name: 'Retry transcription' }))

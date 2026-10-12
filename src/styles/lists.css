@@ -7,16 +7,16 @@
   gap: 10px;
 }
 
-.history-list .action-group {
-  opacity: 0;
-  visibility: hidden;
-}
+/* Actions stay in the tab order and accessibility tree (opacity only, never
+   visibility/display), and show on hover or whenever the row has focus. */
+.history-list .action-group { opacity: 0; }
 
 .history-list .recent-row:focus-within .action-group,
-.history-list .recent-row:hover .action-group {
-  opacity: 1;
-  visibility: visible;
-}
+.history-list .recent-row:hover .action-group { opacity: 1; }
+
+/* Failed and Unverified rows need recovery at a glance: actions always shown. */
+.history-list .recent-row[data-status="failed"] .action-group,
+.history-list .recent-row[data-status="unverified"] .action-group { opacity: 1; }
 
 .icon-btn {
   border: 0;

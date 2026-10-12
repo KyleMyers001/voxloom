@@ -106,3 +106,10 @@ describe('app focus ring reaches every focusable (QA #38)', () => {
     expect(readFileSync('src/styles/ui-controls.css', 'utf8')).not.toMatch(/42%, transparent\);\s*outline-offset/);
   });
 });
+
+describe('History rows take the app focus ring (QA)', () => {
+  it('styles .history-row:focus-visible with --focus', async () => {
+    const { readFileSync } = await import('node:fs');
+    expect(readFileSync('src/styles/base.css', 'utf8')).toMatch(/\.history-row:focus-visible,[^{]*\{\s*outline: 3px solid var\(--focus\)/);
+  });
+});
