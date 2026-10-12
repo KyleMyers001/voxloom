@@ -57,7 +57,7 @@
   width: 16px;
 }
 
-.switch.on i { background: var(--brand); box-shadow: none; }
+.switch.on i { background: var(--switch-on, var(--brand)); box-shadow: none; }
 .switch.on i::after { left: 16px; }
 
 .ib {

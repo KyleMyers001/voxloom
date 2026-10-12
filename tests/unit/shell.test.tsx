@@ -157,3 +157,14 @@ describe('Home (UI PR 3)', () => {
     expect(screen.queryByRole('button', { name: 'Start capture' })).not.toBeInTheDocument();
   });
 });
+
+describe('Title bar (designer: standard macOS title bar)', () => {
+  it('draws the app name only in the browser preview, never a fake inset', async () => {
+    const { unmount, container } = renderWithApp(<App />);
+    expect(container.querySelector('.titlebar__title')).toHaveTextContent('Voxloom');
+    unmount();
+    vi.mocked(isTauriEnv).mockReturnValue(true);
+    const native = renderWithApp(<App />);
+    expect(native.container.querySelector('.titlebar__title')).toBeNull();
+  });
+});

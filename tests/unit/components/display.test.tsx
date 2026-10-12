@@ -10,7 +10,7 @@ import { Switch } from '../../../src/components/Switch';
 
 describe('Icon', () => {
   it('ships the full spec set and is decorative unless labelled', () => {
-    expect(iconNames).toEqual(['house', 'clock', 'book', 'gear', 'copy', 'trash', 'retry', 'edit',
+    expect(iconNames).toEqual(['house', 'clock', 'book', 'info', 'gear', 'copy', 'trash', 'retry', 'edit',
       'search', 'mic', 'plus', 'x', 'down', 'check', 'warn', 'keyboard']);
     const { container } = render(<><Icon name="mic" /><Icon label="Warning" name="warn" /></>);
     expect(container.querySelector('[data-icon="mic"]')?.getAttribute('aria-hidden')).toBe('true');
@@ -35,6 +35,12 @@ describe('Badge', () => {
 });
 
 describe('Banner', () => {
+  it('uses the circled i for info and the triangle for warnings', () => {
+    const { container } = render(<><Banner>Note</Banner><Banner tone="warn">Careful</Banner></>);
+    const icons = [...container.querySelectorAll('[data-icon]')].map((el) => el.getAttribute('data-icon'));
+    expect(icons).toEqual(['info', 'warn']);
+  });
+
   it('announces errors as alerts and other tones as status', () => {
     render(<>
       <Banner action={<button type="button">Try again</button>} tone="error">Couldn't load the model list</Banner>
