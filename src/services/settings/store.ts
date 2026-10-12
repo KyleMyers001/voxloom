@@ -7,7 +7,11 @@ import {
   type SettingsFile,
 } from './format';
 import type { SettingsFileIo } from './io';
-import { describeBackup, runBackup } from '../storeBackup';
+import {
+  describeBackup,
+  hasUnknownVersion,
+  runBackup,
+} from '../storeBackup';
 
 export type SettingsLoadResult =
   | { ok: true; file: SettingsFile }
@@ -63,11 +67,14 @@ export function createSettingsStore(io: SettingsFileIo): DurableSettingsStore {
       const parsed = parseSettingsJson(raw);
       if (!parsed.ok) {
         const backup = await runBackup(io.backup);
+        // Future / unknown version from another build: never replace it.
+        // Only truly corrupt JSON may be replaced, and only after a backup.
+        const unknownVersion = hasUnknownVersion(raw, [SETTINGS_FILE_VERSION, 2]);
         return {
           error: `${parsed.error}${describeBackup(backup)}`,
           file: defaultSettingsFile(),
           ok: false,
-          writeBlocked: !backup.ok,
+          writeBlocked: unknownVersion || !backup.ok,
         };
       }
       if (fileVersion(raw) !== SETTINGS_FILE_VERSION) {

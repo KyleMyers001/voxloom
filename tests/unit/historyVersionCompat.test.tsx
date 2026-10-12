@@ -151,4 +151,60 @@ describe('BUS-42 history file version compatibility', () => {
     expect(result.file.settings.transcriptRetention).toBe('forever');
     expect(io.backups()).toEqual([v2]);
   });
+
+  it('settings from a future version are backed up and never replaced with defaults', async () => {
+    const future = JSON.stringify({ settings: { transcriptRetention: 'forever' }, version: 99 });
+    const io = createMemorySettingsIo(future);
+    const result = await createSettingsStore(io).load();
+    expect(result).toMatchObject({ ok: false, writeBlocked: true });
+    expect(result.ok || result.error).toMatch(/Unsupported settings file version: 99/);
+    expect(io.backups()).toEqual([future]);
+  });
+
+  it('dictionary from a future version is backed up and never replaced', async () => {
+    const future = JSON.stringify({ version: 99, words: ['x'] });
+    const io = createMemoryDictionaryIo(future);
+    const result = await createDictionaryStore(io).load();
+    expect(result).toMatchObject({ ok: false, writeBlocked: true });
+    expect(io.backups()).toEqual([future]);
+  });
+
+  it('only truly corrupt settings JSON may be replaced, after a backup', async () => {
+    const io = createMemorySettingsIo('{not json');
+    const result = await createSettingsStore(io).load();
+    expect(result).toMatchObject({ ok: false, writeBlocked: false });
+    expect(io.backups()).toEqual(['{not json']);
+  });
+
+  it('app keeps future-version settings and dictionary files untouched', async () => {
+    const futureSettings = JSON.stringify({ settings: {}, version: 99 });
+    const futureDict = JSON.stringify({ version: 99, words: ['keep'] });
+    const settingsIo = createMemorySettingsIo(futureSettings);
+    const dictIo = createMemoryDictionaryIo(futureDict);
+    api = null;
+    render(
+      <AppProvider
+        clock={() => NOW}
+        dictionaryPersistence={{ enabled: true, store: createDictionaryStore(dictIo) }}
+        historyPersistence={{ enabled: true, store: createHistoryStore(createMemoryHistoryIo(null)) }}
+        settingsPersistence={{ enabled: true, store: createSettingsStore(settingsIo) }}
+      >
+        <Probe />
+      </AppProvider>,
+    );
+    await waitFor(() => expect(api?.bootReady).toBe(true));
+    act(() => api!.dispatch({ settings: { ...api!.state.settings, transcriptRetention: 'forever' }, type: 'hydrate-settings', onboardingComplete: true }));
+    act(() => api!.dispatch({ type: 'hydrate-words', words: ['changed'] }));
+    await settle();
+    expect(settingsIo.snapshot()).toBe(futureSettings);
+    expect(dictIo.snapshot()).toBe(futureDict);
+  });
+
+  it('a file that stays unreadable is backed up once across launches', async () => {
+    const io = createMemoryHistoryIo('{broken');
+    await createHistoryStore(io).load('forever', NOW);
+    await createHistoryStore(io).load('forever', NOW);
+    expect(io.backups()).toEqual(['{broken']);
+  });
 });
+
