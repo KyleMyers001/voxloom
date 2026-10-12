@@ -39,10 +39,11 @@ restores/steals focus or submits a message. Clicking Home Stop may leave focus
 in Voxloom; switch to your desired field before transcription finishes.
 
 The first native AX observation after final STT (and engine cleanup) fixes the
-target; event/IPC scheduling means this is not an atomic timestamp. If a cold
-Chromium/Electron AX tree is unavailable, host bootstrap still initializes it,
-but that utterance falls back rather than selecting a later-discovered field.
-Retry after AX initializes. Cancelled/superseded work does not acquire a new
+target; event/IPC scheduling means this is not an atomic timestamp. If a cold or
+idle-dropped Chromium/Electron AX tree is unavailable, Voxloom re-enables it on
+every attempt and waits briefly (about 2.4 s at most) for the focused field in
+the same, still-frontmost app; switching apps during that wait falls back (see
+`docs/decisions/web-ax-reenable.md`). Cancelled/superseded work does not acquire a new
 target or dispatch new delivery writes; any already-dispatched native insertion
 cannot be retracted and retains native exact-target checks.
 
