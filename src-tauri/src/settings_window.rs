@@ -5,7 +5,7 @@
 use serde::Serialize;
 #[cfg(target_os = "macos")]
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
-use tauri::{AppHandle, Emitter, EventTarget, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
 
 pub const SETTINGS_LABEL: &str = "settings";
 pub const MAIN_LABEL: &str = "main";
@@ -14,10 +14,13 @@ pub const SETTINGS_CHANGED_EVENT: &str = "settings:changed";
 pub const ONBOARDING_OPEN_EVENT: &str = "onboarding:open";
 const SETTINGS_URL: &str = "settings.html";
 
-/// Payload of `settings:changed`: the raw `settings.json` contents just saved.
+/// Payload of `settings:changed`: the raw `settings.json` contents just saved
+/// and the label of the window that saved them. Receivers ignore their own
+/// label: an any-target `listen()` gets every emit regardless of filters.
 #[derive(Clone, Serialize)]
 pub struct SettingsChanged {
     pub contents: String,
+    pub source: String,
 }
 
 /// Open the Settings window, or focus it if it is already open.
@@ -39,14 +42,15 @@ pub fn open_settings_window<R: Runtime>(app: &AppHandle<R>) -> Result<(), String
         .map_err(|e| format!("open settings window: {e}"))
 }
 
-/// Tell every window except `source` that settings.json changed.
+/// Tell the windows that settings.json changed; `source` lets the saver ignore it.
 pub fn broadcast_settings_changed<R: Runtime>(app: &AppHandle<R>, source: &str, contents: String) {
-    let payload = SettingsChanged { contents };
-    let _ = app.emit_filter(
-        SETTINGS_CHANGED_EVENT,
-        payload,
-        |target| matches!(target, EventTarget::WebviewWindow { label } if label != source),
-    );
+    let payload = SettingsChanged {
+        contents,
+        source: source.to_owned(),
+    };
+    // Plain broadcast: the receiver-side `source` check is the real guard
+    // (an any-target listener would get a filtered emit anyway).
+    let _ = app.emit(SETTINGS_CHANGED_EVENT, payload);
 }
 
 /// Open or focus the Settings window.

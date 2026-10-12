@@ -4,6 +4,7 @@
  */
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 
 export const SETTINGS_WINDOW_LABEL = 'settings';
 export const SETTINGS_CHANGED_EVENT = 'settings:changed';
@@ -11,6 +12,14 @@ export const ONBOARDING_OPEN_EVENT = 'onboarding:open';
 
 export interface SettingsChangedPayload {
   contents: string;
+  /** Label of the window that saved. A window must ignore its own saves. */
+  source: string;
+}
+
+/** This webview's label ('main', 'settings'), or null outside Tauri. */
+export function currentWindowLabel(): string | null {
+  if (!isTauri()) return null;
+  return getCurrentWebviewWindow().label;
 }
 
 type Unlisten = () => void;
@@ -32,9 +41,22 @@ async function listenTo<T>(event: string, handler: (payload: T) => void): Promis
   return listen<T>(event, (e) => handler(e.payload));
 }
 
-/** Another window saved settings.json. Rust never echoes to the sender. */
-export function listenSettingsChanged(handler: (payload: SettingsChangedPayload) => void) {
-  return listenTo(SETTINGS_CHANGED_EVENT, handler);
+/**
+ * Another window saved settings.json. Events whose `source` is this window are
+ * dropped, so an echo can never rehydrate the sender: an any-target listener
+ * receives every emit whatever the Rust side does.
+ */
+export function listenSettingsChanged(
+  handler: (payload: SettingsChangedPayload) => void,
+  ownLabel: string | null = currentWindowLabel(),
+) {
+  return listenTo<SettingsChangedPayload>(SETTINGS_CHANGED_EVENT, (payload) => {
+    if (isForeignSave(payload, ownLabel)) handler(payload);
+  });
+}
+
+export function isForeignSave(payload: SettingsChangedPayload | null, ownLabel: string | null): boolean {
+  return typeof payload?.contents === 'string' && payload.source !== ownLabel;
 }
 
 export function listenOnboardingOpen(handler: () => void) {

@@ -253,6 +253,7 @@ export function AppProvider({
   }, [clock, dictionaryPers, historyPers, settingsPers]);
 
   useSettingsSync({
+    current: { onboardingComplete: state.onboarding.complete, settings: state.settings },
     dispatch,
     enabled: settingsPers.enabled,
     lastSavedRef: lastSavedSettingsRef,
