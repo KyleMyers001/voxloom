@@ -47,3 +47,59 @@ describe('settings persistence ordering', () => {
     expect(JSON.parse(io.snapshot()!).settings.style).toBe('formal');
   });
 });
+
+describe('settings persistence failure with a newer save queued', () => {
+  it('casual, then very casual during the first save, first save fails: UI and disk both end at very casual', async () => {
+    const { io, pending, store } = deferredStore({ ...initialSettings, style: 'formal' });
+    let failNext = true;
+    const flaky = {
+      ...store,
+      save: (settings: Settings, complete: boolean) => {
+        if (failNext) {
+          failNext = false;
+          return new Promise<void>((_, reject) => {
+            pending.push({ release: () => reject(new Error('disk full')), style: settings.style });
+          });
+        }
+        return store.save(settings, complete);
+      },
+    };
+    render(
+      <AppProvider settingsPersistence={{ enabled: true, store: flaky }}>
+        <Probe />
+      </AppProvider>,
+    );
+    await waitFor(() => expect(api?.bootReady).toBe(true));
+    act(() => api!.settings.update({ key: 'style', value: 'casual' }));
+    await waitFor(() => expect(pending).toHaveLength(1));
+    act(() => api!.settings.update({ key: 'style', value: 'very-casual' }));
+    await act(async () => { pending[0].release(); }); // first save fails
+    await waitFor(() => expect(pending).toHaveLength(2));
+    expect(api!.state.settings.style).toBe('very-casual'); // no rollback to formal
+    await act(async () => { pending[1].release(); });
+    await waitFor(() => expect(JSON.parse(io.snapshot()!).settings.style).toBe('very-casual'));
+    expect(api!.state.settings.style).toBe('very-casual');
+  });
+
+  it('still rolls back when the failed save is the latest request', async () => {
+    const { io, pending, store } = deferredStore({ ...initialSettings, style: 'formal' });
+    const failing = {
+      ...store,
+      save: (settings: Settings) => new Promise<void>((_, reject) => {
+        pending.push({ release: () => reject(new Error('disk full')), style: settings.style });
+      }),
+    };
+    render(
+      <AppProvider settingsPersistence={{ enabled: true, store: failing }}>
+        <Probe />
+      </AppProvider>,
+    );
+    await waitFor(() => expect(api?.bootReady).toBe(true));
+    act(() => api!.settings.update({ key: 'style', value: 'casual' }));
+    await waitFor(() => expect(pending).toHaveLength(1));
+    await act(async () => { pending[0].release(); });
+    await waitFor(() => expect(api!.state.settings.style).toBe('formal'));
+    expect(JSON.parse(io.snapshot()!).settings.style).toBe('formal');
+    expect(pending).toHaveLength(1); // the rollback is not re-saved
+  });
+});
