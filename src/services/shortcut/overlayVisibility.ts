@@ -11,20 +11,34 @@ export type OverlayWaveform =
   | 'processing'
   /** Transient result states (HUD rules 4–5), emitted by overlayBridge after delivery. */
   | 'result-copied'
-  | 'result-failed';
+  | 'result-failed'
+  | 'result-unverified';
 
-/** What the HUD shows after a gesture run. Inserted / unverified / cancelled show nothing. */
-export type OverlayResult = 'copied' | 'insert-failed' | 'transcribe-failed';
+/**
+ * What the HUD shows after a gesture run. Inserted and cancelled show nothing.
+ * `maybe-copied`: the write could not be confirmed and the text was also copied.
+ * `unverified`: sent to Terminal, not confirmed and not copied.
+ */
+export type OverlayResult =
+  | 'copied'
+  | 'maybe-copied'
+  | 'unverified'
+  | 'insert-failed'
+  | 'transcribe-failed';
 
-/** HUD rule 4: Copied ~1.5 s. Rule 5: failure ~2.5 s. */
+/** Review: every result holds ~2.5 s (Copied was 1.5 s, too short to read). */
 export const RESULT_HOLD_MS: Record<OverlayResult, number> = {
-  copied: 1500,
+  copied: 2500,
   'insert-failed': 2500,
+  'maybe-copied': 2500,
   'transcribe-failed': 2500,
+  unverified: 2500,
 };
 
 export function resultWaveform(result: OverlayResult): OverlayWaveform {
-  return result === 'copied' ? 'result-copied' : 'result-failed';
+  if (result === 'copied' || result === 'maybe-copied') return 'result-copied';
+  if (result === 'unverified') return 'result-unverified';
+  return 'result-failed';
 }
 
 export function overlayWaveformFromDictation(
