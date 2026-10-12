@@ -392,5 +392,98 @@ describe('BUS-42 history file version compatibility', () => {
     await store.save(loaded.file.settings, true);
     expect(io.snapshot()).not.toContain('cleanupEnabled');
   });
+
+  describe('a backup that copied nothing (null path) never unlocks a write', () => {
+    const nullBackup = async () => null;
+    const readFails = async (): Promise<string | null> => { throw new Error('EISDIR'); };
+
+    it('settings: read error, corrupt JSON and v2 rewrite all stay blocked', async () => {
+      const write = async () => {};
+      const readErr = await createSettingsStore({ backup: nullBackup, read: readFails, write }).load();
+      expect(readErr).toMatchObject({ ok: false, writeBlocked: true });
+      const corrupt = await createSettingsStore({ backup: nullBackup, read: async () => '{bad', write }).load();
+      expect(corrupt).toMatchObject({ ok: false, writeBlocked: true });
+      const v2 = JSON.stringify({ onboardingComplete: true, settings: initialSettings, version: 2 });
+      const migrate = await createSettingsStore({ backup: nullBackup, read: async () => v2, write }).load();
+      expect(migrate).toMatchObject({ ok: false, writeBlocked: true });
+    });
+
+    it('dictionary: read error and corrupt JSON stay blocked', async () => {
+      const write = async () => {};
+      const readErr = await createDictionaryStore({ backup: nullBackup, read: readFails, write }).load();
+      expect(readErr).toMatchObject({ ok: false, writeBlocked: true });
+      const corrupt = await createDictionaryStore({ backup: nullBackup, read: async () => '{bad', write }).load();
+      expect(corrupt).toMatchObject({ ok: false, writeBlocked: true });
+    });
+
+    it('history: v2 is not migrated', async () => {
+      const result = await createHistoryStore({
+        backup: nullBackup, read: async () => V2, write: async () => {},
+      }).load('forever', NOW);
+      expect(result.ok).toBe(false);
+    });
+
+    it('app: settings with a null-path backup are never overwritten', async () => {
+      const writes: string[] = [];
+      api = null;
+      render(
+        <AppProvider
+          clock={() => NOW}
+          historyPersistence={{ enabled: true, store: createHistoryStore(createMemoryHistoryIo(null)) }}
+          settingsPersistence={{
+            enabled: true,
+            store: createSettingsStore({
+              backup: nullBackup, read: async () => '{bad', write: async (c) => { writes.push(c); },
+            }),
+          }}
+        >
+          <Probe />
+        </AppProvider>,
+      );
+      await waitFor(() => expect(api?.bootReady).toBe(true));
+      act(() => api!.dispatch({ key: 'style', type: 'set-setting', value: 'casual' }));
+      await settle();
+      expect(writes).toEqual([]);
+    });
+  });
+
+  it('first launch (no files) writes without any backup', async () => {
+    let backups = 0;
+    const backup = async () => { backups += 1; return 'unexpected'; };
+    const settingsWrites: string[] = [];
+    const dictWrites: string[] = [];
+    const histWrites: string[] = [];
+    api = null;
+    render(
+      <AppProvider
+        clock={() => NOW}
+        dictionaryPersistence={{ enabled: true, store: createDictionaryStore({ backup, read: async () => null, write: async (c) => { dictWrites.push(c); } }) }}
+        historyPersistence={{ enabled: true, store: createHistoryStore({ backup, read: async () => null, write: async (c) => { histWrites.push(c); } }) }}
+        settingsPersistence={{ enabled: true, store: createSettingsStore({ backup, read: async () => null, write: async (c) => { settingsWrites.push(c); } }) }}
+      >
+        <Probe />
+      </AppProvider>,
+    );
+    await waitFor(() => expect(api?.bootReady).toBe(true));
+    act(() => api!.dispatch({ key: 'style', type: 'set-setting', value: 'casual' }));
+    act(() => api!.dispatch({ record: newRow, type: 'append-record' }));
+    act(() => api!.dispatch({ type: 'hydrate-words', words: ['voxloom'] }));
+    await waitFor(() => expect(settingsWrites.at(-1)).toContain('"style": "casual"'));
+    await waitFor(() => expect(histWrites.at(-1)).toContain('new-after-boot'));
+    await waitFor(() => expect(dictWrites.at(-1)).toContain('voxloom'));
+    expect(backups).toBe(0);
+    expect(api!.state.settingsError).toBeNull();
+  });
+
+  it('reset notice names the saved original', async () => {
+    const result = await createSettingsStore({
+      backup: async () => '/data/settings.json.unreadable-1.bak',
+      read: async () => '{bad',
+      write: async () => {},
+    }).load();
+    expect(result.ok || result.error).toBe(
+      'Settings couldn\'t be read and were reset to defaults. Your original file is saved at /data/settings.json.unreadable-1.bak.',
+    );
+  });
 });
 

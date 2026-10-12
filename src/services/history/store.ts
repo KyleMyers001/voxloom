@@ -58,7 +58,7 @@ export function createHistoryStore(io: HistoryFileIo): HistoryStore {
         // Migration: the next save rewrites the file in the current format,
         // so keep the original first. No backup → refuse to migrate.
         const backup = await runBackup(io.backup);
-        if (!backup.ok) {
+        if (!(backup.ok && backup.path)) {
           return {
             error: `History file version ${parsed.sourceVersion} needs migration${describeBackup(backup)}`,
             ok: false,

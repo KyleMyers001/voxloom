@@ -123,7 +123,7 @@ describe('durable settings persistence', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText(/not valid JSON|Settings file/i))
+      expect(screen.getByText(/couldn't be read and were reset to defaults\. Your original file is saved at memory-backup-1/i))
         .toBeInTheDocument();
     });
     // BUS-42: corrupt bytes are backed up, then replaced with v1 defaults.

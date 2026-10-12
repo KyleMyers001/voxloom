@@ -53,7 +53,7 @@ export function createDictionaryStore(
           ok: false,
           // Replace an unreadable file only when its raw bytes were preserved
           // first (store_backup copies bytes, no decoding); otherwise block.
-          writeBlocked: !backup.ok,
+          writeBlocked: !(backup.ok && backup.path),
         };
       }
       if (raw === null || raw.trim() === '') {
@@ -69,7 +69,7 @@ export function createDictionaryStore(
           error: `${parsed.error}${describeBackup(backup)}`,
           file: defaultDictionaryFile(),
           ok: false,
-          writeBlocked: unknownVersion || !backup.ok,
+          writeBlocked: unknownVersion || !(backup.ok && backup.path),
         };
       }
       return { file: parsed.file, ok: true };

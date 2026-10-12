@@ -38,6 +38,11 @@ export interface DurableSettingsStore {
   save(settings: Settings, onboardingComplete: boolean): Promise<void>;
 }
 
+/** Shown after an unreadable settings.json was backed up and reset. */
+export function resetNotice(path: string): string {
+  return `Settings couldn't be read and were reset to defaults. Your original file is saved at ${path}.`;
+}
+
 function fileVersion(raw: string): unknown {
   try {
     return (JSON.parse(raw) as { version?: unknown }).version;
@@ -61,12 +66,14 @@ export function createSettingsStore(io: SettingsFileIo): DurableSettingsStore {
         const message = error instanceof Error ? error.message : String(error);
         const backup = await runBackup(io.backup);
         return {
-          error: `Failed to read settings store: ${message}${describeBackup(backup)}`,
+          error: backup.ok
+            ? resetNotice(backup.path)
+            : `Failed to read settings store: ${message}${describeBackup(backup)}`,
           file: defaultSettingsFile(),
           ok: false,
           // Replace an unreadable file only when its raw bytes were preserved
           // first (store_backup copies bytes, no decoding); otherwise block.
-          writeBlocked: !backup.ok,
+          writeBlocked: !(backup.ok && backup.path),
         };
       }
       if (raw === null || raw.trim() === '') {
@@ -80,17 +87,19 @@ export function createSettingsStore(io: SettingsFileIo): DurableSettingsStore {
         // Only truly corrupt JSON may be replaced, and only after a backup.
         const unknownVersion = hasUnknownVersion(raw, [SETTINGS_FILE_VERSION, 2]);
         return {
-          error: `${parsed.error}${describeBackup(backup)}`,
+          error: backup.ok && !unknownVersion
+            ? resetNotice(backup.path)
+            : `${parsed.error}${describeBackup(backup)}`,
           file: defaultSettingsFile(),
           ok: false,
-          writeBlocked: unknownVersion || !backup.ok,
+          writeBlocked: unknownVersion || !(backup.ok && backup.path),
         };
       }
       if (fileVersion(raw) !== SETTINGS_FILE_VERSION) {
         // Older/sibling version accepted by the parser: the next save
         // rewrites it, so keep the original first.
         const backup = await runBackup(io.backup);
-        if (!backup.ok) {
+        if (!(backup.ok && backup.path)) {
           return {
             error: `Settings file needs migration${describeBackup(backup)}`,
             file: parsed.file,
