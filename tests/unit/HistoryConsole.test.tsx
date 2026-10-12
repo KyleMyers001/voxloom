@@ -70,3 +70,11 @@ describe('History segmented filter (UI PR 4)', () => {
     expect(within(row).getByRole('button', { name: 'Delete transcript' })).toBeInTheDocument();
   });
 });
+
+describe('History heading order', () => {
+  it('uses h2 for row text directly under the h1 (axe heading-order)', () => {
+    renderWithApp(<History onToast={() => {}} />);
+    expect(screen.queryAllByRole('heading', { level: 3 })).toHaveLength(0);
+    expect(screen.getAllByRole('heading', { level: 2 }).length).toBeGreaterThan(0);
+  });
+});

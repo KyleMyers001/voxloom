@@ -37,7 +37,7 @@ export function HistoryRow({ record, isNative, currentTime, canStart, onCopy, on
     <article className="recent-row history-row" tabIndex={0}>
       <span className="timestamp">{formatTime(record.createdAt)}</span>
       <div className="history-row__body">
-        <h3>{record.text}</h3>
+        <h2 className="history-row__text">{record.text}</h2>
         <p className="history-row__meta">
           <Badge status={record.status} />
           <span>{record.durationSeconds}s · {record.model ?? 'Local STT'} · {styleLabel(record.style)}</span>
