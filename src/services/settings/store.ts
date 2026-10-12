@@ -42,6 +42,11 @@ export interface DurableSettingsStore {
 export const SETTINGS_UPGRADING_MESSAGE =
   'Settings are being updated by the main Voxloom window. Your changes will save once it finishes.';
 
+/** Shown after an unreadable settings.json was backed up and reset. */
+export function resetNotice(path: string): string {
+  return `Settings couldn't be read and were reset to defaults. Your original file is saved at ${path}.`;
+}
+
 function fileVersion(raw: string): unknown {
   try {
     return (JSON.parse(raw) as { version?: unknown }).version;
@@ -73,12 +78,14 @@ export function createSettingsStore(io: SettingsFileIo): DurableSettingsStore {
         const message = error instanceof Error ? error.message : String(error);
         const backup = await runBackup(io.backup);
         return {
-          error: `Failed to read settings store: ${message}${describeBackup(backup)}`,
+          error: backup.ok
+            ? resetNotice(backup.path)
+            : `Failed to read settings store: ${message}${describeBackup(backup)}`,
           file: defaultSettingsFile(),
           ok: false,
           // Replace an unreadable file only when its raw bytes were preserved
           // first (store_backup copies bytes, no decoding); otherwise block.
-          writeBlocked: !backup.ok,
+          writeBlocked: !(backup.ok && backup.path),
         };
       }
       if (raw === null || raw.trim() === '') {
@@ -91,20 +98,25 @@ export function createSettingsStore(io: SettingsFileIo): DurableSettingsStore {
         // Future / unknown version from another build: never replace it.
         // Only truly corrupt JSON may be replaced, and only after a backup.
         const unknownVersion = hasUnknownVersion(raw, [SETTINGS_FILE_VERSION, 2]);
+        const corruptMessage = (): string => {
+          if (unknownVersion) return `${parsed.error}${describeBackup(backup)}`;
+          // Settings window: main migrates/resets the file, stay calm here.
+          if (!io.backup) return SETTINGS_UPGRADING_MESSAGE;
+          if (backup.ok) return resetNotice(backup.path);
+          return `${parsed.error}${describeBackup(backup)}`;
+        };
         return {
-          error: !io.backup && !unknownVersion
-            ? SETTINGS_UPGRADING_MESSAGE
-            : `${parsed.error}${describeBackup(backup)}`,
+          error: corruptMessage(),
           file: defaultSettingsFile(),
           ok: false,
-          writeBlocked: unknownVersion || !backup.ok,
+          writeBlocked: unknownVersion || !(backup.ok && backup.path),
         };
       }
       if (fileVersion(raw) !== SETTINGS_FILE_VERSION) {
         // Older/sibling version accepted by the parser: the next save
         // rewrites it, so keep the original first.
         const backup = await runBackup(io.backup);
-        if (!backup.ok) {
+        if (!(backup.ok && backup.path)) {
           return {
             error: io.backup
               ? `Settings file needs migration${describeBackup(backup)}`

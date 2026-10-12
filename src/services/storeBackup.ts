@@ -12,7 +12,7 @@ export function tauriBackup(store: BackupStore): () => Promise<string | null> {
 }
 
 export type BackupOutcome =
-  | { ok: true; path: string | null }
+  | { ok: true; path: string }
   | { ok: false; error: string };
 
 /** Run an optional IO backup hook, never throwing. */
@@ -21,7 +21,11 @@ export async function runBackup(
 ): Promise<BackupOutcome> {
   if (!backup) return { error: 'no backup support', ok: false };
   try {
-    return { ok: true, path: await backup() };
+    const path = await backup();
+    // No file copied (vanished, not a regular file, unreadable dir): that
+    // is not a backup, so nothing may be overwritten on its strength.
+    if (!path) return { error: 'no file was backed up', ok: false };
+    return { ok: true, path };
   } catch (error: unknown) {
     return {
       error: error instanceof Error ? error.message : String(error),
@@ -47,7 +51,7 @@ export function memoryBackups(read: () => string | null) {
 
 export function describeBackup(outcome: BackupOutcome): string {
   if (!outcome.ok) return ` (backup failed: ${outcome.error}; file left untouched)`;
-  return outcome.path ? ` (original kept at ${outcome.path})` : '';
+  return ` (original kept at ${outcome.path})`;
 }
 
 /**
