@@ -167,6 +167,21 @@ export function AppProvider({
   useEffect(() => {
     let cancelled = false;
 
+    // BUS-42: a migrated (older-version) or backed-up corrupt settings.json
+    // is rewritten as the current version during boot, so every later reader
+    // (including other windows) sees a current file.
+    const rewriteSettings = async (file: SettingsFile) => {
+      try {
+        await settingsPers.store.save(file.settings, file.onboardingComplete);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        dispatch({
+          message: `Failed to save settings: ${message}`,
+          type: 'set-settings-error',
+        });
+      }
+    };
+
     void (async () => {
       let retention = initialSettings.transcriptRetention;
 
@@ -183,6 +198,10 @@ export function AppProvider({
           lastRequestedSettingsRef.current = result.file;
           allowSettingsPersistRef.current = true;
           retention = result.file.settings.transcriptRetention;
+          if (result.needsRewrite) {
+            await rewriteSettings(result.file);
+            if (cancelled) return;
+          }
         } else {
           // Safe defaults already in state; surface error. Writing defaults
           // is allowed only once the unreadable file was backed up.
@@ -193,6 +212,11 @@ export function AppProvider({
             message: result.error,
             type: 'set-settings-error',
           });
+          if (!result.writeBlocked) {
+            // Corrupt file already backed up: replace it with defaults now.
+            await rewriteSettings(result.file);
+            if (cancelled) return;
+          }
         }
         settingsHydratedRef.current = true;
         settingsPersistGenRef.current += 1;
