@@ -226,3 +226,15 @@ describe('Settings', () => {
     expect(screen.getByText('available')).toBeInTheDocument();
   });
 });
+
+describe('Shortcut field (one representation at a time)', () => {
+  it('hides the key caps while the raw text is being edited', async () => {
+    const user = userEvent.setup();
+    const { container } = renderWithApp(<Settings onSetup={vi.fn()} />);
+    expect(container.querySelector('.frow__control .key-combo')).not.toBeNull();
+    await user.click(screen.getByLabelText('Shortcut'));
+    expect(container.querySelector('.frow__control .key-combo')).toBeNull();
+    await user.tab();
+    expect(container.querySelector('.frow__control .key-combo')).not.toBeNull();
+  });
+});
