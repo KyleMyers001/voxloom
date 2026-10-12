@@ -193,6 +193,18 @@ mod tests {
     }
 
     #[test]
+    fn invalid_utf8_is_copied_byte_for_byte() {
+        let dir = temp_dir();
+        let path = dir.join("settings.json");
+        let bytes: &[u8] = &[b'{', 0xff, 0xfe, 0x80, b'}'];
+        fs::write(&path, bytes).unwrap();
+        let backup = backup_file(&path, 5).unwrap().unwrap();
+        assert_eq!(fs::read(&backup).unwrap(), bytes);
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn backup_of_missing_file_is_none() {
         let dir = temp_dir();
         assert!(backup_file(&dir.join("history.json"), 1).unwrap().is_none());
