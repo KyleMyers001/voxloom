@@ -145,7 +145,7 @@ describe('Onboarding (step 1 — real permission, simulated steps 2–3)', () =>
     await user.clear(shortcut);
     await user.type(shortcut, 'Ctrl + Space');
     await user.click(screen.getByRole('button', { name: 'Next' }));
-    expect(screen.getByRole('alert')).toHaveTextContent('collision');
+    expect(screen.getByRole('alert')).toHaveTextContent('already in use');
   });
 
   it('does not claim native gestures are app-local or practice is STT', async () => {
@@ -158,7 +158,7 @@ describe('Onboarding (step 1 — real permission, simulated steps 2–3)', () =>
     await user.click(screen.getByRole('button', { name: 'Next' }));
     expect(screen.getByLabelText(/Gesture feedback \(not a speech transcript\)/))
       .toBeInTheDocument();
-    expect(screen.getByText(/not microphone transcription/))
+    expect(screen.getByText(/tests the gesture, not transcription/))
       .toBeInTheDocument();
   });
 

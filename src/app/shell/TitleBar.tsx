@@ -1,4 +1,5 @@
 import { Icon } from '../../components/Icon';
+import { comboLabel } from '../../components/KeyCombo';
 import { isTauriEnv } from '../../services/capture/captureService';
 
 type Props = {
@@ -21,11 +22,11 @@ export function TitleBar({ settingsOpen, onSettings, onHelp }: Props) {
         aria-label="Settings"
         className="tb-settings"
         onClick={onSettings}
-        title="Settings… (⌘,)"
+        title={`Settings… (${comboLabel('CommandOrControl+,')})`}
         type="button"
       >
         <Icon name="gear" size={14} />
-        <span aria-hidden="true">Settings… ⌘,</span>
+        <span aria-hidden="true">Settings… {comboLabel('CommandOrControl+,')}</span>
       </button>
       <button
         aria-label="Open keyboard shortcuts"
