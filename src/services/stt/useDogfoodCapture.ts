@@ -6,6 +6,7 @@
 /// Never silent-downloads missing models — surfaces a clear UI error instead.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { DeliveryOutcome } from '../delivery/types';
 import type { OverlayResult } from '../shortcut/overlayVisibility';
 
 import { createDogfoodRecord } from '../../domain/records';
@@ -87,9 +88,11 @@ export interface UseDogfoodCaptureResult {
 }
 
 /** HUD rules 3–6: only Copied and a failed insert show anything after delivery. */
-export function hudResultFor(status: string, message = ''): OverlayResult | null {
-  if (status === 'copied') return /^May have been inserted/.test(message) ? 'maybe-copied' : 'copied';
-  if (status === 'failed') return 'insert-failed';
+export function hudResultFor(
+  { mayHaveInserted = false, status }: Pick<DeliveryOutcome, 'mayHaveInserted' | 'status'>,
+): OverlayResult | null {
+  if (status === 'copied') return mayHaveInserted ? 'maybe-copied' : 'copied';
+  if (status === 'failed') return mayHaveInserted ? 'maybe-inserted' : 'insert-failed';
   if (status === 'unverified') return 'unverified';
   return null; // inserted: silent dismiss
 }
@@ -222,7 +225,7 @@ export function useDogfoodCapture(
       });
       if (current()) {
         setTranscript(result.transcript);
-        setHudResult(hudResultFor(result.delivery.status, result.delivery.message));
+        setHudResult(hudResultFor(result.delivery));
         setPhase('success');
       }
       const record = createDogfoodRecord({

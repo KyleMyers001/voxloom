@@ -47,6 +47,12 @@ export interface DeliveryOutcome {
   /** Present when restore was skipped (conflict, no snapshot, write fail). */
   restoreSkippedReason: string | null;
   status: DeliveryStatus;
+  /**
+   * A native write happened but could not be confirmed: the text may already be
+   * (partly) in the field, whatever `status` says (copied, or failed when the
+   * Copy fallback is off or failed). Consumers read this, never the message.
+   */
+  mayHaveInserted?: boolean;
   /** Always the transcript text for manual recovery (even if history is off). */
   text: string;
 }
