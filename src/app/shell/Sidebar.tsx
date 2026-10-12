@@ -4,6 +4,8 @@ import { comboLabel, isMacPlatform } from '../../components/KeyCombo';
 import { ScenarioPanel, type OnboardingScenario } from '../../dev/ScenarioPanel';
 import type { Screen } from '../../domain/types';
 import { navScreens } from './screens';
+import { useShortcutActive } from '../../services/shortcut/activeShortcut';
+import { NO_SHORTCUT } from '../../features/settings/shortcutCopy';
 
 type Props = {
   screen: Screen;
@@ -15,6 +17,7 @@ type Props = {
 };
 
 export function Sidebar({ screen, shortcut, status, onNavigate, onScenario, onReset }: Props) {
+  const active = useShortcutActive();
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -22,7 +25,7 @@ export function Sidebar({ screen, shortcut, status, onNavigate, onScenario, onRe
         <div>
           <b className="brand__name">Voxloom</b>
           <small className="brand__status">
-            {status} · {comboLabel(shortcut)}
+            {status} · {active ? comboLabel(shortcut) : NO_SHORTCUT}
           </small>
         </div>
       </div>
@@ -51,8 +54,10 @@ export function Sidebar({ screen, shortcut, status, onNavigate, onScenario, onRe
           </details>
         )}
         <p className="sidebar__hint">
-          Hold the shortcut in any app to dictate. Release to insert, or it
-          copies if insertion isn’t safe.
+          {active ? <>
+            Hold the shortcut in any app to dictate. Release to insert, or it
+            copies if insertion isn’t safe.
+          </> : NO_SHORTCUT}
         </p>
       </div>
     </aside>

@@ -12,9 +12,12 @@ const bound = vi.hoisted(() => ({ handler: null as ((p: Payload) => void) | null
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), isTauri: () => true }));
 vi.mock('../../src/services/shortcut/bindingEvents', () => ({
   listenShortcutBound: async (h: (p: Payload) => void) => { bound.handler = h; return () => {}; },
+  queryShortcutBound: () => {},
 }));
 
 import { CONFIRM_TIMEOUT_MS, ShortcutRecorder } from '../../src/features/settings/ShortcutRecorder';
+import { resetRecorderStore } from '../../src/features/settings/recorderStore';
+import { resetActiveShortcut } from '../../src/services/shortcut/activeShortcut';
 
 const DEFAULT = 'Ctrl + Shift + Space';
 const field = () => screen.getByRole('button', { name: /^Dictation shortcut/ });
@@ -34,7 +37,7 @@ function Harness({ initial = DEFAULT, onChange }: { initial?: string; onChange: 
 const report = (p: Payload) => act(async () => bound.handler!(p));
 
 describe('ShortcutRecorder waits for native registration', () => {
-  beforeEach(() => { bound.handler = null; });
+  beforeEach(() => { bound.handler = null; resetRecorderStore(); resetActiveShortcut(); });
   afterEach(() => vi.useRealTimers());
 
   it('rolls a refused combo back to the previous shortcut', async () => {

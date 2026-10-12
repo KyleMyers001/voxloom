@@ -9,6 +9,10 @@ export const HELP = 'Click, then press keys. Hold to dictate; double-tap to latc
 export const PROMPT = 'Press keys…';
 export const RECORDING = 'Press the new shortcut. Esc cancels.';
 export const CANCELED = 'Canceled. Shortcut unchanged.';
+/** Marks the saved combo while the OS holds nothing (it is retried next launch). */
+export const NOT_ACTIVE = 'not active';
+/** Home and sidebar when no shortcut is registered. */
+export const NO_SHORTCUT = 'No shortcut active. Set one in Settings.';
 
 const mods = (mac: boolean) => (mac ? '⌃, ⌥ or ⌘' : 'Ctrl, Alt or Super');
 const L = (combo: string, mac: boolean) => comboLabel(combo, mac);

@@ -8,6 +8,7 @@
  * NumpadEnter is rejected: native watches only the main Return key (36).
  * Modifier-only shortcuts (Right Option, Fn) are BUS-46.
  */
+import { isMacPlatform } from '../../components/KeyCombo';
 export type CaptureKeyEvent = Pick<
   KeyboardEvent,
   'altKey' | 'code' | 'ctrlKey' | 'key' | 'metaKey' | 'shiftKey'
@@ -40,7 +41,7 @@ const NAMED: Record<string, string> = {
   Tab: 'Tab',
 };
 
-/** macOS reserved combos (stored format) → what macOS uses them for. */
+/** macOS-only reserved combos (stored format) → what macOS uses them for. */
 export const RESERVED: Record<string, string> = {
   'Alt + Meta + Space': 'Finder search',
   'Ctrl + Meta + Q': 'Lock Screen',
@@ -81,7 +82,7 @@ function sortedForReserved(mods: string[], key: string): string {
   return [...sorted, key].join(' + ');
 }
 
-export function captureShortcut(event: CaptureKeyEvent): CaptureResult {
+export function captureShortcut(event: CaptureKeyEvent, mac = isMacPlatform()): CaptureResult {
   const mods = modifierParts(event);
   if (event.key === 'Escape' || event.code === 'Escape') {
     return { kind: 'cancel', reason: 'escape' };
@@ -104,7 +105,8 @@ export function captureShortcut(event: CaptureKeyEvent): CaptureResult {
     return { invalid: { reason: 'shift-only' }, kind: 'invalid' };
   }
   const combo = sortedForReserved(mods, key);
-  const feature = RESERVED[combo];
+  // These are macOS system shortcuts; elsewhere the OS reports real conflicts.
+  const feature = mac ? RESERVED[combo] : undefined;
   if (feature) return { invalid: { combo, feature, reason: 'reserved' }, kind: 'invalid' };
   return { combo, kind: 'captured' };
 }

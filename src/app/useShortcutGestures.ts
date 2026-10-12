@@ -23,6 +23,8 @@ import {
 } from '../services/shortcut';
 import { useShortcutRegistration } from './useShortcutRegistration';
 import { bootRefusedText } from '../features/settings/shortcutCopy';
+import { answerShortcutQueries, emitShortcutBound } from '../services/shortcut/bindingEvents';
+import { subscribe } from '../services/settingsWindow';
 import type {
   DogfoodPhase,
   UseDogfoodCaptureResult,
@@ -200,6 +202,11 @@ export function useShortcutGestures(options: GestureOptions) {
       const outcome = await controller.setShortcut(bootShortcut);
       // Seed the revert target from what the OS accepted, not from settings.
       registeredRef.current = outcome.ok ? bootShortcut : null;
+      // Tell every window (Home, sidebar, Settings) what the OS holds now.
+      emitShortcutBound({
+        active: outcome.ok ? bootShortcut : outcome.active ?? null,
+        ok: outcome.ok, shortcut: bootShortcut,
+      });
       if (cancelled) return;
       if (!outcome.ok) {
         optionsRef.current.onShortcutError?.(bootRefusedText(bootShortcut, outcome.active));
@@ -210,6 +217,7 @@ export function useShortcutGestures(options: GestureOptions) {
     const update = () =>
       controller.setContext(interactionContext(optionsRef.current));
     const unsubscribe = subscribeModal(update);
+    const unanswer = subscribe(answerShortcutQueries);
 
     // Do NOT resetPartial / clear pending on document visibilitychange.
     // ADR §3: other-app focus must keep an in-flight native hold alive;
@@ -221,6 +229,7 @@ export function useShortcutGestures(options: GestureOptions) {
       nativeControllerRef.current = null;
       overlayRef.current = null;
       unsubscribe();
+      unanswer();
       pendingFinishRef.current?.clear();
       void controller.dispose();
       void overlay.dispose();

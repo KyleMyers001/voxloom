@@ -75,6 +75,8 @@
 }
 .shortcut-recorder__field:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .shortcut-recorder__field[data-recording] { border-color: var(--accent); border-style: dashed; }
+.shortcut-recorder__field[data-inactive] .key-combo { opacity: 0.55; }
+.shortcut-recorder__inactive { color: var(--muted); font-size: var(--fs-label); margin-left: 6px; }
 .shortcut-recorder__prompt { font-style: italic; }
 /* One line is always reserved so the row doesn't jump when a status appears. */
 .shortcut-recorder__status { flex-basis: 100%; font-size: var(--fs-label); line-height: 1.35; min-height: 1.35em; order: 99; }

@@ -2,11 +2,12 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { comboLabel, KeyCombo, spokenCombo } from '../../components/KeyCombo';
 import { captureShortcut } from '../../services/shortcut/shortcutCapture';
-import { listenShortcutBound } from '../../services/shortcut/bindingEvents';
-import { subscribe } from '../../services/settingsWindow';
+import { useShortcutActive } from '../../services/shortcut/activeShortcut';
 import {
-  addAKey, CANCELED, inUseText, invalidText, noneActiveText, pendingText, PROMPT, RECORDING,
-  resetText, successText, timeoutText,
+  attachRecorder, beginPending, cancelPending, setRecorderStatus, useRecorderStatus, type Status,
+} from './recorderStore';
+import {
+  addAKey, CANCELED, invalidText, NOT_ACTIVE, pendingText, PROMPT, RECORDING, resetText, successText,
 } from './shortcutCopy';
 
 interface ShortcutRecorderProps {
@@ -15,13 +16,7 @@ interface ShortcutRecorderProps {
   value: string;
 }
 
-/** "Ctrl + Meta + Space" → "Control Command Space" for VoiceOver. */
-export const spokenShortcut = (combo: string) => spokenCombo(combo);
-
-type Status = { tone: 'error' | 'info' | 'ok'; text: string } | null;
-
-/** How long "Setting…" waits for the main window's result. */
-export const CONFIRM_TIMEOUT_MS = 5000;
+export { CONFIRM_TIMEOUT_MS } from './recorderStore';
 
 /**
  * BUS-47: click Record (or Enter/Space on it), press a chord, and it's saved.
@@ -31,70 +26,22 @@ export const CONFIRM_TIMEOUT_MS = 5000;
 export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutRecorderProps) {
   const [recording, setRecording] = useState(false);
   const [preview, setPreview] = useState('');
-  const [status, setStatus] = useState<Status>(null);
+  const status = useRecorderStatus();
+  const setStatus = setRecorderStatus;
+  const active = useShortcutActive();
   const sawKeyRef = useRef(false);
-  /** Combo awaiting the main window's native registration result. */
-  const pendingRef = useRef<{ combo: string } | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** Combo whose confirmation timed out; a late result still updates status. */
-  const lateRef = useRef<{ combo: string } | null>(null);
-  /** Last combo confirmed registered; the revert target (null: none active). */
-  const confirmedRef = useRef<string | null>(value);
-  const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
-
-  const clearPending = () => {
-    pendingRef.current = null;
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = null;
-  };
-
-  useEffect(() => subscribe(() => listenShortcutBound(({ active, ok, previous, shortcut }) => {
-    // Track what the OS holds from every result, even superseded ones, so a
-    // late ok for A still makes A the revert target when B is refused.
-    const before = confirmedRef.current;
-    if (ok) confirmedRef.current = shortcut;
-    else if (active !== undefined) confirmedRef.current = active;
-    const pending = pendingRef.current?.combo === shortcut ? pendingRef.current
-      : lateRef.current?.combo === shortcut ? lateRef.current : null;
-    if (!pending) return;
-    clearPending();
-    lateRef.current = null;
-    if (ok) {
-      setStatus({ text: successText(shortcut), tone: 'ok' });
-      return;
-    }
-    const kept = confirmedRef.current;
-    // Never keep a refused combo. With nothing active, keep the previous one
-    // in settings so the next launch retries it.
-    const restore = previous ?? before;
-    const target = kept ?? restore;
-    if (target && target !== shortcut) onChangeRef.current(target);
-    setStatus({
-      text: kept === null ? noneActiveText(shortcut, restore) : inUseText(shortcut, kept),
-      tone: 'error',
-    });
-  })), []);
-
-  useEffect(() => clearPending, []);
+  useEffect(() => attachRecorder(value, onChange));
 
   /** Save a combo and announce success only once registration confirms it. */
   const apply = (combo: string, okText: string) => {
     const changed = combo !== value;
-    clearPending();
+    cancelPending();
     if (!changed || !isTauri()) {
       onChange(combo);
       stop({ text: okText, tone: 'ok' });
       return;
     }
-    lateRef.current = null;
-    pendingRef.current = { combo };
-    timerRef.current = setTimeout(() => {
-      if (pendingRef.current?.combo !== combo) return;
-      lateRef.current = pendingRef.current;
-      clearPending();
-      setStatus({ text: timeoutText(combo), tone: 'error' });
-    }, CONFIRM_TIMEOUT_MS);
+    beginPending(combo);
     // "Setting…" first, then save: a result that lands during the save must
     // replace "Setting…", never be overwritten by it.
     stop({ text: pendingText(combo), tone: 'info' });
@@ -157,9 +104,10 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
         // Only the help: the role=status line announces itself, so describing
         // the field by it too would read each status twice.
         aria-describedby="settings-shortcut-help"
-        aria-label={recording ? 'Dictation shortcut, recording' : `Dictation shortcut, ${spokenShortcut(value)}`}
+        aria-label={recording ? 'Dictation shortcut, recording' : `Dictation shortcut, ${spokenCombo(value)}${active ? '' : `, ${NOT_ACTIVE}`}`}
         aria-pressed={recording}
         className="shortcut-recorder__field"
+        data-inactive={!active || undefined}
         data-recording={recording || undefined}
         id="settings-shortcut"
         onBlur={() => recording && stop({ text: CANCELED, tone: 'info' })}
@@ -170,7 +118,10 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
       >
         {recording
           ? <span className="shortcut-recorder__prompt">{preview ? `${comboLabel(preview)} …` : PROMPT}</span>
-          : <KeyCombo combo={value} />}
+          : <>
+            <KeyCombo combo={value} />
+            {!active && <span aria-hidden="true" className="shortcut-recorder__inactive">({NOT_ACTIVE})</span>}
+          </>}
       </button>
       <button className="btn" disabled={value === defaultValue} onClick={reset} type="button">
         Reset to default
