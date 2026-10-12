@@ -13,8 +13,8 @@
 .badge--copied,
 .badge--downloading { background: color-mix(in srgb, var(--info) 10%, transparent); color: var(--info); }
 .badge--failed { background: color-mix(in srgb, var(--err) 10%, transparent); color: var(--err); }
-.badge--unverified,
-.badge--missing { background: color-mix(in srgb, var(--warn) 10%, transparent); color: var(--warn); }
+.badge--unverified { background: color-mix(in srgb, var(--warn) 10%, transparent); color: var(--warn); }
+.badge--missing { background: var(--tag-bg); color: var(--tag-fg); } /* neutral grey (designer #43) */
 
 .banner {
   align-items: center;

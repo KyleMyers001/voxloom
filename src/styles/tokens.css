@@ -81,7 +81,7 @@
   --navon: #e7eadf;
   --mut-on-nav: #5d6068; /* 5.16:1 on navon */
   --accfg: #376b00; /* AA: 5.28 on navon; white text on it 6.43 */
-  --ok: #18772f; /* AA: 4.61 seg, 4.63 navon, 5.11 field, 5.45 bg, 5.65 panel */
+  --ok: #156d2b; /* AA text: 5.3+ on all surfaces; 10% badge tint: 4.60 seg, 5.04 field, 5.39 bg, 5.56 panel (was #18772f, 4.48 on the #dde8dc badge) */
   --info: #00717f; /* AA: 5.18 on field, 5.52 bg */
   --warn: #945600; /* AA: 4.77 seg, 4.8 navon, 5.29 field, 5.64 bg, 5.85 panel */
   --err: #bf2c32; /* AA: 4.73 seg, 4.76 navon, 5.25 field, 5.59 bg, 5.8 panel */

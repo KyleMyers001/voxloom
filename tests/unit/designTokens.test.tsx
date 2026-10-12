@@ -73,6 +73,25 @@ describe('Disabled primary button (UI PR 3)', () => {
   });
 });
 
+describe('light --ok on its 10% badge tint (review #43)', () => {
+  const lin = (c: number) => { const v = c / 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+  const hex = (s: string) => [1, 3, 5].map((i) => parseInt(s.slice(i, i + 2), 16));
+  const lum = (rgb: number[]) => 0.2126 * lin(rgb[0]) + 0.7152 * lin(rgb[1]) + 0.0722 * lin(rgb[2]);
+  const ratio = (a: number[], b: number[]) => { const [x, y] = [lum(a), lum(b)].sort((m, n) => n - m); return (x + 0.05) / (y + 0.05); };
+
+  it('is at least 4.5:1 on the badge over every light surface', async () => {
+    const { readFileSync } = await import('node:fs');
+    const light = readFileSync('src/styles/tokens.css', 'utf8').split('[data-appearance-resolved="light"]')[1];
+    const ok = hex(/--ok: (#[0-9a-f]{6})/.exec(light)![1]);
+    // field, bg, panel, seg, navon (selected row)
+    for (const surface of ['#f3f4ef', '#fbfbf8', '#ffffff', '#e7e9e1', '#e7eadf']) {
+      const s = hex(surface);
+      const tint = s.map((c, i) => Math.round(0.1 * ok[i] + 0.9 * c));
+      expect(ratio(ok, tint)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+});
+
 describe('designer #37: focus ring, tag pill, disabled ON switch', () => {
   const lin = (c: number) => { const v = c / 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
   const hex = (s: string) => [1, 3, 5].map((i) => parseInt(s.slice(i, i + 2), 16));

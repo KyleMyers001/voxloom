@@ -6,17 +6,17 @@
 //! Blocking I/O is intended to run off the Tauri command/main thread
 //! (see `stt_download_model` async + `spawn_blocking`).
 
-use std::fs::{self, File};
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
 use super::catalog::{self, ModelSpec};
 use super::error::SttErrorDto;
+
+mod download;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -124,197 +124,13 @@ impl ModelStore {
             .as_ref()
             .is_some_and(|(id, _)| id == model_id)
     }
-
-    /// Cancel an in-flight download. Safe when nothing is downloading
-    /// (including when the model is already present) — returns Ok.
-    pub fn cancel(&self, model_id: &str) -> Result<(), SttErrorDto> {
-        let spec = catalog::find(model_id).ok_or_else(|| {
-            SttErrorDto::new("download-failed", format!("Unknown model: {model_id}"))
-        })?;
-        let guard = self.inflight.lock().unwrap();
-        if let Some((id, inflight)) = guard.as_ref() {
-            if id == spec.id {
-                inflight.cancel.store(true, Ordering::Release);
-                return Ok(());
-            }
-        }
-        Ok(())
-    }
-
-    /// Explicit user-triggered download. Never call from constructors.
-    /// Emits `stt:download-progress` while bytes arrive; returns only after
-    /// the file is finalized on disk (or cancel / error).
-    pub fn download(&self, app: &AppHandle, model_id: &str) -> Result<(), SttErrorDto> {
-        self.download_with_sink(model_id, |progress| {
-            let _ = app.emit("stt:download-progress", progress);
-        })
-    }
-
-    /// Core download with a progress sink (used by IPC and unit tests).
-    pub fn download_with_sink<F>(&self, model_id: &str, on_progress: F) -> Result<(), SttErrorDto>
-    where
-        F: FnMut(DownloadProgressDto),
-    {
-        let spec = catalog::find(model_id).ok_or_else(|| {
-            SttErrorDto::new("download-failed", format!("Unknown model: {model_id}"))
-        })?;
-        self.download_spec_with_sink(spec, spec.url, on_progress)
-    }
-
-    fn download_spec_with_sink<F>(
-        &self,
-        spec: &ModelSpec,
-        url: &str,
-        mut on_progress: F,
-    ) -> Result<(), SttErrorDto>
-    where
-        F: FnMut(DownloadProgressDto),
-    {
-        {
-            let mut guard = self.inflight.lock().unwrap();
-            if guard.is_some() {
-                return Err(SttErrorDto::new(
-                    "download-failed",
-                    "Another model download is already in progress",
-                ));
-            }
-            *guard = Some((
-                spec.id.to_owned(),
-                Inflight {
-                    cancel: Arc::new(AtomicBool::new(false)),
-                },
-            ));
-        }
-
-        let cancel = self
-            .inflight
-            .lock()
-            .unwrap()
-            .as_ref()
-            .expect("inflight just set")
-            .1
-            .cancel
-            .clone();
-
-        let result = self.fetch_to_model_path(spec, url, &cancel, &mut on_progress);
-
-        *self.inflight.lock().unwrap() = None;
-
-        if cancel.load(Ordering::Acquire) {
-            let partial = self.model_path(spec);
-            let _ = fs::remove_file(&partial);
-            let tmp = partial.with_extension("bin.partial");
-            let _ = fs::remove_file(tmp);
-            return Err(SttErrorDto::new(
-                "cancelled",
-                format!("Download cancelled: {}", spec.id),
-            ));
-        }
-
-        result
-    }
-
-    fn fetch_to_model_path<F>(
-        &self,
-        spec: &ModelSpec,
-        url: &str,
-        cancel: &AtomicBool,
-        on_progress: &mut F,
-    ) -> Result<(), SttErrorDto>
-    where
-        F: FnMut(DownloadProgressDto),
-    {
-        fs::create_dir_all(&self.root)
-            .map_err(|e| SttErrorDto::new("download-failed", format!("create models dir: {e}")))?;
-
-        let dest = self.model_path(spec);
-        let tmp = dest.with_extension("bin.partial");
-
-        let response = ureq::get(url)
-            .call()
-            .map_err(|e| SttErrorDto::new("download-failed", format!("request failed: {e}")))?;
-
-        let total = response
-            .header("Content-Length")
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(spec.size_bytes);
-
-        let mut reader = response.into_reader();
-        let mut file = File::create(&tmp)
-            .map_err(|e| SttErrorDto::new("download-failed", format!("create temp file: {e}")))?;
-
-        let mut buf = [0u8; 64 * 1024];
-        let mut received: u64 = 0;
-        let mut last_emit = 0u64;
-
-        loop {
-            if cancel.load(Ordering::Acquire) {
-                drop(file);
-                let _ = fs::remove_file(&tmp);
-                return Err(SttErrorDto::new(
-                    "cancelled",
-                    format!("Download cancelled: {}", spec.id),
-                ));
-            }
-            let n = reader
-                .read(&mut buf)
-                .map_err(|e| SttErrorDto::new("download-failed", format!("read failed: {e}")))?;
-            if n == 0 {
-                break;
-            }
-            file.write_all(&buf[..n])
-                .map_err(|e| SttErrorDto::new("download-failed", format!("write failed: {e}")))?;
-            received += n as u64;
-            // Intermediate progress only — never claim ratio 1.0 until the
-            // file is renamed into place (completion is the Ok return + final emit).
-            if received - last_emit >= 256 * 1024 || received == total {
-                last_emit = received;
-                let ratio = if total == 0 {
-                    0.0
-                } else {
-                    ((received as f64 / total as f64).min(0.999)).max(0.0)
-                };
-                on_progress(DownloadProgressDto {
-                    bytes_received: received,
-                    bytes_total: total,
-                    model_id: spec.id.to_owned(),
-                    ratio,
-                });
-            }
-        }
-
-        file.flush()
-            .map_err(|e| SttErrorDto::new("download-failed", format!("flush failed: {e}")))?;
-        drop(file);
-
-        if cancel.load(Ordering::Acquire) {
-            let _ = fs::remove_file(&tmp);
-            return Err(SttErrorDto::new(
-                "cancelled",
-                format!("Download cancelled: {}", spec.id),
-            ));
-        }
-
-        fs::rename(&tmp, &dest)
-            .map_err(|e| SttErrorDto::new("download-failed", format!("finalize failed: {e}")))?;
-
-        // Only after the destination file exists do we report completion.
-        debug_assert!(dest.is_file());
-        on_progress(DownloadProgressDto {
-            bytes_received: total.max(received),
-            bytes_total: total.max(received),
-            model_id: spec.id.to_owned(),
-            ratio: 1.0,
-        });
-
-        Ok(())
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::env;
+    use std::fs;
     use std::io::{Read as IoRead, Write as IoWrite};
     use std::net::TcpListener;
     use std::sync::atomic::AtomicBool;
@@ -467,6 +283,62 @@ mod tests {
             !dir.join("ggml-base.en.bin.partial").exists(),
             "partial file should be cleaned up"
         );
+        assert_eq!(store.status("whisper-base.en").unwrap().status, "missing");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Declare `declared` bytes but send only `body`, then drop the connection.
+    fn serve_truncated(body: Vec<u8>, declared: usize) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut req = [0u8; 4096];
+            let _ = stream.read(&mut req);
+            let header = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {declared}\r\nConnection: close\r\n\r\n"
+            );
+            stream.write_all(header.as_bytes()).unwrap();
+            let _ = stream.write_all(&body);
+            let _ = stream.flush();
+            // Dropping the stream mid-body is the mid-stream failure.
+        });
+        format!("http://127.0.0.1:{port}/model.bin")
+    }
+
+    #[test]
+    fn mid_stream_failure_removes_partial_file() {
+        let (store, dir) = temp_store("midstream-partial");
+        let spec = catalog::find("whisper-base.en").unwrap();
+        let partial = store.model_path(spec).with_extension("bin.partial");
+        let url = serve_truncated(vec![7u8; 600 * 1024], 2 * 1024 * 1024);
+        let mut progressed = 0u64;
+        let err = store
+            .download_spec_with_sink(spec, &url, |p| progressed = p.bytes_received)
+            .unwrap_err();
+        assert_eq!(err.code, "download-failed");
+        assert!(progressed > 0, "bytes were written before the failure");
+        assert!(!partial.exists(), "partial file should be cleaned up");
+        assert!(!store.model_path(spec).exists(), "nothing is finalized");
+        assert!(store.inflight.lock().unwrap().is_none());
+        assert_eq!(store.status("whisper-base.en").unwrap().status, "missing");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn failed_download_removes_partial_file_so_retry_starts_clean() {
+        let (store, dir) = temp_store("failed-partial");
+        fs::create_dir_all(&dir).unwrap();
+        let spec = catalog::find("whisper-base.en").unwrap();
+        let partial = store.model_path(spec).with_extension("bin.partial");
+        fs::write(&partial, b"stale bytes").unwrap();
+        // Port 9 (discard) on loopback: connection refused, no network needed.
+        let err = store
+            .download_spec_with_sink(spec, "http://127.0.0.1:9/model.bin", |_| {})
+            .unwrap_err();
+        assert_eq!(err.code, "download-failed");
+        assert!(!partial.exists());
+        assert!(store.inflight.lock().unwrap().is_none());
         assert_eq!(store.status("whisper-base.en").unwrap().status, "missing");
         let _ = fs::remove_dir_all(&dir);
     }
