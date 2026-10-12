@@ -86,10 +86,7 @@ export function MicrophoneRows() {
       <div className="frow">
         <span className="frow__label">
           <span>Microphone test</span>
-          <small className="frow__help">
-            10-second auto-stop. Other states: Permission required, Permission denied,
-            Selected microphone unavailable, No audio activity detected.
-          </small>
+          <small className="frow__help">Stops automatically after 10 seconds.</small>
         </span>
         <span className="frow__control">
           <span className="fine" role="status">{testStatus}</span>

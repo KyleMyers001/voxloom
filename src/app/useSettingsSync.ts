@@ -8,6 +8,8 @@ interface Options {
   enabled: boolean;
   dispatch: Dispatch<AppAction>;
   lastSavedRef: MutableRefObject<SettingsFile | null>;
+  /** Last value this window asked to save; a foreign save becomes it too. */
+  lastRequestedRef?: MutableRefObject<SettingsFile | null>;
   persistGenRef: MutableRefObject<number>;
   /** This window's current (possibly not yet saved) values. */
   current: { onboardingComplete: boolean; settings: Settings };
@@ -43,7 +45,7 @@ export function mergeForeignSave(
  * writes again if a local pending edit had to be merged in; bumping the
  * generation drops in-flight save results from before the change.
  */
-export function useSettingsSync({ enabled, dispatch, lastSavedRef, persistGenRef, current }: Options) {
+export function useSettingsSync({ enabled, dispatch, lastSavedRef, lastRequestedRef, persistGenRef, current }: Options) {
   const currentRef = useRef(current);
   currentRef.current = current;
   useEffect(() => {
@@ -53,8 +55,9 @@ export function useSettingsSync({ enabled, dispatch, lastSavedRef, persistGenRef
       if (!parsed.ok) return;
       const merged = mergeForeignSave(parsed.file, lastSavedRef.current, currentRef.current);
       lastSavedRef.current = parsed.file;
+      if (lastRequestedRef) lastRequestedRef.current = parsed.file;
       persistGenRef.current += 1;
       dispatch({ ...merged, type: 'hydrate-settings' });
     }));
-  }, [dispatch, enabled, lastSavedRef, persistGenRef]);
+  }, [dispatch, enabled, lastRequestedRef, lastSavedRef, persistGenRef]);
 }

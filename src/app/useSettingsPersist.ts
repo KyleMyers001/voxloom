@@ -1,0 +1,62 @@
+import { type Dispatch, type MutableRefObject, useEffect, useRef } from 'react';
+import type { Settings } from '../domain/types';
+import { SETTINGS_FILE_VERSION, type DurableSettingsStore, type SettingsFile } from '../services/settings';
+import type { AppAction } from './actions';
+
+interface Options {
+  allowRef: MutableRefObject<boolean>;
+  dispatch: Dispatch<AppAction>;
+  hydratedRef: MutableRefObject<boolean>;
+  /** Last value handed to save(); the "nothing changed" check uses this. */
+  lastRequestedRef: MutableRefObject<SettingsFile | null>;
+  /** Last value confirmed on disk; the rollback target. */
+  lastSavedRef: MutableRefObject<SettingsFile | null>;
+  onboardingComplete: boolean;
+  persistence: { enabled: boolean; store: DurableSettingsStore };
+  persistGenRef: MutableRefObject<number>;
+  settings: Settings;
+}
+
+const same = (a: SettingsFile | null, b: SettingsFile) =>
+  a !== null && a.onboardingComplete === b.onboardingComplete
+    && JSON.stringify(a.settings) === JSON.stringify(b.settings);
+
+/**
+ * Persist settings after hydrate whenever settings or onboarding-complete
+ * change. Optimistic UI with rollback to the last successful save on failure.
+ * Skips only when the value equals the last REQUESTED save, so A→B→A with B
+ * still in flight still writes the final A. Saves run one at a time, in order.
+ */
+export function useSettingsPersist({
+  allowRef, dispatch, hydratedRef, lastRequestedRef, lastSavedRef,
+  onboardingComplete, persistence, persistGenRef, settings,
+}: Options) {
+  const chain = useRef<Promise<void>>(Promise.resolve());
+  useEffect(() => {
+    if (!persistence.enabled || !hydratedRef.current || !allowRef.current) return;
+    const snapshot: SettingsFile = { onboardingComplete, settings, version: SETTINGS_FILE_VERSION };
+    if (same(lastRequestedRef.current, snapshot)) return;
+    lastRequestedRef.current = snapshot;
+    const gen = persistGenRef.current;
+    const run = async () => {
+      try {
+        await persistence.store.save(snapshot.settings, snapshot.onboardingComplete);
+        if (gen !== persistGenRef.current) return;
+        lastSavedRef.current = snapshot;
+        dispatch({ message: null, type: 'set-settings-error' });
+      } catch (error: unknown) {
+        if (gen !== persistGenRef.current) return;
+        const message = error instanceof Error ? error.message : String(error);
+        const rollback = lastSavedRef.current;
+        if (rollback) {
+          // The rollback is what we now expect on disk; don't re-save it.
+          lastRequestedRef.current = rollback;
+          dispatch({ onboardingComplete: rollback.onboardingComplete, settings: rollback.settings, type: 'hydrate-settings' });
+        }
+        dispatch({ message: `Failed to save settings: ${message}`, type: 'set-settings-error' });
+      }
+    };
+    chain.current = chain.current.then(run, run);
+  }, [allowRef, dispatch, hydratedRef, lastRequestedRef, lastSavedRef, onboardingComplete,
+    persistence, persistGenRef, settings]);
+}
