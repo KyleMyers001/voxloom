@@ -48,7 +48,10 @@ export function useSettingsPersist({
         if (gen !== persistGenRef.current) return;
         const message = error instanceof Error ? error.message : String(error);
         const rollback = lastSavedRef.current;
-        if (rollback) {
+        // Roll back only if no newer save is queued: a queued save carries the
+        // UI's current value and will be written next, so rolling the UI back
+        // now would leave the screen and the disk disagreeing.
+        if (rollback && lastRequestedRef.current === snapshot) {
           // The rollback is what we now expect on disk; don't re-save it.
           lastRequestedRef.current = rollback;
           dispatch({ onboardingComplete: rollback.onboardingComplete, settings: rollback.settings, type: 'hydrate-settings' });
