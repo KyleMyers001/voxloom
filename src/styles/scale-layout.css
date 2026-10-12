@@ -44,6 +44,14 @@
 .brand { min-width: 0; }
 .brand > div { min-width: 0; }
 .brand__status { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* At <=780px the one-line status can't fit the 184px sidebar: the shortcut
+   moves to its own line as small key caps. */
+.brand__caps { display: none; }
+@media (max-width: 780px) {
+  .brand__label { display: none; }
+  .brand__caps { display: flex; margin-top: 3px; }
+  .brand__caps .kbd { font-size: var(--fs-micro); min-width: 18px; padding: 2px 4px; }
+}
 
 /* Line length: running text 72ch, History transcripts 78ch. */
 .page-head p,
@@ -54,7 +62,7 @@
 .frow__help { max-width: 72ch; }
 .history-row .history-row__text { max-width: 78ch; }
 
-/* Dictionary: 2 columns at 760, 3 at 1280, 4 fullscreen. */
+/* Dictionary: 2 columns at 760, 3 at 1280 and fullscreen. */
 .term-grid { grid-template-columns: repeat(auto-fill, minmax(17em, 1fr)); }
 
 /* Controls and key caps grow with the type. */

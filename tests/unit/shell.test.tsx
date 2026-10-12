@@ -35,8 +35,11 @@ describe('App shell (UI PR 3)', () => {
     const nav = screen.getByRole('navigation', { name: 'Voxloom screens' });
     expect(within(nav).getAllByRole('button').map((b) => b.getAttribute('aria-label')))
       .toEqual(['Home', 'History', 'Dictionary']);
-    const status = screen.getByText('Ready · ⌃⇧Space');
+    const status = document.querySelector('.brand__status')!;
+    expect(status).toHaveTextContent('Ready · ⌃⇧Space');
     expect(status).not.toHaveAttribute('aria-label');
+    // <=780px: the shortcut moves to its own line as key caps (BUS-41 PR 2).
+    expect([...document.querySelectorAll('.brand__caps .kbd')].map((k) => k.textContent)).toEqual(['⌃', '⇧', 'Space']);
     expect(screen.getByText(/Hold the shortcut in any app to dictate/)).toBeInTheDocument();
     expect(screen.queryByText(/Global hold\/latch snapshots/)).not.toBeInTheDocument();
   });
@@ -180,7 +183,7 @@ describe('off-Mac shell labels (QA #45)', () => {
       renderWithApp(
         <Sidebar onNavigate={() => {}} onReset={() => {}} onScenario={() => {}} screen="home" shortcut="Control+Shift+Space" status="Ready" />,
       );
-      expect(screen.getByText(/Ready · Ctrl\+Shift\+Space/)).toBeInTheDocument();
+      expect(document.querySelector('.brand__status')).toHaveTextContent('Ready · Ctrl+Shift+Space');
       expect(document.body.textContent).toContain('Alt+1');
       expect(document.body.textContent).not.toMatch(/[⌥⌘⌃⇧]/);
     } finally {

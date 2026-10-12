@@ -60,7 +60,6 @@
   .settings-rows .frow__label > .frow__help { align-self: start; grid-column: 2; grid-row: 2; }
   .settings-rows .frow > .frow__control,
   .settings-rows .frow > :not(.frow__label) { grid-column: 2; grid-row: 1; }
-  .settings-rows input:not([type]), .settings-rows select { min-height: var(--ctl); }
 }
 .settings-rows .frow:first-child { border-top: 0; }
 .frow__control { align-items: center; display: flex; flex-wrap: wrap; gap: var(--s-4); justify-content: flex-start; }
