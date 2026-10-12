@@ -9,6 +9,7 @@ mod overlay;
 mod settings;
 mod settings_window;
 mod store_backup;
+mod store_read;
 mod stt;
 
 use std::sync::Arc;

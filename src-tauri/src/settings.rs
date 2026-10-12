@@ -22,15 +22,12 @@ fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join(SETTINGS_FILE_NAME))
 }
 
-/// Read raw settings JSON. Returns `null` when the file does not exist.
+/// Read raw settings JSON. Returns `null` only when the file does not exist;
+/// a directory or unreadable path is an error (BUS-42).
 #[tauri::command]
 pub fn settings_load(app: AppHandle) -> Result<Option<String>, String> {
     let path = settings_path(&app)?;
-    if !path.is_file() {
-        return Ok(None);
-    }
-    let raw = fs::read_to_string(&path).map_err(|e| format!("read settings.json: {e}"))?;
-    Ok(Some(raw))
+    crate::store_read::read_store(&path, "settings.json")
 }
 
 /// Atomically replace `settings.json` with `contents`, then tell the other

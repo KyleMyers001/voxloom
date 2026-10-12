@@ -19,15 +19,12 @@ fn history_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join(HISTORY_FILE_NAME))
 }
 
-/// Read raw history JSON. Returns `null` when the file does not exist.
+/// Read raw history JSON. Returns `null` only when the file does not exist;
+/// a directory or unreadable path is an error (BUS-42).
 #[tauri::command]
 pub fn history_load(app: AppHandle) -> Result<Option<String>, String> {
     let path = history_path(&app)?;
-    if !path.is_file() {
-        return Ok(None);
-    }
-    let raw = fs::read_to_string(&path).map_err(|e| format!("read history.json: {e}"))?;
-    Ok(Some(raw))
+    crate::store_read::read_store(&path, "history.json")
 }
 
 /// Atomically replace `history.json` with `contents`.
