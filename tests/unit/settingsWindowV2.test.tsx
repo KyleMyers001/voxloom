@@ -44,7 +44,12 @@ function Probe() {
 
 const V2 = JSON.stringify({
   onboardingComplete: true,
-  settings: { ...initialSettings, cleanupEnabled: true, transcriptRetention: 'forever' },
+  settings: {
+    ...initialSettings,
+    cleanupEnabled: true,
+    cleanupModelId: 'local-cleanup-small',
+    transcriptRetention: 'forever',
+  },
   version: 2,
 });
 
@@ -84,6 +89,10 @@ describe('Settings window with a v2 settings.json', () => {
     const last = parseSettingsJson(writes.at(-1)!);
     expect(last.ok && last.file.version).toBe(1);
     expect(last.ok && last.file.settings).toMatchObject({ appearance: 'dark', transcriptRetention: 'forever' });
+    // #24's cleanup keys survive the Settings window save, outside app state.
+    expect((JSON.parse(writes.at(-1)!) as { settings: Record<string, unknown> }).settings)
+      .toMatchObject({ cleanupEnabled: true, cleanupModelId: 'local-cleanup-small' });
+    expect(api!.state.settings).not.toHaveProperty('cleanupEnabled');
   });
 
   it('a future-version file keeps its real error in the Settings window', async () => {
@@ -93,4 +102,30 @@ describe('Settings window with a v2 settings.json', () => {
     expect(result).toMatchObject({ ok: false, writeBlocked: true });
     expect(result.ok || result.error).toMatch(/Unsupported settings file version: 99/);
   });
+
+  it('a Settings window save of a migrated v1 file keeps #24 cleanup keys', async () => {
+    const v1 = JSON.stringify({
+      onboardingComplete: true,
+      settings: { ...initialSettings, cleanupEnabled: true, cleanupModelId: 'local-cleanup-small' },
+      version: 1,
+    });
+    const mem = createMemorySettingsIo(v1);
+    render(
+      <AppProvider settingsPersistence={{ enabled: true, store: createSettingsStore({ read: mem.read, write: mem.write }) }}>
+        <Probe />
+      </AppProvider>,
+    );
+    await waitFor(() => expect(api?.bootReady).toBe(true));
+    expect(api!.state.settingsError).toBeNull();
+    act(() => screen.getByText('edit').click());
+    await waitFor(() => expect(mem.snapshot()).toContain('"style": "casual"'));
+    const disk = JSON.parse(mem.snapshot()!) as { settings: Record<string, unknown> };
+    expect(disk.settings).toMatchObject({
+      cleanupEnabled: true,
+      cleanupModelId: 'local-cleanup-small',
+      style: 'casual',
+    });
+    expect(api!.state.settings).not.toHaveProperty('cleanupModelId');
+  });
 });
+
