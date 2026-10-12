@@ -47,8 +47,29 @@ export interface DeliveryOutcome {
   /** Present when restore was skipped (conflict, no snapshot, write fail). */
   restoreSkippedReason: string | null;
   status: DeliveryStatus;
+  /**
+   * A native write happened but could not be confirmed: the text may already be
+   * (partly) in the field, whatever `status` says (copied, or failed when the
+   * Copy fallback is off or failed). Consumers read this, never the message.
+   */
+  mayHaveInserted?: boolean;
   /** Always the transcript text for manual recovery (even if history is off). */
   text: string;
+}
+
+/**
+ * insertText failed after the write may already have started (e.g. the IPC
+ * call died mid-flight). Plain errors mean nothing was written: the native
+ * side reports refusals and verified no-ops as errors, and unconfirmed
+ * mutations as `InsertReport.unverified`.
+ */
+export class InsertError extends Error {
+  readonly writeStarted: boolean;
+  constructor(message: string, writeStarted: boolean) {
+    super(message);
+    this.name = 'InsertError';
+    this.writeStarted = writeStarted;
+  }
 }
 
 /** Structured native insert result (macOS). */

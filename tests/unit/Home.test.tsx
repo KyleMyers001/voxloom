@@ -12,6 +12,7 @@ function stubDogfood(
   return {
     cancel: vi.fn(),
     captureState: { kind: 'idle' },
+    hudResult: null,
     intendedTarget: null,
     message: null,
     origin: null,

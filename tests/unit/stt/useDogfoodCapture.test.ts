@@ -756,4 +756,32 @@ describe('useDogfoodCapture', () => {
 
 
 
+
+  it.each([
+    ['failed', false],
+    ['copied', true],
+  ] as const)('records a may-have-inserted %s delivery as Unverified, not Failed/Copied (Review #44)', async (status, copied) => {
+    const store = createMockSttModelStore();
+    await store.download('whisper-tiny.en');
+    const onHistoryRecord = vi.fn();
+    const dogfood = vi.fn(async (): Promise<DogfoodResult> => ({
+      copied,
+      delivery: { ...deliveryOutcome(status, 'maybe here'), mayHaveInserted: true },
+      transcript: { language: 'en', text: 'maybe here' },
+    }));
+    const { result } = renderHook(() => useDogfoodCapture({
+      captureApi: stubCapture({ audio: { duration_ms: 500, id: `pcm-maybe-${status}`, sample_rate_hz: 16_000 }, kind: 'stopped' }),
+      clipboard: clipboard(),
+      createModelStore: () => store,
+      dogfood: dogfood as never,
+      modelId: 'whisper-tiny.en',
+      onHistoryRecord,
+    }));
+    await waitFor(() => expect(result.current.phase).toBe('success'));
+    expect(onHistoryRecord).toHaveBeenCalledWith(expect.objectContaining({
+      mayHaveInserted: { copied },
+      status: 'unverified',
+    }));
+  });
 });
+

@@ -126,6 +126,7 @@ function makeOverlay(): OverlayBridge {
   return {
     dispose: vi.fn().mockResolvedValue(undefined),
     sync: vi.fn().mockResolvedValue(undefined),
+    showResult: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -910,4 +911,43 @@ describe('useShortcutGestures', () => {
     });
   });
 
+});
+
+describe('HUD result states (UI PR 8)', () => {
+  async function finish(over: Partial<ReturnType<typeof makeDogfood>>) {
+    vi.mocked(isTauri).mockReturnValue(true);
+    mocks.createNativeShortcutController.mockReturnValue(makeNativeController());
+    const overlay = makeOverlay();
+    mocks.createOverlayBridge.mockReturnValue(overlay);
+    const dogfood = makeDogfood({ phase: 'transcribing' });
+    const { rerender, unmount } = renderHook((props) => useShortcutGestures(props), {
+      initialProps: makeOptions({ dogfood }),
+    });
+    rerender(makeOptions({ dogfood: { ...dogfood, ...over } }));
+    await act(async () => { await Promise.resolve(); });
+    unmount();
+    return overlay;
+  }
+
+  it('flashes Copied for a gesture run', async () => {
+    const overlay = await finish({ hudResult: 'copied', origin: 'gesture', phase: 'success' });
+    expect(overlay.showResult).toHaveBeenCalledWith('copied');
+  });
+
+  it('flashes Couldn’t transcribe on a gesture error', async () => {
+    const overlay = await finish({ hudResult: 'transcribe-failed', origin: 'gesture', phase: 'error' });
+    expect(overlay.showResult).toHaveBeenCalledWith('transcribe-failed');
+  });
+
+  it('shows nothing for an insert (silent dismiss), a Home run, or a cancel', async () => {
+    for (const over of [
+      { hudResult: null, origin: 'gesture' as const, phase: 'success' as const },
+      { hudResult: 'copied' as const, origin: 'home' as const, phase: 'success' as const },
+      { hudResult: 'copied' as const, origin: 'gesture' as const, phase: 'cancelled' as const },
+    ]) {
+      const overlay = await finish(over);
+      expect(overlay.showResult).not.toHaveBeenCalled();
+      expect(overlay.sync).toHaveBeenCalledWith({ kind: 'ready' });
+    }
+  });
 });

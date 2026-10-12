@@ -1,29 +1,53 @@
-import { isTauri } from '@tauri-apps/api/core';
 import type { DictationState } from '../../domain/types';
 import {
-  OVERLAY_BOTTOM_MARGIN,
   OVERLAY_HEIGHT,
-  OVERLAY_WINDOW_LABEL,
+  OVERLAY_RESULT_HEIGHT,
+  OVERLAY_RESULT_WIDTH,
   OVERLAY_WIDTH,
 } from './constants';
+import { createTauriOverlayApi } from './overlayWindowApi';
 import {
   isOverlayVisible,
   overlayWaveformFromDictation,
+  RESULT_HOLD_MS,
+  resultWaveform,
+  type OverlayResult,
   type OverlayWaveform,
 } from './overlayVisibility';
 
 export interface OverlayBridge {
   dispose(): Promise<void>;
   sync(dictation: DictationState, homeRecording?: boolean): Promise<void>;
+  /**
+   * Brief result state after a gesture run (Copied ~1.5 s, failure ~2.5 s),
+   * then hide. Hides that sync() asks for meanwhile are held off; a new
+   * visible state (the next listening run) supersedes it at once.
+   */
+  showResult(result: OverlayResult): Promise<void>;
 }
+
+export interface OverlaySize { width: number; height: number }
 
 export interface OverlayWindowApi {
   ensureCreated(): Promise<void>;
   hide(): Promise<void>;
   isAvailable(): boolean;
-  setWaveform(waveform: OverlayWaveform): Promise<void>;
-  showBottomCenter(): Promise<void>;
+  setWaveform(waveform: OverlayWaveform, result?: OverlayResult): Promise<void>;
+  showBottomCenter(size?: OverlaySize): Promise<void>;
 }
+
+export interface OverlayTimers {
+  setTimeout(fn: () => void, ms: number): unknown;
+  clearTimeout(handle: unknown): void;
+}
+
+const defaultTimers: OverlayTimers = {
+  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+  setTimeout: (fn, ms) => setTimeout(fn, ms),
+};
+
+export const LISTEN_SIZE: OverlaySize = { height: OVERLAY_HEIGHT, width: OVERLAY_WIDTH };
+const RESULT_SIZE: OverlaySize = { height: OVERLAY_RESULT_HEIGHT, width: OVERLAY_RESULT_WIDTH };
 
 /** Pure sync decision used by tests and the live bridge. */
 export function overlaySyncPlan(
@@ -46,11 +70,37 @@ export function overlaySyncPlan(
  */
 export function createOverlayBridge(
   api?: OverlayWindowApi,
+  timers: OverlayTimers = defaultTimers,
 ): OverlayBridge {
   const windowApi = api ?? createTauriOverlayApi();
   let lastVisible: boolean | null = null;
   let lastWaveform: OverlayWaveform | null = null;
+  let lastSize: OverlaySize | null = null;
   let disposed = false;
+  /** Pending hide timer of a result state; non-null while a result is shown. */
+  let resultTimer: unknown = null;
+  const clearResult = () => {
+    if (resultTimer !== null) timers.clearTimeout(resultTimer);
+    resultTimer = null;
+  };
+  const enqueue = (run: () => Promise<void>) => {
+    syncChain = syncChain.then(run, run);
+    return syncChain;
+  };
+  const hideNow = async (gen: number) => {
+    await windowApi.hide();
+    if (gen !== syncGeneration) return;
+    lastVisible = false;
+    lastWaveform = null;
+    lastSize = null;
+  };
+  const show = async (gen: number, size: OverlaySize) => {
+    if (lastVisible === true && lastSize === size) return;
+    await windowApi.showBottomCenter(size);
+    if (gen !== syncGeneration) return;
+    lastVisible = true;
+    lastSize = size;
+  };
   /** Serialize show/hide so a late show cannot outrun a newer hide. */
   let syncGeneration = 0;
   let syncChain: Promise<void> = Promise.resolve();
@@ -58,6 +108,7 @@ export function createOverlayBridge(
   return {
     async dispose() {
       disposed = true;
+      clearResult();
       syncGeneration += 1;
       try {
         await windowApi.hide();
@@ -68,6 +119,9 @@ export function createOverlayBridge(
     async sync(dictation, homeRecording = false) {
       if (disposed || !windowApi.isAvailable()) return;
       const plan = overlaySyncPlan(dictation, homeRecording);
+      // A result state owns the HUD until its timer hides it.
+      if (!plan.visible && resultTimer !== null) return;
+      if (plan.visible) clearResult();
       const gen = ++syncGeneration;
       const run = async () => {
         if (disposed || gen !== syncGeneration) return;
@@ -80,63 +134,41 @@ export function createOverlayBridge(
               if (gen !== syncGeneration) return;
               lastWaveform = plan.waveform;
             }
-            if (lastVisible !== true) {
-              await windowApi.showBottomCenter();
-              if (gen !== syncGeneration) return;
-              lastVisible = true;
-            }
+            await show(gen, LISTEN_SIZE);
           } else {
             // Always hide when not visible so a raced late show cannot stick.
-            await windowApi.hide();
-            if (gen !== syncGeneration) return;
-            lastVisible = false;
-            lastWaveform = null;
+            await hideNow(gen);
           }
         } catch {
           // Overlay must never break dictation; failures are non-fatal.
         }
       };
-      syncChain = syncChain.then(run, run);
-      await syncChain;
+      await enqueue(run);
     },
-  };
-}
-
-function createTauriOverlayApi(): OverlayWindowApi {
-  let created = false;
-
-  return {
-    isAvailable: () => isTauri(),
-    async ensureCreated() {
-      if (created) return;
-      if (!isTauri()) return;
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('overlay_ensure', {
-        height: OVERLAY_HEIGHT,
-        label: OVERLAY_WINDOW_LABEL,
-        marginBottom: OVERLAY_BOTTOM_MARGIN,
-        width: OVERLAY_WIDTH,
-      });
-      created = true;
-    },
-    async hide() {
-      if (!isTauri()) return;
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('overlay_hide', { label: OVERLAY_WINDOW_LABEL });
-    },
-    async setWaveform(waveform) {
-      if (!isTauri()) return;
-      const { emit } = await import('@tauri-apps/api/event');
-      await emit('overlay:waveform', { waveform });
-    },
-    async showBottomCenter() {
-      if (!isTauri()) return;
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('overlay_show', {
-        height: OVERLAY_HEIGHT,
-        label: OVERLAY_WINDOW_LABEL,
-        marginBottom: OVERLAY_BOTTOM_MARGIN,
-        width: OVERLAY_WIDTH,
+    async showResult(result) {
+      if (disposed || !windowApi.isAvailable()) return;
+      clearResult();
+      const gen = ++syncGeneration;
+      resultTimer = timers.setTimeout(() => {
+        resultTimer = null;
+        if (disposed || gen !== syncGeneration) return;
+        const hideGen = ++syncGeneration;
+        void enqueue(async () => {
+          try { await hideNow(hideGen); } catch { /* non-fatal */ }
+        });
+      }, RESULT_HOLD_MS[result]);
+      await enqueue(async () => {
+        if (disposed || gen !== syncGeneration) return;
+        try {
+          await windowApi.ensureCreated();
+          const waveform = resultWaveform(result);
+          await windowApi.setWaveform(waveform, result);
+          if (gen !== syncGeneration) return;
+          lastWaveform = waveform;
+          await show(gen, RESULT_SIZE);
+        } catch {
+          // non-fatal
+        }
       });
     },
   };

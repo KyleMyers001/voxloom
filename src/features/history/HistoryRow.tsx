@@ -30,7 +30,9 @@ export function HistoryRow({ record, isNative, currentTime, canStart, onCopy, on
     : retryable && record.recoveryExpiresAt
       ? `Temporary recovery buffer · expires ${formatTime(record.recoveryExpiresAt)}`
       : 'Temporary recovery buffer expired';
-  const note = record.status === 'unverified'
+  const note = record.mayHaveInserted
+    ? `May have been inserted${record.mayHaveInserted.copied ? ' (also copied)' : ''}. Check the field before copying or retrying.`
+    : record.status === 'unverified'
     ? 'Terminal input not verified. Inspect before copying or retrying.'
     : record.status === 'failed' ? failedNote : null;
 

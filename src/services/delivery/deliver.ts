@@ -20,6 +20,7 @@ import type {
   InsertReport,
   TargetSnapshot,
 } from './types';
+import { InsertError } from './types';
 
 
 async function readClipboardText(
@@ -103,6 +104,12 @@ export async function deliverTranscript(
       const insertFail = error instanceof Error
         ? error.message
         : String(error);
+      if (error instanceof InsertError && error.writeStarted) {
+        // The write may have landed: never say "Couldn't insert" (mayHaveInserted).
+        const report = { detail: `insert error after write began: ${insertFail}`, typed: false, unverified: true };
+        if (!current()) return mayHaveInserted(platform, text, false, report);
+        return mayHaveInserted(platform, text, options.clipboardFallback, report);
+      }
       if (!current()) return stale();
       // Insert API failed after a valid-looking target → Copy + toast if enabled.
       if (!options.clipboardFallback) {
@@ -159,13 +166,13 @@ async function mayHaveInserted(
   const detail = `unverified insert: ${report.detail ?? 'read-back failed'}`;
   if (!clipboardFallback) {
     const failed = failOutcome(text, detail);
-    return { ...failed, message: `May have been inserted — ${failed.message}` };
+    return { ...failed, mayHaveInserted: true, message: `May have been inserted — ${failed.message}` };
   }
   const copied = await copyFallback(platform, text, detail);
   if (copied.status === 'copied') {
-    return { ...copied, message: 'May have been inserted — also copied' };
+    return { ...copied, mayHaveInserted: true, message: 'May have been inserted — also copied' };
   }
-  return { ...copied, message: `May have been inserted — ${copied.message}` };
+  return { ...copied, mayHaveInserted: true, message: `May have been inserted — ${copied.message}` };
 }
 
 /**
