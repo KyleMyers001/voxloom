@@ -17,7 +17,7 @@ interface Props {
 export function resultText(result: OverlayResult | null, mac = isMacPlatform()): string {
   const paste = mac ? '⌘V' : 'Ctrl+V';
   switch (result) {
-    case 'copied': return `Copied. Press ${paste} to paste`;
+    case 'copied': return `Copied · ${paste} to paste`;
     case 'maybe-copied': return 'Maybe inserted · copied';
     case 'insert-failed': return 'Couldn’t insert';
     default: return 'Couldn’t transcribe';
@@ -26,6 +26,7 @@ export function resultText(result: OverlayResult | null, mac = isMacPlatform()):
 
 /** Full sentence for the live region (no width limit). */
 export function spokenResultText(result: OverlayResult | null, mac = isMacPlatform()): string {
+  if (result === 'copied') return `Copied. Press ${mac ? '⌘V' : 'Ctrl+V'} to paste`;
   const paste = mac ? 'Command V' : 'Control V';
   if (result === 'maybe-copied') return `May have been inserted; also copied. If it's missing, press ${paste} to paste.`;
   return resultText(result, mac);
