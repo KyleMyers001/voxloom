@@ -145,6 +145,6 @@ describe('durable dictionary persistence', () => {
     expect(historyIo.snapshot()).toContain('keep-me');
 
     await user.click(screen.getByRole('button', { name: 'Dictionary' }));
-    expect(screen.getByText('No words found.')).toBeInTheDocument();
+    expect(screen.getByText('No words yet')).toBeInTheDocument();
   });
 });
