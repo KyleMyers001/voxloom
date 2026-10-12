@@ -85,6 +85,7 @@
 }
 
 .nav-button[aria-current="page"] .icon { color: var(--accfg); }
+.nav-button[aria-current="page"] kbd { color: var(--mut-on-nav, var(--mut)); }
 
 .sidebar__foot { display: flex; flex-direction: column; gap: var(--s-5); margin-top: auto; }
 .sidebar__hint { color: var(--mut); font-size: 11px; margin: 0; padding: 0 var(--s-4); }
