@@ -41,7 +41,7 @@ describe('Settings window tabs (UI PR 6a)', () => {
     expect(screen.getByText('Recording indicator')).toBeInTheDocument();
     // A1
     await user.click(screen.getByRole('tab', { name: 'Appearance' }));
-    expect(screen.getAllByRole('radio')).toHaveLength(4);
+    expect(screen.getAllByRole('radio')).toHaveLength(3); // Follow system · Light · Dark (Sodium Rain removed, PR 10)
     // R1–R3, E1
     await user.click(screen.getByRole('tab', { name: 'Privacy' }));
     expect(screen.getByRole('radiogroup', { name: 'Transcript retention' })).toBeInTheDocument();

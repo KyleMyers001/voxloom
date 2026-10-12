@@ -1,4 +1,4 @@
-export type Appearance = 'system' | 'light' | 'dark' | 'sodium-rain';
+export type Appearance = 'system' | 'light' | 'dark';
 export type HistoryStatus = 'copied' | 'failed' | 'inserted' | 'unverified';
 export type Screen = 'dictionary' | 'history' | 'home' | 'settings';
 export type WritingStyle = 'casual' | 'formal' | 'very-casual';

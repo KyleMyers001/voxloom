@@ -1,12 +1,10 @@
 import { useApp } from '../../app/AppContext';
 import type { Appearance } from '../../domain/types';
 
-// Sodium Rain stays listed until UI PR 10 removes it and migrates stored values to 'system'.
 const appearances: { label: string; value: Appearance }[] = [
   { label: 'Follow system', value: 'system' },
   { label: 'Light', value: 'light' },
   { label: 'Dark', value: 'dark' },
-  { label: 'Sodium Rain', value: 'sodium-rain' },
 ];
 
 /** Appearance tab (A1): theme swatch cards. */

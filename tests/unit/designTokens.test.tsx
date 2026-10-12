@@ -25,11 +25,11 @@ describe('Console design tokens (UI PR 1)', () => {
     }
   });
 
-  it('defines dark defaults and light/sodium-rain overrides on the theme attribute', () => {
+  it('defines dark defaults and light overrides (Sodium Rain removed) on the theme attribute', () => {
     const tokens = css('tokens.css');
     expect(tokens).toMatch(/:root \{[^}]*--bg: #0b0b10;[^}]*--accfg: #b6ff3c;/);
     expect(tokens).toMatch(/\[data-appearance-resolved="light"\] \{[^}]*--bg: #fbfbf8;[^}]*--accfg: #376b00;/);
-    expect(tokens).toContain('[data-appearance-resolved="sodium-rain"]');
+    expect(tokens).not.toContain('sodium-rain');
   });
 
   it('gives the app tile the dark-tile outline', () => {
@@ -63,7 +63,6 @@ describe('Switch styling (UI PR 2)', () => {
     expect(tokens).toMatch(/\[data-appearance-resolved="light"\] \{[^}]*--switch-on: #4c8a00;/);
     expect(tokens).not.toMatch(/:root \{[^}]*--switch-on:/);
     expect(controls).toMatch(/\.switch\.on i \{[^}]*background: var\(--switch-on, var\(--brand\)\)/);
-    expect(tokens).toMatch(/\[data-appearance-resolved="sodium-rain"\] \{[^}]*--switch-off: #7a909a;/);
   });
 });
 
@@ -115,6 +114,19 @@ describe('designer #37: focus ring, tag pill, disabled ON switch', () => {
   it('a disabled ON switch shows the dimmed brand gradient', async () => {
     const { readFileSync } = await import('node:fs');
     expect(readFileSync('src/styles/ui-controls.css', 'utf8')).toMatch(/\.switch\.on:disabled i \{ background: var\(--brand\); \}/);
+  });
+});
+
+describe('Appearance swatches use Console tokens (designer #46)', () => {
+  it('no Sodium blue/teal; Follow system is a split light/dark preview with the lime dot', async () => {
+    const { readFileSync } = await import('node:fs');
+    const css = readFileSync('src/styles/features.css', 'utf8');
+    for (const sodium of ['#5f8fff', '#2f62a6', '#79b8c9', '#0b111b', '#162130', '#182127']) expect(css).not.toContain(sodium);
+    const system = /\[data-preview="system"\] \{([^}]*)\}/.exec(css)![1];
+    expect(system).toMatch(/--preview-accent: #b6ff3c/);
+    expect(system).toMatch(/background: linear-gradient\(90deg, #fbfbf8 50%, #0b0b10 50%\)/);
+    expect(/\[data-preview="dark"\] \{([^}]*)\}/.exec(css)![1]).toMatch(/--preview-bg: #0b0b10/);
+    expect(/\[data-preview="light"\] \{([^}]*)\}/.exec(css)![1]).toMatch(/--preview-accent: #376b00/);
   });
 });
 

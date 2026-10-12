@@ -19,8 +19,10 @@ const APPEARANCES: readonly Appearance[] = [
   'system',
   'light',
   'dark',
-  'sodium-rain',
 ];
+
+/** Sodium Rain was removed (UI PR 10, approved by Kyle); stored values load as 'system'. */
+const RETIRED_APPEARANCES: Readonly<Record<string, Appearance>> = { 'sodium-rain': 'system' };
 
 export type ParseSettingsResult =
   | { ok: true; file: SettingsFile }
@@ -57,7 +59,11 @@ export function coerceSettings(raw: unknown): Settings {
   const base = { ...initialSettings };
   if (!isObject(raw)) return base;
   return {
-    appearance: asChoice(raw.appearance, APPEARANCES, base.appearance),
+    appearance: asChoice(
+      typeof raw.appearance === 'string' ? RETIRED_APPEARANCES[raw.appearance] ?? raw.appearance : raw.appearance,
+      APPEARANCES,
+      base.appearance,
+    ),
     audioRetention: asChoice(
       raw.audioRetention,
       audioRetentions,

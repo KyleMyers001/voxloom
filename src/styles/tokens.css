@@ -90,29 +90,6 @@
   --switch-off: #808389;
 }
 
-/* Sodium Rain is dropped; its removal is PR 10 (approved, comes later). */
-[data-appearance-resolved="sodium-rain"] {
-  color-scheme: dark;
-  --bg: #0a0d10;
-  --side: #10161b;
-  --panel: #182127;
-  --sheet: #182127;
-  --field: #223039;
-  --seg: #223039;
-  --segon: #34464f;
-  --line: #34464f;
-  --fg: #eaf1f3;
-  --mut: #9fb1b8;
-  --navon: #332b16;
-  --mut-on-nav: #9fb1b8; /* 6.31:1 on navon */
-  --accfg: #ffb000;
-  --info: #79b8c9;
-  --err: #ff9b9b;
-  --action: #8a6500;
-  --switch-off: #7a909a; /* 4.05+ vs surfaces; knob 3.34 */
-  --accent-text: #ffffff;
-}
-
 /* Legacy names used by existing component rules, mapped onto the tokens.
    Declared on body too so they re-resolve where the theme attribute lives. */
 :root,

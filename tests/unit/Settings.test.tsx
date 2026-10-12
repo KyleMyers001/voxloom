@@ -60,8 +60,10 @@ describe('Settings', () => {
     await user.click(within(style).getByRole('radio', { name: 'Casual' }));
     expect(within(style).getByRole('radio', { name: 'Casual' })).toHaveAttribute('aria-checked', 'true');
     await user.click(screen.getByRole('tab', { name: 'Appearance' }));
-    await user.click(screen.getByLabelText('Sodium Rain'));
-    expect(screen.getByLabelText('Sodium Rain')).toBeChecked();
+    await user.click(screen.getByLabelText('Dark'));
+    expect(screen.getByLabelText('Dark')).toBeChecked();
+    expect(screen.queryByLabelText('Sodium Rain')).toBeNull();
+    expect(within(screen.getByRole('group', { name: 'Theme' })).getAllByRole('radio')).toHaveLength(3);
   });
 
   it('calls onSetup when Set up shortcuts clicked', async () => {

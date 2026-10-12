@@ -51,32 +51,27 @@
   height: 12px;
 }
 
+/* Console previews (designer #46): each swatch in its own theme's tokens. */
 .appearance-swatch[data-preview="dark"] {
-  --preview-accent: #5f8fff;
-  --preview-bg: #0b111b;
-  --preview-border: #263448;
-  --preview-surface: #162130;
+  --preview-accent: #b6ff3c; /* dark --accfg (lime) */
+  --preview-bg: #0b0b10;
+  --preview-border: #23232e;
+  --preview-surface: #121219;
 }
 
 .appearance-swatch[data-preview="light"] {
-  --preview-accent: #2f62a6;
-  --preview-bg: #f4f5f6;
-  --preview-border: #cbd2da;
+  --preview-accent: #376b00; /* light --accfg */
+  --preview-bg: #fbfbf8;
+  --preview-border: #b9bdb2; /* visible on the white card (designer) */
   --preview-surface: #ffffff;
 }
 
-.appearance-swatch[data-preview="sodium-rain"] {
-  --preview-accent: #ffb000;
-  --preview-bg: #0a0d10;
-  --preview-border: #223039;
-  --preview-surface: #182127;
-}
-
+/* Follow system: half Light, half Dark, with the lime dot. */
 .appearance-swatch[data-preview="system"] {
-  --preview-accent: #79b8c9;
-  --preview-bg: #e7ebed;
-  --preview-border: #73858c;
-  --preview-surface: #182127;
+  --preview-accent: #b6ff3c;
+  --preview-border: #8b8b99;
+  --preview-surface: transparent; /* let the split background show */
+  background: linear-gradient(90deg, #fbfbf8 50%, #0b0b10 50%);
 }
 
 .onboarding-actions {
