@@ -2,7 +2,7 @@ import { useApp } from '../app/AppContext';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { BootHydratePlaceholder } from '../app/shell/BootHydratePlaceholder';
-import { useTheme } from '../app/useTheme';
+import { useTextSize, useTheme } from '../app/useTheme';
 import { Banner } from '../components/Banner';
 import { Settings } from '../features/settings/Settings';
 import { requestOnboarding } from '../services/settingsWindow';
@@ -17,6 +17,7 @@ function setWindowTitle(label: string) {
 export function SettingsWindowApp() {
   const { bootReady, state } = useApp();
   useTheme(state.settings.appearance);
+  useTextSize(state.settings.textSize);
   return (
     <main className="settings-window-root">
       {state.settingsError && <Banner tone="error">{state.settingsError}</Banner>}
