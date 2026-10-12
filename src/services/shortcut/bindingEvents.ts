@@ -12,6 +12,8 @@ export interface ShortcutBoundPayload {
   /** Settings-format shortcut that was attempted. */
   shortcut: string;
   ok: boolean;
+  /** Settings-format combo the OS holds after this attempt (revert target). */
+  active?: string | null;
   message?: string;
 }
 

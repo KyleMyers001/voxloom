@@ -21,7 +21,7 @@ import {
   type OverlayBridge,
   type PendingFinishGate,
 } from '../services/shortcut';
-import { emitShortcutBound } from '../services/shortcut/bindingEvents';
+import { useShortcutRegistration } from './useShortcutRegistration';
 import type {
   DogfoodPhase,
   UseDogfoodCaptureResult,
@@ -125,6 +125,8 @@ export function useShortcutGestures(options: GestureOptions) {
   const overlayRef = useRef<OverlayBridge | null>(null);
   const pendingFinishRef = useRef<PendingFinishGate | null>(null);
   const optionsRef = useRef(options);
+  /** Last combo the OS accepted (settings format); the revert target. */
+  const registeredRef = useRef<string | null>(null);
   optionsRef.current = options;
   const phaseGuardRef = useRef<PhaseGuard>({ seen: options.dogfood.phase });
 
@@ -194,9 +196,10 @@ export function useShortcutGestures(options: GestureOptions) {
 
     let cancelled = false;
     void (async () => {
-      const outcome = await controller.setShortcut(
-        optionsRef.current.state.settings.shortcut,
-      );
+      const bootShortcut = optionsRef.current.state.settings.shortcut;
+      const outcome = await controller.setShortcut(bootShortcut);
+      // Seed the revert target from what the OS accepted, not from settings.
+      registeredRef.current = outcome.ok ? bootShortcut : null;
       if (cancelled) return;
       if (!outcome.ok && outcome.message) {
         optionsRef.current.onShortcutError?.(outcome.message);
@@ -224,45 +227,9 @@ export function useShortcutGestures(options: GestureOptions) {
     };
   }, [options.now]);
 
-  // Re-register when Settings shortcut *changes* (native only).
-  // Mount effect owns the initial bind; skipping that first run avoids a
-  // parallel setShortcut for the same combo on boot (Mac RegisterEventHotKey
-  // race). Controller still serializes setShortcut as a safety net.
-  const boundShortcutRef = useRef<string | null>(null);
-  /** Last combo the OS actually accepted; the revert target on refusal. */
-  const registeredRef = useRef<string | null>(null);
-  useEffect(() => {
-    const native = nativeControllerRef.current;
-    if (!native || !isTauri()) return;
-    const shortcut = options.state.settings.shortcut;
-    if (boundShortcutRef.current === null) {
-      boundShortcutRef.current = shortcut;
-      registeredRef.current = shortcut;
-      return;
-    }
-    if (boundShortcutRef.current === shortcut) return;
-    const previous = registeredRef.current ?? boundShortcutRef.current;
-    boundShortcutRef.current = shortcut;
-    let cancelled = false;
-    void (async () => {
-      const outcome = await native.setShortcut(shortcut);
-      emitShortcutBound({ message: outcome.ok ? undefined : outcome.message, ok: outcome.ok, shortcut });
-      // Only a newer shortcut cancels; callbacks come from optionsRef so a
-      // re-render with new callback identities can't drop the revert.
-      if (cancelled) return;
-      if (outcome.ok) {
-        registeredRef.current = shortcut;
-      } else {
-        // Don't keep (or retry next launch) a combo the OS refused.
-        boundShortcutRef.current = previous;
-        optionsRef.current.onShortcutRevert?.(previous);
-        if (outcome.message) optionsRef.current.onShortcutError?.(outcome.message);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [options.state.settings.shortcut]);
+  useShortcutRegistration(
+    options.state.settings.shortcut, nativeControllerRef, registeredRef, optionsRef,
+  );
 
   useEffect(() => {
     const ctx = interactionContext(options);

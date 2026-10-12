@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-type Payload = { message?: string; ok: boolean; shortcut: string };
+type Payload = { active?: string | null; message?: string; ok: boolean; shortcut: string };
 const bound = vi.hoisted(() => ({ handler: null as ((p: Payload) => void) | null }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), isTauri: () => true }));
 vi.mock('../../src/services/shortcut/bindingEvents', () => ({
@@ -103,5 +103,43 @@ describe('ShortcutRecorder waits for native registration', () => {
     await user.keyboard('{Control>}{Alt>}j{/Alt}{/Control}');
     await report({ ok: false, shortcut: 'Ctrl + Alt + J' });
     expect(onChange).toHaveBeenLastCalledWith(DEFAULT);
+  });
+
+  it('recording B keeps A\'s late ok as the revert target', async () => {
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+    const user = userEvent.setup();
+    await user.click(field());
+    await user.keyboard('{Control>}{Alt>}a{/Alt}{/Control}');
+    await user.click(field());
+    await user.keyboard('{Control>}{Alt>}b{/Alt}{/Control}');
+    await report({ ok: true, shortcut: 'Ctrl + Alt + A' });
+    await report({ ok: false, shortcut: 'Ctrl + Alt + B' }); // no active: own tracking
+    expect(onChange).toHaveBeenLastCalledWith('Ctrl + Alt + A');
+  });
+
+  it('uses the main window\'s active combo as the revert target', async () => {
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+    const user = userEvent.setup();
+    await user.click(field());
+    await user.keyboard('{Control>}{Alt>}b{/Alt}{/Control}');
+    await report({ active: 'Ctrl + Alt + A', ok: false, shortcut: 'Ctrl + Alt + B' });
+    expect(onChange).toHaveBeenLastCalledWith('Ctrl + Alt + A');
+  });
+
+  it('a late refusal after the timeout still rolls back and says so', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    await user.click(field());
+    await user.keyboard('{Control>}{Alt>}k{/Alt}{/Control}');
+    await act(async () => { vi.advanceTimersByTime(CONFIRM_TIMEOUT_MS + 1); });
+    expect(status()).toHaveTextContent(/Couldn't confirm/);
+    await report({ active: DEFAULT, ok: false, shortcut: 'Ctrl + Alt + K' });
+    expect(onChange).toHaveBeenLastCalledWith(DEFAULT);
+    expect(field()).toHaveAccessibleName('Dictation shortcut, Control Shift Space');
+    expect(status()).toHaveTextContent('Previous shortcut kept');
   });
 });

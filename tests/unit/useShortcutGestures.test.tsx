@@ -388,6 +388,67 @@ describe('useShortcutGestures', () => {
       expect(errors).toEqual(['Taken.']);
       unmount();
     });
+    it('BUS-47: fast A then B, A ok lands late, B refused: reverts to A (what native holds)', async () => {
+      vi.mocked(isTauri).mockReturnValue(true);
+      const native = makeNativeController();
+      mocks.createNativeShortcutController.mockReturnValue(native);
+      mocks.createOverlayBridge.mockReturnValue(makeOverlay());
+      const reverts: string[] = [];
+      const baseState = createInitialState(0);
+      const stable = makeOptions({ now: () => 0 });
+      const props = (shortcut: string) => ({
+        ...stable,
+        onShortcutRevert: (s: string) => { reverts.push(s); },
+        state: { ...baseState, settings: { ...baseState.settings, shortcut } },
+      });
+      const { rerender, unmount } = renderHook((p) => useShortcutGestures(p), { initialProps: props('Ctrl + Shift + Space') });
+      await waitFor(() => expect(native.setShortcut).toHaveBeenCalledTimes(1));
+
+      let resolveA!: (v: RegisterOutcome) => void;
+      let resolveB!: (v: RegisterOutcome) => void;
+      native.setShortcut
+        .mockReturnValueOnce(new Promise((r) => { resolveA = r; }))
+        .mockReturnValueOnce(new Promise((r) => { resolveB = r; }));
+      rerender(props('Ctrl + Alt + A'));
+      await waitFor(() => expect(native.setShortcut).toHaveBeenCalledTimes(2));
+      rerender(props('Ctrl + Alt + B')); // B cancels A's effect
+      await waitFor(() => expect(native.setShortcut).toHaveBeenCalledTimes(3));
+      await act(async () => {
+        resolveA({ active: 'Control+Alt+A', lastKnownGood: 'Control+Alt+A', ok: true });
+      });
+      await act(async () => {
+        resolveB({ active: 'Control+Alt+A', attempted: 'Control+Alt+B',
+          lastKnownGood: 'Control+Alt+A', message: 'Taken.', ok: false });
+      });
+      await waitFor(() => expect(reverts).toEqual(['Ctrl + Alt + A']));
+      unmount();
+    });
+
+    it('BUS-47: seeds the revert target from the boot outcome, not startup settings', async () => {
+      vi.mocked(isTauri).mockReturnValue(true);
+      const native = makeNativeController();
+      native.setShortcut.mockResolvedValueOnce({ active: null, attempted: 'Control+Alt+Z',
+        lastKnownGood: null, message: 'Boot taken.', ok: false });
+      mocks.createNativeShortcutController.mockReturnValue(native);
+      mocks.createOverlayBridge.mockReturnValue(makeOverlay());
+      const reverts: string[] = [];
+      const baseState = createInitialState(0);
+      const stable = makeOptions({ now: () => 0 });
+      const props = (shortcut: string) => ({
+        ...stable,
+        onShortcutRevert: (s: string) => { reverts.push(s); },
+        state: { ...baseState, settings: { ...baseState.settings, shortcut } },
+      });
+      const { rerender, unmount } = renderHook((p) => useShortcutGestures(p), { initialProps: props('Ctrl + Alt + Z') });
+      await waitFor(() => expect(native.setShortcut).toHaveBeenCalledTimes(1));
+      native.setShortcut.mockResolvedValueOnce({ active: null, attempted: 'Control+Alt+K',
+        lastKnownGood: null, message: 'Taken.', ok: false });
+      rerender(props('Ctrl + Alt + K'));
+      await waitFor(() => expect(native.setShortcut).toHaveBeenCalledTimes(2));
+      await new Promise((r) => setTimeout(r, 10));
+      expect(reverts).toEqual([]); // never back to the refused boot combo
+      unmount();
+    });
   });
 
   describe('product gesture → dogfood delivery', () => {

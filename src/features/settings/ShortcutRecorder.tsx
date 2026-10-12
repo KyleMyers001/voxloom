@@ -38,10 +38,10 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
   const [status, setStatus] = useState<Status>(null);
   const sawKeyRef = useRef(false);
   /** Combo awaiting the main window's native registration result. */
-  const pendingRef = useRef<{ combo: string; previous: string } | null>(null);
+  const pendingRef = useRef<{ combo: string } | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Combo whose confirmation timed out; a late result still updates status. */
-  const lateRef = useRef<{ combo: string; previous: string } | null>(null);
+  const lateRef = useRef<{ combo: string } | null>(null);
   /** Last combo confirmed registered; the revert target (not the last attempt). */
   const confirmedRef = useRef(value);
   const onChangeRef = useRef(onChange);
@@ -53,14 +53,17 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
     timerRef.current = null;
   };
 
-  useEffect(() => subscribe(() => listenShortcutBound(({ ok, shortcut }) => {
+  useEffect(() => subscribe(() => listenShortcutBound(({ active, ok, shortcut }) => {
+    // Track what the OS holds from every result, even superseded ones, so a
+    // late ok for A still makes A the revert target when B is refused.
+    if (ok) confirmedRef.current = shortcut;
+    else if (active !== undefined && active !== null) confirmedRef.current = active;
     const pending = pendingRef.current?.combo === shortcut ? pendingRef.current
       : lateRef.current?.combo === shortcut ? lateRef.current : null;
     if (!pending) return;
     clearPending();
     lateRef.current = null;
-    if (ok) confirmedRef.current = shortcut;
-    if (!ok) onChangeRef.current(pending.previous); // never keep a refused combo
+    if (!ok) onChangeRef.current(confirmedRef.current); // never keep a refused combo
     setStatus(ok
       ? { text: `Shortcut set to ${comboLabel(shortcut)}.`, tone: 'ok' }
       : { text: `Couldn't set ${comboLabel(shortcut)}. Previous shortcut kept.`, tone: 'error' });
@@ -78,7 +81,7 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
       return;
     }
     lateRef.current = null;
-    pendingRef.current = { combo, previous: confirmedRef.current };
+    pendingRef.current = { combo };
     timerRef.current = setTimeout(() => {
       if (pendingRef.current?.combo !== combo) return;
       lateRef.current = pendingRef.current;
