@@ -117,3 +117,23 @@ describe('History row actions (designer: reachable by keyboard and VoiceOver)', 
     }
   });
 });
+
+describe('may-have-inserted History rows (Review #44)', () => {
+  it.each([
+    [false, 'May have been inserted. Check the field before copying or retrying.'],
+    [true, 'May have been inserted (also copied). Check the field before copying or retrying.'],
+  ])('shows Unverified with a check-the-field note (copied=%s), never Failed/Copied', async (copied, note) => {
+    const { render } = await import('@testing-library/react');
+    const { HistoryRow } = await import('../../src/features/history/HistoryRow');
+    const record = {
+      createdAt: 1_000, durationSeconds: 1, id: 'm', mayHaveInserted: { copied }, model: null,
+      recoveryExpiresAt: null, status: 'unverified' as const, style: 'formal' as const, text: 'hi',
+    };
+    render(<HistoryRow canStart currentTime={2_000} isNative onCopy={() => {}} onDelete={() => {}} onRetry={() => {}} record={record} />);
+    expect(screen.getByText('Unverified')).toBeInTheDocument();
+    expect(screen.queryByText(/^(Failed|Copied)$/)).toBeNull();
+    expect(screen.getByText(note, { exact: false })).toBeInTheDocument();
+    expect(screen.queryByText(/copy the text to recover it/)).toBeNull();
+  });
+});
+
