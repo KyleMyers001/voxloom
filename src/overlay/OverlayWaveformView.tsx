@@ -29,9 +29,9 @@ export function resultText(result: OverlayResult | null, mac = isMacPlatform()):
 /** Full sentence for the live region (no width limit). */
 export function spokenResultText(result: OverlayResult | null, mac = isMacPlatform()): string {
   const paste = mac ? 'Command V' : 'Control V';
-  if (result === 'maybe-copied') return `May not have been inserted. The text was also copied; press ${paste} to paste.`;
-  if (result === 'maybe-inserted') return 'May have been inserted. Check the field; nothing was copied.';
-  if (result === 'unverified') return 'Sent to Terminal, not verified.';
+  if (result === 'maybe-copied') return `May have been inserted; also copied. If it's missing, press ${paste} to paste.`;
+  if (result === 'maybe-inserted') return 'May have been inserted; check the field. Nothing was copied.';
+  if (result === 'unverified') return 'Sent, but not verified.';
   return resultText(result, mac);
 }
 

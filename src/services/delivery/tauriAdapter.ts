@@ -69,14 +69,23 @@ export function createTauriDeliveryAdapter(
     clipboardRestore: (prior) => stub.clipboardRestore(prior),
     clipboardWrite: (text) => stub.clipboardWrite(text),
     async insertText(text, intended) {
+      // JS-side failures before the call reaches native (no Tauri bridge, args
+      // that cannot be serialized) are plain failures: nothing was sent.
+      try {
+        if (!isTauri()) throw new Error('Tauri bridge unavailable');
+        JSON.stringify({ intended, text });
+      } catch (error: unknown) {
+        throw new InsertError(error instanceof Error ? error.message : String(error), false);
+      }
       try {
         return await invoke<InsertReport | null>('delivery_insert_text', {
           text,
           intended,
         }) ?? undefined;
       } catch (error: unknown) {
-        // A string is the command's own Err: refused or verified unchanged, so
-        // nothing landed. Anything else (IPC failure) may have hit mid-write.
+        // A string is the command's own Err, which by contract (see
+        // delivery_insert_text) means nothing was written. Anything else is an
+        // IPC failure after dispatch, which may have hit mid-write.
         if (typeof error === 'string') throw new InsertError(error, false);
         throw new InsertError(error instanceof Error ? error.message : String(error), true);
       }

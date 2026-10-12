@@ -22,4 +22,14 @@ describe('tauri insertText errors', () => {
     const error = await createTauriDeliveryAdapter(clipboard).insertText('hi', target).catch((e: unknown) => e);
     expect((error as InstanceType<typeof InsertError>).writeStarted).toBe(true);
   });
+
+  it('a JS-side error before the call reaches native is a plain failure (QA #44)', async () => {
+    invoke.mockClear();
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    const error = await createTauriDeliveryAdapter(clipboard).insertText('hi', cyclic as never).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(InsertError);
+    expect((error as InstanceType<typeof InsertError>).writeStarted).toBe(false);
+    expect(invoke).not.toHaveBeenCalled();
+  });
 });
