@@ -187,6 +187,9 @@ export function AppProvider({
       // Settings unreadable and not backed up: retention is unknown, so an
       // older history.json must not be migrated (rewritten) yet. BUS-42.
       let settingsBlocked = false;
+      // Settings were unreadable, backed up and reset: retention fell back to
+      // the default, so history.json must be backed up before any prune.
+      let settingsReset = false;
 
       if (settingsPers.enabled) {
         const result = await settingsPers.store.load();
@@ -210,6 +213,7 @@ export function AppProvider({
           // is allowed only once the unreadable file was backed up.
           allowSettingsPersistRef.current = !result.writeBlocked;
           settingsBlocked = result.writeBlocked;
+          settingsReset = !result.writeBlocked;
           // Defaults, or the parsed values of a file this window may not
           // migrate (Settings window, BUS-42) so it shows the real values.
           dispatch({
@@ -280,12 +284,23 @@ export function AppProvider({
 
       const historyResult = await historyPers.store.load(retention, clock());
       if (cancelled) return;
-      if (historyResult.ok && historyResult.migratedFrom && settingsBlocked) {
-        // Show it, but never rewrite it on default retention.
+      let historyBackupFailed = false;
+      if (historyResult.ok && settingsReset && !settingsBlocked) {
+        const outcome = historyPers.store.backup
+          ? await historyPers.store.backup()
+          : 'failed';
+        if (cancelled) return;
+        historyBackupFailed = outcome === 'failed';
+      }
+      if (historyResult.ok && (settingsBlocked || historyBackupFailed)) {
+        // Any history version: show it, but never rewrite or prune it on
+        // default retention while settings writes are blocked.
         dispatch({ records: historyResult.records, type: 'hydrate-records' });
         allowHistoryPersistRef.current = false;
         dispatch({
-          message: 'History is read-only until settings can be read. Your history file was left untouched.',
+          message: settingsBlocked
+            ? 'History is read-only until settings can be read. Your history file was left untouched.'
+            : 'History is read-only because it couldn\'t be backed up after settings were reset. Your history file was left untouched.',
           type: 'set-history-error',
         });
       } else if (historyResult.ok) {
