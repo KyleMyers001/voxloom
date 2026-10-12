@@ -24,7 +24,9 @@ use macos as platform;
 use stub as platform;
 
 /// Snapshot frontmost app + focused AX element after transcription completes.
-#[tauri::command]
+/// Async: for Chromium/Electron it re-asserts web accessibility and may wait
+/// (bounded, ~2.4 s) for the real field, which must never block the UI thread.
+#[tauri::command(async)]
 pub fn delivery_snapshot_target() -> Result<TargetSnapshotDto, String> {
     platform::snapshot_target()
 }
