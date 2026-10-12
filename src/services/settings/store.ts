@@ -76,8 +76,9 @@ export function createSettingsStore(io: SettingsFileIo): DurableSettingsStore {
           error: `Failed to read settings store: ${message}${describeBackup(backup)}`,
           file: defaultSettingsFile(),
           ok: false,
-          // A failed read is not known-corrupt JSON: never replace it.
-          writeBlocked: true,
+          // Replace an unreadable file only when its raw bytes were preserved
+          // first (store_backup copies bytes, no decoding); otherwise block.
+          writeBlocked: !backup.ok,
         };
       }
       if (raw === null || raw.trim() === '') {

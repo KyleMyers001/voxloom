@@ -252,11 +252,64 @@ describe('BUS-42 history file version compatibility', () => {
     expect(settingsIo.backups()).toEqual(['{not json']);
   });
 
-  it('a settings read failure never allows writing defaults', async () => {
-    const io = createMemorySettingsIo('x');
-    const failing = { ...io, read: async () => { throw new Error('EACCES'); } };
-    const result = await createSettingsStore(failing).load();
-    expect(result).toMatchObject({ ok: false, writeBlocked: true });
+  it('settings read error: writes allowed only when the raw bytes were backed up', async () => {
+    const readFails = async () => { throw new Error('invalid utf-8'); };
+    const backedUp = await createSettingsStore({
+      backup: async () => 'settings.json.unreadable-1.bak',
+      read: readFails,
+      write: async () => {},
+    }).load();
+    expect(backedUp).toMatchObject({ ok: false, writeBlocked: false });
+    const backupFails = await createSettingsStore({
+      backup: async () => { throw new Error('read for backup failed'); },
+      read: readFails,
+      write: async () => {},
+    }).load();
+    expect(backupFails).toMatchObject({ ok: false, writeBlocked: true });
+    const noBackup = await createSettingsStore({ read: readFails, write: async () => {} }).load();
+    expect(noBackup).toMatchObject({ ok: false, writeBlocked: true });
+  });
+
+  it('dictionary read error: writes allowed only when the raw bytes were backed up', async () => {
+    const readFails = async () => { throw new Error('invalid utf-8'); };
+    const backedUp = await createDictionaryStore({
+      backup: async () => 'dictionary.json.unreadable-1.bak',
+      read: readFails,
+      write: async () => {},
+    }).load();
+    expect(backedUp).toMatchObject({ ok: false, writeBlocked: false });
+    const backupFails = await createDictionaryStore({
+      backup: async () => { throw new Error('read for backup failed'); },
+      read: readFails,
+      write: async () => {},
+    }).load();
+    expect(backupFails).toMatchObject({ ok: false, writeBlocked: true });
+  });
+
+  it('app with an unreadable-but-backed-up settings file stays durable', async () => {
+    const writes: string[] = [];
+    const io = {
+      backup: async () => 'settings.json.unreadable-1.bak',
+      read: async (): Promise<string | null> => {
+        if (writes.length === 0) throw new Error('invalid utf-8');
+        return writes.at(-1)!;
+      },
+      write: async (c: string) => { writes.push(c); },
+    };
+    api = null;
+    render(
+      <AppProvider
+        clock={() => NOW}
+        historyPersistence={{ enabled: true, store: createHistoryStore(createMemoryHistoryIo(null)) }}
+        settingsPersistence={{ enabled: true, store: createSettingsStore(io) }}
+      >
+        <Probe />
+      </AppProvider>,
+    );
+    await waitFor(() => expect(api?.bootReady).toBe(true));
+    expect(writes).toHaveLength(1);
+    act(() => api!.dispatch({ key: 'style', type: 'set-setting', value: 'casual' }));
+    await waitFor(() => expect(writes.at(-1)).toContain('"style": "casual"'));
   });
 
   it('keeps #24 cleanup keys through the boot rewrite and a later edit, out of app state', async () => {
