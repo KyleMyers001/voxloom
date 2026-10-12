@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod acl_tests;
+mod cancel_scope;
 mod capture;
 mod delivery;
 mod dictionary;
@@ -126,6 +127,11 @@ fn capture_list_devices(
     coordinator.list_devices()
 }
 
+// Share one generated context: macOS embeds a single _EMBED_INFO_PLIST symbol.
+fn app_context<R: tauri::Runtime>() -> tauri::Context<R> {
+    tauri::generate_context!()
+}
+
 // Application entry
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -150,6 +156,9 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            cancel_scope::dictation_cancel_arm,
+            cancel_scope::dictation_cancel_finish,
+            cancel_scope::dictation_cancel_end,
             capture_cancel,
             capture_list_devices,
             capture_query_permission,
@@ -186,6 +195,7 @@ pub fn run() {
                 return;
             }
             if let tauri::WindowEvent::CloseRequested { .. } = event {
+                cancel_scope::close();
                 if let Some(coordinator) = window.try_state::<CaptureCoordinator>() {
                     coordinator.cancel_any();
                 }
@@ -197,6 +207,6 @@ pub fn run() {
                 }
             }
         })
-        .run(tauri::generate_context!())
+        .run(app_context())
         .expect("failed to run Voxloom");
 }

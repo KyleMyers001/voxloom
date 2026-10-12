@@ -187,14 +187,66 @@ describe('useDogfoodCapture', () => {
         if (stage === 'cancel') result.current.cancel();
         else await result.current.start();
         resume(); });
-      await waitFor(() => expect(history).toHaveBeenCalledOnce());
+      if (stage === 'cancel') expect(history).not.toHaveBeenCalled();
+      else await waitFor(() => expect(history).toHaveBeenCalledOnce());
       expect(insert).not.toHaveBeenCalled();
       expect(clip.copy).not.toHaveBeenCalled();
       if (stage === 'stt') expect(snapshot).not.toHaveBeenCalled();
       expect(result.current.intendedTarget).toBeNull();
       expect(result.current.phase).toBe(stage === 'cancel' ? 'cancelled' : 'recording');
-      expect(history).toHaveBeenCalledWith(expect.objectContaining({ status: 'failed' }));
+      if (stage !== 'cancel') expect(history).toHaveBeenCalledWith(expect.objectContaining({ status: 'failed' }));
     });
+
+  it('cancel suppresses a late transcription rejection and allows the next session', async () => {
+    const store = createMockSttModelStore();
+    await store.download('whisper-tiny.en');
+    let reject!: (error: Error) => void;
+    const dogfood = vi.fn(() => new Promise<DogfoodResult>((_, fail) => { reject = fail; }));
+    const toast = vi.fn();
+    const history = vi.fn();
+    const { result, rerender } = renderHook(({ state }: { state: CaptureState }) => useDogfoodCapture({
+      captureApi: stubCapture(state), clipboard: clipboard(), createModelStore: () => store,
+      dogfood, modelId: 'whisper-tiny.en', onToast: toast, onHistoryRecord: history,
+    }), { initialProps: { state: { kind: 'stopped', audio: {
+      id: 'late-error', duration_ms: 700, sample_rate_hz: 16_000,
+    } } as CaptureState } });
+    await waitFor(() => expect(dogfood).toHaveBeenCalledOnce());
+    act(() => result.current.cancel());
+    toast.mockClear();
+    await act(async () => { reject(new Error('late failure')); });
+    expect(toast).not.toHaveBeenCalled();
+    expect(history).not.toHaveBeenCalled();
+    expect(result.current.phase).toBe('cancelled');
+    rerender({ state: { kind: 'idle' } });
+    await act(async () => { await result.current.start(); });
+    expect(result.current.phase).toBe('recording');
+  });
+
+  it('Escape cancels pending capture startup, ignores idle Escape, and can restart', async () => {
+    const store = createMockSttModelStore();
+    await store.download('whisper-tiny.en');
+    let acquired!: (value: 'started') => void;
+    const capture = stubCapture({ kind: 'idle' });
+    capture.startFullCaptureSession = vi.fn(() => new Promise<'started'>((resolve) => { acquired = resolve; }));
+    const { result } = renderHook(() => useDogfoodCapture({
+      captureApi: capture, clipboard: clipboard(), createModelStore: () => store, modelId: 'whisper-tiny.en',
+    }));
+    const idle = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+    document.dispatchEvent(idle);
+    expect(idle.defaultPrevented).toBe(false);
+    let start!: Promise<void>;
+    act(() => { start = result.current.start(); });
+    await waitFor(() => expect(capture.startFullCaptureSession).toHaveBeenCalledOnce());
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+    act(() => { document.dispatchEvent(escape); });
+    expect(escape.defaultPrevented).toBe(true);
+    expect(capture.cancelActiveCapture).toHaveBeenCalledOnce();
+    await act(async () => { acquired('started'); await start; });
+    expect(result.current.phase).toBe('cancelled');
+    vi.mocked(capture.startFullCaptureSession).mockResolvedValue('started');
+    await act(async () => { await result.current.start(); });
+    expect(result.current.phase).toBe('recording');
+  });
 
   it('does not claim recording when capture is still owned by a previous hold', async () => {
     const store = createMockSttModelStore();

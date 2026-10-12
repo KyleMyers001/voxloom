@@ -1,0 +1,33 @@
+# BUS-43: Escape while the dictation popup is active
+
+## Decision
+
+Escape cancels **listening and transcription**, including a pending microphone start once the popup is visible. Cancelled dictations do **not** appear in History. They do not insert text, write the clipboard, or surface a late transcription error/result. A new dictation can start normally afterward.
+
+This supersedes the global-Escape rejection in the original BUS-12 ADR only for the visible, session-owned dictation popup. There is no permanent Escape shortcut. Result banners (Copied/failure), idle Voxloom, and a hidden popup do not own Escape.
+
+## Implementation boundaries
+
+- macOS uses an active session event tap on the main run loop. It passes every event except Escape key-down while its session's popup is visible. It does not activate/focus any app or synthesize keys. After cancellation, subsequent key events pass through.
+- The tap latches native cancellation before cancelling capture and notifying the main renderer with an opaque session identifier. It hides the popup immediately. The callback does not free its own tap/context.
+- After transcription resolves, the renderer must claim a native delivery barrier. This checks cancellation, closes the popup, and removes the tap on the same run loop. A cancelled or superseded scope cannot claim delivery even when its cancellation notification is delayed.
+- The popup closes **before target lookup/delivery begins**. After this commit boundary, already-dispatched delivery cannot be recalled and Escape belongs to the foreground app again. Existing exact-target, secure-field, focus, Unicode-chunk and no-Enter safeguards remain unchanged.
+- Closing/discarding an old scope uses its exact session ID; it cannot remove a newer scope. Stale cancellable popup-show requests are rejected when no live scope exists. Result popups explicitly opt out of cancellation.
+- The frontend retains per-session cancellation separately from supersession. Explicit cancellation drops late history/toasts, while superseded (not cancelled) transcripts preserve the existing failed-history evidence policy.
+- Existing model validation is still mandatory; there are no silent model downloads. Whisper work already running may finish in the background; its result is discarded on cancellation. This change does not add a Whisper interrupt API.
+
+## Permissions and failure policy
+
+An active macOS event tap needs the OS permission that permits event interception. The code never prompts, grants or resets permissions. If the tap cannot be created, starting dictation fails with an Accessibility-permission message rather than offering a popup whose Escape action cannot work. This also affects users who otherwise use Copy-only delivery without Accessibility permission. A disabled/revoked tap cancels its scope fail-closed; it is not silently re-enabled.
+
+The document Escape handler supports the focused-window/browser path, but is not evidence of cross-app interception. Native acceptance must be performed with the exact packaged app after user-approved permissions.
+
+## Review and acceptance
+
+Automated coverage checks cancellation during startup, cancellation vs late STT resolution/rejection, the native delivery barrier, listener cleanup, teardown errors, popup persistence during STT, result-banner pass-through, native Escape/disabled-tap policy and existing delivery regressions. Source-wiring checks are supplementary, not native integration proof.
+
+Still required before approval/install: Escape in another app while listening and transcribing; idle/result Escape reaching the foreground app; denied/revoked interception permission; repeat hold/latch after cancellation; no clipboard/history changes; and ordinary native/browser insertion without cancellation. No live TCC or cross-app event delivery was exercised by this build-only implementation.
+
+## Build prerequisite fix
+
+The fetched base's macOS release library tests failed with duplicate `_EMBED_INFO_PLIST`: both the application entry and ACL test expanded `generate_context!()`. The application and mock-runtime ACL test now call one generic `app_context()` function, leaving only one macro expansion. The original failure was reproduced in a pristine source archive before applying the fix. It changes no ACL policy or app configuration.

@@ -91,7 +91,7 @@ describe('overlayBridge.showResult', () => {
     const bridge = createOverlayBridge(window);
     await bridge.showResult('copied');
     expect(window.setWaveform).toHaveBeenCalledWith('result-copied', 'copied');
-    expect(window.showBottomCenter).toHaveBeenCalledWith({ height: 40, width: 248 });
+    expect(window.showBottomCenter).toHaveBeenCalledWith({ height: 40, width: 248 }, false);
     await bridge.sync({ kind: 'ready' });
     expect(window.hide).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(2499);
