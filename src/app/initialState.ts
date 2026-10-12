@@ -35,6 +35,7 @@ export function createInitialState(
     dictionaryError: null,
     historyError: null,
     historyErrorSticky: false,
+    historyHydrated: !options.persistHistory,
     settingsError: null,
     nextRunId: 1,
     onboarding: { ...initialOnboarding },
