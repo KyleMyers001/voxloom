@@ -353,6 +353,41 @@ describe('useShortcutGestures', () => {
       expect(native.setShortcut).toHaveBeenCalledTimes(2);
       unmount();
     });
+    it('BUS-47: a re-render with new callbacks while pending still reverts and reports', async () => {
+      vi.mocked(isTauri).mockReturnValue(true);
+      const native = makeNativeController();
+      mocks.createNativeShortcutController.mockReturnValue(native);
+      mocks.createOverlayBridge.mockReturnValue(makeOverlay());
+      const errors: string[] = [];
+      const reverts: string[] = [];
+      const baseState = createInitialState(0);
+      const withShortcut = (shortcut: string) => ({
+        ...baseState, settings: { ...baseState.settings, shortcut },
+      });
+      // Fresh callback identities on every render, like an unmemoized announceError.
+      const stable = makeOptions({ now: () => 0 });
+      const props = (shortcut: string) => ({
+        ...stable,
+        onShortcutError: (m: string) => { errors.push(m); },
+        state: withShortcut(shortcut),
+        onShortcutRevert: (s: string) => { reverts.push(s); },
+      });
+      const { rerender, unmount } = renderHook((p) => useShortcutGestures(p), { initialProps: props('Ctrl + Shift + Space') });
+      await waitFor(() => expect(native.setShortcut).toHaveBeenCalledTimes(1));
+
+      let resolve!: (v: Awaited<ReturnType<typeof native.setShortcut>>) => void;
+      native.setShortcut.mockReturnValue(new Promise((r) => { resolve = r; }));
+      rerender(props('Ctrl + Alt + K'));
+      await waitFor(() => expect(native.setShortcut).toHaveBeenCalledTimes(2));
+      rerender(props('Ctrl + Alt + K')); // re-render while pending
+      await act(async () => {
+        resolve({ active: 'Control+Shift+Space', attempted: 'Control+Alt+K',
+          lastKnownGood: 'Control+Shift+Space', message: 'Taken.', ok: false });
+      });
+      await waitFor(() => expect(reverts).toEqual(['Ctrl + Shift + Space']));
+      expect(errors).toEqual(['Taken.']);
+      unmount();
+    });
   });
 
   describe('product gesture → dogfood delivery', () => {

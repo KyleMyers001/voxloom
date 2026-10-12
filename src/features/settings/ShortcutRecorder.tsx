@@ -40,6 +40,10 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
   /** Combo awaiting the main window's native registration result. */
   const pendingRef = useRef<{ combo: string; previous: string } | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Combo whose confirmation timed out; a late result still updates status. */
+  const lateRef = useRef<{ combo: string; previous: string } | null>(null);
+  /** Last combo confirmed registered; the revert target (not the last attempt). */
+  const confirmedRef = useRef(value);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
@@ -50,9 +54,12 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
   };
 
   useEffect(() => subscribe(() => listenShortcutBound(({ ok, shortcut }) => {
-    const pending = pendingRef.current;
-    if (pending?.combo !== shortcut) return;
+    const pending = pendingRef.current?.combo === shortcut ? pendingRef.current
+      : lateRef.current?.combo === shortcut ? lateRef.current : null;
+    if (!pending) return;
     clearPending();
+    lateRef.current = null;
+    if (ok) confirmedRef.current = shortcut;
     if (!ok) onChangeRef.current(pending.previous); // never keep a refused combo
     setStatus(ok
       ? { text: `Shortcut set to ${comboLabel(shortcut)}.`, tone: 'ok' }
@@ -70,9 +77,11 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
       stop({ text: okText, tone: 'ok' });
       return;
     }
-    pendingRef.current = { combo, previous: value };
+    lateRef.current = null;
+    pendingRef.current = { combo, previous: confirmedRef.current };
     timerRef.current = setTimeout(() => {
       if (pendingRef.current?.combo !== combo) return;
+      lateRef.current = pendingRef.current;
       clearPending();
       setStatus({ text: `Couldn't confirm ${comboLabel(combo)} yet. Try it, or record it again.`, tone: 'error' });
     }, CONFIRM_TIMEOUT_MS);

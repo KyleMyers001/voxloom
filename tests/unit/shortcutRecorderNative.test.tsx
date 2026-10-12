@@ -80,4 +80,28 @@ describe('ShortcutRecorder waits for native registration', () => {
     expect(status()).toHaveTextContent(/Couldn't confirm/);
     expect(status()).toHaveAttribute('role', 'status');
   });
+
+  it('a late ok after the timeout replaces "Couldn\'t confirm" with success', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(<Harness onChange={vi.fn()} />);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    await user.click(field());
+    await user.keyboard('{Control>}{Alt>}k{/Alt}{/Control}');
+    await act(async () => { vi.advanceTimersByTime(CONFIRM_TIMEOUT_MS + 1); });
+    expect(status()).toHaveTextContent(/Couldn't confirm/);
+    await report({ ok: true, shortcut: 'Ctrl + Alt + K' });
+    expect(status()).toHaveTextContent(/^Shortcut set to/);
+  });
+
+  it('reverts to the last confirmed combo, not the last attempted one', async () => {
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+    const user = userEvent.setup();
+    await user.click(field());
+    await user.keyboard('{Control>}{Alt>}k{/Alt}{/Control}');
+    await user.click(field());
+    await user.keyboard('{Control>}{Alt>}j{/Alt}{/Control}');
+    await report({ ok: false, shortcut: 'Ctrl + Alt + J' });
+    expect(onChange).toHaveBeenLastCalledWith(DEFAULT);
+  });
 });

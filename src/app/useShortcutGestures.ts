@@ -229,33 +229,40 @@ export function useShortcutGestures(options: GestureOptions) {
   // parallel setShortcut for the same combo on boot (Mac RegisterEventHotKey
   // race). Controller still serializes setShortcut as a safety net.
   const boundShortcutRef = useRef<string | null>(null);
+  /** Last combo the OS actually accepted; the revert target on refusal. */
+  const registeredRef = useRef<string | null>(null);
   useEffect(() => {
     const native = nativeControllerRef.current;
     if (!native || !isTauri()) return;
     const shortcut = options.state.settings.shortcut;
     if (boundShortcutRef.current === null) {
       boundShortcutRef.current = shortcut;
+      registeredRef.current = shortcut;
       return;
     }
     if (boundShortcutRef.current === shortcut) return;
-    const previous = boundShortcutRef.current;
+    const previous = registeredRef.current ?? boundShortcutRef.current;
     boundShortcutRef.current = shortcut;
     let cancelled = false;
     void (async () => {
       const outcome = await native.setShortcut(shortcut);
       emitShortcutBound({ message: outcome.ok ? undefined : outcome.message, ok: outcome.ok, shortcut });
+      // Only a newer shortcut cancels; callbacks come from optionsRef so a
+      // re-render with new callback identities can't drop the revert.
       if (cancelled) return;
-      if (!outcome.ok) {
+      if (outcome.ok) {
+        registeredRef.current = shortcut;
+      } else {
         // Don't keep (or retry next launch) a combo the OS refused.
         boundShortcutRef.current = previous;
-        options.onShortcutRevert?.(previous);
-        if (outcome.message) options.onShortcutError?.(outcome.message);
+        optionsRef.current.onShortcutRevert?.(previous);
+        if (outcome.message) optionsRef.current.onShortcutError?.(outcome.message);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [options.onShortcutError, options.onShortcutRevert, options.state.settings.shortcut]);
+  }, [options.state.settings.shortcut]);
 
   useEffect(() => {
     const ctx = interactionContext(options);
