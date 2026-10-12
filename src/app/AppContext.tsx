@@ -309,7 +309,9 @@ export function AppProvider({
         allowHistoryPersistRef.current = true;
       } else {
         // Unreadable / unknown-version history.json: never write over it
-        // (the store already tried to back it up). BUS-42.
+        // (the store already tried to back it up). BUS-42. Dictations made
+        // before this load stay visible in memory but are never written.
+        dispatch({ records: [], type: 'hydrate-records' });
         allowHistoryPersistRef.current = false;
         dispatch({
           message: historyResult.error,

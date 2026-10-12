@@ -14,6 +14,10 @@ import type {
 } from '../domain/types';
 import type { AppAction } from './actions';
 import { createInitialState } from './initialState';
+import {
+  mergePreHydrateRecords,
+  pendingPreHydrateRecords,
+} from './preHydrateRecords';
 
 export { createInitialState } from './initialState';
 export type { AppAction, SettingAction } from './actions';
@@ -27,6 +31,8 @@ export interface AppState {
   historyError: string | null;
   /** True while history writes are blocked: new records keep the notice. */
   historyErrorSticky: boolean;
+  /** False until durable history finished its boot load (BUS-45 queue). */
+  historyHydrated: boolean;
   /** Load/save failure message for durable settings; null when healthy. */
   settingsError: string | null;
   nextRunId: number;
@@ -47,7 +53,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       persistHistory,
       persistSettings,
     });
-    let result = next;
+    let result = { ...next, historyHydrated: state.historyHydrated };
     if (persistHistory && action.wipeHistory !== true) {
       // Session UI reset only — keep durable rows so history.json is not
       // overwritten with fixture seed data.
@@ -138,7 +144,11 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       ...state,
       historyError: null,
       historyErrorSticky: false,
-      records: action.records,
+      historyHydrated: true,
+      records: mergePreHydrateRecords(
+        action.records,
+        pendingPreHydrateRecords(state.historyHydrated, state.records),
+      ),
     };
   }
   if (action.type === 'set-history-error') {
