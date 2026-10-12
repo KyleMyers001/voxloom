@@ -170,6 +170,8 @@ test('the 760×600 Settings window keeps two-column rows and a two-column recove
   await page.getByRole('tab', { name: 'Privacy' }).click();
   expect(await cols('.settings-rows .frow')).toBe(2);
   expect(await cols('.recovery-grid')).toBe(2);
+  await page.getByRole('tab', { name: 'Appearance' }).click();
+  expect(await cols('.appearance-options')).toBe(3);
 });
 
 test('the shortcut field does not move while typing (QA #41)', async ({ page }) => {
