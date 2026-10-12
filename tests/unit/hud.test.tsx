@@ -46,8 +46,11 @@ describe('HUD view', () => {
   });
 
   it('shows only a brief Copied, maybe-copied or short error, with the platform paste key', () => {
-    expect(resultText('copied', true)).toBe('Copied. Press ⌘V to paste');
-    expect(resultText('copied', false)).toBe('Copied. Press Ctrl+V to paste');
+    expect(resultText('copied', true)).toBe('Copied · ⌘V to paste');
+    expect(resultText('copied', false)).toBe('Copied · Ctrl+V to paste');
+    // The live region keeps the full sentence.
+    expect(spokenResultText('copied', true)).toBe('Copied. Press ⌘V to paste');
+    expect(spokenResultText('copied', false)).toBe('Copied. Press Ctrl+V to paste');
     expect(resultText('maybe-copied', true)).toBe('Maybe inserted · copied');
     // The spoken text keeps the pill's meaning (QA #44).
     expect(spokenResultText('maybe-copied', true)).toBe('May have been inserted; also copied. If it\'s missing, press Command V to paste.');
