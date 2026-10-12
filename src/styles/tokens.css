@@ -13,6 +13,7 @@
   --winline: rgba(255, 255, 255, .1);
   --fg: #ececf1;
   --mut: #8b8b99;
+  --mut-on-nav: #9a9aa8; /* muted text on --navon: 5.09:1 (--mut was 4.2:1) */
   --navon: #2a2a38; /* selected nav: 1.36:1 vs --side (was #1a1a24, 1.12:1) */
   --accfg: #b6ff3c;
   --ok: #7ff07a;
@@ -72,6 +73,7 @@
   --fg: #0b0b10;
   --mut: #5d6068;
   --navon: #e7eadf;
+  --mut-on-nav: #5d6068; /* 5.16:1 on navon */
   --accfg: #376b00; /* AA: 5.28 on navon; white text on it 6.43 */
   --ok: #18772f; /* AA: 4.61 seg, 4.63 navon, 5.11 field, 5.45 bg, 5.65 panel */
   --info: #00717f; /* AA: 5.18 on field, 5.52 bg */
@@ -96,6 +98,7 @@
   --fg: #eaf1f3;
   --mut: #9fb1b8;
   --navon: #332b16;
+  --mut-on-nav: #9fb1b8; /* 6.31:1 on navon */
   --accfg: #ffb000;
   --info: #79b8c9;
   --err: #ff9b9b;
