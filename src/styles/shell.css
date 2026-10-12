@@ -17,7 +17,7 @@
   padding: 0 var(--s-8);
 }
 
-.titlebar__title { color: var(--mut); font-size: 12px; font-weight: 600; }
+.titlebar__title { color: var(--mut); font-size: var(--fs-secondary); font-weight: 600; }
 
 .tb-settings {
   align-items: center;
@@ -25,7 +25,7 @@
   border-radius: var(--r-ctl);
   color: var(--mut);
   display: inline-flex;
-  font-size: 12px;
+  font-size: var(--fs-secondary);
   gap: 6px;
   margin-left: auto;
   padding: 4px 8px;
@@ -55,8 +55,8 @@
 }
 
 .brand { align-items: center; display: flex; gap: var(--s-5); padding: 0 var(--s-4); }
-.brand__name { display: block; font-size: 14px; }
-.brand__status { color: var(--mut); font-size: 11px; }
+.brand__name { display: block; font-size: var(--fs-emph); }
+.brand__status { color: var(--mut); font-size: var(--fs-label); }
 
 .sidebar nav { display: grid; gap: 2px; }
 
@@ -73,7 +73,7 @@
 }
 
 .nav-button .icon { color: var(--mut); }
-.nav-button kbd { color: var(--mut); font-size: 10px; margin-left: auto; visibility: hidden; }
+.nav-button kbd { color: var(--mut); font-size: var(--fs-micro); margin-left: auto; visibility: hidden; }
 .nav-button:hover kbd,
 .nav-button:focus-visible kbd { visibility: visible; }
 .nav-button:hover { background: color-mix(in srgb, var(--navon) 60%, transparent); }
@@ -88,12 +88,12 @@
 .nav-button[aria-current="page"] kbd { color: var(--mut-on-nav, var(--mut)); }
 
 .sidebar__foot { display: flex; flex-direction: column; gap: var(--s-5); margin-top: auto; }
-.sidebar__hint { color: var(--mut); font-size: 11px; margin: 0; padding: 0 var(--s-4); }
+.sidebar__hint { color: var(--mut); font-size: var(--fs-label); margin: 0; padding: 0 var(--s-4); }
 
 .dev-panel summary {
   color: var(--mut);
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--fs-label);
   padding: 0 var(--s-4);
 }
 

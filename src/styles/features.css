@@ -91,7 +91,7 @@
   align-items: center;
   color: var(--muted);
   display: flex;
-  font-size: 12px;
+  font-size: var(--fs-secondary);
   gap: 12px;
   margin-bottom: 18px;
 }

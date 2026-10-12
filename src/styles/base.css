@@ -3,7 +3,7 @@
   font-family: var(--font);
 }
 
-/* Body text is 13px per spec; set on body so 1rem stays 16px. */
+/* Body text uses --fs-body (type scale); set on body so 1rem stays 16px. */
 body {
   font-size: var(--fs-body);
   line-height: var(--lh-body);
@@ -64,19 +64,19 @@ p {
 }
 
 h1 {
-  font-size: clamp(24px, 3vw, 38px);
+  font-size: var(--fs-page);
   letter-spacing: -.04em;
   line-height: 1.05;
   margin-bottom: 8px;
 }
 
 h2 {
-  font-size: 17px;
+  font-size: var(--fs-sheet);
   letter-spacing: -.01em;
 }
 
 h3 {
-  font-size: 14px;
+  font-size: var(--fs-emph);
   margin-bottom: 6px;
 }
 
@@ -98,7 +98,7 @@ textarea {
 label,
 legend {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-label);
   font-weight: 650;
   letter-spacing: .05em;
   text-transform: uppercase;

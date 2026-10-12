@@ -49,7 +49,7 @@
   align-items: center;
   color: var(--text);
   display: flex;
-  font-size: 13px;
+  font-size: var(--fs-body);
   gap: 9px;
   letter-spacing: 0;
   text-transform: none;
@@ -72,7 +72,7 @@
 
 .empty-note {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-secondary);
   margin: 4px 0 0;
 }
 
@@ -83,7 +83,7 @@
 
 .form-error {
   color: var(--danger);
-  font-size: 12px;
+  font-size: var(--fs-secondary);
   margin: 0;
 }
 

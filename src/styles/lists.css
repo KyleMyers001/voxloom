@@ -47,7 +47,7 @@
 }
 
 .recent-row p {
-  font-size: 13px;
+  font-size: var(--fs-body);
   line-height: 1.55;
   margin-bottom: 0;
 }
@@ -59,7 +59,7 @@
 
 .recovery-state {
   color: var(--danger);
-  font-size: 12px;
+  font-size: var(--fs-secondary);
   margin: 5px 0 0;
 }
 
@@ -101,6 +101,6 @@
 .timestamp {
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-mono);
 }
 
