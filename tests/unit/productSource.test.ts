@@ -21,24 +21,24 @@ describe('distributable native source', () => {
     }
   });
 
-  it('keeps completion observation synchronous and bootstrap out of focus guards', () => {
+  it('re-asserts web AX per attempt and keeps the bounded wait out of focus guards', () => {
     const focus = readFileSync(resolve(root, 'src-tauri/src/delivery/macos/focus.rs'), 'utf8');
+    const webAx = readFileSync(resolve(root, 'src-tauri/src/delivery/macos/web_ax.rs'), 'utf8');
     const commands = readFileSync(resolve(root, 'src-tauri/src/delivery/mod.rs'), 'utf8');
-    expect(commands).toMatch(/pub fn delivery_snapshot_target\(/);
-    // Validation/insert/per-chunk guards must not wait for WEB_AX or bootstrap.
+    // The bounded wait must never block the UI thread.
+    expect(commands).toMatch(/#\[tauri::command\(async\)\]\npub fn delivery_snapshot_target\(/);
+    // Validation/insert/per-chunk guards must not wait or re-assert.
     const guard = focus.split('pub fn focused_ui_element(')[1].split('\n}')[0];
     expect(guard).toContain('focused_ui_element_once(stage)');
-    expect(guard).not.toMatch(/warm_web_ax|WEB_AX|sleep|lock\(/);
+    expect(guard).not.toMatch(/web_ax|WEB_AX|sleep|lock\(/);
+    // Completion: re-assert (no per-pid cache), then same-pid bounded settle.
     const snapshot = focus.split('pub fn snapshot_at(')[1].split('\nfn snapshot_from_focus')[0];
-    const observation = snapshot.indexOf('snapshot_from_focus(focused_ui_element_once(stage), true)');
-    const scheduling = snapshot.indexOf('completion_snapshot_with(initial, move ||');
-    expect(observation).toBeGreaterThan(-1);
-    expect(scheduling).toBeGreaterThan(observation);
-    const worker = snapshot.slice(scheduling, snapshot.indexOf('\n        });', scheduling));
-    expect(worker).toContain('warm_web_ax(&stage, front)');
-    expect(worker).toContain('release(element as CFTypeRef)');
-    expect(worker).not.toMatch(/build_snapshot|snapshot_from_focus|registry::/);
-    expect(focus.split('#[cfg(test)]')[0]).not.toContain('WEB_AX.lock()');
+    const reassert = snapshot.indexOf('web_ax::reassert(front)');
+    const settle = snapshot.indexOf('web_ax::settle_focus(stage, front, focused_ui_element_once(stage))');
+    expect(reassert).toBeGreaterThan(-1);
+    expect(settle).toBeGreaterThan(reassert);
+    expect(focus + webAx).not.toMatch(/WEB_AX|static .*Mutex/);
+    expect(webAx).toContain('frontmost_pid');
   });
 
   it('has no developer-home or scratch-dependent native source', () => {
