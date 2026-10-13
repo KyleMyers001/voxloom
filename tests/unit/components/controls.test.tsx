@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { IconButton } from '../../../src/components/IconButton';
-import { comboKeys, comboLabel, isMacPlatform, KeyCombo } from '../../../src/components/KeyCombo';
+import { comboKeys, comboLabel, comboSpoken, isMacPlatform, KeyCombo } from '../../../src/components/KeyCombo';
 import { SearchField } from '../../../src/components/SearchField';
 import { SegmentedControl } from '../../../src/components/SegmentedControl';
 import { Switch } from '../../../src/components/Switch';
@@ -116,9 +116,15 @@ describe('KeyCombo', () => {
     expect(comboKeys('Option + Cmd + 1')).toEqual(['⌥', '⌘', '1']);
   });
 
-  it('renders hidden key caps plus the original text for screen readers', () => {
+  it('names shortcuts for screen readers in macOS words (BUS-41 PR 3)', () => {
+    expect(comboSpoken('Ctrl + Shift + Space', true)).toBe('Control Shift Space');
+    expect(comboSpoken('CommandOrControl+Alt+k', true)).toBe('Command Option K');
+    expect(comboSpoken('Ctrl + Shift + Space', false)).toBe('Ctrl + Shift + Space');
+  });
+
+  it('renders hidden key caps plus a spoken name for screen readers', () => {
     const { container } = render(<KeyCombo combo="Ctrl + Shift + Space" />);
-    expect(screen.getByText('Ctrl + Shift + Space').className).toBe('sr-only');
+    expect(screen.getByText('Control Shift Space').className).toBe('sr-only');
     expect(container.querySelector('.key-combo__caps')?.getAttribute('aria-hidden')).toBe('true');
     expect([...container.querySelectorAll('kbd')].map((k) => k.textContent)).toEqual(['⌃', '⇧', 'Space']);
   });

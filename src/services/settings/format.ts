@@ -1,6 +1,7 @@
 import { initialSettings } from '../../domain/fixtures';
 import {
   audioRetentions,
+  textSizes,
   transcriptRetentions,
   writingStyles,
 } from '../../domain/settings';
@@ -80,6 +81,8 @@ export function coerceSettings(raw: unknown): Settings {
       writingStyles,
       base.style,
     ) as WritingStyle,
+    // Added in BUS-41 PR 3: older files have no textSize and load as 'default'.
+    textSize: asChoice(raw.textSize, textSizes, base.textSize),
     transcriptRetention: asChoice(
       raw.transcriptRetention,
       transcriptRetentions,

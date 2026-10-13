@@ -57,6 +57,7 @@ export const initialSettings: Settings = {
   shortcut: 'Ctrl + Shift + Space',
   startAtLogin: false,
   style: 'formal',
+  textSize: 'default',
   transcriptRetention: '30-days',
   // Explicit STT modelId (ADR / BUS-10 settings pick). Legacy simulated
   // labels are resolved to this default via resolveTranscriptionModelId.

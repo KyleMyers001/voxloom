@@ -47,18 +47,18 @@
      Media queries + calc(), no clamp(): clamp() needs Safari 13.1 (macOS
      10.15.4), and the app supports 10.15.0. calc() with `*`/`/` by a number
      works there (calc() is Safari 7+, nested calc() 11+; MDN browser-compat-data). */
-  --fs-micro: 11px;
-  --fs-badge: 11.5px;
-  --fs-label: 12px;
-  --fs-secondary: 13px;
-  --fs-mono: 12.5px;
-  --fs-body: 15px;
-  --fs-emph: 16px;
-  --fs-section: 16px;
-  --fs-sheet: 17px;
-  --fs-hero: 30px;
-  --fs-page: 34px;
-  --fs-bigkey: 20px;
+  --fsb-micro: 11px;
+  --fsb-badge: 11.5px;
+  --fsb-label: 12px;
+  --fsb-secondary: 13px;
+  --fsb-mono: 12.5px;
+  --fsb-body: 15px;
+  --fsb-emph: 16px;
+  --fsb-section: 16px;
+  --fsb-sheet: 17px;
+  --fsb-hero: 30px;
+  --fsb-page: 34px;
+  --fsb-bigkey: 20px;
   --lh-body: 1.45;
 
   --shadow-win: 0 0 0 .5px var(--winline), 0 30px 80px rgba(0, 0, 0, .35);
@@ -118,37 +118,59 @@ body {
   --text: var(--fg);
 }
 
+/* BUS-41 PR 3 Text size (TYPE-SCALE.md § Optional): every --fs-* is the base
+   --fsb-* times --ts, floored at 11px so Small never drops below 11px. max()
+   is Safari 11.1+; calc() number multiplication works on 10.15.0 (no clamp()).
+   Declared once on :root; the --fsb-* media queries below re-resolve it. */
+:root {
+  --ts: 1;
+  --fs-micro: max(11px, calc(var(--fsb-micro) * var(--ts)));
+  --fs-badge: max(11px, calc(var(--fsb-badge) * var(--ts)));
+  --fs-label: max(11px, calc(var(--fsb-label) * var(--ts)));
+  --fs-secondary: max(11px, calc(var(--fsb-secondary) * var(--ts)));
+  --fs-mono: max(11px, calc(var(--fsb-mono) * var(--ts)));
+  --fs-body: max(11px, calc(var(--fsb-body) * var(--ts)));
+  --fs-emph: max(11px, calc(var(--fsb-emph) * var(--ts)));
+  --fs-section: max(11px, calc(var(--fsb-section) * var(--ts)));
+  --fs-sheet: max(11px, calc(var(--fsb-sheet) * var(--ts)));
+  --fs-hero: max(11px, calc(var(--fsb-hero) * var(--ts)));
+  --fs-page: max(11px, calc(var(--fsb-page) * var(--ts)));
+  --fs-bigkey: max(11px, calc(var(--fsb-bigkey) * var(--ts)));
+}
+:root[data-textsize="small"] { --ts: .92; }
+:root[data-textsize="large"] { --ts: 1.12; }
+
 /* BUS-41: linear growth between 1280px and 1920px wide (see :root above). */
 @media (min-width: 1281px) {
   :root {
-    --fs-micro: calc(9px + 0.15625vw);
-    --fs-badge: calc(8.5px + 0.234375vw);
-    --fs-label: calc(9px + 0.234375vw);
-    --fs-secondary: calc(10px + 0.234375vw);
-    --fs-mono: calc(9.5px + 0.234375vw);
-    --fs-body: calc(11px + 0.3125vw);
-    --fs-emph: calc(12px + 0.3125vw);
-    --fs-section: calc(11px + 0.390625vw);
-    --fs-sheet: calc(12px + 0.390625vw);
-    --fs-hero: calc(16px + 1.09375vw);
-    --fs-page: calc(18px + 1.25vw);
-    --fs-bigkey: calc(12px + 0.625vw);
+    --fsb-micro: calc(9px + 0.15625vw);
+    --fsb-badge: calc(8.5px + 0.234375vw);
+    --fsb-label: calc(9px + 0.234375vw);
+    --fsb-secondary: calc(10px + 0.234375vw);
+    --fsb-mono: calc(9.5px + 0.234375vw);
+    --fsb-body: calc(11px + 0.3125vw);
+    --fsb-emph: calc(12px + 0.3125vw);
+    --fsb-section: calc(11px + 0.390625vw);
+    --fsb-sheet: calc(12px + 0.390625vw);
+    --fsb-hero: calc(16px + 1.09375vw);
+    --fsb-page: calc(18px + 1.25vw);
+    --fsb-bigkey: calc(12px + 0.625vw);
   }
 }
 
 @media (min-width: 1920px) {
   :root {
-    --fs-micro: 12px;
-    --fs-badge: 13px;
-    --fs-label: 13.5px;
-    --fs-secondary: 14.5px;
-    --fs-mono: 14px;
-    --fs-body: 17px;
-    --fs-emph: 18px;
-    --fs-section: 18.5px;
-    --fs-sheet: 19.5px;
-    --fs-hero: 37px;
-    --fs-page: 42px;
-    --fs-bigkey: 24px;
+    --fsb-micro: 12px;
+    --fsb-badge: 13px;
+    --fsb-label: 13.5px;
+    --fsb-secondary: 14.5px;
+    --fsb-mono: 14px;
+    --fsb-body: 17px;
+    --fsb-emph: 18px;
+    --fsb-section: 18.5px;
+    --fsb-sheet: 19.5px;
+    --fsb-hero: 37px;
+    --fsb-page: 42px;
+    --fsb-bigkey: 24px;
   }
 }

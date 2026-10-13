@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import type { Appearance } from '../domain/types';
+import type { Appearance, TextSize } from '../domain/types';
 
 export function resolveAppearance(
   appearance: Appearance,
@@ -23,4 +23,11 @@ export function useTheme(appearance: Appearance) {
     media.addEventListener('change', applyTheme);
     return () => media.removeEventListener('change', applyTheme);
   }, [appearance]);
+}
+
+/** BUS-41 Text size: `data-textsize` on <html> picks the --ts multiplier in tokens.css. */
+export function useTextSize(textSize: TextSize) {
+  useEffect(() => {
+    document.documentElement.dataset.textsize = textSize;
+  }, [textSize]);
 }
