@@ -8,6 +8,7 @@
 mod ax;
 mod ax_insert;
 mod focus;
+mod focus_fallback;
 mod host;
 mod registry;
 mod typing;

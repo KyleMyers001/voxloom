@@ -2,6 +2,7 @@
 //! The macOS adapter gathers AX facts and delegates every policy choice here.
 
 pub mod focus_fallback;
+pub mod focus_walk;
 pub mod host;
 pub mod report;
 pub mod retry;
