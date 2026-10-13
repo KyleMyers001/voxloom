@@ -87,7 +87,7 @@
 
 @media (max-width: 780px) {
   .home-hero { flex-direction: column; align-items: flex-start; }
-  .home .recent-row { grid-template-columns: 58px minmax(0, 1fr) auto; }
+  .home .recent-row { grid-template-columns: minmax(58px, max-content) minmax(0, 1fr) auto; }
   .home .recent-row > .badge { display: none; }
 }
 
