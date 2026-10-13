@@ -4,7 +4,7 @@
 
 use super::ax::{ancestor_roles, copy_string_attr, set_ax_string, AXUIElementRef};
 use super::{focus_still_matches, host, typing, web_ax};
-use crate::delivery::decide::retry::{retry_eligible, reprobe_decision, retry_once, RetryIo};
+use crate::delivery::decide::retry::{reprobe_decision, retry_eligible, retry_once, RetryIo};
 use crate::delivery::decide::{
     after_ax, is_web_content_field, value_confirms_insert, AfterAx, InsertReport,
 };
@@ -129,7 +129,11 @@ fn reprobe_after_retry(
         // Diagnostic only: Chrome can keep fields outside AXWebArea, so the
         // decision no longer depends on this probe.
         let dom_now = copy_string_attr(fresh, "AXDOMIdentifier").is_some();
-        let anc_now = if dom_now { Vec::new() } else { ancestor_roles(fresh) };
+        let anc_now = if dom_now {
+            Vec::new()
+        } else {
+            ancestor_roles(fresh)
+        };
         let web_now = is_web_content_field(role, dom_now, &anc_now);
         eprintln!("[insert] retry re-probe web_field_now={web_now}");
     }

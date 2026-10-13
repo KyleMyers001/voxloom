@@ -187,10 +187,7 @@ fn proven(after: AfterAx) -> RetryOutcome {
 #[test]
 fn types_after_retry_only_for_proven_web_field_in_typing_host() {
     let f = || AfterAx::Failed("AXSelectedText reported success but nothing changed".into());
-    assert_eq!(
-        type_after_retry(proven(f()), true),
-        AfterAx::TypeFallback
-    );
+    assert_eq!(type_after_retry(proven(f()), true), AfterAx::TypeFallback);
     assert_eq!(type_after_retry(proven(f()), false), f());
     assert_eq!(type_after_retry(done(f()), true), f());
     assert_eq!(
@@ -208,10 +205,7 @@ fn unreadable_value_before_retry_stays_failed_never_types() {
     let mut f = Fake::new(&[None]);
     let r = retry_once(&OK, "Hi ", "there", &mut f);
     assert!(!r.proven_unchanged);
-    assert!(matches!(
-        type_after_retry(r, true),
-        AfterAx::Failed(_)
-    ));
+    assert!(matches!(type_after_retry(r, true), AfterAx::Failed(_)));
     assert_eq!(f.writes, 0);
 }
 
@@ -229,10 +223,7 @@ fn retry_write_error_or_unreadable_readback_never_types() {
     f.write_result = Err("insert aborted — target changed".into());
     let r = retry_once(&OK, "Hi ", "there", &mut f);
     assert!(!r.proven_unchanged);
-    assert!(matches!(
-        type_after_retry(r, true),
-        AfterAx::Failed(_)
-    ));
+    assert!(matches!(type_after_retry(r, true), AfterAx::Failed(_)));
     let mut f = Fake::new(&[s("Hi ")]).after_write(&[None]);
     let r = retry_once(&OK, "Hi ", "there", &mut f);
     assert!(!r.proven_unchanged);
@@ -242,10 +233,7 @@ fn retry_write_error_or_unreadable_readback_never_types() {
 #[test]
 fn chromium_host_types_when_proven_unchanged_even_if_not_web() {
     let f = AfterAx::Failed("AXSelectedText reported success but nothing changed".into());
-    assert_eq!(
-        type_after_retry(proven(f), true),
-        AfterAx::TypeFallback
-    );
+    assert_eq!(type_after_retry(proven(f), true), AfterAx::TypeFallback);
 }
 
 #[test]
@@ -273,8 +261,14 @@ fn reprobe_fails_closed_when_focus_lost_or_unreadable() {
 #[test]
 fn reprobe_types_only_when_proven_unchanged_in_typing_host() {
     let f = || AfterAx::Failed("nothing changed".into());
-    assert_eq!(reprobe_decision(proven(f()), true, true, true), AfterAx::TypeFallback);
+    assert_eq!(
+        reprobe_decision(proven(f()), true, true, true),
+        AfterAx::TypeFallback
+    );
     assert_eq!(reprobe_decision(proven(f()), true, true, false), f());
     assert_eq!(reprobe_decision(done(f()), true, true, true), f());
-    assert_eq!(reprobe_decision(done(AfterAx::Inserted), true, true, true), AfterAx::Inserted);
+    assert_eq!(
+        reprobe_decision(done(AfterAx::Inserted), true, true, true),
+        AfterAx::Inserted
+    );
 }
