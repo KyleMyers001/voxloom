@@ -1,6 +1,7 @@
 //! Platform-independent delivery decisions (pure; unit-tested on any OS).
 //! The macOS adapter gathers AX facts and delegates every policy choice here.
 
+pub mod focus_fallback;
 pub mod host;
 pub mod report;
 pub mod retry;

@@ -4,6 +4,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::ax::*;
 use super::{host, registry, web_ax};
+use crate::delivery::decide::focus_fallback::{
+    accept_element, fallback_pid, with_fallback_error, FallbackError, FALLBACK_RETRY_MS,
+};
 use crate::delivery::decide::{classify_role, effective_role, element_token};
 use crate::delivery::types::TargetSnapshotDto;
 
@@ -58,9 +61,44 @@ pub(super) fn focused_ui_element_once(
     if focus_err != AX_OK || focused.is_null() {
         let reason = focus_unavailable_reason(stage, app_err, focus_err, focused.is_null());
         release(focused);
-        return Err(reason);
+        return frontmost_app_focus(&reason);
     }
     Ok((focused as AXUIElementRef, app_name))
+}
+
+/// System-wide focus was empty (seen with ChatGPT): ask the frontmost app
+/// itself, retrying briefly. Never Voxloom's own pid; fail closed otherwise.
+fn frontmost_app_focus(reason: &str) -> Result<(AXUIElementRef, Option<String>), String> {
+    let front = host::frontmost_pid();
+    let own = std::process::id() as i32;
+    let pid = fallback_pid(front, own).map_err(|e| with_fallback_error(reason, front, &e))?;
+    let app = unsafe { AXUIElementCreateApplication(pid) };
+    if app.is_null() {
+        let e = FallbackError::AppFocus(0, true);
+        return Err(with_fallback_error(reason, front, &e));
+    }
+    let mut last = FallbackError::AppFocus(0, true);
+    for wait in FALLBACK_RETRY_MS {
+        if wait > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(wait));
+        }
+        let (err, focused) = copy_focus(app);
+        let el = focused as AXUIElementRef;
+        let owner = (!focused.is_null()).then(|| element_pid(el)).flatten();
+        match accept_element(err, focused.is_null(), owner, pid) {
+            Ok(()) => {
+                let name = copy_string_attr(app, "AXTitle");
+                release(app as CFTypeRef);
+                return Ok((el, name));
+            }
+            Err(e) => {
+                release(focused);
+                last = e;
+            }
+        }
+    }
+    release(app as CFTypeRef);
+    Err(with_fallback_error(reason, front, &last))
 }
 
 /// Validation and per-chunk insertion guards never wait for web AX; only the
