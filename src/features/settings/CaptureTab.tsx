@@ -28,7 +28,7 @@ export function CaptureTab({ onSetup }: { onSetup: (opener: HTMLElement) => void
         <span className="frow__label">
           <label htmlFor="settings-shortcut">Shortcut</label>
           <small className="frow__help" id="settings-shortcut-help">
-            Hold to dictate; double-tap to latch. If the combo is taken, your previous one is kept.
+            Hold to dictate; double-tap to latch.
           </small>
         </span>
         <span className="frow__control">
@@ -82,7 +82,7 @@ export function CaptureTab({ onSetup }: { onSetup: (opener: HTMLElement) => void
       {!isNative && (
         <div className="frow">
           <span className="frow__label">
-            <label htmlFor="settings-language-model">Language-processing model · simulated</label>
+            <label htmlFor="settings-language-model">Language-processing model</label>
           </span>
           <select
             id="settings-language-model"
@@ -95,11 +95,11 @@ export function CaptureTab({ onSetup }: { onSetup: (opener: HTMLElement) => void
         </div>
       )}
       <div className="frow">
-        <span className="frow__label"><span>Use clipboard if direct insertion fails</span></span>
+        <span className="frow__label"><span>Clipboard fallback</span></span>
         <Switch
           checked={state.settings.clipboardFallback}
           hideLabel
-          label="Use clipboard if direct insertion fails"
+          label="Clipboard fallback"
           onChange={(value) => update({ key: 'clipboardFallback', value })}
         />
       </div>

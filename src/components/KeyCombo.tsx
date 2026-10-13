@@ -40,6 +40,18 @@ export function Kbd({ children }: { children: string }) {
   return <kbd className="kbd">{children}</kbd>;
 }
 
+const spoken: Record<string, string> = {
+  alt: 'Option', cmd: 'Command', command: 'Command', commandorcontrol: 'Command', cmdorctrl: 'Command',
+  control: 'Control', ctrl: 'Control', meta: 'Command', opt: 'Option', option: 'Option', shift: 'Shift', super: 'Command',
+};
+
+/** Screen-reader name: "Control Shift Space" on macOS; the raw combo elsewhere. */
+export function comboSpoken(combo: string, mac = isMacPlatform()): string {
+  if (!mac) return combo;
+  return combo.split('+').map((p) => p.trim()).filter(Boolean)
+    .map((k) => spoken[k.toLowerCase()] ?? (k.length === 1 ? k.toUpperCase() : k)).join(' ');
+}
+
 /** Renders a shortcut as key caps; screen readers get the original text. */
 export function KeyCombo({ combo }: { combo: string }) {
   return (
@@ -47,7 +59,7 @@ export function KeyCombo({ combo }: { combo: string }) {
       <span aria-hidden="true" className="key-combo__caps">
         {comboKeys(combo).map((key, index) => <Kbd key={`${key}-${index}`}>{key}</Kbd>)}
       </span>
-      <span className="sr-only">{combo}</span>
+      <span className="sr-only">{comboSpoken(combo)}</span>
     </span>
   );
 }

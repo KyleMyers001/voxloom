@@ -34,16 +34,16 @@ describe('BUS-41 type scale tokens', () => {
       tokens.slice(tokens.indexOf('@media (min-width: 1920px)')),
     ];
     for (const [name, lo, hi] of scale) {
-      expect(root, name).toContain(`--fs-${name}: ${lo}px;`);
-      expect(top, name).toContain(`--fs-${name}: ${hi}px;`);
-      const m = new RegExp(`--fs-${name}: calc\\(([\\d.]+)px \\+ ([\\d.]+)vw\\);`).exec(mid);
+      expect(root, name).toContain(`--fsb-${name}: ${lo}px;`);
+      expect(top, name).toContain(`--fsb-${name}: ${hi}px;`);
+      const m = new RegExp(`--fsb-${name}: calc\\(([\\d.]+)px \\+ ([\\d.]+)vw\\);`).exec(mid);
       expect(m, name).not.toBeNull();
       const at = (w: number) => Number(m![1]) + Number(m![2]) * w / 100;
       expect(at(1280), name).toBeCloseTo(lo, 2);
       expect(at(1920), name).toBeCloseTo(hi, 2);
     }
-    // clamp() needs Safari 13.1 (macOS 10.15.4); the app supports 10.15.0.
-    expect(tokens).not.toMatch(/--fs-[\w-]+: clamp\(/);
+    // Project rule: no clamp() in CSS (calc()+media queries keep the scale explicit).
+    expect(tokens).not.toMatch(/--fsb?-[\w-]+: clamp\(/);
     expect(tokens).not.toContain('--fs-caption');
   });
 
