@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { useApp } from '../../app/AppContext';
 import { Dialog } from '../../components/Dialog';
 import { Icon } from '../../components/Icon';
-import { KeyCombo } from '../../components/KeyCombo';
+import { initialSettings } from '../../domain/fixtures';
+import { ShortcutRecorder } from '../settings/ShortcutRecorder';
+import { HELP as SHORTCUT_HELP } from '../settings/shortcutCopy';
 import { isTauriEnv } from '../../services/capture/captureService';
 import { useCaptureState } from '../../services/capture/useCaptureState';
 import { MicStep } from './MicStep';
@@ -33,7 +35,7 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
     }
     if (onboarding.step === 2) {
       if (!shortcut.trim()) {
-        setError('Enter a shortcut.');
+        setError('Record a shortcut.');
         return;
       }
       if (!isNative && shortcut.toLowerCase() === 'ctrl + space') {
@@ -72,15 +74,22 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
             <p>{isNative
               ? 'Desktop gestures use a global shortcut. Registration problems are shown in Settings.'
               : 'Browser prototype gestures work only while this tab is focused.'}</p>
-            {shortcut.trim() && <div className="bigkeys"><KeyCombo combo={shortcut.replace(/\s*\+\s*/g, '+')} /></div>}
-            <label className="field">
-              {isNative ? 'Preferred global shortcut' : 'Preferred app-local shortcut'}
-              <input
-                aria-invalid={onboarding.shortcutCollision || undefined}
-                onChange={(event) => settings.update({ key: 'shortcut', value: event.target.value })}
+            <div className="field onboarding-shortcut">
+              <span id="onboarding-shortcut-label">
+                {isNative ? 'Global shortcut' : 'App-local shortcut'}
+              </span>
+              <small className="frow__help" id="onboarding-shortcut-help">{SHORTCUT_HELP}</small>
+              <ShortcutRecorder
+                defaultValue={initialSettings.shortcut}
+                helpId="onboarding-shortcut-help"
+                id="onboarding-shortcut"
+                onChange={(value) => {
+                  if (onboarding.shortcutCollision) update({ shortcutCollision: false });
+                  settings.update({ key: 'shortcut', value });
+                }}
                 value={shortcut}
               />
-            </label>
+            </div>
           </section>
         )}
 

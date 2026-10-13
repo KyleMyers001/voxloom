@@ -1,13 +1,13 @@
 import { isTauri } from '@tauri-apps/api/core';
 import type { OverlayResult } from '../services/shortcut/overlayVisibility';
 import { useEffect, useRef } from 'react';
-import { hasOpenModal, subscribeModal } from './modalState';
+import { subscribeModal } from './modalState';
+import { handlePractice, interactionContext } from './gestureContext';
+import { suspendable } from '../services/shortcut/recordingSuspend';
 import type { AppState } from './state';
-import type { OnboardingState } from '../domain/types';
 import type {
   DictationLifecycle,
   SetupLifecycle,
-  ShortcutContext,
   ShortcutController,
   ShortcutGesture,
 } from '../services/contracts';
@@ -153,13 +153,9 @@ export function useShortcutGestures(options: GestureOptions) {
     if (isTauri()) return;
     const controller = createShortcutController({
       clock: options.now,
-      onGesture: (gesture) => handleGesture(
-        optionsRef.current,
-        gesture,
-        pendingFinishRef.current,
-        optionsRef,
-        phaseGuardRef.current,
-      ),
+      onGesture: suspendable((gesture) => handleGesture(
+        optionsRef.current, gesture, pendingFinishRef.current, optionsRef, phaseGuardRef.current,
+      )),
       shortcut: options.state.settings.shortcut,
       target: document,
     });
@@ -181,13 +177,9 @@ export function useShortcutGestures(options: GestureOptions) {
     if (!isTauri()) return;
     const controller = createNativeShortcutController({
       clock: options.now,
-      onGesture: (gesture) => handleGesture(
-        optionsRef.current,
-        gesture,
-        pendingFinishRef.current,
-        optionsRef,
-        phaseGuardRef.current,
-      ),
+      onGesture: suspendable((gesture) => handleGesture(
+        optionsRef.current, gesture, pendingFinishRef.current, optionsRef, phaseGuardRef.current,
+      )),
       // No onRegisterFailure toast: registration outcomes are reported once,
       // in words, by the boot path below and useShortcutRegistration.
       scheduler: browserScheduler,
@@ -349,30 +341,6 @@ function handleGesture(
       endGestureCapture(optionsRef);
     }
   }
-}
-
-function interactionContext(options: GestureOptions): ShortcutContext {
-  if (options.onboardingOpen) {
-    return options.state.onboarding.step === 3 ? 'practice' : null;
-  }
-  return options.shortcutOpen || hasOpenModal() ? null : 'product';
-}
-
-function handlePractice(options: GestureOptions, gesture: ShortcutGesture) {
-  const changes: Partial<OnboardingState> = {};
-  if (gesture === 'hold-start') {
-    changes.recognizedText = 'Hold gesture started (no speech captured).';
-  }
-  if (gesture === 'hold-finish') changes.holdTested = true;
-  if (gesture === 'latch-start') {
-    changes.recognizedText =
-      'Double-tap latched. Activate once more to finish (no speech captured).';
-  }
-  if (gesture === 'latch-finish') {
-    changes.recognizedText = 'Double-tap gesture finished (no speech captured).';
-    changes.tapTested = true;
-  }
-  options.setup.update(changes);
 }
 
 /** Test/helper: narrow UseDogfoodCaptureResult to the gesture bridge. */

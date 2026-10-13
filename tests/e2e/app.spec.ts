@@ -294,3 +294,36 @@ test('History retry cannot interrupt an active listening run', async (
     .toHaveCount(0);
   await page.getByRole('button', { name: 'Cancel' }).click();
 });
+
+test('onboarding records the shortcut with the shared recorder (BUS-47)', async ({ page }) => {
+  const shots = process.env.BUS47_ONBOARDING_DIR;
+  await page.goto('/');
+  const onboarding = page.getByRole('dialog', { name: 'Set up Voxloom' });
+  await page.getByRole('button', { name: 'Next' }).click();
+  await expect(onboarding.getByRole('textbox')).toHaveCount(0);
+  const field = onboarding.getByRole('button', { name: /^Dictation shortcut/ });
+  await expectAccessible(page);
+  if (shots) await page.screenshot({ path: `${shots}/1-idle.png` });
+  await field.click();
+  await expect(field).toHaveText('Press keys…');
+  await expectAccessible(page);
+  if (shots) await page.screenshot({ path: `${shots}/2-recording.png` });
+  // Esc cancels recording; it must not close the onboarding sheet.
+  await page.keyboard.press('Escape');
+  await expect(onboarding).toBeVisible();
+  await expect(field).toHaveAccessibleName('Dictation shortcut, Control Shift Space');
+  await expect(onboarding.getByRole('status')).toHaveText('Canceled. Shortcut unchanged.');
+  // Pressing the current shortcut while recording records it; it doesn't dictate.
+  await field.click();
+  await holdShortcut(page);
+  await expect(field).toHaveAttribute('aria-pressed', 'false');
+  await expect(onboarding.getByRole('status')).toHaveText(/Shortcut set to/);
+  await field.click();
+  await page.keyboard.press('Control+F5');
+  await expect(onboarding.getByText(/can't be used/)).toBeVisible();
+  if (shots) await page.screenshot({ path: `${shots}/3-refused.png` });
+  await page.keyboard.press('Control+Alt+KeyK');
+  await expect(field).toHaveAccessibleName(/^Dictation shortcut, Control (Option|Alt) K$/);
+  await expectAccessible(page);
+  if (shots) await page.screenshot({ path: `${shots}/4-saved.png` });
+});

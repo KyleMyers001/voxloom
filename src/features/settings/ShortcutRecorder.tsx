@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { comboLabel, KeyCombo, spokenCombo } from '../../components/KeyCombo';
 import { captureShortcut } from '../../services/shortcut/shortcutCapture';
 import { useShortcutActive } from '../../services/shortcut/activeShortcut';
+import { beginRecordingSuspend } from '../../services/shortcut/recordingSuspend';
 import {
   attachRecorder, beginPending, cancelPending, setRecorderStatus, useRecorderStatus, type Status,
 } from './recorderStore';
@@ -12,6 +13,10 @@ import {
 
 interface ShortcutRecorderProps {
   defaultValue: string;
+  /** Id of the help text that describes the field. */
+  helpId?: string;
+  /** Field id; Settings and onboarding each pass their own. */
+  id?: string;
   onChange: (combo: string) => void;
   value: string;
 }
@@ -21,16 +26,37 @@ export { CONFIRM_TIMEOUT_MS } from './recorderStore';
 /**
  * BUS-47: click Record (or Enter/Space on it), press a chord, and it's saved.
  * Focus alone never records, so tabbing through doesn't hijack keys. Esc,
- * Tab and blur cancel and keep the previous shortcut.
+ * Tab and blur cancel and keep the previous shortcut. Used by Settings and
+ * onboarding. While recording, keys are read window-wide (capture phase, so
+ * Esc can't close a dialog first, and WebKit's unfocused click still works)
+ * and the global shortcut can't start dictation (recordingSuspend).
  */
-export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutRecorderProps) {
+export function ShortcutRecorder({
+  defaultValue, helpId = 'settings-shortcut-help', id = 'settings-shortcut', onChange, value,
+}: ShortcutRecorderProps) {
   const [recording, setRecording] = useState(false);
   const [preview, setPreview] = useState('');
   const status = useRecorderStatus();
   const setStatus = setRecorderStatus;
   const active = useShortcutActive();
   const sawKeyRef = useRef(false);
+  const fieldRef = useRef<HTMLButtonElement>(null);
+  const handlersRef = useRef<Record<'down' | 'up', (e: KeyboardEvent) => void>>({ down: () => {}, up: () => {} });
   useEffect(() => attachRecorder(value, onChange));
+  useEffect(() => {
+    if (!recording) return;
+    // Ended on save, cancel, blur and unmount: this cleanup runs for each.
+    const endSuspend = beginRecordingSuspend();
+    const down = (e: KeyboardEvent) => handlersRef.current.down(e);
+    const up = (e: KeyboardEvent) => handlersRef.current.up(e);
+    window.addEventListener('keydown', down, true);
+    window.addEventListener('keyup', up, true);
+    return () => {
+      window.removeEventListener('keydown', down, true);
+      window.removeEventListener('keyup', up, true);
+      endSuspend();
+    };
+  }, [recording]);
 
   /** Save a combo and announce success only once registration confirms it. */
   const apply = (combo: string, okText: string) => {
@@ -52,6 +78,7 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
     sawKeyRef.current = false;
     setPreview('');
     setRecording(true);
+    fieldRef.current?.focus();
     setStatus({ text: RECORDING, tone: 'info' });
   };
 
@@ -61,16 +88,15 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
     setStatus(next);
   };
 
-  const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
-    if (!recording) return;
-    const result = captureShortcut(event.nativeEvent);
+  const onKeyDown = (event: KeyboardEvent) => {
+    const result = captureShortcut(event);
     if (result.kind === 'cancel' && result.reason === 'tab') {
       stop({ text: CANCELED, tone: 'info' });
       return; // let Tab move focus on
     }
-    // Keep the keystroke away from the in-app shortcut listener while recording.
+    // Keep the keystroke from app shortcuts and the dialog's Esc-to-close.
     event.preventDefault();
-    event.stopPropagation();
+    event.stopImmediatePropagation();
     if (result.kind === 'cancel') {
       stop({ text: CANCELED, tone: 'info' });
     } else if (result.kind === 'modifier-only') {
@@ -84,10 +110,8 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
     }
   };
 
-  const onKeyUp = (event: KeyboardEvent<HTMLButtonElement>) => {
-    if (!recording) return;
-    event.stopPropagation();
-    const n = event.nativeEvent;
+  const onKeyUp = (n: KeyboardEvent) => {
+    n.stopImmediatePropagation();
     const anyModifier = n.altKey || n.ctrlKey || n.metaKey || n.shiftKey;
     if (preview && !anyModifier) {
       // Released with only modifiers held: lone modifiers are BUS-46.
@@ -96,6 +120,8 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
     }
   };
 
+  handlersRef.current = { down: onKeyDown, up: onKeyUp };
+
   const reset = () => apply(defaultValue, resetText(defaultValue));
 
   return (
@@ -103,17 +129,16 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
       <button
         // Only the help: the role=status line announces itself, so describing
         // the field by it too would read each status twice.
-        aria-describedby="settings-shortcut-help"
+        aria-describedby={helpId}
         aria-label={recording ? 'Dictation shortcut, recording' : `Dictation shortcut, ${spokenCombo(value)}${active ? '' : `, ${NOT_ACTIVE}`}`}
         aria-pressed={recording}
         className="shortcut-recorder__field"
         data-inactive={!active || undefined}
         data-recording={recording || undefined}
-        id="settings-shortcut"
+        id={id}
         onBlur={() => recording && stop({ text: CANCELED, tone: 'info' })}
         onClick={() => (recording ? undefined : start())}
-        onKeyDown={onKeyDown}
-        onKeyUp={onKeyUp}
+        ref={fieldRef}
         type="button"
       >
         {recording
@@ -130,7 +155,7 @@ export function ShortcutRecorder({ defaultValue, onChange, value }: ShortcutReco
         aria-live="polite"
         className="shortcut-recorder__status"
         data-tone={status?.tone}
-        id="settings-shortcut-status"
+        id={`${id}-status`}
         role="status"
       >
         {status?.text}
