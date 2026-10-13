@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 interface Capability { windows: string[]; permissions: (string | { identifier: string })[] }
 
 const load = (name: string): Capability =>
-  JSON.parse(readFileSync(resolve(__dirname, '../../../src-tauri/capabilities', `${name}.json`), 'utf8'));
+  JSON.parse(readFileSync(resolve(__dirname, '../../src-tauri/capabilities', `${name}.json`), 'utf8'));
 
 const ids = (c: Capability) => c.permissions.map((p) => (typeof p === 'string' ? p : p.identifier));
 
