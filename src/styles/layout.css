@@ -15,7 +15,6 @@
 
 .modal-close {
   float: right;
-  font-size: 22px;
 }
 
 .overlay {
@@ -67,7 +66,7 @@
 .state-lab button {
   border: 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-label);
   padding: 4px 6px;
   text-align: left;
 }
@@ -75,7 +74,7 @@
 .state-lab p,
 .state-lab strong {
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--fs-micro);
 }
 
 .toast {
@@ -83,7 +82,7 @@
   border-radius: 7px;
   bottom: 24px;
   color: var(--bg);
-  font-size: 12px;
+  font-size: var(--fs-secondary);
   font-weight: 700;
   left: 50%;
   opacity: 0;

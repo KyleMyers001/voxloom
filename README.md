@@ -70,6 +70,11 @@ Open `http://localhost:1420`.
 
 ## macOS desktop
 
+**Minimum macOS: 13.1 (Ventura).** The UI runs in the system WKWebView, so it
+needs the WebKit that ships with Safari 16.2: `color-mix()` (Safari 16.2),
+`:has()` (15.4), `Array.prototype.at()` (15.4) and `inert` (15.5). Declared in
+`src-tauri/tauri.conf.json` → `bundle.macOS.minimumSystemVersion` (BUS-53).
+
 With the Rust and macOS build toolchains installed:
 
 ```sh

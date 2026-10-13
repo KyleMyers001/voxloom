@@ -24,6 +24,6 @@ bundled; download it separately as described in the README
 
 ### Known limitations
 
-- macOS only (minimum macOS 10.15); Windows and Linux are not supported yet.
+- macOS only (minimum macOS 13.1 (Ventura)); Windows and Linux are not supported yet.
 - No auto-update; download new versions from the Releases page.
 - _Edit before publishing: add release-specific limitations here._

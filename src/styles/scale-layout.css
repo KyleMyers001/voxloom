@@ -1,0 +1,73 @@
+/* BUS-41 PR 2: layout for the larger type. Tokens follow the PR 1 pattern in
+   tokens.css: windowed value at <=1280px, additive calc() growth to the
+   fullscreen value at >=1920px (TYPE-SCALE.md § Token table). */
+:root {
+  --content-max: 1080px;
+  --pad-x: 32px;
+  --ctl: 32px;
+  --side-w: 244px;
+  --kbd-min: 22px;
+  --bigkey: 46px;
+  --seg-x: 12px;
+}
+
+@media (min-width: 1281px) {
+  :root {
+    --content-max: calc(760px + 25vw);
+    --pad-x: calc(-16px + 3.75vw);
+    --ctl: calc(24px + 0.625vw);
+    --side-w: calc(188px + 4.375vw);
+    --kbd-min: calc(18px + 0.3125vw);
+    --bigkey: calc(38px + 0.625vw);
+    --seg-x: calc(8px + 0.3125vw);
+  }
+}
+
+@media (min-width: 1920px) {
+  :root {
+    --content-max: 1240px;
+    --pad-x: 56px;
+    --ctl: 36px;
+    --side-w: 272px;
+    --kbd-min: 24px;
+    --bigkey: 50px;
+    --seg-x: 14px;
+  }
+}
+
+@media (max-width: 900px) { :root { --side-w: 200px; } }
+@media (max-width: 780px) { :root { --side-w: 184px; } }
+
+/* Shell: sidebar width, centered main column. */
+.app { grid-template-columns: var(--side-w) minmax(0, 1fr); }
+.main { margin-inline: auto; max-width: var(--content-max); }
+.brand { min-width: 0; }
+.brand > div { min-width: 0; }
+.brand__status { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Below 910px the one-line status clips in the 184-200px sidebar: the shortcut
+   moves to its own line as small key caps. */
+.brand__caps { display: none; }
+@media (max-width: 909px) {
+  .brand__label { display: none; }
+  .brand__caps { display: flex; margin-top: 3px; }
+  .brand__caps .key-combo__caps { flex-wrap: wrap; gap: 2px; } /* Large text wraps instead of spilling */
+  /* Tight caps: 'Ctrl Shift Space' fits the 101px box at 760 on Win/Linux. */
+  .brand__caps .kbd { font-size: var(--fs-micro); min-width: 16px; padding: 1px 3px; }
+}
+
+/* Line length: running text 72ch, History transcripts 78ch. */
+.page-head p,
+.hero p,
+.home-hero p,
+.note,
+.callout p,
+.frow__help { max-width: 72ch; }
+.history-row .history-row__text { max-width: 78ch; }
+
+/* Dictionary: 2 columns at 760, 3 at 1280 and fullscreen. */
+.term-grid { grid-template-columns: repeat(auto-fill, minmax(17em, 1fr)); }
+
+/* Controls and key caps grow with the type. */
+.seg__item { min-height: var(--ctl); padding-inline: var(--seg-x); white-space: nowrap; }
+.kbd { min-width: var(--kbd-min); }
+.bigkeys .kbd { height: var(--bigkey); min-width: var(--bigkey); }

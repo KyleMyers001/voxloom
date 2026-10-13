@@ -38,6 +38,9 @@ export type DictationState =
   | { kind: 'cancelled'; runId: number }
   | { kind: 'error'; recordId: string; runId: number };
 
+/** BUS-41 Text size: a --ts multiplier on the type tokens (TYPE-SCALE.md). */
+export type TextSize = 'small' | 'default' | 'large';
+
 export interface Settings {
   appearance: Appearance;
   audioRetention: 'off' | '24-hours' | '7-days';
@@ -48,6 +51,7 @@ export interface Settings {
   shortcut: string;
   startAtLogin: boolean;
   style: WritingStyle;
+  textSize: TextSize;
   transcriptRetention: '30-days' | 'forever' | 'off';
   transcriptionModel: string;
 }
