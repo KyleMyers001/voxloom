@@ -54,6 +54,20 @@ describe('native cancellation scope', () => {
     expect(ipc.unlisten).toHaveBeenCalledOnce();
   });
 
+  it('keeps tap-failure evidence non-prompting and the active tap fail-closed', () => {
+    const native = readFileSync('src-tauri/src/cancel_scope/macos.rs', 'utf8');
+    expect(native).toContain('CGEventTapCreate(1, 0, 0, 1 << 10, callback, context.cast())');
+    const failure = native.slice(native.indexOf('if port.is_null()'), native.indexOf('let source = CFMachPortCreateRunLoopSource'));
+    for (const call of ['AXIsProcessTrusted() != 0', 'CGPreflightListenEventAccess()', 'CGPreflightPostEventAccess()']) {
+      expect(failure).toContain(call);
+    }
+    expect(failure).toContain('return Err(super::diagnostics::tap_failure_message(');
+    expect(failure).toContain('let context = Box::from_raw(context)');
+    expect(native).not.toMatch(/CGRequest(?:Listen|Post)EventAccess\(|AXIsProcessTrustedWithOptions\(/);
+    expect(native).not.toContain('Enable Voxloom Accessibility permission');
+    expect(native).toContain('let tap = Tap::install(app, session)?;');
+  });
+
   it('wires native scope and main-window cleanup into the shipped app', () => {
     const lib = readFileSync('src-tauri/src/lib.rs', 'utf8');
     expect(lib).toContain('cancel_scope::dictation_cancel_arm');

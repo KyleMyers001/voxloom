@@ -8,6 +8,9 @@ type Callback = unsafe extern "C" fn(Handle, u32, Handle, Handle) -> Handle;
 
 #[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {
+    // Apple AXUIElement.h: Boolean (UInt8), available since macOS 10.4.
+    // No options/prompting; queries this app process, not an external helper.
+    fn AXIsProcessTrusted() -> u8;
     fn CGEventTapCreate(
         location: u32,
         place: u32,
@@ -18,6 +21,13 @@ extern "C" {
     ) -> Handle;
     fn CGEventGetIntegerValueField(event: Handle, field: u32) -> i64;
     fn CGEventTapEnable(tap: Handle, enable: bool);
+}
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    // Apple CGEvent.h: bool; macOS 10.15 (the app's minimum). Preflight only:
+    // never call the corresponding CGRequest* APIs or change TCC state here.
+    fn CGPreflightListenEventAccess() -> bool;
+    fn CGPreflightPostEventAccess() -> bool;
 }
 #[link(name = "CoreFoundation", kind = "framework")]
 extern "C" {
@@ -120,8 +130,16 @@ impl Tap {
         unsafe {
             let port = CGEventTapCreate(1, 0, 0, 1 << 10, callback, context.cast());
             if port.is_null() {
-                drop(Box::from_raw(context));
-                return Err("Escape cancellation unavailable. Enable Voxloom Accessibility permission and retry.".into());
+                // SAFETY: regain sole ownership after failed creation (no tap /
+                // callbacks). Query non-prompting evidence in this exact process.
+                let context = Box::from_raw(context);
+                return Err(super::diagnostics::tap_failure_message(
+                    AXIsProcessTrusted() != 0,
+                    CGPreflightListenEventAccess(),
+                    CGPreflightPostEventAccess(),
+                    &context.app.config().identifier,
+                    &context.app.package_info().version.to_string(),
+                ));
             }
             let source = CFMachPortCreateRunLoopSource(ptr::null_mut(), port, 0);
             if source.is_null() {

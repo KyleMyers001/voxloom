@@ -33,6 +33,35 @@ function deferred<T>() {
 beforeEach(() => { vi.resetAllMocks(); });
 
 describe('BUS-43 pending acquisition ownership', () => {
+  it.each(['cancel-ax-untrusted', 'cancel-tap-create-failed'])(
+    'keeps capture closed and preserves the full %s diagnostic from IPC', async (code) => {
+      const message = `Escape cancellation unavailable [${code}]. ax=true listen=false post=true`;
+      const unlisten = vi.fn();
+      ipc.listen.mockResolvedValue(unlisten);
+      ipc.invoke.mockRejectedValue(message);
+      const startCapture = vi.fn();
+      const dogfood = vi.fn();
+      const copy = vi.fn();
+      const history = vi.fn();
+      const toast = vi.fn();
+      const { result } = renderHook(() => useDogfoodCapture({
+        captureApi: { captureState: { kind: 'idle' }, startFullCaptureSession: startCapture,
+          cancelActiveCapture: vi.fn() } as unknown as UseCaptureStateResult,
+        clipboard: { copy }, createModelStore: createMockSttModelStore, modelId: 'whisper-tiny.en',
+        dogfood, onHistoryRecord: history, onToast: toast,
+      }));
+      await act(async () => { await result.current.start('gesture'); });
+      expect(result.current.phase).toBe('error');
+      expect(result.current.scopeReady).toBe(false);
+      expect(result.current.message).toBe(message);
+      expect(toast).toHaveBeenCalledWith(message);
+      expect(startCapture).not.toHaveBeenCalled();
+      expect(dogfood).not.toHaveBeenCalled();
+      expect(history).not.toHaveBeenCalled();
+      expect(copy).not.toHaveBeenCalled();
+      expect(unlisten).toHaveBeenCalledOnce();
+    },
+  );
   it.each([
     ['cancelled', 'success', false], ['cancelled', 'failure', false],
     ['ordinary', 'success', false], ['ordinary', 'failure', false],

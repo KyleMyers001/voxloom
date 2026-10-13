@@ -1,6 +1,8 @@
 //! BUS-43: session-scoped Escape ownership and native delivery barrier.
 //! Sync IPC and window callbacks run on the UI thread, as does the event tap.
 
+#[cfg(any(target_os = "macos", test))]
+mod diagnostics;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(test)]
