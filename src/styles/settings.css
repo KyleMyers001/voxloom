@@ -35,7 +35,7 @@
   padding: 6px 10px;
 }
 
-.settings-tab[aria-selected="true"] { background: var(--navon); color: var(--fg); }
+.settings-tab[aria-selected="true"] { background: var(--navon); box-shadow: inset 0 -2px 0 var(--sel-edge); color: var(--fg); }
 .settings-tab[aria-selected="true"] .icon { color: var(--accfg); }
 .settings-panel { padding: var(--s-8); }
 .settings-panel:focus-visible { outline-offset: -3px; }
