@@ -31,10 +31,11 @@
 @keyframes hud-shimmer { to { transform: translateX(-50%); } }
 @keyframes hud-pulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
 
-/* Reduce Motion (BUS-50): nothing loops. The bar row holds still at a steady
-   opacity; the cyan border and the "Transcribing" status still mark the state. */
+@keyframes hud-breathe { 0%, 100% { opacity: .6; } 50% { opacity: .9; } }
+
+/* Reduce Motion (BUS-50): no shimmer, a slow 3 s opacity breathe. */
 @media (prefers-reduced-motion: reduce) {
-  .hud-transcribing { animation: none; opacity: .8; }
+  .hud-transcribing { animation: hud-breathe 3s ease-in-out infinite; }
   .hud-transcribing i { animation: none; will-change: auto; }
 }
 
