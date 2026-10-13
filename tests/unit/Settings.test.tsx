@@ -2,7 +2,7 @@
 ///
 /// The capture hook is mocked to avoid live IPC. Real permission flow,
 /// real device list, and real mic test are covered in manual tests
-/// documented in docs/review/BUS-9-implementation.md.
+/// checked manually on a Mac.
 import { cleanup, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';

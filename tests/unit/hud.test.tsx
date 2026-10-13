@@ -62,7 +62,7 @@ describe('HUD view', () => {
     expect(screen.getByRole('status')).toHaveTextContent('May have been inserted; also copied');
   });
 
-  it('unverified and may-have-inserted (nothing copied) dismiss silently, like a success (Kyle)', () => {
+  it('unverified and may-have-inserted (nothing copied) dismiss silently, like a success', () => {
     expect(hudResultFor({ status: 'unverified' })).toBeNull();
     expect(hudResultFor({ mayHaveInserted: true, status: 'failed' })).toBeNull();
     // A null result never reaches overlayBridge.showResult, so there is no pill and no announcement.

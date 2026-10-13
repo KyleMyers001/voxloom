@@ -3,7 +3,7 @@
 /// The real microphone permission flow requires a live TCC context and is
 /// not exercised here; the capture hook is mocked to return controlled
 /// permission state. The real permission + test flows are in manual tests
-/// documented in docs/review/BUS-9-implementation.md.
+/// checked manually on a Mac.
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
