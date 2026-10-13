@@ -37,6 +37,12 @@ export { CONFIRM_TIMEOUT_MS } from './recorderStore';
  * Esc can't close a dialog first, and WebKit's unfocused click still works)
  * and the global shortcut can't start dictation (recordingSuspend).
  */
+/** With a visible label (labelledby) the field names only its value; standalone it says what it is. */
+function recorderName(labelled: boolean, recording: boolean, value: string, active: boolean): string {
+  const state = recording ? 'recording' : `${spokenCombo(value)}${active ? '' : `, ${NOT_ACTIVE}`}`;
+  return labelled ? state : `Dictation shortcut, ${state}`;
+}
+
 export function ShortcutRecorder({
   defaultValue, errorId, helpId = 'settings-shortcut-help', id = 'settings-shortcut', invalid, labelId, onChange, value,
 }: ShortcutRecorderProps) {
@@ -138,7 +144,7 @@ export function ShortcutRecorder({
         aria-describedby={invalid && errorId ? `${helpId} ${errorId}` : helpId}
         aria-invalid={invalid || status?.tone === 'error' || undefined}
         aria-labelledby={labelId ? `${labelId} ${id}` : undefined}
-        aria-label={recording ? 'Dictation shortcut, recording' : `Dictation shortcut, ${spokenCombo(value)}${active ? '' : `, ${NOT_ACTIVE}`}`}
+        aria-label={recorderName(Boolean(labelId), recording, value, active)}
         aria-pressed={recording}
         className="shortcut-recorder__field"
         data-inactive={!active || undefined}

@@ -141,11 +141,11 @@ describe('Onboarding (step 1 — real permission, simulated steps 2–3)', () =>
     renderWithApp(<Onboarding onClose={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Next' }));
     expect(screen.getByText('App-local shortcut')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /Dictation shortcut/ }));
+    await user.click(screen.getByRole('button', { name: /^(Shortcut|App-local shortcut|Global shortcut) / }));
     await user.keyboard('{Control>} {/Control}');
     // The recorder refuses it itself (macOS reserved) and keeps the old combo.
     expect(screen.getByRole('status')).toHaveTextContent(/switching input sources/);
-    expect(screen.getByRole('button', { name: /Dictation shortcut/ }))
+    expect(screen.getByRole('button', { name: /^(Shortcut|App-local shortcut|Global shortcut) / }))
       .toHaveAttribute('aria-pressed', 'true');
   });
 
@@ -184,7 +184,7 @@ describe('Onboarding shortcut step (BUS-47 recorder)', () => {
     renderWithApp(<Onboarding onClose={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Next' }));
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
-    const field = screen.getByRole('button', { name: /Dictation shortcut/ });
+    const field = screen.getByRole('button', { name: /^(Shortcut|App-local shortcut|Global shortcut) / });
     expect(field).toHaveAttribute('id', 'onboarding-shortcut');
     expect(field).toHaveAccessibleDescription(HELP);
   });
@@ -195,7 +195,7 @@ describe('Onboarding shortcut step (BUS-47 recorder)', () => {
     const close = vi.fn();
     renderWithApp(<Onboarding onClose={close} />);
     await user.click(screen.getByRole('button', { name: 'Next' }));
-    const field = () => screen.getByRole('button', { name: /Dictation shortcut/ });
+    const field = () => screen.getByRole('button', { name: /^(Shortcut|App-local shortcut|Global shortcut) / });
     await user.click(field());
     expect(screen.getByRole('status')).toHaveTextContent(RECORDING);
     await user.keyboard('{Escape}');
@@ -204,7 +204,7 @@ describe('Onboarding shortcut step (BUS-47 recorder)', () => {
     expect(screen.getByRole('status')).toHaveTextContent(CANCELED);
     await user.click(field());
     await user.keyboard('{Control>}{Alt>}k{/Alt}{/Control}');
-    expect(field()).toHaveAccessibleName(/^Global shortcut Dictation shortcut, Control (Option|Alt) K$/);
+    expect(field()).toHaveAccessibleName(/^Global shortcut Control (Option|Alt) K$/);
     expect(screen.getByText('Choose your shortcut')).toBeInTheDocument();
   });
 
@@ -216,14 +216,15 @@ describe('Onboarding shortcut step (BUS-47 recorder)', () => {
       const user = userEvent.setup();
       renderWithApp(<Onboarding onClose={vi.fn()} />);
       await user.click(screen.getByRole('button', { name: 'Next' }));
-      const field = () => screen.getByRole('button', { name: /Dictation shortcut/ });
-      expect(field()).toHaveAccessibleName(/^App-local shortcut Dictation shortcut, /);
+      const field = () => screen.getByRole('button', { name: /^(Shortcut|App-local shortcut|Global shortcut) / });
+      expect(field()).toHaveAccessibleName(/^App-local shortcut /);
       await user.click(field());
       await user.keyboard('{Control>} {/Control}');
       await user.click(screen.getByRole('button', { name: 'Next' }));
-      expect(screen.getByRole('alert')).toHaveTextContent('Ctrl+Space is already in use (simulated). Kept Ctrl+Shift+Space; record a different combo.');
+      expect(screen.getByRole('alert')).toHaveTextContent('Ctrl+Space is in use by another app (simulated). Kept Ctrl+Shift+Space. Record a different one.');
       expect(field()).toHaveAttribute('aria-invalid', 'true');
-      expect(field()).toHaveAccessibleName(/Control Shift Space$/);
+      expect(screen.getByRole('status')).toHaveTextContent(/^$/);
+      expect(field()).toHaveAccessibleName('App-local shortcut Control Shift Space');
       expect(field().getAttribute('aria-describedby')).toContain('onboarding-error');
       await user.click(field());
       await user.keyboard('{Control>}{Alt>}j{/Alt}{/Control}');

@@ -78,7 +78,7 @@ describe('Settings', () => {
 
   it('labels remaining mock settings without calling shortcut simulated', async () => {
     renderWithApp(<Settings onSetup={vi.fn()} />);
-    expect(screen.getByRole('button', { name: /Dictation shortcut/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^(Shortcut|App-local shortcut|Global shortcut) / })).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: /Start at login/ })).toBeDisabled();
     // S8: hidden in the native app (CHECKLIST § Hidden in the native app).
     expect(screen.queryByLabelText(/Language-processing model/)).toBeNull();
@@ -233,11 +233,11 @@ describe('Shortcut recorder (BUS-47)', () => {
   it('records a chord by pressing it and shows it as key caps', async () => {
     const user = userEvent.setup();
     renderWithApp(<Settings onSetup={vi.fn()} />);
-    const field = screen.getByRole('button', { name: /Dictation shortcut/ });
+    const field = screen.getByRole('button', { name: /^(Shortcut|App-local shortcut|Global shortcut) / });
     await user.click(field);
     expect(field).toHaveTextContent('Press keys…');
     await user.keyboard('{Control>}{Alt>}k{/Alt}{/Control}');
-    expect(field).toHaveAccessibleName('Shortcut Dictation shortcut, Control Option K');
+    expect(field).toHaveAccessibleName('Shortcut Control Option K');
     expect(screen.getByText(/^Shortcut set to/)).toBeInTheDocument();
   });
 });

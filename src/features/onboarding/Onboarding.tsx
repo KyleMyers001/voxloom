@@ -2,11 +2,10 @@ import { useState } from 'react';
 import { useApp } from '../../app/AppContext';
 import { Dialog } from '../../components/Dialog';
 import { Icon } from '../../components/Icon';
-import { comboLabel } from '../../components/KeyCombo';
 import { initialSettings } from '../../domain/fixtures';
 import { setRecorderStatus } from '../settings/recorderStore';
 import { ShortcutRecorder } from '../settings/ShortcutRecorder';
-import { HELP as SHORTCUT_HELP } from '../settings/shortcutCopy';
+import { HELP as SHORTCUT_HELP, onboardingInUseText } from '../settings/shortcutCopy';
 import { isTauriEnv } from '../../services/capture/captureService';
 import { useCaptureState } from '../../services/capture/useCaptureState';
 import { MicStep } from './MicStep';
@@ -46,8 +45,9 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
         const fallback = kept.toLowerCase() === 'ctrl + space' ? initialSettings.shortcut : kept;
         update({ shortcutCollision: true });
         settings.update({ key: 'shortcut', value: fallback });
-        setRecorderStatus({ text: `Kept ${comboLabel(fallback)}.`, tone: 'info' });
-        setError(`${comboLabel(shortcut)} is already in use (simulated). Kept ${comboLabel(fallback)}; record a different combo.`);
+        // The error line already says what was kept; don't repeat it in the status line.
+        setRecorderStatus(null);
+        setError(onboardingInUseText(shortcut, fallback));
         return;
       }
     }
@@ -86,21 +86,25 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
                 {isNative ? 'Global shortcut' : 'App-local shortcut'}
               </span>
               <small className="frow__help" id="onboarding-shortcut-help">{SHORTCUT_HELP}</small>
-              <ShortcutRecorder
-                defaultValue={initialSettings.shortcut}
-                errorId="onboarding-error"
-                helpId="onboarding-shortcut-help"
-                id="onboarding-shortcut"
-                invalid={Boolean(error)}
-                labelId="onboarding-shortcut-label"
-                onChange={(value) => {
-                  setError('');
-                  if (onboarding.shortcutCollision) update({ shortcutCollision: false });
-                  if (shortcut.toLowerCase() !== 'ctrl + space') setKept(shortcut);
-                  settings.update({ key: 'shortcut', value });
-                }}
-                value={shortcut}
-              />
+              <span className="frow__control">
+                <ShortcutRecorder
+                  defaultValue={initialSettings.shortcut}
+                  errorId="onboarding-error"
+                  helpId="onboarding-shortcut-help"
+                  id="onboarding-shortcut"
+                  invalid={Boolean(error)}
+                  labelId="onboarding-shortcut-label"
+                  onChange={(value) => {
+                    setError('');
+                    if (onboarding.shortcutCollision) update({ shortcutCollision: false });
+                    // `shortcut` is still the combo being replaced here, so this records
+                    // the last accepted one as the fallback for a later collision.
+                    if (shortcut.toLowerCase() !== 'ctrl + space') setKept(shortcut);
+                    settings.update({ key: 'shortcut', value });
+                  }}
+                  value={shortcut}
+                />
+              </span>
             </div>
           </section>
         )}

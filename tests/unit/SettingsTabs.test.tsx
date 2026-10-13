@@ -29,7 +29,7 @@ describe('Settings window tabs (UI PR 6a)', () => {
     renderWithApp(<Settings onSetup={vi.fn()} />);
     // S1–S11
     expect(screen.getByRole('button', { name: 'Set up shortcuts' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Dictation shortcut/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^(Shortcut|App-local shortcut|Global shortcut) / })).toBeInTheDocument();
     expect(screen.getByLabelText('Microphone')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Refresh microphones/ })).toBeInTheDocument();
     expect(screen.getByText('Microphone test')).toBeInTheDocument();

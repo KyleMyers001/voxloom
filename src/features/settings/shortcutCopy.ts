@@ -28,6 +28,9 @@ export const timeoutText = (combo: string, mac = isMacPlatform()) =>
   `Still waiting for ${L(combo, mac)}. Try it, or record again.`;
 export const inUseText = (combo: string, kept: string, mac = isMacPlatform()) =>
   `${L(combo, mac)} is in use by another app. Kept ${L(kept, mac)}.`;
+/** Onboarding's browser-prototype collision (no OS registration, so it's simulated). */
+export const onboardingInUseText = (combo: string, kept: string, mac = isMacPlatform()) =>
+  `${L(combo, mac)} is in use by another app (simulated). Kept ${L(kept, mac)}. Record a different one.`;
 
 /** The new combo was refused and restoring the previous one failed too. */
 export function noneActiveText(combo: string, previous: string | null | undefined, mac = isMacPlatform()) {
