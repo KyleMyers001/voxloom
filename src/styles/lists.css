@@ -105,3 +105,12 @@
   white-space: nowrap;
 }
 
+/* Shared timestamp column (QA #59): every row's time cell is the same width,
+   sized in the timestamp's own monospace ch to fit the widest time ("12:59 PM",
+   8 glyphs) at any text size, so transcripts align and never touch the time. */
+.recent-row > .timestamp {
+  display: block;
+  font-variant-numeric: tabular-nums;
+  width: calc(8ch + 2px);
+}
+

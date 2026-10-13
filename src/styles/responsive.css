@@ -11,7 +11,7 @@
     opacity: 1;
     visibility: visible;
   }
-  .recent-row { grid-template-columns: minmax(58px, max-content) minmax(0, 1fr); }
+  .recent-row { grid-template-columns: auto minmax(0, 1fr); }
   .recent-row > :last-child { grid-column: 2; }
 }
 
