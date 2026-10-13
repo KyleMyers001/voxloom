@@ -42,7 +42,7 @@ describe('BUS-41 type scale tokens', () => {
       expect(at(1280), name).toBeCloseTo(lo, 2);
       expect(at(1920), name).toBeCloseTo(hi, 2);
     }
-    // clamp() needs Safari 13.1 (macOS 10.15.4); the app supports 10.15.0.
+    // Project rule: no clamp() in CSS (calc()+media queries keep the scale explicit).
     expect(tokens).not.toMatch(/--fsb?-[\w-]+: clamp\(/);
     expect(tokens).not.toContain('--fs-caption');
   });
