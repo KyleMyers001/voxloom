@@ -167,6 +167,7 @@ describe('BUS-48 contrast tokens', () => {
   it('borders form controls and .btn with --ctl-line', () => {
     expect(css('base.css')).toMatch(/input,\nselect,\ntextarea \{[^}]*border: 1px solid var\(--ctl-line\)/);
     expect(css('components.css')).toMatch(/\.btn \{[^}]*border-color: var\(--ctl-line\)/);
+    expect(css('ui-controls.css')).toMatch(/\.search \{[^}]*border: 1px solid var\(--ctl-line\)/);
   });
 
   it('marks selected nav, settings tab and segment with --sel-edge', () => {
