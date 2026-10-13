@@ -101,7 +101,8 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
     });
     try {
       await storeRef.current.download(modelId, (next) => {
-        setProgress(next);
+        // Ignore late or stray progress once this download is no longer the one in flight.
+        if (inFlightRef.current === modelId) setProgress(next);
       });
       await refresh();
     } catch (err) {
