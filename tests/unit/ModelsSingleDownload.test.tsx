@@ -79,7 +79,7 @@ describe('ModelsTab single download', () => {
   it('locks the other Download buttons until the download finishes', async () => {
     const store = gatedStore();
     await startFirstDownload(store);
-    expect(screen.getAllByText('Available when the current download finishes').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Available after the current download.').length).toBeGreaterThan(0);
     await act(async () => { store.release(); });
     await expectAllEnabled();
     expect(store.download).toHaveBeenCalledTimes(1);
@@ -109,6 +109,13 @@ describe('ModelsTab single download', () => {
     const retry = await screen.findByRole('button', { name: 'Retry download' });
     await userEvent.click(downloadButtons()[0]);
     await waitFor(() => expect(retry).toBeDisabled());
+    // Visual order matches spoken order: error first, then the lock reason.
+    const [errorId, noteId] = retry.getAttribute('aria-describedby')!.split(' ');
+    const error = document.getElementById(errorId)!;
+    const note = document.getElementById(noteId)!;
+    expect(error).toHaveClass('stt-model-error');
+    expect(note).toHaveTextContent('Available after the current download.');
+    expect(error.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await act(async () => { store.release(); });
     await waitFor(() => expect(screen.getByRole('button', { name: 'Retry download' })).toBeEnabled());
     expect(store.download).toHaveBeenCalledTimes(2);

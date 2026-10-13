@@ -60,13 +60,13 @@ export function ModelCard({ model, selected, progress, failure, onSelect, onDown
           </button>
         )}
       </div>
-      {downloadLocked && !downloading && model.status !== 'available' && (
-        <p className="empty-note stt-model-lock-note" id={lockNoteId}>Available when the current download finishes</p>
-      )}
       {failed && (
         <p className="form-error stt-model-error" id={errorId} role="alert">
           {failure ?? 'Download failed. Nothing was saved.'}
         </p>
+      )}
+      {downloadLocked && !downloading && model.status !== 'available' && (
+        <p className="empty-note stt-model-lock-note" id={lockNoteId}>Available after the current download.</p>
       )}
       {selected && (
         <p className="empty-note stt-model-selected-note">
