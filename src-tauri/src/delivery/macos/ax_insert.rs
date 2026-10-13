@@ -4,7 +4,7 @@
 
 use super::ax::{ancestor_roles, copy_string_attr, set_ax_string, AXUIElementRef};
 use super::{focus_still_matches, host, typing, web_ax};
-use crate::delivery::decide::retry::{retry_eligible, retry_once, type_after_retry, RetryIo};
+use crate::delivery::decide::retry::{retry_eligible, reprobe_decision, retry_once, RetryIo};
 use crate::delivery::decide::{
     after_ax, is_web_content_field, value_confirms_insert, AfterAx, InsertReport,
 };
@@ -122,24 +122,20 @@ fn reprobe_after_retry(
     role: &str,
 ) -> AfterAx {
     let Ok((fresh, _)) = super::focused_ui_element("retry re-probe") else {
-        return retried.after;
+        return reprobe_decision(retried, false, false, false);
     };
     let still_ours = focus_still_matches(validated).is_ok();
-    let web_now = still_ours && {
+    if still_ours {
+        // Diagnostic only: Chrome can keep fields outside AXWebArea, so the
+        // decision no longer depends on this probe.
         let dom_now = copy_string_attr(fresh, "AXDOMIdentifier").is_some();
-        let anc_now = if dom_now {
-            Vec::new()
-        } else {
-            ancestor_roles(fresh)
-        };
-        is_web_content_field(role, dom_now, &anc_now)
-    };
-    super::ax::release(fresh as super::ax::CFTypeRef);
-    if !still_ours {
-        return retried.after;
+        let anc_now = if dom_now { Vec::new() } else { ancestor_roles(fresh) };
+        let web_now = is_web_content_field(role, dom_now, &anc_now);
+        eprintln!("[insert] retry re-probe web_field_now={web_now}");
     }
+    super::ax::release(fresh as super::ax::CFTypeRef);
     let typing_ok = validated.app_pid.is_some_and(host::unicode_typing_ok);
-    type_after_retry(retried, web_now, typing_ok)
+    reprobe_decision(retried, true, still_ours, typing_ok)
 }
 
 /// Diagnostic for Chrome/Electron insert failures (no field contents logged).

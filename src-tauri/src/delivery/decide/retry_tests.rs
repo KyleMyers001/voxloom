@@ -188,17 +188,17 @@ fn proven(after: AfterAx) -> RetryOutcome {
 fn types_after_retry_only_for_proven_web_field_in_typing_host() {
     let f = || AfterAx::Failed("AXSelectedText reported success but nothing changed".into());
     assert_eq!(
-        type_after_retry(proven(f()), true, true),
+        type_after_retry(proven(f()), true),
         AfterAx::TypeFallback
     );
-    assert_eq!(type_after_retry(proven(f()), true, false), f());
-    assert_eq!(type_after_retry(done(f()), true, true), f());
+    assert_eq!(type_after_retry(proven(f()), false), f());
+    assert_eq!(type_after_retry(done(f()), true), f());
     assert_eq!(
-        type_after_retry(done(AfterAx::Unverified), true, true),
+        type_after_retry(done(AfterAx::Unverified), true),
         AfterAx::Unverified
     );
     assert_eq!(
-        type_after_retry(done(AfterAx::Inserted), true, true),
+        type_after_retry(done(AfterAx::Inserted), true),
         AfterAx::Inserted
     );
 }
@@ -209,7 +209,7 @@ fn unreadable_value_before_retry_stays_failed_never_types() {
     let r = retry_once(&OK, "Hi ", "there", &mut f);
     assert!(!r.proven_unchanged);
     assert!(matches!(
-        type_after_retry(r, true, true),
+        type_after_retry(r, true),
         AfterAx::Failed(_)
     ));
     assert_eq!(f.writes, 0);
@@ -220,7 +220,7 @@ fn unchanged_after_ok_retry_write_is_proven_and_types() {
     let mut f = Fake::new(&[s("Hi ")]);
     let r = retry_once(&OK, "Hi ", "there", &mut f);
     assert!(r.proven_unchanged);
-    assert_eq!(type_after_retry(r, true, true), AfterAx::TypeFallback);
+    assert_eq!(type_after_retry(r, true), AfterAx::TypeFallback);
 }
 
 #[test]
@@ -230,20 +230,20 @@ fn retry_write_error_or_unreadable_readback_never_types() {
     let r = retry_once(&OK, "Hi ", "there", &mut f);
     assert!(!r.proven_unchanged);
     assert!(matches!(
-        type_after_retry(r, true, true),
+        type_after_retry(r, true),
         AfterAx::Failed(_)
     ));
     let mut f = Fake::new(&[s("Hi ")]).after_write(&[None]);
     let r = retry_once(&OK, "Hi ", "there", &mut f);
     assert!(!r.proven_unchanged);
-    assert_ne!(type_after_retry(r, true, true), AfterAx::TypeFallback);
+    assert_ne!(type_after_retry(r, true), AfterAx::TypeFallback);
 }
 
 #[test]
 fn chromium_host_types_when_proven_unchanged_even_if_not_web() {
     let f = AfterAx::Failed("AXSelectedText reported success but nothing changed".into());
     assert_eq!(
-        type_after_retry(proven(f), false, true),
+        type_after_retry(proven(f), true),
         AfterAx::TypeFallback
     );
 }
@@ -251,13 +251,30 @@ fn chromium_host_types_when_proven_unchanged_even_if_not_web() {
 #[test]
 fn chromium_host_not_proven_unchanged_stays_failed() {
     let f = || AfterAx::Failed("AXValue unreadable".into());
-    assert_eq!(type_after_retry(done(f()), false, true), f());
-    assert_eq!(type_after_retry(done(f()), true, true), f());
+    assert_eq!(type_after_retry(done(f()), true), f());
+    assert_eq!(type_after_retry(done(f()), true), f());
 }
 
 #[test]
 fn unrecognised_host_never_types_even_when_proven() {
     let f = || AfterAx::Failed("nothing changed".into());
-    assert_eq!(type_after_retry(proven(f()), true, false), f());
-    assert_eq!(type_after_retry(proven(f()), false, false), f());
+    assert_eq!(type_after_retry(proven(f()), false), f());
+    assert_eq!(type_after_retry(proven(f()), false), f());
+}
+
+#[test]
+fn reprobe_fails_closed_when_focus_lost_or_unreadable() {
+    let f = || AfterAx::Failed("nothing changed".into());
+    assert_eq!(reprobe_decision(proven(f()), false, true, true), f());
+    assert_eq!(reprobe_decision(proven(f()), true, false, true), f());
+    assert_eq!(reprobe_decision(proven(f()), false, false, true), f());
+}
+
+#[test]
+fn reprobe_types_only_when_proven_unchanged_in_typing_host() {
+    let f = || AfterAx::Failed("nothing changed".into());
+    assert_eq!(reprobe_decision(proven(f()), true, true, true), AfterAx::TypeFallback);
+    assert_eq!(reprobe_decision(proven(f()), true, true, false), f());
+    assert_eq!(reprobe_decision(done(f()), true, true, true), f());
+    assert_eq!(reprobe_decision(done(AfterAx::Inserted), true, true, true), AfterAx::Inserted);
 }
