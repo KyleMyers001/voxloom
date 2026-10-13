@@ -44,9 +44,9 @@
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
   /* BUS-41 type scale: windowed value at <=1280px wide, growing linearly to
      the fullscreen value at >=1920px (TYPE-SCALE.md). The HUD keeps its own sizes.
-     Media queries + calc(), no clamp(): clamp() needs Safari 13.1 (macOS
-     10.15.4), and the app supports 10.15.0. calc() with `*`/`/` by a number
-     works there (calc() is Safari 7+, nested calc() 11+; MDN browser-compat-data). */
+     Media queries + calc(), no clamp() (project rule). The app requires macOS
+     13.1+ (Safari 16.2 WebKit, BUS-53), where calc() with `*`/`/` by a number
+     works (calc() is Safari 7+, nested calc() 11+; MDN browser-compat-data). */
   --fsb-micro: 11px;
   --fsb-badge: 11.5px;
   --fsb-label: 12px;
@@ -120,7 +120,7 @@ body {
 
 /* BUS-41 PR 3 Text size (TYPE-SCALE.md § Optional): every --fs-* is the base
    --fsb-* times --ts, floored at 11px so Small never drops below 11px. max()
-   is Safari 11.1+; calc() number multiplication works on 10.15.0 (no clamp()).
+   is Safari 11.1+; calc() number multiplication works on macOS 13.1+ (no clamp()).
    Declared once on :root; the --fsb-* media queries below re-resolve it. */
 :root {
   --ts: 1;
