@@ -168,6 +168,8 @@ describe('BUS-48 contrast tokens', () => {
     expect(css('base.css')).toMatch(/input,\nselect,\ntextarea \{[^}]*border: 1px solid var\(--ctl-line\)/);
     expect(css('components.css')).toMatch(/\.btn \{[^}]*border-color: var\(--ctl-line\)/);
     expect(css('ui-controls.css')).toMatch(/\.search \{[^}]*border: 1px solid var\(--ctl-line\)/);
+    expect(css('shell.css')).toMatch(/\.tb-settings\[aria-current="page"\] \{ box-shadow: inset 0 -2px 0 var\(--sel-edge\); \}/);
+    expect(css('shell.css')).toMatch(/\.tb-help \{[^}]*border: 1px solid var\(--ctl-line\)/);
   });
 
   it('marks selected nav, settings tab and segment with --sel-edge', () => {
