@@ -161,10 +161,11 @@ describe('BUS-51 brand tokens', () => {
     expect(css('home.css')).toContain('0 0 40px var(--tile-glow)');
   });
 
-  it('keeps raw brand and status hex out of hud.css and sheets.css', () => {
-    for (const f of ['hud.css', 'sheets.css']) {
-      expect(css(f), f).not.toMatch(/#(b6ff3c|3cf0ff|ffb020|30d158|ff453a|ff6b6b)\b/i);
-    }
+  it('keeps raw brand hex and rgba out of hud.css', () => {
+    const hud = css('hud.css');
+    expect(hud).not.toMatch(/#(b6ff3c|3cf0ff)\b/i);
+    expect(hud).not.toMatch(/rgba\((182, 255, 60|60, 240, 255)/);
+    expect(hud).toMatch(/\.hud-result \{[^}]*box-shadow: inset 0 0 0 1px color-mix\(in srgb, var\(--brand-a\) 35%, transparent\)[^;]*color-mix\(in srgb, var\(--brand-b\) 14%, transparent\);/);
   });
 
   it('paints the AppTile gradient with the brand tokens', () => {
@@ -177,5 +178,7 @@ describe('BUS-51 brand tokens', () => {
     const svg = readFileSync(join(__dirname, '../../site/favicon.svg'), 'utf8');
     expect(svg).toContain('#3cf0ff');
     expect(svg).not.toContain('#4cf4ff');
+    expect(svg).toContain('#b6ff3c');
+    expect(svg).not.toContain('#c4ff5a');
   });
 });

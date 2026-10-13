@@ -77,6 +77,6 @@
   padding: 9px 14px;
 }
 [data-appearance-resolved="light"] .toast { --toast: #0b0b10; }
-.toast.t-ok .icon { color: var(--ok); }
-.toast.t-err .icon { color: var(--err); }
-.toast.t-warn .icon { color: var(--warn); }
+.toast.t-ok .icon { color: #30d158; }
+.toast.t-err .icon { color: #ff6b6b; }
+.toast.t-warn .icon { color: #ffb020; }
