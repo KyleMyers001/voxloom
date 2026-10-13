@@ -9,6 +9,7 @@ mod ax;
 mod ax_insert;
 mod focus;
 mod focus_fallback;
+mod focus_walk;
 mod host;
 mod registry;
 mod typing;
@@ -43,7 +44,9 @@ pub fn validate_target(intended: TargetSnapshotDto) -> Result<TargetSnapshotDto,
 /// per-chunk check would abort typing there. Still fails closed: the fallback
 /// never returns Voxloom's own pid, and the element must re-validate against
 /// `intended` (same app, same element, insertable) before anything is posted.
-/// Its <=150 ms retry only runs off the main thread: every caller is reached
+/// The first fallback of a delivery may take ~0.5 s (activation + retry +
+/// walk); later chunks reuse the warm, re-verified element (one cheap AX
+/// round-trip set). Only runs off the main thread: every caller is reached
 /// from `#[tauri::command(async)]` delivery commands.
 fn focus_still_matches(intended: &TargetSnapshotDto) -> Result<(), String> {
     let (element, app_name) =
