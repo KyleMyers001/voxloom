@@ -51,7 +51,9 @@
 @media (max-width: 909px) {
   .brand__label { display: none; }
   .brand__caps { display: flex; margin-top: 3px; }
-  .brand__caps .kbd { font-size: var(--fs-micro); min-width: 18px; padding: 2px 4px; }
+  .brand__caps .key-combo__caps { flex-wrap: wrap; gap: 2px; } /* Large text wraps instead of spilling */
+  /* Tight caps: 'Ctrl Shift Space' fits the 101px box at 760 on Win/Linux. */
+  .brand__caps .kbd { font-size: var(--fs-micro); min-width: 16px; padding: 1px 3px; }
 }
 
 /* Line length: running text 72ch, History transcripts 78ch. */

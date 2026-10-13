@@ -17,7 +17,7 @@ import { TitleBar } from './shell/TitleBar';
 import { useAppKeys } from './useAppKeys';
 import { useDevSession } from './useDevSession';
 import { toGestureDogfoodBridge, useShortcutGestures } from './useShortcutGestures';
-import { useTheme } from './useTheme';
+import { useTextSize, useTheme } from './useTheme';
 import { useToastMessages } from './useToastMessages';
 
 export function App() {
@@ -26,6 +26,7 @@ export function App() {
   const [shortcutOpen, setShortcutOpen] = useState(false);
   const modalOpener = useRef<HTMLElement | null>(null);
   useTheme(state.settings.appearance);
+  useTextSize(state.settings.textSize);
   const { toast, toastTone, announce, announceError } = useToastMessages([
     state.historyError, state.settingsError, state.dictionaryError,
   ]);

@@ -62,6 +62,9 @@
   .settings-rows .frow > :not(.frow__label) { grid-column: 2; grid-row: 1; }
 }
 .settings-rows .frow:first-child { border-top: 0; }
+/* Text size row follows the Theme fieldset: keep its hairline and space it off the swatches. */
+.settings-rows--after-fieldset { margin-top: var(--s-6); }
+.settings-rows--after-fieldset .frow:first-child { border-top: 1px solid var(--line); }
 .frow__control { align-items: center; display: flex; flex-wrap: wrap; gap: var(--s-4); justify-content: flex-start; }
 .settings-rows .frow > :not(.frow__label) { justify-self: start; }
 .frow__control input:not([type]) { max-width: 190px; }
