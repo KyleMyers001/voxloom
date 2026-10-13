@@ -34,7 +34,7 @@ export function ModelCard({ model, selected, progress, failure, onSelect, onDown
         <input checked={selected} name="stt-model" onChange={onSelect} type="radio" value={model.id} />
         <span>
           <strong>{model.label}</strong>
-          <span className="stt-model-id"><span>{model.id}</span> · {mb(model.sizeBytes)}</span>
+          <span className="stt-model-id"><span>{model.id}</span> · <span className="stt-model-size">{mb(model.sizeBytes)}</span></span>
         </span>
       </label>
       <Badge status={status} />
@@ -49,7 +49,7 @@ export function ModelCard({ model, selected, progress, failure, onSelect, onDown
             <button className="btn" onClick={onCancel} type="button">Cancel download</button>
           </>
         ) : model.status === 'available' ? null : failed ? (
-          <button aria-describedby={downloadLocked ? `${errorId} ${lockNoteId}` : errorId} className="btn primary" disabled={downloadLocked} onClick={onDownload} type="button">
+          <button aria-describedby={downloadLocked ? `${errorId} ${lockNoteId}` : errorId} className={downloadLocked ? 'btn' : 'btn primary'} disabled={downloadLocked} onClick={onDownload} type="button">
             <Icon name="retry" size={14} />
             Retry download
           </button>

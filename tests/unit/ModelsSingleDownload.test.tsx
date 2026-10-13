@@ -109,6 +109,8 @@ describe('ModelsTab single download', () => {
     const retry = await screen.findByRole('button', { name: 'Retry download' });
     await userEvent.click(downloadButtons()[0]);
     await waitFor(() => expect(retry).toBeDisabled());
+    // Locked Retry uses the same plain .btn disabled look as a locked Download.
+    expect(retry).not.toHaveClass('primary');
     // Visual order matches spoken order: error first, then the lock reason.
     const [errorId, noteId] = retry.getAttribute('aria-describedby')!.split(' ');
     const error = document.getElementById(errorId)!;
