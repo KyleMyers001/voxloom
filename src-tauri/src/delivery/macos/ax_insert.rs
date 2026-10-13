@@ -65,17 +65,23 @@ pub fn insert_selected(
             validated,
             text,
         };
-        outcome = retry_once(&ax, &before, text, &mut io);
+        let retried = retry_once(&ax, &before, text, &mut io);
         // Re-probe web identity now that web AX is re-enabled: a dropped tree
         // hid it from the first may_type check (Chrome: "AXSelectedText
         // reported success but nothing changed").
-        if matches!(outcome, AfterAx::Failed(_)) && !may_type {
+        outcome = if matches!(retried.after, AfterAx::Failed(_)) && !may_type {
             let dom_now = copy_string_attr(element, "AXDOMIdentifier").is_some();
-            let anc_now = if dom_now { Vec::new() } else { ancestor_roles(element) };
+            let anc_now = if dom_now {
+                Vec::new()
+            } else {
+                ancestor_roles(element)
+            };
             let web_now = is_web_content_field(&role, dom_now, &anc_now);
             let typing_ok = validated.app_pid.is_some_and(host::unicode_typing_ok);
-            outcome = type_after_retry(&ax, outcome, web_now, typing_ok);
-        }
+            type_after_retry(retried, web_now, typing_ok)
+        } else {
+            retried.after
+        };
     }
     match outcome {
         AfterAx::Inserted => Ok(InsertReport::default()),
