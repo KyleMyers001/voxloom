@@ -29,10 +29,13 @@ let last: ShortcutBoundPayload | null = null;
 
 const emitEvent = (name: string, payload: unknown) => {
   if (!isTauri()) return;
-  // Best-effort: a lost event only leaves the recorder on "Setting…".
+  // A lost event leaves the recorder on "Setting…", so log it instead of
+  // hiding it (e.g. a capability missing core:event:allow-emit).
   void import('@tauri-apps/api/event')
     .then(({ emit }) => emit(name, payload))
-    .catch(() => {});
+    .catch((err: unknown) => {
+      console.error(`[shortcut] emit ${name} failed:`, err);
+    });
 };
 
 export function emitShortcutBound(payload: ShortcutBoundPayload): void {
