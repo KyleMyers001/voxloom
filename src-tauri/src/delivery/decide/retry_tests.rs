@@ -158,3 +158,14 @@ fn nbsp_readback_counts_as_unchanged_and_as_inserted() {
     let mut f = Fake::new(&[s("Hi\u{a0}")]).after_write(&[s("Hi\u{a0}there")]);
     assert_eq!(retry_once(&OK, "Hi ", "there", &mut f), AfterAx::Inserted);
 }
+
+#[test]
+fn types_after_retry_only_for_proven_web_field_in_typing_host() {
+    let f = || AfterAx::Failed("AXSelectedText reported success but nothing changed".into());
+    assert_eq!(type_after_retry(&Ok(()), f(), true, true), AfterAx::TypeFallback);
+    assert_eq!(type_after_retry(&Ok(()), f(), false, true), f());
+    assert_eq!(type_after_retry(&Ok(()), f(), true, false), f());
+    assert_eq!(type_after_retry(&Err("e".into()), f(), true, true), f());
+    assert_eq!(type_after_retry(&Ok(()), AfterAx::Unverified, true, true), AfterAx::Unverified);
+    assert_eq!(type_after_retry(&Ok(()), AfterAx::Inserted, true, true), AfterAx::Inserted);
+}

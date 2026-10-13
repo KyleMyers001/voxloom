@@ -71,6 +71,25 @@ pub fn retry_once(
     after_ax(false, result, before, last.as_deref(), text)
 }
 
+/// After the retry re-enabled web AX, the tree is complete again, so a field
+/// whose web identity was invisible to the first `may_type` check (dropped
+/// tree: no AXDOMIdentifier, no AXWebArea ancestor) can now be proven to be
+/// web content. Only an unchanged field with an Ok write (`Failed` after
+/// `retry_once`, which never writes after an AX error) may then be typed.
+pub fn type_after_retry(
+    first_write: &Result<(), String>,
+    outcome: AfterAx,
+    web_field_now: bool,
+    typing_ok: bool,
+) -> AfterAx {
+    match outcome {
+        AfterAx::Failed(_) if first_write.is_ok() && web_field_now && typing_ok => {
+            AfterAx::TypeFallback
+        }
+        other => other,
+    }
+}
+
 #[cfg(test)]
 #[path = "retry_tests.rs"]
 mod tests;
