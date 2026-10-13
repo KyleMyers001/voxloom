@@ -13,16 +13,20 @@ type Props = {
   onSelect: () => void;
   onDownload: () => void;
   onCancel: () => void;
+  /** BUS-52: another model is downloading; only one download runs at a time. */
+  downloadLocked?: boolean;
 };
 
 /** One model card (M3–M5, M7): radio + label, id · size, status badge, and its action. */
-export function ModelCard({ model, selected, progress, failure, onSelect, onDownload, onCancel }: Props) {
+export function ModelCard({ model, selected, progress, failure, onSelect, onDownload, onCancel, downloadLocked = false }: Props) {
   const downloading = model.status === 'downloading' || progress !== null;
   const failed = !downloading && model.status !== 'available' && (failure !== undefined || model.status === 'failed');
   const status: BadgeStatus = downloading ? 'downloading' : failed ? 'failed' : model.status === 'available' ? 'available' : 'missing';
   const errorId = `stt-model-error-${model.id}`;
   const pct = progress ? Math.round(progress.ratio * 100) : 0;
   const total = progress?.bytesTotal || model.sizeBytes;
+  const lockNoteId = `stt-model-lock-${model.id}`;
+  const lock = downloadLocked ? { 'aria-describedby': lockNoteId, disabled: true } : {};
 
   return (
     <li className="stt-model-row" data-selected={selected || undefined}>
@@ -45,17 +49,20 @@ export function ModelCard({ model, selected, progress, failure, onSelect, onDown
             <button className="btn" onClick={onCancel} type="button">Cancel download</button>
           </>
         ) : model.status === 'available' ? null : failed ? (
-          <button aria-describedby={errorId} className="btn primary" onClick={onDownload} type="button">
+          <button aria-describedby={downloadLocked ? `${errorId} ${lockNoteId}` : errorId} className="btn primary" disabled={downloadLocked} onClick={onDownload} type="button">
             <Icon name="retry" size={14} />
             Retry download
           </button>
         ) : (
-          <button className="btn" onClick={onDownload} type="button">
+          <button className="btn" onClick={onDownload} type="button" {...lock}>
             <Icon name="download" size={14} />
             Download
           </button>
         )}
       </div>
+      {downloadLocked && !downloading && model.status !== 'available' && (
+        <p className="empty-note stt-model-lock-note" id={lockNoteId}>Available when the current download finishes</p>
+      )}
       {failed && (
         <p className="form-error stt-model-error" id={errorId} role="alert">
           {failure ?? 'Download failed. Nothing was saved.'}
