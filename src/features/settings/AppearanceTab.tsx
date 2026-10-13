@@ -35,18 +35,22 @@ export function AppearanceTab() {
         </label>
       ))}
     </fieldset>
-    <div className="frow">
-      <span className="frow__label">
-        <span>Text size</span>
-        <small className="frow__help">Doesn't change the recording indicator.</small>
-      </span>
-      <SegmentedControl
-        label="Text size"
-        onChange={(value) => settings.update({ key: 'textSize', value })}
-        options={textSizeOptions}
-        size="sm"
-        value={state.settings.textSize}
-      />
+    <div className="settings-rows settings-rows--after-fieldset">
+      <div className="frow">
+        <span className="frow__label">
+          <label id="settings-text-size-label">Text size</label>
+          <small className="frow__help" id="settings-text-size-help">Doesn't change the recording indicator.</small>
+        </span>
+        <SegmentedControl
+          describedBy="settings-text-size-help"
+          label="Text size"
+          labelledBy="settings-text-size-label"
+          onChange={(value) => settings.update({ key: 'textSize', value })}
+          options={textSizeOptions}
+          size="sm"
+          value={state.settings.textSize}
+        />
+      </div>
     </div>
     </>
   );

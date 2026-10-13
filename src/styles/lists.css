@@ -102,5 +102,6 @@
   color: var(--muted);
   font-family: var(--mono);
   font-size: var(--fs-mono);
+  white-space: nowrap;
 }
 

@@ -9,13 +9,16 @@ type Props<T extends string> = {
   onChange: (value: T) => void;
   size?: 'sm' | 'md';
   disabled?: boolean;
+  /** Ids of a visible label / help text; aria-labelledby wins over label when given. */
+  labelledBy?: string;
+  describedBy?: string;
 };
 
 const step: Record<string, number> = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 };
 
 /** Radiogroup with roving tabindex; arrows, Home and End move and select. */
 export function SegmentedControl<T extends string>(
-  { label, options, value, onChange, size = 'md', disabled = false }: Props<T>,
+  { label, options, value, onChange, size = 'md', disabled = false, labelledBy, describedBy }: Props<T>,
 ) {
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   // -1 when value isn't an option: nothing is checked, but the first option stays focusable.
@@ -38,8 +41,10 @@ export function SegmentedControl<T extends string>(
 
   return (
     <div
+      aria-describedby={describedBy}
       aria-disabled={disabled || undefined}
-      aria-label={label}
+      aria-label={labelledBy ? undefined : label}
+      aria-labelledby={labelledBy}
       className={size === 'sm' ? 'seg seg--sm' : 'seg'}
       onKeyDown={disabled ? undefined : onKeyDown}
       role="radiogroup"
