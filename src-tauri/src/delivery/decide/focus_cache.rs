@@ -2,9 +2,11 @@
 //! fallback in a delivery may activate web AX, retry (~0.5 s) and walk the
 //! window; per-chunk typing checks must not repeat that. While warm (same pid,
 //! recently resolved), re-check the cached element first and skip activation
-//! and the long retry. Fail closed: the cached element is only reused if it is
-//! still AXFocused, owned by the same frontmost pid; the caller then still
-//! re-validates it against the intended snapshot.
+//! and the long retry. The cache is cleared when the delivery ends or fails
+//! (TTL is only a backstop). Fail closed: the cached element is only reused
+//! if it is still AXFocused, owned by the same frontmost pid, and in the app's
+//! current AXFocusedWindow; the caller then re-validates it against the
+//! intended snapshot.
 
 /// A delivery (validation + all chunks) finishes well within this.
 pub const WARM_TTL_MS: i64 = 5_000;
@@ -39,9 +41,16 @@ pub fn plan(warm: Option<Warm>, pid: i32, now_ms: i64) -> Plan {
 }
 
 /// Cached element is reusable only if still focused and owned by `pid`,
-/// which must still be frontmost.
-pub fn cached_ok(focused: bool, owner: Option<i32>, front: Option<i32>, pid: i32) -> bool {
-    focused && owner == Some(pid) && front == Some(pid)
+/// which must still be frontmost, and its window is the app's focused window
+/// (`same_window`: None = unreadable, treated as a miss).
+pub fn cached_ok(
+    focused: bool,
+    owner: Option<i32>,
+    front: Option<i32>,
+    pid: i32,
+    same_window: Option<bool>,
+) -> bool {
+    focused && owner == Some(pid) && front == Some(pid) && same_window == Some(true)
 }
 
 #[cfg(test)]
@@ -79,11 +88,18 @@ mod tests {
 
     #[test]
     fn cached_element_needs_focus_owner_and_frontmost() {
-        assert!(cached_ok(true, Some(42), Some(42), 42));
-        assert!(!cached_ok(false, Some(42), Some(42), 42));
-        assert!(!cached_ok(true, Some(7), Some(42), 42));
-        assert!(!cached_ok(true, None, Some(42), 42));
-        assert!(!cached_ok(true, Some(42), Some(7), 42));
-        assert!(!cached_ok(true, Some(42), None, 42));
+        assert!(cached_ok(true, Some(42), Some(42), 42, Some(true)));
+        assert!(!cached_ok(false, Some(42), Some(42), 42, Some(true)));
+        assert!(!cached_ok(true, Some(7), Some(42), 42, Some(true)));
+        assert!(!cached_ok(true, None, Some(42), 42, Some(true)));
+        assert!(!cached_ok(true, Some(42), Some(7), 42, Some(true)));
+        assert!(!cached_ok(true, Some(42), None, 42, Some(true)));
+    }
+
+    #[test]
+    fn cached_element_must_be_in_focused_window() {
+        assert!(cached_ok(true, Some(42), Some(42), 42, Some(true)));
+        assert!(!cached_ok(true, Some(42), Some(42), 42, Some(false)));
+        assert!(!cached_ok(true, Some(42), Some(42), 42, None));
     }
 }

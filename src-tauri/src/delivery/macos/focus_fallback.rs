@@ -3,18 +3,18 @@
 //! Cold (first lookup of a delivery): set the host's web-AX activation
 //! attribute (allowlisted hosts only), retry the app's AXFocusedUIElement
 //! (≤ ~0.5 s), then walk the focused/main window. Warm (same pid, within
-//! `WARM_TTL_MS`): re-check the cached element, then one read and the walk.
+//! `WARM_TTL_MS`, cleared when a delivery ends): re-check the cached element, then one read and the walk.
 //! Policy: `decide::{focus_fallback, focus_walk, focus_cache}`. Only reached
 //! from async Tauri commands, never the main thread.
 
-use std::sync::Mutex;
 use std::time::Instant;
 
 use super::ax::*;
 use super::focus::now_ms;
 use super::focus_walk::{set_timeout, Live, Node};
+use super::focus_warm::{cached, remember, warm_state};
 use super::host;
-use crate::delivery::decide::focus_cache::{cached_ok, plan, Warm};
+use crate::delivery::decide::focus_cache::plan;
 use crate::delivery::decide::focus_fallback::{
     accept_element, fallback_pid, retry_schedule, with_fallback_error, with_fallback_trace,
     FallbackError, Step,
@@ -23,53 +23,12 @@ use crate::delivery::decide::focus_walk::{find_focused, AxTree, WalkOutcome};
 
 type Focus = Result<(AXUIElementRef, Option<String>), String>;
 
-/// Warm state plus the retained element it resolved to (as usize: CF refs
-/// are thread-safe to retain/release; the AX element is immutable).
-static WARM: Mutex<Option<(Warm, usize)>> = Mutex::new(None);
-
-fn remember(pid: i32, el: AXUIElementRef) {
-    let mut w = WARM.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((_, old)) = w.take() {
-        release(old as CFTypeRef);
-    }
-    let kept = unsafe { CFRetain(el as CFTypeRef) } as usize;
-    *w = Some((
-        Warm {
-            pid,
-            at_ms: now_ms(),
-        },
-        kept,
-    ));
-}
-
-/// Cached element if warm for `pid` and still focused there (+1 retain).
-fn cached(pid: i32) -> Option<AXUIElementRef> {
-    let w = WARM.lock().unwrap_or_else(|e| e.into_inner());
-    let (warm, el) = (*w)?;
-    if !plan(Some(warm), pid, now_ms()).try_cached {
-        return None;
-    }
-    let node = Node(unsafe { CFRetain(el as CFTypeRef) });
-    let mut live = Live(Instant::now());
-    let ok = cached_ok(
-        live.is_focused(&node),
-        live.pid(&node),
-        host::frontmost_pid(),
-        pid,
-    );
-    ok.then(|| node.into_raw())
-}
-
 /// Never Voxloom's own pid; every failure is fail-closed with a full trace.
 pub fn frontmost_app_focus(reason: &str) -> Focus {
     let front = host::frontmost_pid();
     let own = std::process::id() as i32;
     let pid = fallback_pid(front, own).map_err(|e| with_fallback_error(reason, front, &e))?;
-    let warm = WARM
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .map(|(w, _)| w);
-    let plan = plan(warm, pid, now_ms());
+    let plan = plan(warm_state(), pid, now_ms());
     let app = unsafe { AXUIElementCreateApplication(pid) };
     if app.is_null() {
         return Err(with_fallback_trace(reason, front, &[]));
@@ -77,7 +36,7 @@ pub fn frontmost_app_focus(reason: &str) -> Focus {
     let app = Node(app as CFTypeRef);
     set_timeout(app.0);
     if plan.try_cached {
-        if let Some(el) = cached(pid) {
+        if let Some(el) = cached(pid, app.0) {
             return found(pid, el, &app);
         }
     }
@@ -209,5 +168,8 @@ fn copy_focus_of(element: AXUIElementRef) -> (AXError, CFTypeRef) {
     let mut focused: CFTypeRef = std::ptr::null();
     let err = unsafe { AXUIElementCopyAttributeValue(element, name, &mut focused) };
     release(name);
+    if !focused.is_null() {
+        set_timeout(focused); // 0.25 s, also for later cached reads
+    }
     (err, focused)
 }
