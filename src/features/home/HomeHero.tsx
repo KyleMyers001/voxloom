@@ -2,7 +2,7 @@ import { useApp } from '../../app/AppContext';
 import { AppTile } from '../../components/AppTile';
 import { KeyCombo } from '../../components/KeyCombo';
 import { useShortcutActive } from '../../services/shortcut/activeShortcut';
-import { NO_SHORTCUT } from '../settings/shortcutCopy';
+import { NO_SHORTCUT_HEADING, NO_SHORTCUT_HINT } from '../settings/shortcutCopy';
 import { SegmentedControl } from '../../components/SegmentedControl';
 import type { WritingStyle } from '../../domain/types';
 
@@ -23,8 +23,9 @@ export function HomeHero({ isNative }: { isNative: boolean }) {
         <h1 id="home-title">
           {active
             ? <>Hold <KeyCombo combo={state.settings.shortcut} /> to dictate</>
-            : NO_SHORTCUT}
+            : NO_SHORTCUT_HEADING}
         </h1>
+        {!active && <p className="home-hero__none">{NO_SHORTCUT_HINT}</p>}
         <p>Speak in any app. Release to type. Transcribed locally with Whisper.</p>
         <div className="home-hero__style">
           <span className="fine">

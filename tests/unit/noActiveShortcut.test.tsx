@@ -3,7 +3,7 @@ import { screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Sidebar } from '../../src/app/shell/Sidebar';
 import { HomeHero } from '../../src/features/home/HomeHero';
-import { NO_SHORTCUT } from '../../src/features/settings/shortcutCopy';
+import { NO_SHORTCUT, NO_SHORTCUT_HINT } from '../../src/features/settings/shortcutCopy';
 import { resetActiveShortcut, setActiveShortcut } from '../../src/services/shortcut/activeShortcut';
 import { renderWithApp } from './testUtils';
 
@@ -15,7 +15,9 @@ describe('no active shortcut in the main window', () => {
   it('Home says so instead of "Hold …"', () => {
     setActiveShortcut(null);
     renderWithApp(<HomeHero isNative />);
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(NO_SHORTCUT);
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/^No shortcut is active$/);
+    expect(screen.getByText('Record one in Settings.')).toBeInTheDocument();
+    expect(NO_SHORTCUT_HINT).toBe('Record one in Settings.');
     expect(screen.queryByText(/^Hold/)).toBeNull();
   });
 
@@ -29,7 +31,8 @@ describe('no active shortcut in the main window', () => {
     renderWithApp(
       <Sidebar onNavigate={vi.fn()} onReset={vi.fn()} onScenario={vi.fn()} screen="home" shortcut={DEFAULT} status="Ready" />,
     );
-    expect(screen.getAllByText(new RegExp(NO_SHORTCUT.replace('.', '\\.'))).length).toBeGreaterThan(0);
+    expect(NO_SHORTCUT).toBe('No shortcut is active. Record one in Settings.');
+    expect(screen.getAllByText(NO_SHORTCUT).length).toBeGreaterThan(0);
     expect(screen.queryByText(/Hold the shortcut/)).toBeNull();
   });
 });

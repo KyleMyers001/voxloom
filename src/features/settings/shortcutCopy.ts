@@ -12,7 +12,9 @@ export const CANCELED = 'Canceled. Shortcut unchanged.';
 /** Marks the saved combo while the OS holds nothing (it is retried next launch). */
 export const NOT_ACTIVE = 'not active';
 /** Home and sidebar when no shortcut is registered. */
-export const NO_SHORTCUT = 'No shortcut active. Set one in Settings.';
+export const NO_SHORTCUT_HEADING = 'No shortcut is active';
+export const NO_SHORTCUT_HINT = 'Record one in Settings.';
+export const NO_SHORTCUT = `${NO_SHORTCUT_HEADING}. ${NO_SHORTCUT_HINT}`;
 
 const mods = (mac: boolean) => (mac ? '⌃, ⌥ or ⌘' : 'Ctrl, Alt or Super');
 const L = (combo: string, mac: boolean) => comboLabel(combo, mac);
