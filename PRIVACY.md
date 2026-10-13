@@ -1,0 +1,62 @@
+# Privacy and local data
+
+Voxloom transcribes on your Mac. Nothing you dictate is sent to a remote
+service. The only network traffic is a Whisper model download, and only when
+you start it (see `src-tauri/src/stt/catalog.rs` for the exact URLs).
+
+## Transcripts are stored as plain text
+
+The desktop app keeps its data as **unencrypted JSON** in its app data folder:
+
+```text
+~/Library/Application Support/com.voxloom.prototype/
+├── history.json      transcript text, status, duration, model, timestamp, delivery outcome
+├── dictionary.json   your custom words
+├── settings.json     preferences
+└── models/           downloaded Whisper model files (*.bin)
+```
+
+`history.json` is not encrypted. Any process running as your macOS user, and
+anything that copies your home folder (Time Machine, other backup or sync
+tools), can read your transcripts. FileVault protects it only while the Mac is
+off or locked. Recorded audio is never saved.
+
+## Deleting transcripts
+
+- **One transcript:** History → the row's **Delete transcript** (trash) button.
+- **All transcripts, and stop keeping them:** Settings → Privacy →
+  **Transcript retention → Off**. `history.json` is rewritten with no records
+  right away, and new dictations are not stored. Home still shows the last
+  transcript for manual recovery (in memory only).
+- **Keep only recent ones:** **30 days** drops older records on every save
+  and on launch. **Forever** keeps everything until you delete it.
+- **Everything, manually:** quit Voxloom and delete the folder above (or just
+  `history.json`). A missing file is treated as empty history on next launch.
+
+Deleting a file does not remove copies already captured by backups.
+
+## Clipboard
+
+If clipboard fallback is on and direct insertion isn't safe, the transcript
+is copied to the system clipboard, where other apps and clipboard managers can
+read it. Turn fallback off in Settings if that matters to you.
+
+## macOS private API (`macOSPrivateApi`)
+
+`src-tauri/tauri.conf.json` sets `app.macOSPrivateApi: true` (and Cargo
+enables Tauri's `macos-private-api` feature).
+
+- **Why:** the floating dictation waveform (`src-tauri/src/overlay.rs`) is a
+  transparent, non-focusable window. On macOS, Tauri can only make a webview
+  window transparent through non-public AppKit/WebKit APIs, which this flag
+  turns on. It is still needed while the overlay is transparent.
+- **Implications:**
+  - Voxloom **can't be distributed through the Mac App Store**; App Review
+    rejects apps that use private APIs. Direct download (Developer ID signed
+    and notarized) is unaffected.
+  - Private APIs can change or break in a macOS update without notice, so the
+    overlay's transparency should be re-checked on each new macOS release.
+  - It does not grant extra permissions. Microphone and Accessibility access
+    still go through the normal macOS privacy prompts.
+- **To drop it:** make the overlay an opaque window (or a native panel), then
+  remove the flag and the Cargo feature.
