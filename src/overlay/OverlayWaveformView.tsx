@@ -37,8 +37,8 @@ const isResult = (w: OverlayWaveform) => w.startsWith('result-');
 
 /**
  * Non-focusable desktop HUD (SPEC § HUD behavior rules). Listening: waveform
- * only. Transcribing: Option A (pulsing, shimmering lime→cyan bar row; slow
- * breathe under Reduce Motion). Results: a brief Copied / maybe-copied / error.
+ * only. Transcribing: Option A (pulsing, shimmering lime→cyan bar row; still
+ * under Reduce Motion). Results: a brief Copied / maybe-copied / error.
  * One permanent role=status node announces "Transcribing" and results.
  */
 export function OverlayWaveformView({ levels, waveform, result = null, mac = isMacPlatform() }: Props) {
