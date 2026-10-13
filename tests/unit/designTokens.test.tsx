@@ -151,3 +151,31 @@ describe('Dictionary rows take the app focus ring (QA)', () => {
     expect(readFileSync('src/styles/base.css', 'utf8')).toMatch(/\.term-row:focus-visible,[^{]*\{\s*outline: 3px solid var\(--focus\)/);
   });
 });
+
+describe('BUS-51 brand tokens', () => {
+  const tokens = css('tokens.css');
+  it('defines --brand-a/--brand-b and builds --brand, --tile-glow and --hud-shadow from them', () => {
+    expect(tokens).toMatch(/:root \{[^}]*--brand-a: #b6ff3c;[^}]*--brand-b: #3cf0ff;[^}]*--brand: linear-gradient\(90deg, var\(--brand-a\), var\(--brand-b\)\);/);
+    expect(tokens).toContain('--tile-glow: color-mix(in srgb, var(--brand-a) 25%, transparent);');
+    expect(tokens).toMatch(/--hud-shadow:[^;]*color-mix\(in srgb, var\(--brand-a\) 35%, transparent\)[^;]*color-mix\(in srgb, var\(--brand-b\) 18%, transparent\);/);
+    expect(css('home.css')).toContain('0 0 40px var(--tile-glow)');
+  });
+
+  it('keeps raw brand and status hex out of hud.css and sheets.css', () => {
+    for (const f of ['hud.css', 'sheets.css']) {
+      expect(css(f), f).not.toMatch(/#(b6ff3c|3cf0ff|ffb020|30d158|ff453a|ff6b6b)\b/i);
+    }
+  });
+
+  it('paints the AppTile gradient with the brand tokens', () => {
+    const { getByTestId } = render(<AppTile />);
+    const stops = [...getByTestId('app-tile').querySelectorAll('stop')].map((s) => s.getAttribute('style'));
+    expect(stops).toEqual(['stop-color: var(--brand-a);', 'stop-color: var(--brand-b);']);
+  });
+
+  it('uses the brand cyan in the site favicon', () => {
+    const svg = readFileSync(join(__dirname, '../../site/favicon.svg'), 'utf8');
+    expect(svg).toContain('#3cf0ff');
+    expect(svg).not.toContain('#4cf4ff');
+  });
+});

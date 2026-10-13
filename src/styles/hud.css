@@ -1,6 +1,6 @@
 /* HUD (UI PR 8, SPEC § HUD behavior rules; mocks hud.html, hud-transcribing.html).
    The HUD is the same dark pill on any wallpaper, so it doesn't follow the app theme. */
-.recording--overlay[data-waveform="processing"] { border-color: color-mix(in srgb, #3cf0ff 45%, transparent); }
+.recording--overlay[data-waveform="processing"] { border-color: color-mix(in srgb, var(--brand-b) 45%, transparent); }
 
 /* Option A: the bars settle into an even row; the gradient shimmers and pulses (1.6 s). */
 /* Listening and transcribing share one 118px row in a 136px pill, so nothing jumps. */
@@ -21,7 +21,7 @@
 /* Shimmer is a compositor-only transform: a 2× wide repeating gradient slides by half. */
 .hud-transcribing i {
   animation: hud-shimmer 1.6s linear infinite;
-  background: linear-gradient(90deg, #b6ff3c, #3cf0ff, #b6ff3c, #3cf0ff, #b6ff3c);
+  background: linear-gradient(90deg, var(--brand-a), var(--brand-b), var(--brand-a), var(--brand-b), var(--brand-a));
   display: block;
   height: 100%;
   width: 200%;
@@ -58,8 +58,8 @@
   white-space: nowrap;
 }
 
-.hud-result--copied .icon { color: #b6ff3c; }
+.hud-result--copied .icon { color: var(--brand-a); }
 .hud-result--failed { box-shadow: inset 0 0 0 1px rgba(255, 107, 107, .5), 0 0 0 .5px rgba(0, 0, 0, .6); }
-.hud-result--failed .icon { color: #ff6b6b; }
+.hud-result--failed .icon { color: var(--err); }
 .hud-result--unverified { box-shadow: inset 0 0 0 1px rgba(255, 176, 32, .5), 0 0 0 .5px rgba(0, 0, 0, .6); }
-.hud-result--unverified .icon { color: #ffb020; }
+.hud-result--unverified .icon { color: var(--warn); }
