@@ -37,6 +37,13 @@ pub fn validate_target(intended: TargetSnapshotDto) -> Result<TargetSnapshotDto,
 }
 
 /// Re-read focus and require it to still be the validated, insertable field.
+/// Uses the frontmost-app fallback on purpose: apps such as ChatGPT leave the
+/// system-wide focus empty mid-insert, and without the fallback every
+/// per-chunk check would abort typing there. Still fails closed: the fallback
+/// never returns Voxloom's own pid, and the element must re-validate against
+/// `intended` (same app, same element, insertable) before anything is posted.
+/// Its <=150 ms retry only runs off the main thread: every caller is reached
+/// from `#[tauri::command(async)]` delivery commands.
 fn focus_still_matches(intended: &TargetSnapshotDto) -> Result<(), String> {
     let (element, app_name) =
         focused_ui_element("typing").map_err(|e| format!("typing aborted — {e}"))?;

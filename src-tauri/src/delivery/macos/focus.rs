@@ -67,7 +67,8 @@ pub(super) fn focused_ui_element_once(
 }
 
 /// System-wide focus was empty (seen with ChatGPT): ask the frontmost app
-/// itself, retrying briefly. Never Voxloom's own pid; fail closed otherwise.
+/// itself, retrying briefly (sleeps up to 150 ms; only reached from async
+/// Tauri commands, never the main thread). Never Voxloom's own pid; fail closed otherwise.
 fn frontmost_app_focus(reason: &str) -> Result<(AXUIElementRef, Option<String>), String> {
     let front = host::frontmost_pid();
     let own = std::process::id() as i32;
