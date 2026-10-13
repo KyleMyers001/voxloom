@@ -191,7 +191,6 @@ fn types_after_retry_only_for_proven_web_field_in_typing_host() {
         type_after_retry(proven(f()), true, true),
         AfterAx::TypeFallback
     );
-    assert_eq!(type_after_retry(proven(f()), false, true), f());
     assert_eq!(type_after_retry(proven(f()), true, false), f());
     assert_eq!(type_after_retry(done(f()), true, true), f());
     assert_eq!(
@@ -238,4 +237,27 @@ fn retry_write_error_or_unreadable_readback_never_types() {
     let r = retry_once(&OK, "Hi ", "there", &mut f);
     assert!(!r.proven_unchanged);
     assert_ne!(type_after_retry(r, true, true), AfterAx::TypeFallback);
+}
+
+#[test]
+fn chromium_host_types_when_proven_unchanged_even_if_not_web() {
+    let f = AfterAx::Failed("AXSelectedText reported success but nothing changed".into());
+    assert_eq!(
+        type_after_retry(proven(f), false, true),
+        AfterAx::TypeFallback
+    );
+}
+
+#[test]
+fn chromium_host_not_proven_unchanged_stays_failed() {
+    let f = || AfterAx::Failed("AXValue unreadable".into());
+    assert_eq!(type_after_retry(done(f()), false, true), f());
+    assert_eq!(type_after_retry(done(f()), true, true), f());
+}
+
+#[test]
+fn unrecognised_host_never_types_even_when_proven() {
+    let f = || AfterAx::Failed("nothing changed".into());
+    assert_eq!(type_after_retry(proven(f()), true, false), f());
+    assert_eq!(type_after_retry(proven(f()), false, false), f());
 }

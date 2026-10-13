@@ -97,14 +97,17 @@ pub fn retry_once(
 }
 
 /// After the retry re-enabled web AX, the tree is complete again, so a field
-/// whose web identity was invisible to the first `may_type` check (dropped
-/// tree: no AXDOMIdentifier, no AXWebArea ancestor) can now be proven to be
-/// web content. Typing only when read-back proved the field unchanged after
-/// an Ok retry write; any other Failed (unreadable AXValue, write error,
-/// target changed) stays Failed so text is never duplicated.
+/// whose web identity was invisible to the first `may_type` check can now be
+/// proven to be web content. In a recognised Chromium/Electron host
+/// (`typing_ok`) the web probe may still miss (Chrome keeps some fields
+/// outside the AXWebArea subtree), so typing is also allowed there whenever
+/// read-back PROVED the field unchanged after an Ok retry write. Codex P1:
+/// any other Failed (unreadable AXValue, write error, target changed) stays
+/// Failed so text is never duplicated.
 pub fn type_after_retry(retried: RetryOutcome, web_field_now: bool, typing_ok: bool) -> AfterAx {
     match retried.after {
-        AfterAx::Failed(_) if retried.proven_unchanged && web_field_now && typing_ok => {
+        AfterAx::Failed(_) if retried.proven_unchanged && typing_ok => {
+            let _ = web_field_now; // informative only once the host is recognised
             AfterAx::TypeFallback
         }
         other => other,
