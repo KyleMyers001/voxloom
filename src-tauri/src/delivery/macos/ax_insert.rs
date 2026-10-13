@@ -4,7 +4,7 @@
 
 use super::ax::{ancestor_roles, copy_string_attr, set_ax_string, AXUIElementRef};
 use super::{focus_still_matches, host, typing, web_ax};
-use crate::delivery::decide::retry::{retry_eligible, retry_once, RetryIo};
+use crate::delivery::decide::retry::{reprobe_decision, retry_eligible, retry_once, RetryIo};
 use crate::delivery::decide::{
     after_ax, is_web_content_field, value_confirms_insert, AfterAx, InsertReport,
 };
@@ -65,7 +65,15 @@ pub fn insert_selected(
             validated,
             text,
         };
-        outcome = retry_once(&ax, &before, text, &mut io);
+        let retried = retry_once(&ax, &before, text, &mut io);
+        outcome = if matches!(retried.after, AfterAx::Failed(_)) && !may_type {
+            reprobe_after_retry(retried, validated, &role)
+        } else {
+            retried.after
+        };
+        if let AfterAx::Failed(err) = &outcome {
+            log_chrome_failure(validated, err);
+        }
     }
     match outcome {
         AfterAx::Inserted => Ok(InsertReport::default()),
@@ -103,6 +111,45 @@ fn wait_for_insert(element: AXUIElementRef, before: &str, text: &str) -> bool {
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
     false
+}
+
+/// Re-probe web identity on a FRESHLY fetched focused element now that web AX
+/// is re-enabled (the pre-retry handle may describe the dropped tree). Fail
+/// closed: if focus can't be re-read or no longer matches, stay Failed.
+fn reprobe_after_retry(
+    retried: crate::delivery::decide::retry::RetryOutcome,
+    validated: &TargetSnapshotDto,
+    role: &str,
+) -> AfterAx {
+    let Ok((fresh, _)) = super::focused_ui_element("retry re-probe") else {
+        return reprobe_decision(retried, false, false, false);
+    };
+    let still_ours = focus_still_matches(validated).is_ok();
+    if still_ours {
+        // Diagnostic only: Chrome can keep fields outside AXWebArea, so the
+        // decision no longer depends on this probe.
+        let dom_now = copy_string_attr(fresh, "AXDOMIdentifier").is_some();
+        let anc_now = if dom_now {
+            Vec::new()
+        } else {
+            ancestor_roles(fresh)
+        };
+        let web_now = is_web_content_field(role, dom_now, &anc_now);
+        eprintln!("[insert] retry re-probe web_field_now={web_now}");
+    }
+    super::ax::release(fresh as super::ax::CFTypeRef);
+    let typing_ok = validated.app_pid.is_some_and(host::unicode_typing_ok);
+    reprobe_decision(retried, true, still_ours, typing_ok)
+}
+
+/// Diagnostic for Chrome/Electron insert failures (no field contents logged).
+fn log_chrome_failure(validated: &TargetSnapshotDto, err: &str) {
+    let pid = validated.app_pid.unwrap_or(-1);
+    eprintln!(
+        "[insert] chromium failure exe={:?} host={:?} err={err}",
+        host::executable_path(pid),
+        host::web_ax_activation(pid)
+    );
 }
 
 fn unverified(typed: bool, detail: String) -> Result<InsertReport, String> {

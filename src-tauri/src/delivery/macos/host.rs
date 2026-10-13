@@ -40,7 +40,7 @@ mod tests {
     }
 }
 
-fn executable_path(pid: i32) -> Option<String> {
+pub fn executable_path(pid: i32) -> Option<String> {
     let mut buf = vec![0u8; PROC_PIDPATHINFO_MAXSIZE];
     let len = unsafe { proc_pidpath(pid, buf.as_mut_ptr() as *mut c_void, buf.len() as u32) };
     if len <= 0 {
