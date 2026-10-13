@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ShortcutRecorder } from '../../src/features/settings/ShortcutRecorder';
 import { resetRecorderStore } from '../../src/features/settings/recorderStore';
 import {
-  beginRecordingSuspend, isDictationSuspended, resetRecordingSuspend, suspendable,
+  applyRemoteLease, beginRecordingSuspend, isDictationSuspended, LEASE_MS, resetRecordingSuspend, suspendable,
 } from '../../src/services/shortcut/recordingSuspend';
 
 const DEFAULT = 'Ctrl + Shift + Space';
@@ -120,5 +120,22 @@ describe('ShortcutRecorder suspends dictation only while recording', () => {
     await user.click(field());
     await user.keyboard('{Control>}{Escape}{/Control}');
     expect(field()).toHaveAccessibleName('Dictation shortcut, Control Shift Space');
+  });
+});
+
+describe('per-window leases', () => {
+  it('one window\'s \'off\' doesn\'t unprotect another', () => {
+    applyRemoteLease({ on: true, source: 'settings' }, 0);
+    applyRemoteLease({ on: true, source: 'main' }, 0);
+    applyRemoteLease({ on: false, source: 'settings' }, 1);
+    expect(isDictationSuspended(2)).toBe(true);
+    applyRemoteLease({ on: false, source: 'main' }, 3);
+    expect(isDictationSuspended(4)).toBe(false);
+  });
+
+  it('a lease never ended still expires after LEASE_MS', () => {
+    applyRemoteLease({ on: true, source: 'crashed' }, 0);
+    expect(isDictationSuspended(LEASE_MS - 1)).toBe(true);
+    expect(isDictationSuspended(LEASE_MS)).toBe(false);
   });
 });

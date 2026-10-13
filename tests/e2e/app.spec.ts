@@ -177,21 +177,21 @@ test('records the shortcut by pressing it (BUS-47)', async ({ page }) => {
   await page.goto('/');
   await skipOnboarding(page);
   await page.getByRole('button', { name: 'Settings' }).click();
-  const field = page.getByRole('button', { name: /^Dictation shortcut/ });
+  const field = page.getByRole('button', { name: /Dictation shortcut/ });
   const before = await field.boundingBox();
   await field.click();
   await expect(field).toHaveText('Press keys…');
   await page.keyboard.press('Escape');
-  await expect(field).toHaveAccessibleName('Dictation shortcut, Control Shift Space');
+  await expect(field).toHaveAccessibleName('Shortcut Dictation shortcut, Control Shift Space');
   await field.click();
   await page.keyboard.press('Control+F5');
   await expect(page.getByText(/can't be used/)).toBeVisible();
   await page.keyboard.press('Control+Alt+KeyK');
-  await expect(field).toHaveAccessibleName(/^Dictation shortcut, Control (Option|Alt) K$/);
+  await expect(field).toHaveAccessibleName(/^Shortcut Dictation shortcut, Control (Option|Alt) K$/);
   expect((await field.boundingBox())?.y).toBe(before?.y);
   if (process.env.BUS47_SHOT) await page.screenshot({ path: process.env.BUS47_SHOT });
   await page.getByRole('button', { name: 'Reset to default' }).click();
-  await expect(field).toHaveAccessibleName('Dictation shortcut, Control Shift Space');
+  await expect(field).toHaveAccessibleName('Shortcut Dictation shortcut, Control Shift Space');
 });
 
 test('dialogs, reduced motion, narrow and coarse layouts work', async (
@@ -301,7 +301,7 @@ test('onboarding records the shortcut with the shared recorder (BUS-47)', async 
   const onboarding = page.getByRole('dialog', { name: 'Set up Voxloom' });
   await page.getByRole('button', { name: 'Next' }).click();
   await expect(onboarding.getByRole('textbox')).toHaveCount(0);
-  const field = onboarding.getByRole('button', { name: /^Dictation shortcut/ });
+  const field = onboarding.getByRole('button', { name: /Dictation shortcut/ });
   await expectAccessible(page);
   if (shots) await page.screenshot({ path: `${shots}/1-idle.png` });
   await field.click();
@@ -311,7 +311,7 @@ test('onboarding records the shortcut with the shared recorder (BUS-47)', async 
   // Esc cancels recording; it must not close the onboarding sheet.
   await page.keyboard.press('Escape');
   await expect(onboarding).toBeVisible();
-  await expect(field).toHaveAccessibleName('Dictation shortcut, Control Shift Space');
+  await expect(field).toHaveAccessibleName('App-local shortcut Dictation shortcut, Control Shift Space');
   await expect(onboarding.getByRole('status')).toHaveText('Canceled. Shortcut unchanged.');
   // Pressing the current shortcut while recording records it; it doesn't dictate.
   await field.click();
@@ -323,7 +323,7 @@ test('onboarding records the shortcut with the shared recorder (BUS-47)', async 
   await expect(onboarding.getByText(/can't be used/)).toBeVisible();
   if (shots) await page.screenshot({ path: `${shots}/3-refused.png` });
   await page.keyboard.press('Control+Alt+KeyK');
-  await expect(field).toHaveAccessibleName(/^Dictation shortcut, Control (Option|Alt) K$/);
+  await expect(field).toHaveAccessibleName(/^App-local shortcut Dictation shortcut, Control (Option|Alt) K$/);
   await expectAccessible(page);
   if (shots) await page.screenshot({ path: `${shots}/4-saved.png` });
 });

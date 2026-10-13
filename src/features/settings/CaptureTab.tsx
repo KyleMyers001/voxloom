@@ -31,6 +31,7 @@ export function CaptureTab({ onSetup }: { onSetup: (opener: HTMLElement) => void
         <span className="frow__control">
           <ShortcutRecorder
             defaultValue={initialSettings.shortcut}
+            labelId="settings-shortcut-label"
             onChange={(value) => update({ key: 'shortcut', value })}
             value={state.settings.shortcut}
           />

@@ -15,19 +15,34 @@ export const LEASE_MS = 15_000;
 export const RENEW_MS = 5_000;
 
 let localCount = 0;
-let remoteUntil = 0;
+/** Per-window lease expiry, keyed by the sender's window id. */
+const remote = new Map<string, number>();
+const WINDOW_ID = globalThis.crypto?.randomUUID?.() ?? `w${Math.random().toString(36).slice(2)}`;
 let listening: Promise<unknown> | null = null;
 
 const emit = (on: boolean) => {
   if (!isTauri()) return;
   void import('@tauri-apps/api/event')
-    .then(({ emit: send }) => send(RECORDING_EVENT, { on }))
+    .then(({ emit: send }) => send(RECORDING_EVENT, { on, source: WINDOW_ID }))
     .catch((err: unknown) => console.error('[shortcut] emit recording failed:', err));
 };
 
 /** True while any recorder (this window or another) is recording. */
 export function isDictationSuspended(now = Date.now()): boolean {
-  return localCount > 0 || now < remoteUntil;
+  if (localCount > 0) return true;
+  for (const [source, until] of remote) {
+    if (now < until) return true;
+    remote.delete(source);
+  }
+  return false;
+}
+
+/** Apply a lease event: one window's 'off' only ends that window's lease. */
+export function applyRemoteLease(payload: { on: boolean; source?: string }, now = Date.now()): void {
+  const source = payload.source ?? 'unknown';
+  if (source === WINDOW_ID) return; // our own lease is localCount
+  if (payload.on) remote.set(source, now + LEASE_MS);
+  else remote.delete(source);
 }
 
 /** Start suspending; returns an idempotent end function. */
@@ -51,9 +66,7 @@ export function beginRecordingSuspend(): () => void {
 function ensureListening() {
   if (listening || !isTauri()) return;
   listening = import('@tauri-apps/api/event')
-    .then(({ listen }) => listen<{ on: boolean }>(RECORDING_EVENT, (e) => {
-      remoteUntil = e.payload.on ? Date.now() + LEASE_MS : 0;
-    }))
+    .then(({ listen }) => listen<{ on: boolean; source?: string }>(RECORDING_EVENT, (e) => applyRemoteLease(e.payload)))
     .catch(() => { listening = null; });
 }
 
@@ -85,6 +98,6 @@ export function suspendable(
 /** Tests only. */
 export function resetRecordingSuspend(): void {
   localCount = 0;
-  remoteUntil = 0;
+  remote.clear();
   listening = null;
 }

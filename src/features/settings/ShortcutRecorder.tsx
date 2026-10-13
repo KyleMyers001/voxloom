@@ -17,6 +17,12 @@ interface ShortcutRecorderProps {
   helpId?: string;
   /** Field id; Settings and onboarding each pass their own. */
   id?: string;
+  /** Id of the visible label; read before the field's own name. */
+  labelId?: string;
+  /** Marks the field invalid (e.g. a refused combo). */
+  invalid?: boolean;
+  /** Id of the error text that describes an invalid field. */
+  errorId?: string;
   onChange: (combo: string) => void;
   value: string;
 }
@@ -32,7 +38,7 @@ export { CONFIRM_TIMEOUT_MS } from './recorderStore';
  * and the global shortcut can't start dictation (recordingSuspend).
  */
 export function ShortcutRecorder({
-  defaultValue, helpId = 'settings-shortcut-help', id = 'settings-shortcut', onChange, value,
+  defaultValue, errorId, helpId = 'settings-shortcut-help', id = 'settings-shortcut', invalid, labelId, onChange, value,
 }: ShortcutRecorderProps) {
   const [recording, setRecording] = useState(false);
   const [preview, setPreview] = useState('');
@@ -129,7 +135,9 @@ export function ShortcutRecorder({
       <button
         // Only the help: the role=status line announces itself, so describing
         // the field by it too would read each status twice.
-        aria-describedby={helpId}
+        aria-describedby={invalid && errorId ? `${helpId} ${errorId}` : helpId}
+        aria-invalid={invalid || status?.tone === 'error' || undefined}
+        aria-labelledby={labelId ? `${labelId} ${id}` : undefined}
         aria-label={recording ? 'Dictation shortcut, recording' : `Dictation shortcut, ${spokenCombo(value)}${active ? '' : `, ${NOT_ACTIVE}`}`}
         aria-pressed={recording}
         className="shortcut-recorder__field"
