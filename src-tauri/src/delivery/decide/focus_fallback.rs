@@ -72,6 +72,8 @@ pub enum FallbackError {
     AppFocus(i32, bool),
     /// The element found belongs to another process than the frontmost app.
     PidMismatch,
+    /// The frontmost app changed while the element was being read/walked.
+    FrontmostChanged,
 }
 
 /// Which pid to query, never Voxloom itself (the overlay never takes focus,
@@ -101,6 +103,17 @@ pub fn accept_element(
     Ok(())
 }
 
+/// Final gate before handing an element to insertion: the app we queried
+/// must still be frontmost *after* the AX read/walk (fail closed), so text
+/// never lands in a background app's field if focus moved mid-read.
+pub fn still_frontmost(queried: i32, after: Option<i32>) -> Result<(), FallbackError> {
+    if after == Some(queried) {
+        Ok(())
+    } else {
+        Err(FallbackError::FrontmostChanged)
+    }
+}
+
 /// Original system-wide message plus the fallback's own failure code.
 pub fn with_fallback_error(reason: &str, front: Option<i32>, err: &FallbackError) -> String {
     let detail = match err {
@@ -111,6 +124,7 @@ pub fn with_fallback_error(reason: &str, front: Option<i32>, err: &FallbackError
             format!("app AXFocusedUIElement={code}{n}")
         }
         FallbackError::PidMismatch => "focused element not owned by frontmost app".to_string(),
+        FallbackError::FrontmostChanged => "frontmost app changed during AX read".to_string(),
     };
     let pid = front.map_or("none".to_string(), |p| p.to_string());
     format!("{reason}; frontmost fallback pid={pid}: {detail}")

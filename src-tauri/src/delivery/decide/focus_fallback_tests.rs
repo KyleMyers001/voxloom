@@ -89,3 +89,21 @@ fn failure_keeps_original_message_and_adds_fallback_code() {
     let msg = with_fallback_error(base, None, &FallbackError::NoFrontmost);
     assert!(msg.contains("pid=none: no frontmost app"));
 }
+
+#[test]
+fn refuses_when_frontmost_changed_after_read() {
+    assert_eq!(still_frontmost(42, Some(42)), Ok(()));
+    assert_eq!(
+        still_frontmost(42, Some(9)),
+        Err(FallbackError::FrontmostChanged)
+    );
+    assert_eq!(
+        still_frontmost(42, None),
+        Err(FallbackError::FrontmostChanged)
+    );
+    let msg = with_fallback_error("base", Some(42), &FallbackError::FrontmostChanged);
+    assert_eq!(
+        msg,
+        "base; frontmost fallback pid=42: frontmost app changed during AX read"
+    );
+}

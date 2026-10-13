@@ -16,8 +16,8 @@ use super::focus_warm::{cached, remember, warm_state};
 use super::host;
 use crate::delivery::decide::focus_cache::plan;
 use crate::delivery::decide::focus_fallback::{
-    accept_element, fallback_pid, retry_schedule, with_fallback_error, with_fallback_trace,
-    FallbackError, Step,
+    accept_element, fallback_pid, retry_schedule, still_frontmost, with_fallback_error,
+    with_fallback_trace, FallbackError, Step,
 };
 use crate::delivery::decide::focus_walk::{find_focused, AxTree, WalkOutcome};
 
@@ -37,7 +37,7 @@ pub fn frontmost_app_focus(reason: &str) -> Focus {
     set_timeout(app.0);
     if plan.try_cached {
         if let Some(el) = cached(pid, app.0) {
-            return found(pid, el, &app);
+            return found(reason, front, pid, el, &app);
         }
     }
     let mut steps = Vec::new();
@@ -75,7 +75,7 @@ pub fn frontmost_app_focus(reason: &str) -> Focus {
             .then(|| element_pid(focused as _))
             .flatten();
         match accept_element(err, focused.is_null(), owner, pid) {
-            Ok(()) => return found(pid, focused as AXUIElementRef, &app),
+            Ok(()) => return found(reason, front, pid, focused as AXUIElementRef, &app),
             Err(e) => {
                 release(focused);
                 (last_err, last_null) = (err, focused.is_null());
@@ -136,15 +136,7 @@ fn walk_windows(
             WalkOutcome::NotFound { .. } | WalkOutcome::Budget { .. }
         );
         if let WalkOutcome::Found(node) = outcome {
-            if host::frontmost_pid() == Some(pid) {
-                return found(pid, node.into_raw(), app);
-            }
-            steps.push(Step::Walk {
-                window,
-                err: 0,
-                outcome: Some("frontmost app changed".into()),
-            });
-            break;
+            return found(reason, front, pid, node.into_raw(), app);
         }
         steps.push(Step::Walk {
             window,
@@ -158,7 +150,13 @@ fn walk_windows(
     Err(with_fallback_trace(reason, front, &steps))
 }
 
-fn found(pid: i32, el: AXUIElementRef, app: &Node) -> Focus {
+/// Every success path ends here: recheck frontmost *after* the AX read/walk
+/// and refuse (releasing the owned element) if it moved (Codex P1).
+fn found(reason: &str, front: Option<i32>, pid: i32, el: AXUIElementRef, app: &Node) -> Focus {
+    if let Err(e) = still_frontmost(pid, host::frontmost_pid()) {
+        release(el as CFTypeRef);
+        return Err(with_fallback_error(reason, front, &e));
+    }
     remember(pid, el);
     Ok((el, copy_string_attr(app.0 as AXUIElementRef, "AXTitle")))
 }
