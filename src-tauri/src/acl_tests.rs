@@ -38,7 +38,7 @@ fn invoke_from(app: &tauri::App<MockRuntime>, label: &str, page: &str) -> Result
 fn store_backup_is_granted_to_main_only() {
     let app = mock_builder()
         .invoke_handler(tauri::generate_handler![store_backup])
-        .build(tauri::generate_context!())
+        .build(crate::app_context())
         .expect("mock app");
     assert_eq!(invoke_from(&app, "main", "index.html"), Ok(()));
     let settings = invoke_from(&app, "settings", "settings.html").unwrap_err();
