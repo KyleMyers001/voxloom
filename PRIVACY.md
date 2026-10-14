@@ -11,6 +11,7 @@ The desktop app keeps its data as **unencrypted JSON** in its app data folder:
 ```text
 ~/Library/Application Support/com.voxloom.prototype/
 ├── history.json      transcript text, status, duration, model, timestamp, delivery outcome
+├── *.json.unreadable-*.bak  backups of a store file Voxloom couldn't read (see below)
 ├── dictionary.json   your custom words
 ├── settings.json     preferences
 └── models/           downloaded Whisper model files (*.bin)
@@ -19,7 +20,8 @@ The desktop app keeps its data as **unencrypted JSON** in its app data folder:
 `history.json` is not encrypted. Any process running as your macOS user, and
 anything that copies your home folder (Time Machine, other backup or sync
 tools), can read your transcripts. FileVault protects it only while the Mac is
-off or locked. Recorded audio is never saved.
+shut down; once you've logged in, a locked screen doesn't keep it from other
+processes running as you. Recorded audio is never saved.
 
 ## Deleting transcripts
 
@@ -32,8 +34,21 @@ off or locked. Recorded audio is never saved.
   and on launch. **Forever** keeps everything until you delete it.
 - **Everything, manually:** quit Voxloom and delete the folder above (or just
   `history.json`). A missing file is treated as empty history on next launch.
+- **Unreadable-file backups:** if Voxloom can't read `history.json` (corrupt,
+  or from a different version), it first copies it to
+  `history.json.unreadable-<timestamp>.bak` in the same folder. The same applies
+  to `dictionary.json` and `settings.json`. These copies may hold old
+  transcripts in plain text, and **retention never deletes them**. To remove
+  them, quit Voxloom and delete them by hand, for example:
+  `rm ~/Library/Application\ Support/com.voxloom.prototype/*.unreadable-*.bak`
 
 Deleting a file does not remove copies already captured by backups.
+
+## Accessibility
+
+With Accessibility permission, Voxloom reads the focused text field (to check
+it's safe to insert, and to confirm the text landed) and inserts the transcript
+into it. What it reads from the field is not saved.
 
 ## Clipboard
 
