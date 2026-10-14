@@ -4,7 +4,9 @@
 /// Native shape (src-tauri): `stt_cancel_download` resolves `null`; the pending
 /// `stt_download_model` then rejects with `SttErrorDto::to_string_payload()`,
 /// i.e. the JSON string `{"code":"cancelled","message":"Download cancelled: <id>"}`.
-/// The store removes the `.partial`, so `stt_list_models` reports `missing`.
+/// Until that rejection `stt_list_models` still reports `downloading` (the
+/// inflight slot is cleared in the same step); only then does it say `missing`.
+/// So the row can only reach "Not downloaded" through a post-cancel refresh.
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -12,6 +14,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const native = vi.hoisted(() => ({
   status: {} as Record<string, string>,
   reject: null as ((reason: unknown) => void) | null,
+  listCalls: 0,
+  listCallsAtReject: -1,
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -20,17 +24,29 @@ vi.mock('@tauri-apps/api/core', () => ({
     const id = args?.modelId ?? '';
     switch (cmd) {
       case 'stt_list_models':
+        native.listCalls += 1;
         return [
           { id: 'whisper-tiny.en', label: 'Whisper Tiny (English)', sizeBytes: 77_700_000, status: native.status['whisper-tiny.en'] ?? 'missing' },
           { id: 'whisper-base.en', label: 'Whisper Base (English)', sizeBytes: 148_000_000, status: native.status['whisper-base.en'] ?? 'missing' },
         ];
       case 'stt_download_model':
         native.status[id] = 'downloading';
-        return new Promise((_, reject) => { native.reject = reject; });
-      case 'stt_cancel_download':
-        native.status[id] = 'missing';
-        native.reject?.(JSON.stringify({ code: 'cancelled', message: `Download cancelled: ${id}` }));
+        return new Promise((_, reject) => {
+          native.reject = (reason) => {
+            // Native clears inflight and the .partial as the download returns.
+            native.status[id] = 'missing';
+            native.listCallsAtReject = native.listCalls;
+            reject(reason);
+          };
+        });
+      case 'stt_cancel_download': {
+        // Native only raises the cancel flag and resolves null; the download
+        // loop notices on its next chunk and rejects a moment later.
+        const reject = native.reject;
+        native.reject = null;
+        setTimeout(() => reject?.(JSON.stringify({ code: 'cancelled', message: `Download cancelled: ${id}` })), 30);
         return null;
+      }
       default:
         throw new Error(`unexpected ${cmd}`);
     }
@@ -38,7 +54,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) }));
 
-import { act, render } from '@testing-library/react';
+import { render } from '@testing-library/react';
 import { ModelCard } from '../../src/features/settings/ModelCard';
 import { useSttModels } from '../../src/services/stt/useSttModels';
 import { createWhisperSttModelStore } from '../../src/services/stt/whisperAdapter';
@@ -74,6 +90,8 @@ describe('Models tab: native cancel (BUS-57)', () => {
   afterEach(() => {
     native.status = {};
     native.reject = null;
+    native.listCalls = 0;
+    native.listCallsAtReject = -1;
   });
 
   it('returns the row to Not downloaded with no error and no Retry', async () => {
@@ -82,9 +100,14 @@ describe('Models tab: native cancel (BUS-57)', () => {
     const row = (await screen.findByText('whisper-base.en')).closest('li')!;
     await user.click(within(row).getByRole('button', { name: 'Download' }));
     await user.click(await within(row).findByRole('button', { name: 'Cancel download' }));
-    await act(async () => {});
+    // Cancel resolved, but native still reports downloading: no Download yet.
+    expect(native.status['whisper-base.en']).toBe('downloading');
+    expect(within(row).queryByRole('button', { name: 'Download' })).toBeNull();
 
     await waitFor(() => expect(within(row).getByRole('button', { name: 'Download' })).toBeInTheDocument());
+    // Download appeared only after the list was refreshed post-rejection.
+    expect(native.listCallsAtReject).toBeGreaterThan(0);
+    expect(native.listCalls).toBeGreaterThan(native.listCallsAtReject);
     expect(within(row).queryByRole('button', { name: /Retry/ })).toBeNull();
     expect(within(row).queryByRole('alert')).toBeNull();
     expect(within(row).queryByText(/fail/i)).toBeNull();
