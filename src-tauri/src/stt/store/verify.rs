@@ -56,9 +56,10 @@ pub(super) fn check_sha256(spec: &ModelSpec, actual: &str) -> Result<(), SttErro
         "[stt] checksum mismatch for {}: expected sha256 {}, got {actual}",
         spec.id, spec.sha256
     );
+    // Own code so the UI can show its designer copy without a wrapper.
     Err(SttErrorDto::new(
-        "download-failed",
-        "Download was corrupted. Try again.",
+        "download-corrupted",
+        "Download was damaged. Nothing was saved.",
     ))
 }
 
@@ -91,8 +92,8 @@ mod tests {
         let mut i = Integrity::default();
         i.update(b"not a model");
         let err = i.finish(spec, None).unwrap_err();
-        assert_eq!(err.code, "download-failed");
-        assert_eq!(err.message, "Download was corrupted. Try again.");
+        assert_eq!(err.code, "download-corrupted");
+        assert_eq!(err.message, "Download was damaged. Nothing was saved.");
 
         let err = check_length(10, Some(11)).unwrap_err();
         assert!(err.message.contains("incomplete"));

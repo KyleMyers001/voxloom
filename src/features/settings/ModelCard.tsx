@@ -62,7 +62,7 @@ export function ModelCard({ model, selected, progress, failure, onSelect, onDown
       </div>
       {failed && (
         <p className="form-error stt-model-error" id={errorId} role="alert">
-          {failure ?? 'Model file is corrupted. Download it again.'}
+          {failure ?? 'Model file is damaged. Download it again.'}
         </p>
       )}
       {downloadLocked && !downloading && model.status !== 'available' && (

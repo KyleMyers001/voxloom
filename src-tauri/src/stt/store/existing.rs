@@ -7,7 +7,7 @@
 //! or, if transcription needs the model first, on its blocking worker.
 //!
 //! A mismatched file is not deleted: it is reported as `failed` so the Models
-//! tab shows "Model file is corrupted" with Retry, and transcription refuses it.
+//! tab shows "Model file is damaged" with Retry, and transcription refuses it.
 
 use std::collections::HashMap;
 use std::fs::{self, File};

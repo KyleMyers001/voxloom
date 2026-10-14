@@ -136,7 +136,7 @@ impl ModelStore {
         if verdict != Some(existing::Verdict::Verified) {
             return Err(SttErrorDto::new(
                 "model-missing",
-                "Model file is corrupted. Download it again in Settings → Models.",
+                "Model file is damaged. Download it again in Settings → Models.",
             ));
         }
         Ok(path)

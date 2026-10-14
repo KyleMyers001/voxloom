@@ -1,4 +1,4 @@
-/// BUS-35: corrupted-model copy and no double period in download failures.
+/// BUS-35: damaged-model and damaged-download copy; no double period in other failures.
 import { act, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { ModelsTab } from '../../src/features/settings/ModelsTab';
@@ -14,16 +14,25 @@ vi.mock('../../src/services/stt/factory', async (importActual) => {
 });
 
 describe('BUS-35 integrity copy', () => {
-  it('does not double the period after a backend message that ends in one', async () => {
+  it('shows the checksum failure exactly, with no wrapper and no hashes', async () => {
     const store = createMockSttModelStore();
-    vi.spyOn(store, 'download').mockRejectedValueOnce(new SttError('download-failed', 'Download was corrupted. Try again.'));
+    vi.spyOn(store, 'download').mockRejectedValueOnce(new SttError('download-corrupted', 'anything from native'));
     const { result } = renderHook(() => useSttModels({ onSelect: vi.fn(), selectedModelId: 'whisper-tiny.en', store }));
     await waitFor(() => expect(result.current.loading).toBe(false));
     await act(async () => { await result.current.downloadModel('whisper-base.en').catch(() => {}); });
-    expect(result.current.failures['whisper-base.en']).toBe('Download failed: Download was corrupted. Try again. Nothing was saved.');
+    expect(result.current.failures['whisper-base.en']).toBe('Download was damaged. Nothing was saved.');
   });
 
-  it('shows a corrupted existing file (status failed) with Retry', async () => {
+  it('does not double the period after another failure message that ends in one', async () => {
+    const store = createMockSttModelStore();
+    vi.spyOn(store, 'download').mockRejectedValueOnce(new SttError('download-failed', 'Disk is full.'));
+    const { result } = renderHook(() => useSttModels({ onSelect: vi.fn(), selectedModelId: 'whisper-tiny.en', store }));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => { await result.current.downloadModel('whisper-base.en').catch(() => {}); });
+    expect(result.current.failures['whisper-base.en']).toBe('Download failed: Disk is full. Nothing was saved.');
+  });
+
+  it('shows a damaged existing file (status failed) with Retry', async () => {
     const store = createMockSttModelStore();
     const models = await store.list();
     vi.spyOn(store, 'list').mockResolvedValue(
@@ -32,7 +41,7 @@ describe('BUS-35 integrity copy', () => {
     factory.store = store;
     renderWithApp(<ModelsTab />);
     const row = (await screen.findByText('whisper-base.en')).closest('li')!;
-    expect(within(row).getByRole('alert')).toHaveTextContent('Model file is corrupted. Download it again.');
+    expect(within(row).getByRole('alert')).toHaveTextContent('Model file is damaged. Download it again.');
     expect(within(row).getByRole('button', { name: 'Retry download' })).toBeInTheDocument();
     factory.store = null;
   });

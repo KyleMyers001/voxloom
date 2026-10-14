@@ -16,8 +16,8 @@ fn checksum_mismatch_deletes_file_and_reports_failure() {
     let err = store
         .download_spec_with_sink(spec, &url, |p| final_ratio = p.ratio)
         .unwrap_err();
-    assert_eq!(err.code, "download-failed");
-    assert_eq!(err.message, "Download was corrupted. Try again.");
+    assert_eq!(err.code, "download-corrupted");
+    assert_eq!(err.message, "Download was damaged. Nothing was saved.");
     assert!(final_ratio < 1.0, "never report completion for a bad file");
     assert!(
         !store.model_path(spec).exists(),
@@ -147,7 +147,7 @@ fn existing_file_mismatch_reports_failed_and_is_not_deleted() {
 
     let err = store.resolved_path(spec.id).unwrap_err();
     assert_eq!(err.code, "model-missing");
-    assert!(err.message.contains("corrupted"), "{}", err.message);
+    assert!(err.message.contains("damaged"), "{}", err.message);
     let _ = fs::remove_dir_all(&dir);
 }
 
