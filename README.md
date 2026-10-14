@@ -21,8 +21,7 @@ focused-window shortcuts; state clears on reload. The Tauri shell persists
 saved audio retention are not implemented. Onboarding practice recognizes
 shortcut gestures but does not transcribe speech. Cleanup styles, the cleanup
 model and start-at-login are not functional desktop features yet. Development
-scenario controls are excluded from production builds. See
-`docs/review/BUS-14-insert-delivery.md` for native smoke checks and limitations.
+scenario controls are excluded from production builds.
 
 ### Dictation target selection
 
@@ -73,7 +72,7 @@ Open `http://localhost:1420`.
 **Minimum macOS: 13.1 (Ventura).** The UI runs in the system WKWebView, so it
 needs the WebKit that ships with Safari 16.2: `color-mix()` (Safari 16.2),
 `:has()` (15.4), `Array.prototype.at()` (15.4) and `inert` (15.5). Declared in
-`src-tauri/tauri.conf.json` → `bundle.macOS.minimumSystemVersion` (BUS-53).
+`src-tauri/tauri.conf.json` → `bundle.macOS.minimumSystemVersion`
 
 With the Rust and macOS build toolchains installed:
 
@@ -105,8 +104,7 @@ src-tauri/target/release/bundle/macos/Voxloom.app
 ```
 
 Open it, request mic access, then confirm **Voxloom** appears under
-System Settings → Privacy & Security → Microphone. Details and deny/revoke
-gaps: `docs/review/BUS-10-packaged-tcc.md`.
+System Settings → Privacy & Security → Microphone.
 
 After build, confirm codesign embedded the mic entitlement (ad-hoc or
 Developer ID):
@@ -116,7 +114,10 @@ npm run macos:assert-entitlements
 # codesign -d --entitlements :- src-tauri/target/release/bundle/macos/Voxloom.app
 ```
 
-See `docs/review/BUS-10-entitlements-codesign.md` if the dump is empty.
+If the dump is empty, the app kept only the linker's ad-hoc signature, which
+does not embed `src-tauri/Entitlements.plist`. Tauri runs `codesign` only when
+a signing identity resolves; `bundle.macOS.signingIdentity` is `"-"` (ad-hoc)
+for that reason. `npm run macos:assert-entitlements -- --repair` re-signs it.
 
 ## Releases
 
@@ -162,7 +163,6 @@ brew install cmake   # once
 npm run tauri -- dev -- --features whisper
 ```
 
-Details: `docs/review/BUS-10-whisper.md`.
 
 ## Verification
 

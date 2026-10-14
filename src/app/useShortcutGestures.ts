@@ -37,7 +37,7 @@ import type {
  * Overlay visibility is torn down on finish/cancel/error unconditionally
  * (try/finally) so a failed stop/STT/deliver cannot leave the waveform up.
  * Dogfood terminal (Home Stop / success / error / cancel) also forces overlay
- * clear — do not rely only on gesture finish (Clara: Stop clears capture but
+ * clear — do not rely only on gesture finish (Stop clears capture but
  * waveform stayed). That teardown is **edge-triggered** on the phase
  * transition only: the phase stays "success"/"cancelled" until the next
  * start, so re-running it on every dictation change cancelled the *next*
