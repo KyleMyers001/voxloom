@@ -151,3 +151,61 @@ describe('Dictionary rows take the app focus ring (QA)', () => {
     expect(readFileSync('src/styles/base.css', 'utf8')).toMatch(/\.term-row:focus-visible,[^{]*\{\s*outline: 3px solid var\(--focus\)/);
   });
 });
+
+describe('BUS-51 brand tokens', () => {
+  const tokens = css('tokens.css');
+  it('defines --brand-a/--brand-b and builds --brand, --tile-glow and --hud-shadow from them', () => {
+    expect(tokens).toMatch(/:root \{[^}]*--brand-a: #b6ff3c;[^}]*--brand-b: #3cf0ff;[^}]*--brand: linear-gradient\(90deg, var\(--brand-a\), var\(--brand-b\)\);/);
+    expect(tokens).toContain('--tile-glow: color-mix(in srgb, var(--brand-a) 25%, transparent);');
+    expect(tokens).toMatch(/--hud-shadow:[^;]*color-mix\(in srgb, var\(--brand-a\) 35%, transparent\)[^;]*color-mix\(in srgb, var\(--brand-b\) 18%, transparent\);/);
+    expect(css('home.css')).toContain('0 0 40px var(--tile-glow)');
+  });
+
+  it('keeps raw brand hex and rgba out of hud.css', () => {
+    const hud = css('hud.css');
+    expect(hud).not.toMatch(/#(b6ff3c|3cf0ff)\b/i);
+    expect(hud).not.toMatch(/rgba\((182, 255, 60|60, 240, 255)/);
+    expect(hud).toMatch(/\.hud-result \{[^}]*box-shadow: inset 0 0 0 1px color-mix\(in srgb, var\(--brand-a\) 35%, transparent\)[^;]*color-mix\(in srgb, var\(--brand-b\) 14%, transparent\);/);
+  });
+
+  it('paints the AppTile gradient with the brand tokens', () => {
+    const { getByTestId } = render(<AppTile />);
+    const stops = [...getByTestId('app-tile').querySelectorAll('stop')].map((s) => s.getAttribute('style'));
+    expect(stops).toEqual(['stop-color: var(--brand-a);', 'stop-color: var(--brand-b);']);
+  });
+
+  it('uses the brand cyan in the site favicon', () => {
+    const svg = readFileSync(join(__dirname, '../../site/favicon.svg'), 'utf8');
+    expect(svg).toContain('#3cf0ff');
+    expect(svg).not.toContain('#4cf4ff');
+    expect(svg).toContain('#b6ff3c');
+    expect(svg).not.toContain('#c4ff5a');
+  });
+});
+
+describe('BUS-48 contrast tokens', () => {
+  const tokens = css('tokens.css');
+  it('raises dark --mut and keeps light --mut', () => {
+    expect(tokens).toMatch(/:root \{[^}]*--mut: #9494a3;/);
+    expect(tokens).toMatch(/\[data-appearance-resolved="light"\] \{[^}]*--mut: #5d6068;/);
+  });
+
+  it('defines per-theme --ctl-line and --sel-edge', () => {
+    expect(tokens).toMatch(/:root \{[^}]*--ctl-line: #6a6a80;[^}]*--sel-edge: #70943a;/);
+    expect(tokens).toMatch(/\[data-appearance-resolved="light"\] \{[^}]*--ctl-line: #808389;[^}]*--sel-edge: #376b00;/);
+  });
+
+  it('borders form controls and .btn with --ctl-line', () => {
+    expect(css('base.css')).toMatch(/input,\nselect,\ntextarea \{[^}]*border: 1px solid var\(--ctl-line\)/);
+    expect(css('components.css')).toMatch(/\.btn \{[^}]*border-color: var\(--ctl-line\)/);
+    expect(css('ui-controls.css')).toMatch(/\.search \{[^}]*border: 1px solid var\(--ctl-line\)/);
+    expect(css('shell.css')).toMatch(/\.tb-settings\[aria-current="page"\] \{ box-shadow: inset 0 -2px 0 var\(--sel-edge\); \}/);
+    expect(css('shell.css')).toMatch(/\.tb-help \{[^}]*border: 1px solid var\(--ctl-line\)/);
+  });
+
+  it('marks selected nav, settings tab and segment with --sel-edge', () => {
+    expect(css('shell.css')).toMatch(/\.nav-button\[aria-current="page"\] \{[^}]*box-shadow: inset 3px 0 0 var\(--sel-edge\)/);
+    expect(css('settings.css')).toMatch(/\.settings-tab\[aria-selected="true"\] \{[^}]*box-shadow: inset 0 -2px 0 var\(--sel-edge\)/);
+    expect(css('ui-controls.css')).toMatch(/\.seg__item\.on \{[^}]*box-shadow: inset 0 0 0 1px var\(--sel-edge\)/);
+  });
+});

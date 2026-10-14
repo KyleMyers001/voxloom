@@ -49,12 +49,18 @@ export function App() {
     if (state.onboarding.complete) setOnboardingOpen(false);
   }, [state.onboarding.complete]);
 
+  const onShortcutRevert = useCallback(
+    (shortcut: string) => dispatch({ key: 'shortcut', type: 'set-setting', value: shortcut }),
+    [dispatch],
+  );
+
   useShortcutGestures({
     dictation,
     dogfood: toGestureDogfoodBridge(dogfood),
     now,
     onboardingOpen,
     onShortcutError: announceError,
+    onShortcutRevert,
     setup,
     shortcutOpen,
     state,

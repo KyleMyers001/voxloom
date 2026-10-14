@@ -140,7 +140,8 @@ describe('HUD motion (Option A)', () => {
     expect((118 + 2) % 5).toBe(0); // 24 bars × 3px + 23 gaps × 2px
   });
   it('falls back to a slow 3 s opacity breathe under Reduce Motion', () => {
-    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.hud-transcribing \{ animation: hud-breathe 3s ease-in-out infinite; \}\s*\.hud-transcribing i \{ animation: none; \}/);
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.hud-transcribing \{ animation: hud-breathe 3s ease-in-out infinite; \}\s*\.hud-transcribing i \{ animation: none;/);
+    expect(css).toMatch(/@keyframes hud-breathe \{ 0%, 100% \{ opacity: \.6; \} 50% \{ opacity: \.9; \} \}/);
   });
 });
 

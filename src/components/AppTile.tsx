@@ -15,8 +15,8 @@ export function AppTile({ size = 'md' }: { size?: AppTileSize }) {
       <svg viewBox="0 0 24 24">
         <defs>
           <linearGradient id={gradientId} x1="0" x2="1" y1="0" y2="1">
-            <stop offset="0" stopColor="#b6ff3c" />
-            <stop offset="1" stopColor="#3cf0ff" />
+            <stop offset="0" style={{ stopColor: 'var(--brand-a)' }} />
+            <stop offset="1" style={{ stopColor: 'var(--brand-b)' }} />
           </linearGradient>
         </defs>
         <rect fill={`url(#${gradientId})`} height="9" rx="2.25" width="4.5" x="3" y="7.5" />

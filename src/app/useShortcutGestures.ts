@@ -1,13 +1,13 @@
 import { isTauri } from '@tauri-apps/api/core';
 import type { OverlayResult } from '../services/shortcut/overlayVisibility';
 import { useEffect, useRef } from 'react';
-import { hasOpenModal, subscribeModal } from './modalState';
+import { subscribeModal } from './modalState';
+import { handlePractice, interactionContext } from './gestureContext';
+import { suspendable } from '../services/shortcut/recordingSuspend';
 import type { AppState } from './state';
-import type { OnboardingState } from '../domain/types';
 import type {
   DictationLifecycle,
   SetupLifecycle,
-  ShortcutContext,
   ShortcutController,
   ShortcutGesture,
 } from '../services/contracts';
@@ -21,6 +21,10 @@ import {
   type OverlayBridge,
   type PendingFinishGate,
 } from '../services/shortcut';
+import { useShortcutRegistration } from './useShortcutRegistration';
+import { bootRefusedText } from '../features/settings/shortcutCopy';
+import { answerShortcutQueries, emitShortcutBound } from '../services/shortcut/bindingEvents';
+import { subscribe } from '../services/settingsWindow';
 import type {
   DogfoodPhase,
   UseDogfoodCaptureResult,
@@ -59,6 +63,8 @@ interface GestureOptions {
   now: () => number;
   onboardingOpen: boolean;
   onShortcutError?: (message: string) => void;
+  /** BUS-47: registration failed; put this last-good combo back in settings. */
+  onShortcutRevert?: (shortcut: string) => void;
   setup: SetupLifecycle;
   shortcutOpen: boolean;
   state: AppState;
@@ -122,6 +128,8 @@ export function useShortcutGestures(options: GestureOptions) {
   const overlayRef = useRef<OverlayBridge | null>(null);
   const pendingFinishRef = useRef<PendingFinishGate | null>(null);
   const optionsRef = useRef(options);
+  /** Last combo the OS accepted (settings format); the revert target. */
+  const registeredRef = useRef<string | null>(null);
   optionsRef.current = options;
   const phaseGuardRef = useRef<PhaseGuard>({ seen: options.dogfood.phase });
 
@@ -145,13 +153,9 @@ export function useShortcutGestures(options: GestureOptions) {
     if (isTauri()) return;
     const controller = createShortcutController({
       clock: options.now,
-      onGesture: (gesture) => handleGesture(
-        optionsRef.current,
-        gesture,
-        pendingFinishRef.current,
-        optionsRef,
-        phaseGuardRef.current,
-      ),
+      onGesture: suspendable((gesture) => handleGesture(
+        optionsRef.current, gesture, pendingFinishRef.current, optionsRef, phaseGuardRef.current,
+      )),
       shortcut: options.state.settings.shortcut,
       target: document,
     });
@@ -173,16 +177,11 @@ export function useShortcutGestures(options: GestureOptions) {
     if (!isTauri()) return;
     const controller = createNativeShortcutController({
       clock: options.now,
-      onGesture: (gesture) => handleGesture(
-        optionsRef.current,
-        gesture,
-        pendingFinishRef.current,
-        optionsRef,
-        phaseGuardRef.current,
-      ),
-      onRegisterFailure: (message) => {
-        optionsRef.current.onShortcutError?.(message);
-      },
+      onGesture: suspendable((gesture) => handleGesture(
+        optionsRef.current, gesture, pendingFinishRef.current, optionsRef, phaseGuardRef.current,
+      )),
+      // No onRegisterFailure toast: registration outcomes are reported once,
+      // in words, by the boot path below and useShortcutRegistration.
       scheduler: browserScheduler,
     });
     nativeControllerRef.current = controller;
@@ -191,12 +190,18 @@ export function useShortcutGestures(options: GestureOptions) {
 
     let cancelled = false;
     void (async () => {
-      const outcome = await controller.setShortcut(
-        optionsRef.current.state.settings.shortcut,
-      );
+      const bootShortcut = optionsRef.current.state.settings.shortcut;
+      const outcome = await controller.setShortcut(bootShortcut);
+      // Seed the revert target from what the OS accepted, not from settings.
+      registeredRef.current = outcome.ok ? bootShortcut : null;
+      // Tell every window (Home, sidebar, Settings) what the OS holds now.
+      emitShortcutBound({
+        active: outcome.ok ? bootShortcut : outcome.active ?? null,
+        ok: outcome.ok, shortcut: bootShortcut,
+      });
       if (cancelled) return;
-      if (!outcome.ok && outcome.message) {
-        optionsRef.current.onShortcutError?.(outcome.message);
+      if (!outcome.ok) {
+        optionsRef.current.onShortcutError?.(bootRefusedText(bootShortcut, outcome.active));
       }
       controller.setContext(interactionContext(optionsRef.current));
     })();
@@ -204,6 +209,7 @@ export function useShortcutGestures(options: GestureOptions) {
     const update = () =>
       controller.setContext(interactionContext(optionsRef.current));
     const unsubscribe = subscribeModal(update);
+    const unanswer = subscribe(answerShortcutQueries);
 
     // Do NOT resetPartial / clear pending on document visibilitychange.
     // ADR §3: other-app focus must keep an in-flight native hold alive;
@@ -215,39 +221,16 @@ export function useShortcutGestures(options: GestureOptions) {
       nativeControllerRef.current = null;
       overlayRef.current = null;
       unsubscribe();
+      unanswer();
       pendingFinishRef.current?.clear();
       void controller.dispose();
       void overlay.dispose();
     };
   }, [options.now]);
 
-  // Re-register when Settings shortcut *changes* (native only).
-  // Mount effect owns the initial bind; skipping that first run avoids a
-  // parallel setShortcut for the same combo on boot (Mac RegisterEventHotKey
-  // race). Controller still serializes setShortcut as a safety net.
-  const boundShortcutRef = useRef<string | null>(null);
-  useEffect(() => {
-    const native = nativeControllerRef.current;
-    if (!native || !isTauri()) return;
-    const shortcut = options.state.settings.shortcut;
-    if (boundShortcutRef.current === null) {
-      boundShortcutRef.current = shortcut;
-      return;
-    }
-    if (boundShortcutRef.current === shortcut) return;
-    boundShortcutRef.current = shortcut;
-    let cancelled = false;
-    void (async () => {
-      const outcome = await native.setShortcut(shortcut);
-      if (cancelled) return;
-      if (!outcome.ok && outcome.message) {
-        options.onShortcutError?.(outcome.message);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [options.onShortcutError, options.state.settings.shortcut]);
+  useShortcutRegistration(
+    options.state.settings.shortcut, nativeControllerRef, registeredRef, optionsRef,
+  );
 
   useEffect(() => {
     const ctx = interactionContext(options);
@@ -358,30 +341,6 @@ function handleGesture(
       endGestureCapture(optionsRef);
     }
   }
-}
-
-function interactionContext(options: GestureOptions): ShortcutContext {
-  if (options.onboardingOpen) {
-    return options.state.onboarding.step === 3 ? 'practice' : null;
-  }
-  return options.shortcutOpen || hasOpenModal() ? null : 'product';
-}
-
-function handlePractice(options: GestureOptions, gesture: ShortcutGesture) {
-  const changes: Partial<OnboardingState> = {};
-  if (gesture === 'hold-start') {
-    changes.recognizedText = 'Hold gesture started (no speech captured).';
-  }
-  if (gesture === 'hold-finish') changes.holdTested = true;
-  if (gesture === 'latch-start') {
-    changes.recognizedText =
-      'Double-tap latched. Activate once more to finish (no speech captured).';
-  }
-  if (gesture === 'latch-finish') {
-    changes.recognizedText = 'Double-tap gesture finished (no speech captured).';
-    changes.tapTested = true;
-  }
-  options.setup.update(changes);
 }
 
 /** Test/helper: narrow UseDogfoodCaptureResult to the gesture bridge. */

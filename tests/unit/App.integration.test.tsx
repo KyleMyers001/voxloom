@@ -230,7 +230,7 @@ describe('App integration', () => {
       );
       expect(
         screen.getByRole('alert'),
-      ).toHaveTextContent('already in use');
+      ).toHaveTextContent('is in use by another app (simulated)');
     },
   );
 });
