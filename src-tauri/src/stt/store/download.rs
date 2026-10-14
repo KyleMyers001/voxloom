@@ -182,6 +182,9 @@ impl ModelStore {
 
         file.flush()
             .map_err(|e| SttErrorDto::new("download-failed", format!("flush failed: {e}")))?;
+        // Durable before the rename, so a crash cannot leave a short "verified" file.
+        file.sync_all()
+            .map_err(|e| SttErrorDto::new("download-failed", format!("sync failed: {e}")))?;
         drop(file);
 
         let received = integrity.received();
@@ -198,6 +201,9 @@ impl ModelStore {
 
         fs::rename(&tmp, &dest)
             .map_err(|e| SttErrorDto::new("download-failed", format!("finalize failed: {e}")))?;
+        // Bytes were just hashed: record it so the file is never re-hashed.
+        super::existing::write_marker(spec, &dest);
+        self.set_verdict(spec, super::existing::Verdict::Verified);
 
         // Only after the destination file exists do we report completion.
         debug_assert!(dest.is_file());

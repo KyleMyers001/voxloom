@@ -17,6 +17,7 @@ use super::catalog::{self, ModelSpec};
 use super::error::SttErrorDto;
 
 mod download;
+mod existing;
 #[cfg(test)]
 mod integrity_tests;
 mod verify;
@@ -46,6 +47,10 @@ struct Inflight {
 pub struct ModelStore {
     root: PathBuf,
     inflight: Mutex<Option<(String, Inflight)>>,
+    /// Existing-file verification results (see `existing.rs`).
+    verdicts: Mutex<existing::VerdictMap>,
+    /// Serializes hashing so a file is never hashed twice concurrently.
+    hashing: Mutex<()>,
 }
 
 impl ModelStore {
@@ -54,6 +59,8 @@ impl ModelStore {
         Self {
             root,
             inflight: Mutex::new(None),
+            verdicts: Mutex::new(Default::default()),
+            hashing: Mutex::new(()),
         }
     }
 
@@ -88,7 +95,12 @@ impl ModelStore {
         let status = if self.is_downloading(spec.id) {
             "downloading"
         } else if path.is_file() {
-            "available"
+            // Not yet verified (startup hash still running) reads as available;
+            // transcription verifies synchronously before use (resolved_path).
+            match self.known_verdict(spec) {
+                Some(existing::Verdict::Corrupt) => "failed",
+                _ => "available",
+            }
         } else {
             "missing"
         };
@@ -115,6 +127,16 @@ impl ModelStore {
                 format!(
                     "Model `{model_id}` is not downloaded. Call download after explicit user confirm."
                 ),
+            ));
+        }
+        let verdict = match self.known_verdict(spec) {
+            Some(v) => Some(v),
+            None => self.verify_existing(spec),
+        };
+        if verdict != Some(existing::Verdict::Verified) {
+            return Err(SttErrorDto::new(
+                "model-missing",
+                "Model file is corrupted. Download it again in Settings → Models.",
             ));
         }
         Ok(path)

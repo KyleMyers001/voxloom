@@ -1,6 +1,7 @@
 //! Download integrity checks (BUS-35): byte count against Content-Length and
-//! SHA-256 against the catalog pin. Both run before the `.partial` is renamed
-//! into place, so a model reported "available" is always a verified file.
+//! SHA-256 against the catalog pin, both checked before the `.partial` is
+//! renamed into place. Files already on disk are verified separately, once
+//! per file, in `existing.rs`.
 
 use sha2::{Digest, Sha256};
 
@@ -28,8 +29,11 @@ impl Integrity {
     /// on a hash that does not match `spec.sha256`.
     pub(super) fn finish(self, spec: &ModelSpec, declared: Option<u64>) -> Result<(), SttErrorDto> {
         check_length(self.received, declared)?;
-        let actual = hex(&self.hasher.finalize());
-        check_sha256(spec, &actual)
+        check_sha256(spec, &self.hex_digest())
+    }
+
+    pub(super) fn hex_digest(self) -> String {
+        hex(&self.hasher.finalize())
     }
 }
 
@@ -47,12 +51,14 @@ pub(super) fn check_sha256(spec: &ModelSpec, actual: &str) -> Result<(), SttErro
     if actual.eq_ignore_ascii_case(spec.sha256) {
         return Ok(());
     }
+    // Hashes go to the log, not the UI.
+    eprintln!(
+        "[stt] checksum mismatch for {}: expected sha256 {}, got {actual}",
+        spec.id, spec.sha256
+    );
     Err(SttErrorDto::new(
         "download-failed",
-        format!(
-            "Checksum mismatch for {}: expected {}, got {actual}. The file was deleted.",
-            spec.id, spec.sha256
-        ),
+        "Download was corrupted. Try again.",
     ))
 }
 
@@ -86,7 +92,7 @@ mod tests {
         i.update(b"not a model");
         let err = i.finish(spec, None).unwrap_err();
         assert_eq!(err.code, "download-failed");
-        assert!(err.message.contains("Checksum mismatch"), "{}", err.message);
+        assert_eq!(err.message, "Download was corrupted. Try again.");
 
         let err = check_length(10, Some(11)).unwrap_err();
         assert!(err.message.contains("incomplete"));

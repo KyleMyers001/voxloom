@@ -150,6 +150,9 @@ mod tests {
         // Place a placeholder so resolved_path succeeds; engine stub still
         // returns engine-unavailable without the whisper feature.
         std::fs::write(dir.join("ggml-tiny.en.bin"), b"placeholder").unwrap();
+        // Marker as if this file had been verified against the pin (BUS-35).
+        let pin = catalog::find("whisper-tiny.en").unwrap().sha256;
+        std::fs::write(dir.join("ggml-tiny.en.bin.verified"), format!("{pin} 11\n")).unwrap();
 
         let models = Arc::new(ModelStore::new(dir.clone()));
         let buffers = Arc::new(PcmBufferStore::new());

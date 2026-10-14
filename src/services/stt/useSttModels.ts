@@ -110,7 +110,7 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
       if (!cancelled) {
         setFailures((prev) => ({
           ...prev,
-          [modelId]: `Download failed: ${errorMessage(err)}. Nothing was saved.`,
+          [modelId]: `Download failed: ${errorMessage(err).replace(/\.+$/, '')}. Nothing was saved.`,
         }));
       }
       try {

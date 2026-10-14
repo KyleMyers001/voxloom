@@ -17,7 +17,7 @@ fn checksum_mismatch_deletes_file_and_reports_failure() {
         .download_spec_with_sink(spec, &url, |p| final_ratio = p.ratio)
         .unwrap_err();
     assert_eq!(err.code, "download-failed");
-    assert!(err.message.contains("Checksum mismatch"), "{}", err.message);
+    assert_eq!(err.message, "Download was corrupted. Try again.");
     assert!(final_ratio < 1.0, "never report completion for a bad file");
     assert!(
         !store.model_path(spec).exists(),
@@ -85,5 +85,94 @@ fn cancel_after_rename_keeps_verified_model() {
     );
     assert_eq!(fs::read(&dest).unwrap(), body, "verified model is kept");
     assert_eq!(store.status(spec.id).unwrap().status, "available");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// --- Existing files on disk (Codex P1): hash once, persist a marker. ---
+
+use super::existing::{marker_path, Verdict};
+
+#[test]
+fn existing_file_is_hashed_once_then_trusted_by_marker() {
+    let body = vec![0x55u8; 20 * 1024];
+    let spec = spec_for_body("whisper-tiny.en", &body);
+    let (store, dir) = temp_store("existing-ok");
+    fs::create_dir_all(&dir).unwrap();
+    let path = store.model_path(&spec);
+    fs::write(&path, &body).unwrap();
+    assert_eq!(
+        store.known_verdict(&spec),
+        None,
+        "unverified before hashing"
+    );
+
+    assert_eq!(store.verify_existing(&spec), Some(Verdict::Verified));
+    let marker = fs::read_to_string(marker_path(&path)).unwrap();
+    assert!(marker.starts_with(spec.sha256), "{marker}");
+
+    // A fresh store (next launch) trusts the marker without hashing. Proof:
+    // same-length different bytes, which only a re-hash would catch.
+    fs::write(&path, vec![0x66u8; body.len()]).unwrap();
+    let fresh = super::ModelStore::new(dir.clone());
+    assert_eq!(
+        fresh.known_verdict(&spec),
+        Some(Verdict::Verified),
+        "no re-hash once marked"
+    );
+
+    // A length change invalidates the marker.
+    fs::write(&path, b"short").unwrap();
+    let fresh = super::ModelStore::new(dir.clone());
+    assert_eq!(fresh.known_verdict(&spec), None);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn existing_file_mismatch_reports_failed_and_is_not_deleted() {
+    let (store, dir) = temp_store("existing-bad");
+    fs::create_dir_all(&dir).unwrap();
+    // Real catalog pin; these bytes are not the model.
+    let spec = catalog::find("whisper-tiny.en").unwrap();
+    let path = store.model_path(spec);
+    fs::write(&path, b"not the model").unwrap();
+
+    assert_eq!(store.verify_existing(spec), Some(Verdict::Corrupt));
+    assert!(path.is_file(), "never deleted silently");
+    assert!(!marker_path(&path).exists());
+    assert_eq!(
+        store.status(spec.id).unwrap().status,
+        "failed",
+        "UI offers Retry"
+    );
+
+    let err = store.resolved_path(spec.id).unwrap_err();
+    assert_eq!(err.code, "model-missing");
+    assert!(err.message.contains("corrupted"), "{}", err.message);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn resolved_path_verifies_unmarked_file_before_use() {
+    let (store, dir) = temp_store("existing-resolve");
+    fs::create_dir_all(&dir).unwrap();
+    let spec = catalog::find("whisper-base.en").unwrap();
+    fs::write(store.model_path(spec), b"tampered").unwrap();
+    // Status is optimistic until the background hash finishes...
+    assert_eq!(store.status(spec.id).unwrap().status, "available");
+    // ...but transcription hashes first and refuses the file.
+    assert!(store.resolved_path(spec.id).is_err());
+    assert_eq!(store.status(spec.id).unwrap().status, "failed");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn download_writes_marker() {
+    let body = vec![0x77u8; 8 * 1024];
+    let spec = spec_for_body("whisper-base.en", &body);
+    let (store, dir) = temp_store("download-marker");
+    let url = serve_bytes(body, None);
+    store.download_spec_with_sink(&spec, &url, |_| {}).unwrap();
+    assert!(marker_path(&store.model_path(&spec)).is_file());
+    assert_eq!(store.known_verdict(&spec), Some(Verdict::Verified));
     let _ = fs::remove_dir_all(&dir);
 }

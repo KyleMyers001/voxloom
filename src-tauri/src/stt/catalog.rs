@@ -8,8 +8,25 @@
 //! (also returned as `X-Linked-ETag` on the `resolve` URL).
 
 /// Hugging Face commit of `ggerganov/whisper.cpp` the catalog is pinned to.
-#[allow(dead_code)] // referenced by tests and docs
-pub const HF_REVISION: &str = "5359861c739e955e79d9a303bcbc70fb988958b1";
+/// A macro so `concat!` can build the URLs from it at compile time.
+macro_rules! hf_revision {
+    () => {
+        "5359861c739e955e79d9a303bcbc70fb988958b1"
+    };
+}
+macro_rules! hf_url {
+    ($file:literal) => {
+        concat!(
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/",
+            hf_revision!(),
+            "/",
+            $file
+        )
+    };
+}
+
+#[cfg(test)]
+pub const HF_REVISION: &str = hf_revision!();
 
 #[derive(Debug, Clone, Copy)]
 pub struct ModelSpec {
@@ -32,7 +49,7 @@ pub const CATALOG: &[ModelSpec] = &[
         label: "Whisper Tiny (English)",
         filename: "ggml-tiny.en.bin",
         size_bytes: 77_700_000,
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.en.bin",
+        url: hf_url!("ggml-tiny.en.bin"),
         // LFS oid, 77_704_715 bytes.
         sha256: "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
     },
@@ -41,7 +58,7 @@ pub const CATALOG: &[ModelSpec] = &[
         label: "Whisper Base (English)",
         filename: "ggml-base.en.bin",
         size_bytes: 148_000_000,
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.en.bin",
+        url: hf_url!("ggml-base.en.bin"),
         // LFS oid, 147_964_211 bytes.
         sha256: "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
     },
