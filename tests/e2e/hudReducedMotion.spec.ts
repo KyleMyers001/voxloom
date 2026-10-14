@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 
 // BUS-50: under Reduce Motion, transcribing keeps only the slow hud-breathe;
 // the processing waveform has no animations. With motion allowed, the pulse runs.
+// Only CSS animations are counted: a load-time CSS transition can still be running on slow CI runners (BUS-72).
 const transcribing =
   '<div class="recording recording--overlay" data-waveform="processing"><div class="hud-transcribing"><i></i></div></div>';
 const processingWave =
@@ -14,13 +15,19 @@ test('HUD under prefers-reduced-motion: breathe only on transcribing, none on pr
 
   const breathe = await page.evaluate((markup) => {
     document.getElementById('root')!.innerHTML = markup;
-    return document.getAnimations().map((a) => (a as CSSAnimation).animationName ?? 'transition');
+    return document
+      .getAnimations()
+      .filter((a) => a instanceof CSSAnimation)
+      .map((a) => (a as CSSAnimation).animationName);
   }, transcribing);
   expect(breathe).toEqual(['hud-breathe']);
 
   const wave = await page.evaluate((markup) => {
     document.getElementById('root')!.innerHTML = markup;
-    return document.getAnimations().map((a) => (a as CSSAnimation).animationName ?? 'transition');
+    return document
+      .getAnimations()
+      .filter((a) => a instanceof CSSAnimation)
+      .map((a) => (a as CSSAnimation).animationName);
   }, processingWave);
   expect(wave).toEqual([]);
 });
