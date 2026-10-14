@@ -2,7 +2,10 @@ import { useState } from 'react';
 import { useApp } from '../../app/AppContext';
 import { Dialog } from '../../components/Dialog';
 import { Icon } from '../../components/Icon';
-import { KeyCombo } from '../../components/KeyCombo';
+import { initialSettings } from '../../domain/fixtures';
+import { setRecorderStatus } from '../settings/recorderStore';
+import { ShortcutRecorder } from '../settings/ShortcutRecorder';
+import { HELP as SHORTCUT_HELP, onboardingInUseText } from '../settings/shortcutCopy';
 import { isTauriEnv } from '../../services/capture/captureService';
 import { useCaptureState } from '../../services/capture/useCaptureState';
 import { MicStep } from './MicStep';
@@ -17,6 +20,8 @@ interface OnboardingProps {
 export function Onboarding({ onClose, opener }: OnboardingProps) {
   const { settings, setup, state } = useApp();
   const [error, setError] = useState('');
+  // Last combo that wasn't refused: a collision reverts the field to it.
+  const [kept, setKept] = useState(state.settings.shortcut);
   const onboarding = state.onboarding;
   const update = setup.update;
   const capture = useCaptureState();
@@ -33,12 +38,16 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
     }
     if (onboarding.step === 2) {
       if (!shortcut.trim()) {
-        setError('Enter a shortcut.');
+        setError('Record a shortcut.');
         return;
       }
       if (!isNative && shortcut.toLowerCase() === 'ctrl + space') {
+        const fallback = kept.toLowerCase() === 'ctrl + space' ? initialSettings.shortcut : kept;
         update({ shortcutCollision: true });
-        setError('“Ctrl + Space” is already in use (simulated). Choose another combo; your previous one is kept.');
+        settings.update({ key: 'shortcut', value: fallback });
+        // The error line already says what was kept; don't repeat it in the status line.
+        setRecorderStatus(null);
+        setError(onboardingInUseText(shortcut, fallback));
         return;
       }
     }
@@ -72,15 +81,31 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
             <p>{isNative
               ? 'Desktop gestures use a global shortcut. Registration problems are shown in Settings.'
               : 'Browser prototype gestures work only while this tab is focused.'}</p>
-            {shortcut.trim() && <div className="bigkeys"><KeyCombo combo={shortcut.replace(/\s*\+\s*/g, '+')} /></div>}
-            <label className="field">
-              {isNative ? 'Preferred global shortcut' : 'Preferred app-local shortcut'}
-              <input
-                aria-invalid={onboarding.shortcutCollision || undefined}
-                onChange={(event) => settings.update({ key: 'shortcut', value: event.target.value })}
-                value={shortcut}
-              />
-            </label>
+            <div className="field onboarding-shortcut">
+              <span id="onboarding-shortcut-label">
+                {isNative ? 'Global shortcut' : 'App-local shortcut'}
+              </span>
+              <small className="frow__help" id="onboarding-shortcut-help">{SHORTCUT_HELP}</small>
+              <span className="frow__control">
+                <ShortcutRecorder
+                  defaultValue={initialSettings.shortcut}
+                  errorId="onboarding-error"
+                  helpId="onboarding-shortcut-help"
+                  id="onboarding-shortcut"
+                  invalid={Boolean(error)}
+                  labelId="onboarding-shortcut-label"
+                  onChange={(value) => {
+                    setError('');
+                    if (onboarding.shortcutCollision) update({ shortcutCollision: false });
+                    // `shortcut` is still the combo being replaced here, so this records
+                    // the last accepted one as the fallback for a later collision.
+                    if (shortcut.toLowerCase() !== 'ctrl + space') setKept(shortcut);
+                    settings.update({ key: 'shortcut', value });
+                  }}
+                  value={shortcut}
+                />
+              </span>
+            </div>
           </section>
         )}
 
@@ -111,7 +136,7 @@ export function Onboarding({ onClose, opener }: OnboardingProps) {
           </section>
         )}
 
-        {error && <p className="form-error ferr" role="alert"><Icon name="warn" size={14} />{error}</p>}
+        {error && <p className="form-error ferr" id="onboarding-error" role="alert"><Icon name="warn" size={14} />{error}</p>}
 
         <div className="sheet-acts">
           <button className="btn ghost" onClick={() => { update({ complete: true }); onClose(); }} type="button">

@@ -32,7 +32,19 @@ function normalizeKey(key: string): string {
   return key.charAt(0).toUpperCase() + key.slice(1);
 }
 
-/** Match a KeyboardEvent against a Settings-format shortcut string. */
+/** Physical key code → stored key name ("KeyK" → "k"), matching capture. */
+function physicalKey(code: string): string | null {
+  const m = /^(?:Key([A-Z])|Digit([0-9]))$/.exec(code);
+  if (m) return (m[1] ?? m[2]).toLowerCase();
+  if (code === 'Space' || code === 'Enter' || code === 'Backspace' || code === 'Tab') return code.toLowerCase();
+  return null;
+}
+
+/**
+ * Match a KeyboardEvent against a Settings-format shortcut string. The key is
+ * compared by physical `code` (as the recorder stores it), so Option+K still
+ * matches on layouts where `key` is "å"; `key` is a fallback for other codes.
+ */
 export function matchesShortcut(
   event: Pick<
     KeyboardEvent,
@@ -42,8 +54,9 @@ export function matchesShortcut(
 ): boolean {
   const parts = shortcut.toLowerCase().split('+').map((part) => part.trim());
   const key = parts.at(-1);
-  const space = key === 'space' && event.code === 'Space';
-  return (space || event.key.toLowerCase() === key) &&
+  const physical = physicalKey(event.code);
+  const keyMatches = physical !== null ? physical === key : event.key.toLowerCase() === key;
+  return keyMatches &&
     event.altKey === parts.includes('alt') &&
     event.ctrlKey === parts.includes('ctrl') &&
     event.metaKey === parts.includes('meta') &&

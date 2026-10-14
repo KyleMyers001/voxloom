@@ -16,6 +16,7 @@ import {
   type RegisterOutcome,
   type ShortcutBinder,
 } from './registerOrRevert';
+import { isDictationSuspended } from './recordingSuspend';
 
 export interface NativeShortcutApi {
   isAvailable(): boolean;
@@ -209,7 +210,8 @@ export function createNativeShortcutController({
     onGesture: (gesture) => {
       if (gesture === 'hold-start') {
         // Mac: HotKey Released often missing when modifiers lift first.
-        armHoldWatch();
+        // Not while a recorder records: that start is dropped downstream.
+        if (!isDictationSuspended()) armHoldWatch();
       } else if (
         gesture === 'hold-finish' ||
         gesture === 'latch-start' ||

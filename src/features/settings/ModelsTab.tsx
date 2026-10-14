@@ -12,6 +12,8 @@ export function ModelsTab() {
     selectedModelId: state.settings.transcriptionModel,
   });
   // Download/Retry rejections are shown on the row; nothing here downloads on its own.
+  // BUS-52: one download at a time; the other cards' Download buttons wait.
+  const busy = stt.progress !== null || stt.models.some((m) => m.status === 'downloading');
   const start = (id: string) => { void stt.downloadModel(id).catch(() => {}); };
 
   return (
@@ -37,6 +39,7 @@ export function ModelsTab() {
             key={model.id}
             model={model}
             onCancel={() => { void stt.cancelDownload(model.id).catch(() => {}); }}
+            downloadLocked={busy && stt.progress?.modelId !== model.id && model.status !== 'downloading'}
             onDownload={() => start(model.id)}
             onSelect={() => stt.selectModel(model.id)}
             progress={stt.progress?.modelId === model.id ? stt.progress : null}

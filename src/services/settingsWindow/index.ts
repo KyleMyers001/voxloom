@@ -30,6 +30,20 @@ export async function openSettingsWindow(): Promise<void> {
   await invoke('settings_window_open');
 }
 
+/**
+ * Whether the Settings window exists (it is destroyed on close). Lets main
+ * skip a toast the Settings status line already shows. False outside Tauri.
+ */
+export async function isSettingsWindowOpen(): Promise<boolean> {
+  if (!isTauri()) return false;
+  try {
+    const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+    return (await WebviewWindow.getByLabel(SETTINGS_WINDOW_LABEL)) !== null;
+  } catch {
+    return false;
+  }
+}
+
 /** From the Settings window: focus main and open onboarding there. */
 export async function requestOnboarding(): Promise<void> {
   if (!isTauri()) return;
