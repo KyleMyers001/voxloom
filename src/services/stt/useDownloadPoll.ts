@@ -10,6 +10,20 @@ import type { SttModelInfo } from './types';
 
 export const DOWNLOAD_POLL_MS = 1000;
 
+/**
+ * BUS-76: the download started by any mount, set before
+ * `stt_download_model` is invoked and cleared when it settles. Module level
+ * so a Models remount inherits it before the backend reports `downloading`.
+ */
+export const pendingDownload: { modelId: string | null } = { modelId: null };
+
+/** Show the pending model as downloading while the backend still says missing. */
+export function withPending(models: readonly SttModelInfo[]): readonly SttModelInfo[] {
+  const id = pendingDownload.modelId;
+  if (!id) return models;
+  return models.map((m) => (m.id === id && m.status === 'missing' ? { ...m, status: 'downloading' } : m));
+}
+
 export function useDownloadPoll(
   models: readonly SttModelInfo[],
   ownDownloadActive: boolean,
