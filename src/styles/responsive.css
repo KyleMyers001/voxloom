@@ -31,6 +31,7 @@
     transition-duration: .01ms !important;
   }
 
-  .wave i { animation: none; transition: none; }
+  .wave i,
+  [data-waveform="processing"] .wave i { animation: none; transition: none; }
 }
 
