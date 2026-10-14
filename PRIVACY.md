@@ -28,12 +28,18 @@ processes running as you. Recorded audio is never saved.
 - **One transcript:** History → the row's **Delete transcript** (trash) button.
 - **All transcripts, and stop keeping them:** Settings → Privacy →
   **Transcript retention → Off**. `history.json` is rewritten with no records
-  right away, and new dictations are not stored. Home still shows the last
-  transcript for manual recovery (in memory only).
+  right away, and new dictations are not stored. Transcripts already loaded
+  stay visible in History and Home (in memory only) until you restart Voxloom.
 - **Keep only recent ones:** **30 days** drops older records on every save
   and on launch. **Forever** keeps everything until you delete it.
-- **Everything, manually:** quit Voxloom and delete the folder above (or just
-  `history.json`). A missing file is treated as empty history on next launch.
+- **Everything, manually:** quit Voxloom and delete the folder above, or at
+  least these files in it:
+  - `history.json`
+  - `*.unreadable-*.bak` (see below)
+  - `history.json.tmp`, a temporary file a crash during save can leave behind.
+    Nothing cleans it up automatically, and it may hold transcripts.
+
+  A missing `history.json` is treated as empty history on next launch.
 - **Unreadable-file backups:** if Voxloom can't read `history.json` (corrupt,
   or from a different version), it first copies it to
   `history.json.unreadable-<timestamp>.bak` in the same folder. The same applies
@@ -46,9 +52,15 @@ Deleting a file does not remove copies already captured by backups.
 
 ## Accessibility
 
-With Accessibility permission, Voxloom reads the focused text field (to check
-it's safe to insert, and to confirm the text landed) and inserts the transcript
-into it. What it reads from the field is not saved.
+With Accessibility permission, Voxloom inserts the transcript into the focused
+field. To do that safely it reads:
+
+- the focused element's value, to check the text was inserted;
+- the window title, the document path (`AXDocument`) and, in browsers, the
+  page URL (`AXURL`), to notice when the target has changed.
+
+None of this is saved, and insertion itself never uses the clipboard (see
+Clipboard below for the optional fallback).
 
 ## Clipboard
 
