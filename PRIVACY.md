@@ -30,6 +30,8 @@ processes running as you. Recorded audio is never saved.
   **Transcript retention → Off**. `history.json` is rewritten with no records
   right away, and new dictations are not stored. Transcripts already loaded
   stay visible in History and Home (in memory only) until you restart Voxloom.
+  If Voxloom couldn't load `history.json` (it shows an error banner), Off
+  can't rewrite it; quit Voxloom and delete the files manually as below.
 - **Keep only recent ones:** **30 days** drops older records on every save
   and on launch. **Forever** keeps everything until you delete it.
 - **Everything, manually:** quit Voxloom and delete the folder above, or at
