@@ -42,9 +42,8 @@ describe('captureShortcut', () => {
     expect(keyName('Digit7')).toBe('7');
   });
 
-  it('rejects bare keys, Shift-only, Esc, lone modifiers and reserved combos', () => {
+  it('rejects bare keys, Esc, lone modifiers and reserved combos', () => {
     expect(captureShortcut(ev('KeyK', 'k')).kind).toBe('invalid');
-    expect(captureShortcut(ev('KeyK', 'K', { shiftKey: true })).kind).toBe('invalid');
     expect(captureShortcut(ev('Escape', 'Escape', { altKey: true })))
       .toEqual({ kind: 'cancel', reason: 'escape' });
     expect(captureShortcut(ev('AltRight', 'Alt', { altKey: true })))
@@ -62,6 +61,15 @@ describe('captureShortcut', () => {
   });
 });
 
+describe('Shift-only shortcuts (Kyle, BUS-47)', () => {
+  it('captures Shift+Space and Shift+letter; a bare key is still refused', () => {
+    expect(captureShortcut(ev('Space', ' ', { shiftKey: true }))).toEqual({ combo: 'Shift + Space', kind: 'captured' });
+    expect(captureShortcut(ev('KeyD', 'D', { shiftKey: true }))).toEqual({ combo: 'Shift + D', kind: 'captured' });
+    expect(captureShortcut(ev('KeyD', 'd'))).toMatchObject({ invalid: { reason: 'no-modifier' }, kind: 'invalid' });
+    expect(captureShortcut(ev('Tab', 'Tab', { shiftKey: true }))).toEqual({ kind: 'cancel', reason: 'tab' });
+  });
+});
+
 describe('recorder copy (designer final copy)', () => {
   it('says each refusal in words, with glyphs on macOS and words elsewhere', () => {
     const msg = (code: string, key: string, mods: Partial<KeyboardEvent> = {}, mac = true) => {
@@ -73,11 +81,10 @@ describe('recorder copy (designer final copy)', () => {
     expect(msg('F5', 'F5', { ctrlKey: true })).toMatch(/^F5 can't be used/);
     expect(msg('NumpadEnter', 'Enter', { ctrlKey: true }))
       .toBe('Keypad Enter can\'t be used. Use Return instead.');
-    expect(msg('KeyK', 'k')).toBe('Add ⌃, ⌥ or ⌘ to K.');
-    expect(msg('KeyK', 'K', { shiftKey: true })).toBe('Shift alone isn\'t enough. Add ⌃, ⌥ or ⌘.');
+    expect(msg('KeyK', 'k')).toBe('Add ⌃, ⌥, ⌘ or ⇧ to K.');
     expect(msg('Space', ' ', { metaKey: true })).toBe('macOS uses ⌘Space for Spotlight. Choose another.');
-    expect(msg('KeyK', 'k', {}, false)).toBe('Add Ctrl, Alt or Super to K.');
-    expect(addAKey(true)).toBe('Add a key: hold ⌃, ⌥ or ⌘ and press a letter, number or Space.');
+    expect(msg('KeyK', 'k', {}, false)).toBe('Add Ctrl, Alt, Super or Shift to K.');
+    expect(addAKey(true)).toBe('Add a key: hold ⌃, ⌥, ⌘ or ⇧ and press a letter, number or Space.');
     expect(addAKey(false)).not.toMatch(/[⌃⌥⌘]/);
     expect(inUseText('Ctrl + Alt + B', 'Ctrl + Shift + Space', true))
       .toBe('⌃⌥B is in use by another app. Kept ⌃⇧Space.');

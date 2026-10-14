@@ -25,7 +25,6 @@ export type InvalidCapture =
   | { reason: 'unsupported'; code: string; key: string }
   | { reason: 'numpad-enter' }
   | { reason: 'no-modifier'; key: string }
-  | { reason: 'shift-only' }
   | { reason: 'reserved'; combo: string; feature: string };
 
 const MODIFIER_CODES = new Set([
@@ -101,9 +100,6 @@ export function captureShortcut(event: CaptureKeyEvent, mac = isMacPlatform()): 
     return { invalid: { code: event.code, key: event.key, reason: 'unsupported' }, kind: 'invalid' };
   }
   if (mods.length === 0) return { invalid: { key, reason: 'no-modifier' }, kind: 'invalid' };
-  if (mods.length === 1 && mods[0] === 'Shift') {
-    return { invalid: { reason: 'shift-only' }, kind: 'invalid' };
-  }
   const combo = sortedForReserved(mods, key);
   // These are macOS system shortcuts; elsewhere the OS reports real conflicts.
   const feature = mac ? RESERVED[combo] : undefined;

@@ -16,7 +16,7 @@ export const NO_SHORTCUT_HEADING = 'No shortcut is active';
 export const NO_SHORTCUT_HINT = 'Record one in Settings.';
 export const NO_SHORTCUT = `${NO_SHORTCUT_HEADING}. ${NO_SHORTCUT_HINT}`;
 
-const mods = (mac: boolean) => (mac ? '⌃, ⌥ or ⌘' : 'Ctrl, Alt or Super');
+const mods = (mac: boolean) => (mac ? '⌃, ⌥, ⌘ or ⇧' : 'Ctrl, Alt, Super or Shift');
 const L = (combo: string, mac: boolean) => comboLabel(combo, mac);
 
 export const addAKey = (mac = isMacPlatform()) =>
@@ -64,8 +64,6 @@ export function invalidText(invalid: InvalidCapture, mac = isMacPlatform()): str
       return `Keypad Enter can't be used. Use ${mac ? 'Return' : 'the main Enter key'} instead.`;
     case 'no-modifier':
       return `Add ${mods(mac)} to ${L(invalid.key, mac)}.`;
-    case 'shift-only':
-      return `Shift alone isn't enough. Add ${mods(mac)}.`;
     case 'reserved':
       return `macOS uses ${L(invalid.combo, mac)} for ${invalid.feature}. Choose another.`;
   }
