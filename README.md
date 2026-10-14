@@ -18,7 +18,9 @@ The browser / Vite-only prototype uses synthetic capture, transcription and
 focused-window shortcuts; state clears on reload. The Tauri shell persists
 **Settings**, **History** and the **Word dictionary** in app data
 (`settings.json`, `history.json`, `dictionary.json`). Native audio retry and
-saved audio retention are not implemented. Onboarding practice recognizes
+saved audio retention are not implemented. Transcripts in `history.json` are
+stored as **plain text**; see [PRIVACY.md](PRIVACY.md) for where they live,
+how to delete them, and why the app enables Tauri's `macOSPrivateApi`. Onboarding practice recognizes
 shortcut gestures but does not transcribe speech. Cleanup styles, the cleanup
 model and start-at-login are not functional desktop features yet. Development
 scenario controls are excluded from production builds.
