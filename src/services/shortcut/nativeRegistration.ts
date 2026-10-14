@@ -63,6 +63,12 @@ export interface NativeShortcutController {
    * and returns an honest outcome for Settings/toast.
    */
   setShortcut(settingsShortcut: string): Promise<RegisterOutcome>;
+  /**
+   * BUS-69: unbind the OS hotkey while a recorder records (Carbon hotkeys
+   * swallow the keystroke, so the recorder would never see the current
+   * combo), and re-bind it afterwards.
+   */
+  suspendBinding(on: boolean): Promise<void>;
   setContext: GestureMachine['setContext'];
   resetPartial: GestureMachine['resetPartial'];
 }
@@ -95,6 +101,8 @@ export function createNativeShortcutController({
   scheduler,
 }: NativeShortcutControllerOptions): NativeShortcutController {
   let active: string | null = null;
+  /** Hotkey unbound by suspendBinding(true), re-bound on resume. */
+  let suspendedHotkey: string | null = null;
   let lastKnownGood: string | null = null;
   let disposed = false;
   let generation = 0;
@@ -314,6 +322,35 @@ export function createNativeShortcutController({
       context = ctx;
       disarmHoldWatch();
       machine.setContext(ctx);
+    },
+    suspendBinding(on) {
+      const run = async () => {
+        if (disposed) return;
+        if (on) {
+          if (!active || suspendedHotkey) return;
+          const hotkey = active;
+          disarmHoldWatch();
+          machine.resetPartial();
+          generation += 1;
+          active = null;
+          suspendedHotkey = hotkey;
+          await api.unregister(hotkey).catch(() => undefined);
+          return;
+        }
+        const hotkey = suspendedHotkey;
+        suspendedHotkey = null;
+        // A save during recording already bound the new combo.
+        if (!hotkey || active) return;
+        try {
+          await binder.register(hotkey);
+          active = hotkey;
+        } catch (err) {
+          onRegisterFailure?.(err instanceof Error ? err.message : String(err));
+        }
+      };
+      const pending = setShortcutQueue.then(run, run);
+      setShortcutQueue = pending.catch(() => undefined);
+      return pending;
     },
     async setShortcut(settingsShortcut) {
       const next = toPluginHotkey(settingsShortcut);

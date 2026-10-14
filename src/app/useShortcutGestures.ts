@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { subscribeModal } from './modalState';
 import { handlePractice, interactionContext } from './gestureContext';
 import { suspendable } from '../services/shortcut/recordingSuspend';
+import { unbindWhileRecording } from '../services/shortcut/recordingUnbind';
 import type { AppState } from './state';
 import type {
   DictationLifecycle,
@@ -210,6 +211,8 @@ export function useShortcutGestures(options: GestureOptions) {
       controller.setContext(interactionContext(optionsRef.current));
     const unsubscribe = subscribeModal(update);
     const unanswer = subscribe(answerShortcutQueries);
+    // BUS-69: the OS hotkey would swallow a re-recording of the same combo.
+    const stopUnbind = unbindWhileRecording(controller, { scheduler: browserScheduler });
 
     // Do NOT resetPartial / clear pending on document visibilitychange.
     // ADR §3: other-app focus must keep an in-flight native hold alive;
@@ -222,6 +225,7 @@ export function useShortcutGestures(options: GestureOptions) {
       overlayRef.current = null;
       unsubscribe();
       unanswer();
+      stopUnbind();
       pendingFinishRef.current?.clear();
       void controller.dispose();
       void overlay.dispose();
