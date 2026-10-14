@@ -54,6 +54,8 @@ export function createTauriShortcutApi(): NativeShortcutApi {
   };
 }
 
+const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
 export interface NativeShortcutController {
   activeHotkey(): string | null;
   dispose(): Promise<void>;
@@ -86,6 +88,11 @@ export interface NativeShortcutControllerOptions {
   holdRelease?: HoldReleaseApi;
   onGesture: (gesture: ShortcutGesture) => void;
   onRegisterFailure?: (message: string) => void;
+  /**
+   * BUS-69: suspendBinding could not unbind ('unbind': the hotkey stays
+   * active) or could not re-bind after a retry ('rebind': nothing active).
+   */
+  onSuspendFailure?: (kind: 'unbind' | 'rebind', message: string) => void;
   scheduler: Scheduler;
 }
 
@@ -98,6 +105,7 @@ export function createNativeShortcutController({
   holdRelease = createTauriHoldReleaseApi(),
   onGesture,
   onRegisterFailure,
+  onSuspendFailure,
   scheduler,
 }: NativeShortcutControllerOptions): NativeShortcutController {
   let active: string | null = null;
@@ -331,22 +339,42 @@ export function createNativeShortcutController({
           const hotkey = active;
           disarmHoldWatch();
           machine.resetPartial();
+          try {
+            await api.unregister(hotkey);
+          } catch (err) {
+            // The OS may still hold it: stay bound and say so, rather than
+            // marking it suspended and later "re-binding" a live hotkey.
+            onSuspendFailure?.('unbind', errorText(err));
+            return;
+          }
           generation += 1;
           active = null;
           suspendedHotkey = hotkey;
-          await api.unregister(hotkey).catch(() => undefined);
           return;
         }
         const hotkey = suspendedHotkey;
-        suspendedHotkey = null;
         // A save during recording already bound the new combo.
-        if (!hotkey || active) return;
-        try {
-          await binder.register(hotkey);
-          active = hotkey;
-        } catch (err) {
-          onRegisterFailure?.(err instanceof Error ? err.message : String(err));
+        if (!hotkey || active) {
+          suspendedHotkey = null;
+          return;
         }
+        let lastError: unknown = null;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          if (disposed) return;
+          try {
+            await binder.register(hotkey);
+            active = hotkey;
+            suspendedHotkey = null;
+            return;
+          } catch (err) {
+            lastError = err;
+          }
+        }
+        // Keep suspendedHotkey so the next resume retries it; report the
+        // inactive state so Settings and Home show it.
+        const message = errorText(lastError);
+        onRegisterFailure?.(message);
+        onSuspendFailure?.('rebind', message);
       };
       const pending = setShortcutQueue.then(run, run);
       setShortcutQueue = pending.catch(() => undefined);

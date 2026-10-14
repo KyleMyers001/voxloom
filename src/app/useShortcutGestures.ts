@@ -25,7 +25,7 @@ import {
 import { useShortcutRegistration } from './useShortcutRegistration';
 import { bootRefusedText } from '../features/settings/shortcutCopy';
 import { answerShortcutQueries, emitShortcutBound } from '../services/shortcut/bindingEvents';
-import { subscribe } from '../services/settingsWindow';
+import { isSettingsWindowOpen, subscribe } from '../services/settingsWindow';
 import type {
   DogfoodPhase,
   UseDogfoodCaptureResult,
@@ -183,6 +183,21 @@ export function useShortcutGestures(options: GestureOptions) {
       )),
       // No onRegisterFailure toast: registration outcomes are reported once,
       // in words, by the boot path below and useShortcutRegistration.
+      // BUS-69: a failed re-bind after recording is reported the same way.
+      onSuspendFailure: (kind, message) => {
+        if (kind === 'unbind') {
+          // Still bound: only re-recording the same combo is affected.
+          console.warn('[shortcut] unbind while recording failed:', message);
+          return;
+        }
+        const lost = registeredRef.current;
+        if (lost === null) return;
+        registeredRef.current = null;
+        emitShortcutBound({ active: null, message, ok: false, previous: lost, shortcut: lost });
+        void isSettingsWindowOpen().then((open) => {
+          if (!open) optionsRef.current.onShortcutError?.(bootRefusedText(lost, null));
+        }, () => undefined);
+      },
       scheduler: browserScheduler,
     });
     nativeControllerRef.current = controller;
