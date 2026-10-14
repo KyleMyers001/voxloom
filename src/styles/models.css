@@ -54,6 +54,7 @@
 }
 .stt-model-select > span { display: grid; gap: 2px; }
 .stt-model-id { color: var(--mut); font-family: var(--mono); font-size: var(--fs-mono); }
+.stt-model-size { white-space: nowrap; }
 .stt-model-actions .btn { align-items: center; display: inline-flex; gap: 6px; }
 .stt-model-actions { align-items: center; display: flex; gap: var(--s-4); justify-content: flex-end; }
 .stt-model-actions .prog { min-width: 180px; }
