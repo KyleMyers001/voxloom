@@ -93,6 +93,8 @@ export interface NativeShortcutControllerOptions {
    * active) or could not re-bind after a retry ('rebind': nothing active).
    */
   onSuspendFailure?: (kind: 'unbind' | 'rebind', message: string) => void;
+  /** BUS-69: a later resume re-bound the hotkey after a reported 'rebind' failure. */
+  onSuspendRecovered?: () => void;
   scheduler: Scheduler;
 }
 
@@ -106,11 +108,16 @@ export function createNativeShortcutController({
   onGesture,
   onRegisterFailure,
   onSuspendFailure,
+  onSuspendRecovered,
   scheduler,
 }: NativeShortcutControllerOptions): NativeShortcutController {
   let active: string | null = null;
   /** Hotkey unbound by suspendBinding(true), re-bound on resume. */
   let suspendedHotkey: string | null = null;
+  /** suspendBinding(true) is in effect (a recorder is recording). */
+  let recording = false;
+  /** A resume re-bind failure was reported; report the recovery too. */
+  let rebindFailed = false;
   let lastKnownGood: string | null = null;
   let disposed = false;
   let generation = 0;
@@ -334,15 +341,15 @@ export function createNativeShortcutController({
     suspendBinding(on) {
       const run = async () => {
         if (disposed) return;
+        recording = on;
         if (on) {
           if (!active || suspendedHotkey) return;
           const hotkey = active;
-          disarmHoldWatch();
-          machine.resetPartial();
           try {
             await api.unregister(hotkey);
           } catch (err) {
-            // The OS may still hold it: stay bound and say so, rather than
+            // The OS may still hold it: stay bound (gesture state intact, so
+            // the shortcut still stops a dictation) and say so, rather than
             // marking it suspended and later "re-binding" a live hotkey.
             onSuspendFailure?.('unbind', errorText(err));
             return;
@@ -350,6 +357,11 @@ export function createNativeShortcutController({
           generation += 1;
           active = null;
           suspendedHotkey = hotkey;
+          // A hold/latch started before recording must end with its normal
+          // finish, or (with the hotkey unbound) nothing could stop the mic.
+          // Finishes pass suspendable(); only starts are swallowed.
+          machine.finishActive();
+          disarmHoldWatch();
           return;
         }
         const hotkey = suspendedHotkey;
@@ -365,6 +377,10 @@ export function createNativeShortcutController({
             await binder.register(hotkey);
             active = hotkey;
             suspendedHotkey = null;
+            if (rebindFailed) {
+              rebindFailed = false;
+              onSuspendRecovered?.();
+            }
             return;
           } catch (err) {
             lastError = err;
@@ -373,6 +389,7 @@ export function createNativeShortcutController({
         // Keep suspendedHotkey so the next resume retries it; report the
         // inactive state so Settings and Home show it.
         const message = errorText(lastError);
+        rebindFailed = true;
         onRegisterFailure?.(message);
         onSuspendFailure?.('rebind', message);
       };
@@ -412,6 +429,12 @@ export function createNativeShortcutController({
         if (outcome.ok) {
           active = outcome.active;
           lastKnownGood = outcome.lastKnownGood;
+          // Outside recording, a stale suspended combo must not be re-bound
+          // later over the one just saved.
+          if (!recording) {
+            suspendedHotkey = null;
+            rebindFailed = false;
+          }
         } else {
           active = outcome.active;
           if (outcome.message) onRegisterFailure?.(outcome.message);

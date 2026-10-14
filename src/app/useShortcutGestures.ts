@@ -131,6 +131,8 @@ export function useShortcutGestures(options: GestureOptions) {
   const optionsRef = useRef(options);
   /** Last combo the OS accepted (settings format); the revert target. */
   const registeredRef = useRef<string | null>(null);
+  /** BUS-69: combo lost by a failed re-bind after recording (until recovered). */
+  const lostRef = useRef<string | null>(null);
   optionsRef.current = options;
   const phaseGuardRef = useRef<PhaseGuard>({ seen: options.dogfood.phase });
 
@@ -192,11 +194,19 @@ export function useShortcutGestures(options: GestureOptions) {
         }
         const lost = registeredRef.current;
         if (lost === null) return;
+        lostRef.current = lost;
         registeredRef.current = null;
         emitShortcutBound({ active: null, message, ok: false, previous: lost, shortcut: lost });
         void isSettingsWindowOpen().then((open) => {
           if (!open) optionsRef.current.onShortcutError?.(bootRefusedText(lost, null));
         }, () => undefined);
+      },
+      onSuspendRecovered: () => {
+        const back = lostRef.current;
+        lostRef.current = null;
+        if (back === null || registeredRef.current !== null) return;
+        registeredRef.current = back;
+        emitShortcutBound({ active: back, ok: true, shortcut: back });
       },
       scheduler: browserScheduler,
     });

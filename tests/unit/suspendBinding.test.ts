@@ -17,10 +17,26 @@ function setup() {
   const scheduler: Scheduler = { clear: () => undefined, set: () => 0 };
   const onRegisterFailure = vi.fn();
   const onSuspendFailure = vi.fn();
+  const onSuspendRecovered = vi.fn();
+  const gestures: string[] = [];
+  let now = 0;
+  const timers = new Map<number, () => void>();
+  let id = 0;
+  scheduler.set = (cb) => { id += 1; timers.set(id, cb); return id; };
+  scheduler.clear = (t) => { timers.delete(t); };
+  const flush = () => { for (const [t, cb] of [...timers]) { timers.delete(t); cb(); } };
+  const edge = (e: 'pressed' | 'released') => {
+    const calls = api.register.mock.calls;
+    calls[calls.length - 1][1](e);
+  };
   const controller = createNativeShortcutController({
-    api, clock: () => 0, holdRelease, onGesture: () => undefined, onRegisterFailure, onSuspendFailure, scheduler,
+    api, clock: () => now, doubleTapMs: 100, holdMs: 10, holdRelease,
+    onGesture: (g) => { gestures.push(g); }, onRegisterFailure, onSuspendFailure, onSuspendRecovered, scheduler,
   });
-  return { api, controller, onRegisterFailure, onSuspendFailure };
+  return {
+    advance: (ms: number) => { now += ms; }, api, controller, edge, flush, gestures,
+    onRegisterFailure, onSuspendFailure, onSuspendRecovered,
+  };
 }
 
 describe('suspendBinding (BUS-69)', () => {
@@ -80,5 +96,76 @@ describe('suspendBinding (BUS-69)', () => {
     await controller.suspendBinding(false);
     expect(api.register).not.toHaveBeenCalled();
     expect(controller.activeHotkey()).toBe(hotkey);
+  });
+
+  it('finishes a latched dictation before unbinding', async () => {
+    const { advance, controller, edge, gestures } = setup();
+    await controller.setShortcut('Shift + Space');
+    edge('pressed'); edge('released'); advance(20);
+    edge('pressed'); edge('released');
+    expect(gestures).toEqual(['latch-start']);
+    await controller.suspendBinding(true);
+    expect(gestures).toEqual(['latch-start', 'latch-finish']);
+    await controller.suspendBinding(false);
+    // Fresh state after resume: one tap does not "finish" anything.
+    advance(500); edge('pressed'); edge('released');
+    expect(gestures).toEqual(['latch-start', 'latch-finish']);
+  });
+
+  it('finishes an active hold before unbinding', async () => {
+    const { controller, edge, flush, gestures } = setup();
+    await controller.setShortcut('Shift + Space');
+    edge('pressed'); flush();
+    expect(gestures).toEqual(['hold-start']);
+    await controller.suspendBinding(true);
+    expect(gestures).toEqual(['hold-start', 'hold-finish']);
+  });
+
+  it('keeps an active latch when unbind fails', async () => {
+    const { advance, api, controller, edge, gestures } = setup();
+    await controller.setShortcut('Shift + Space');
+    edge('pressed'); edge('released'); advance(20);
+    edge('pressed'); edge('released');
+    api.unregister.mockRejectedValueOnce(new Error('native'));
+    await controller.suspendBinding(true);
+    expect(gestures).toEqual(['latch-start']);
+    edge('pressed');
+    expect(gestures).toEqual(['latch-start', 'latch-finish']);
+  });
+
+  it('reports recovery when a later resume re-binds after a failure', async () => {
+    const { api, controller, onSuspendFailure, onSuspendRecovered } = setup();
+    await controller.setShortcut('Shift + Space');
+    await controller.suspendBinding(true);
+    api.register.mockRejectedValue(new Error('taken'));
+    await controller.suspendBinding(false);
+    expect(onSuspendFailure).toHaveBeenCalledWith('rebind', 'taken');
+    expect(onSuspendRecovered).not.toHaveBeenCalled();
+    api.register.mockResolvedValue(undefined);
+    await controller.suspendBinding(true);
+    await controller.suspendBinding(false);
+    expect(onSuspendRecovered).toHaveBeenCalledTimes(1);
+    await controller.suspendBinding(true);
+    await controller.suspendBinding(false);
+    expect(onSuspendRecovered).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears the stale suspended combo when setShortcut succeeds outside recording', async () => {
+    const { api, controller, onSuspendRecovered } = setup();
+    await controller.setShortcut('Shift + Space');
+    await controller.suspendBinding(true);
+    api.register.mockRejectedValueOnce(new Error('x')).mockRejectedValueOnce(new Error('x'));
+    await controller.suspendBinding(false);
+    expect(controller.activeHotkey()).toBeNull();
+    await controller.setShortcut('Ctrl + Shift + D');
+    const saved = controller.activeHotkey();
+    expect(saved).not.toBeNull();
+    api.register.mockClear();
+    await controller.suspendBinding(true);
+    await controller.suspendBinding(false);
+    // Re-binds the saved combo, not the stale Shift+Space; no recovery report.
+    expect(api.register).toHaveBeenCalledTimes(1);
+    expect(api.register.mock.calls[0][0]).toBe(saved);
+    expect(onSuspendRecovered).not.toHaveBeenCalled();
   });
 });
