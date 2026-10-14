@@ -68,7 +68,32 @@
 .frow__control { align-items: center; display: flex; flex-wrap: wrap; gap: var(--s-4); justify-content: flex-start; }
 .settings-rows .frow > :not(.frow__label) { justify-self: start; }
 .frow__control input:not([type]) { max-width: 190px; }
-.shortcut-caps[data-editing] { visibility: hidden; }
+.shortcut-recorder { display: contents; }
+/* Top-align the recorder row: a status that wraps grows it downward only, so
+   the field never moves under the pointer. */
+.settings-rows .frow--recorder { align-items: start; }
+.shortcut-recorder__field {
+  align-items: center;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  min-height: var(--ctl);
+  min-width: 150px;
+  padding: 0 var(--s-4);
+}
+.shortcut-recorder__field:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.shortcut-recorder__field[data-recording] { border-color: var(--accent); border-style: dashed; }
+/* Dimmed via the muted text colour, not opacity: --mut is 5.69:1 light (opacity .55 was 4.24:1). */
+.shortcut-recorder__field[data-inactive] .kbd { color: var(--mut); }
+.shortcut-recorder__inactive { color: var(--muted); font-size: var(--fs-label); margin-left: 6px; }
+.shortcut-recorder__prompt { font-style: italic; }
+/* One line is always reserved so the row doesn't jump when a status appears. */
+.shortcut-recorder__status { flex-basis: 100%; font-size: var(--fs-label); line-height: 1.35; min-height: 1.35em; order: 99; }
+.shortcut-recorder__status[data-tone="error"] { color: var(--danger); }
 
 .mini-hud {
   align-items: center;

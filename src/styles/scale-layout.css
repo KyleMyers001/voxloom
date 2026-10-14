@@ -47,6 +47,7 @@
 /* Below 910px the one-line status clips in the 184-200px sidebar: the shortcut
    moves to its own line as small key caps. */
 .brand__caps { display: none; }
+.brand__none { color: var(--mut); display: block; font-size: var(--fs-label); margin-top: 2px; }
 @media (max-width: 909px) {
   .brand__label { display: none; }
   .brand__caps { display: flex; margin-top: 3px; }
