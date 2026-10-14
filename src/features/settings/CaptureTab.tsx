@@ -1,11 +1,12 @@
-import { useState } from 'react';
 import { useApp } from '../../app/AppContext';
-import { KeyCombo } from '../../components/KeyCombo';
+import { initialSettings } from '../../domain/fixtures';
 import { SegmentedControl } from '../../components/SegmentedControl';
 import { Switch } from '../../components/Switch';
 import type { WritingStyle } from '../../domain/types';
 import { isTauriEnv } from '../../services/capture/captureService';
 import { MicrophoneRows } from './MicrophoneRows';
+import { ShortcutRecorder } from './ShortcutRecorder';
+import { HELP as SHORTCUT_HELP } from './shortcutCopy';
 
 const styles: { value: WritingStyle; label: string }[] = [
   { value: 'formal', label: 'Formal' },
@@ -18,31 +19,20 @@ export function CaptureTab({ onSetup }: { onSetup: (opener: HTMLElement) => void
   const { settings, state } = useApp();
   const isNative = isTauriEnv();
   const update = settings.update;
-
-  /** Combo frozen at focus: the hidden caps keep that exact width while typing, so the field never moves. */
-  const [frozenCombo, setFrozenCombo] = useState<string | null>(null);
-  const editingShortcut = frozenCombo !== null;
   return (
     <div className="settings-rows">
-      <div className="frow">
+      <div className="frow frow--recorder">
         <span className="frow__label">
-          <label htmlFor="settings-shortcut">Shortcut</label>
+          <span id="settings-shortcut-label">Shortcut</span>
           <small className="frow__help" id="settings-shortcut-help">
-            Hold to dictate; double-tap to latch.
+            {SHORTCUT_HELP}
           </small>
         </span>
         <span className="frow__control">
-          {/* One representation at a time: key caps hide while the raw text is edited.
-              visibility (not unmount) keeps their space, so the field doesn't shift. */}
-          <span className="shortcut-caps" data-editing={editingShortcut || undefined}>
-            <KeyCombo combo={frozenCombo ?? state.settings.shortcut} />
-          </span>
-          <input
-            aria-describedby="settings-shortcut-help"
-            id="settings-shortcut"
-            onBlur={() => setFrozenCombo(null)}
-            onFocus={() => setFrozenCombo(state.settings.shortcut)}
-            onChange={(event) => update({ key: 'shortcut', value: event.target.value })}
+          <ShortcutRecorder
+            defaultValue={initialSettings.shortcut}
+            labelId="settings-shortcut-label"
+            onChange={(value) => update({ key: 'shortcut', value })}
             value={state.settings.shortcut}
           />
           <button aria-label="Set up shortcuts" className="btn" onClick={(event) => onSetup(event.currentTarget)} type="button">
