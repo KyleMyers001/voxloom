@@ -151,3 +151,30 @@ describe('Dictionary rows take the app focus ring (QA)', () => {
     expect(readFileSync('src/styles/base.css', 'utf8')).toMatch(/\.term-row:focus-visible,[^{]*\{\s*outline: 3px solid var\(--focus\)/);
   });
 });
+
+describe('BUS-48 contrast tokens', () => {
+  const tokens = css('tokens.css');
+  it('raises dark --mut and keeps light --mut', () => {
+    expect(tokens).toMatch(/:root \{[^}]*--mut: #9494a3;/);
+    expect(tokens).toMatch(/\[data-appearance-resolved="light"\] \{[^}]*--mut: #5d6068;/);
+  });
+
+  it('defines per-theme --ctl-line and --sel-edge', () => {
+    expect(tokens).toMatch(/:root \{[^}]*--ctl-line: #6a6a80;[^}]*--sel-edge: #70943a;/);
+    expect(tokens).toMatch(/\[data-appearance-resolved="light"\] \{[^}]*--ctl-line: #808389;[^}]*--sel-edge: #376b00;/);
+  });
+
+  it('borders form controls and .btn with --ctl-line', () => {
+    expect(css('base.css')).toMatch(/input,\nselect,\ntextarea \{[^}]*border: 1px solid var\(--ctl-line\)/);
+    expect(css('components.css')).toMatch(/\.btn \{[^}]*border-color: var\(--ctl-line\)/);
+    expect(css('ui-controls.css')).toMatch(/\.search \{[^}]*border: 1px solid var\(--ctl-line\)/);
+    expect(css('shell.css')).toMatch(/\.tb-settings\[aria-current="page"\] \{ box-shadow: inset 0 -2px 0 var\(--sel-edge\); \}/);
+    expect(css('shell.css')).toMatch(/\.tb-help \{[^}]*border: 1px solid var\(--ctl-line\)/);
+  });
+
+  it('marks selected nav, settings tab and segment with --sel-edge', () => {
+    expect(css('shell.css')).toMatch(/\.nav-button\[aria-current="page"\] \{[^}]*box-shadow: inset 3px 0 0 var\(--sel-edge\)/);
+    expect(css('settings.css')).toMatch(/\.settings-tab\[aria-selected="true"\] \{[^}]*box-shadow: inset 0 -2px 0 var\(--sel-edge\)/);
+    expect(css('ui-controls.css')).toMatch(/\.seg__item\.on \{[^}]*box-shadow: inset 0 0 0 1px var\(--sel-edge\)/);
+  });
+});
