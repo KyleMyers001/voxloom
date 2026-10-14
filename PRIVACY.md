@@ -55,8 +55,10 @@ Deleting a file does not remove copies already captured by backups.
 ## Accessibility
 
 With Accessibility permission, Voxloom inserts the transcript into the focused
-field. To do that safely it reads:
+field by writing it as the field's selected text. To do that safely it reads:
 
+- the focused app's name, and the focused element's role, subrole and whether
+  it has a DOM identifier, to find the right field;
 - the focused element's value, to check the text was inserted;
 - the window title, the document path (`AXDocument`) and, in browsers, the
   page URL (`AXURL`), to notice when the target has changed.
