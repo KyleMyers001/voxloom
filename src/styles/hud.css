@@ -30,12 +30,13 @@
 
 @keyframes hud-shimmer { to { transform: translateX(-50%); } }
 @keyframes hud-pulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+
 @keyframes hud-breathe { 0%, 100% { opacity: .6; } 50% { opacity: .9; } }
 
-/* Reduce Motion: no shimmer, a slow 3 s opacity breathe. */
+/* Reduce Motion (BUS-50): no shimmer, a slow 3 s opacity breathe. */
 @media (prefers-reduced-motion: reduce) {
   .hud-transcribing { animation: hud-breathe 3s ease-in-out infinite; }
-  .hud-transcribing i { animation: none; }
+  .hud-transcribing i { animation: none; will-change: auto; }
 }
 
 /* Result states: ~2.5 s each (timed by overlayBridge). */

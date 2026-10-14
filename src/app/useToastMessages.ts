@@ -23,11 +23,13 @@ export function useToastMessages(errors: (string | null | undefined)[]) {
   useEffect(() => { if (historyError) show(historyError, ERROR_MS); }, [historyError, show]);
   useEffect(() => { if (settingsError) show(settingsError, ERROR_MS); }, [settingsError, show]);
   useEffect(() => { if (dictionaryError) show(dictionaryError, ERROR_MS); }, [dictionaryError, show]);
+  const announce = useCallback((message: string) => show(message, INFO_MS), [show]);
+  const announceError = useCallback((message: string) => show(message, ERROR_MS), [show]);
   return {
     toast,
     /** announceError and store errors force the error tone; others are inferred from text. */
     toastTone: errorTone ? 'err' as const : undefined,
-    announce: (message: string) => show(message, INFO_MS),
-    announceError: (message: string) => show(message, ERROR_MS),
+    announce,
+    announceError,
   };
 }

@@ -12,7 +12,9 @@
   --line: #23232e;
   --winline: rgba(255, 255, 255, .1);
   --fg: #ececf1;
-  --mut: #8b8b99;
+  --mut: #9494a3; /* BUS-48: 4.60 on segon, 4.72 on navon, 5.65+ elsewhere */
+  --ctl-line: #6a6a80; /* BUS-48 control borders: 3.21+ on every surface (--line stays for dividers) */
+  --sel-edge: #70943a; /* BUS-48 selected marker: 3.92+ on navon/side/seg/segon */
   --mut-on-nav: #9a9aa8; /* muted text on --navon: 5.09:1 (--mut was 4.2:1) */
   --navon: #2a2a38; /* selected nav: 1.36:1 vs --side (was #1a1a24, 1.12:1) */
   --accfg: #b6ff3c;
@@ -92,6 +94,8 @@
   --winline: rgba(0, 0, 0, .12);
   --fg: #0b0b10;
   --mut: #5d6068;
+  --ctl-line: #808389; /* BUS-48: 3.10+ on every surface */
+  --sel-edge: #376b00; /* BUS-48: = --accfg, 5.25+ */
   --navon: #e7eadf;
   --mut-on-nav: #5d6068; /* 5.16:1 on navon */
   --accfg: #376b00; /* AA: 5.28 on navon; white text on it 6.43 */
