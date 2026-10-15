@@ -133,7 +133,7 @@ export function AppProvider({
   );
   const dictionary = useMemo(() => createDictionaryService(dispatch), []);
   const history = useMemo(() => createHistoryService(dispatch), []);
-  const settings = useMemo(() => createSettingsService(dispatch), []);
+  const settings = useMemo(() => createSettingsService(dispatch, clock), [clock]);
   const setup = useMemo(() => createSetupService(dispatch), []);
 
   const settingsHydratedRef = useRef(!settingsPers.enabled);
@@ -198,7 +198,7 @@ export function AppProvider({
           dispatch({
             onboardingComplete: result.file.onboardingComplete,
             settings: result.file.settings,
-            now: Date.now(), type: 'hydrate-settings',
+            now: clock(), type: 'hydrate-settings',
           });
           lastSavedSettingsRef.current = result.file;
           lastRequestedSettingsRef.current = result.file;
@@ -219,7 +219,7 @@ export function AppProvider({
           dispatch({
             onboardingComplete: result.file.onboardingComplete,
             settings: result.file.settings,
-            now: Date.now(), type: 'hydrate-settings',
+            now: clock(), type: 'hydrate-settings',
           });
           lastSavedSettingsRef.current = result.file;
           lastRequestedSettingsRef.current = result.file;
@@ -295,7 +295,7 @@ export function AppProvider({
       if (historyResult.ok && (settingsBlocked || historyBackupFailed)) {
         // Any history version: show it, but never rewrite or prune it on
         // default retention while settings writes are blocked.
-        dispatch({ records: historyResult.records, now: Date.now(), type: 'hydrate-records' });
+        dispatch({ records: historyResult.records, now: clock(), type: 'hydrate-records' });
         allowHistoryPersistRef.current = false;
         dispatch({
           message: settingsBlocked
@@ -305,13 +305,13 @@ export function AppProvider({
           type: 'set-history-error',
         });
       } else if (historyResult.ok) {
-        dispatch({ records: historyResult.records, now: Date.now(), type: 'hydrate-records' });
+        dispatch({ records: historyResult.records, now: clock(), type: 'hydrate-records' });
         allowHistoryPersistRef.current = true;
       } else {
         // Unreadable / unknown-version history.json: never write over it
         // (the store already tried to back it up). BUS-42. Dictations made
         // before this load stay visible in memory but are never written.
-        dispatch({ records: [], now: Date.now(), type: 'hydrate-records' });
+        dispatch({ records: [], now: clock(), type: 'hydrate-records' });
         allowHistoryPersistRef.current = false;
         dispatch({
           message: historyResult.error,
@@ -337,6 +337,7 @@ export function AppProvider({
     enabled: settingsPers.enabled,
     lastRequestedRef: lastRequestedSettingsRef,
     lastSavedRef: lastSavedSettingsRef,
+    now: clock,
     persistGenRef: settingsPersistGenRef,
   });
 
@@ -347,6 +348,7 @@ export function AppProvider({
     lastRequestedRef: lastRequestedSettingsRef,
     lastSavedRef: lastSavedSettingsRef,
     onboardingComplete: state.onboarding.complete,
+    now: clock,
     persistence: settingsPers,
     persistGenRef: settingsPersistGenRef,
     settings: state.settings,

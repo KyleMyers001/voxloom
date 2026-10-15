@@ -21,9 +21,13 @@ export function createHistoryService(dispatch: Dispatch): HistoryDeletion {
   };
 }
 
-export function createSettingsService(dispatch: Dispatch): SettingsStore {
+/** `now` defaults to Date.now for call sites that don't inject a clock. */
+export function createSettingsService(
+  dispatch: Dispatch,
+  now: () => number = Date.now,
+): SettingsStore {
   return {
-    update: (change) => dispatch({ ...change, now: Date.now(), type: 'set-setting' }),
+    update: (change) => dispatch({ ...change, now: now(), type: 'set-setting' }),
   };
 }
 

@@ -50,8 +50,8 @@ export function App() {
   }, [state.onboarding.complete]);
 
   const onShortcutRevert = useCallback(
-    (shortcut: string) => dispatch({ key: 'shortcut', now: Date.now(), type: 'set-setting', value: shortcut }),
-    [dispatch],
+    (shortcut: string) => dispatch({ key: 'shortcut', now: now(), type: 'set-setting', value: shortcut }),
+    [dispatch, now],
   );
 
   useShortcutGestures({

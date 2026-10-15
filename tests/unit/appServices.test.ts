@@ -40,4 +40,16 @@ describe('mock application services', () => {
       },
     ]);
   });
+
+  it('createSettingsService uses the injected clock for now', () => {
+    const dispatch = vi.fn();
+    const settings = createSettingsService(dispatch, () => 1_700_000_000_000);
+    settings.update({ key: 'startAtLogin', value: false });
+    expect(dispatch.mock.calls[0][0]).toEqual({
+      key: 'startAtLogin',
+      now: 1_700_000_000_000,
+      type: 'set-setting',
+      value: false,
+    });
+  });
 });
