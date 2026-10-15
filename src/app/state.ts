@@ -1,4 +1,4 @@
-import { recordsAfterSettingsChange, recordsForRetention, retentionStashAfter } from './retentionClear';
+import { recordsAfterSettingsChange, recordsForRetention } from './retentionClear';
 import { dictationReducer } from '../domain/dictationMachine';
 import { initialOnboarding } from '../domain/fixtures';
 import {
@@ -39,11 +39,6 @@ export interface AppState {
   nextRunId: number;
   onboarding: OnboardingState;
   records: DictationRecord[];
-  /**
-   * Transcripts Retention Off cleared from memory before its settings save
-   * confirmed; restored if that save fails and settings roll back.
-   */
-  retentionOffStash?: DictationRecord[] | null;
   screen: Screen;
   settings: Settings;
   words: string[];
@@ -102,7 +97,6 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     return {
       ...state,
       records: recordsAfterSettingsChange(state, settings, action.now),
-      retentionOffStash: retentionStashAfter(state, settings),
       settings,
     };
   }
@@ -174,17 +168,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         ...state.onboarding,
         complete: action.onboardingComplete,
       },
-      records: action.rollback === true && state.retentionOffStash
-        && action.settings.transcriptRetention !== 'off'
-        ? restoreStash(state.records, state.retentionOffStash)
-        : recordsAfterSettingsChange(state, action.settings, action.now),
-      retentionOffStash: retentionStashAfter(state, action.settings),
+      records: recordsAfterSettingsChange(state, action.settings, action.now),
       settings: action.settings,
       settingsError: null,
     };
-  }
-  if (action.type === 'settings-saved') {
-    return state.retentionOffStash ? { ...state, retentionOffStash: null } : state;
   }
   if (action.type === 'set-settings-error') {
     if (state.settingsError === action.message) return state;
@@ -306,14 +293,3 @@ export function canStartDictation(dictation: DictationState): boolean {
   return dictation.kind !== 'listening' && dictation.kind !== 'processing';
 }
 
-/** Rows added while Off stay first; cleared rows come back in their order. */
-function restoreStash(current: DictationRecord[], stash: DictationRecord[]): DictationRecord[] {
-  const ids = new Set(current.map((record) => record.id));
-  const restored = stash.filter((record) => !ids.has(record.id));
-  const merged = [...current, ...restored];
-  const order = new Map(stash.map((record, index) => [record.id, index]));
-  const fresh = merged.filter((record) => !order.has(record.id));
-  const old = merged.filter((record) => order.has(record.id))
-    .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
-  return [...fresh, ...old];
-}

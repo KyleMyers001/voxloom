@@ -132,7 +132,7 @@ export function AppProvider({
     [clock],
   );
   const dictionary = useMemo(() => createDictionaryService(dispatch), []);
-  const history = useMemo(() => createHistoryService(dispatch), []);
+  const historyDispatch = useMemo(() => createHistoryService(dispatch), []);
   const settings = useMemo(() => createSettingsService(dispatch), []);
   const setup = useMemo(() => createSetupService(dispatch), []);
 
@@ -148,12 +148,108 @@ export function AppProvider({
   /** False after a corrupt-load so we never overwrite the broken file. */
   const allowHistoryPersistRef = useRef(!historyPers.enabled);
   const historyPersistGenRef = useRef(0);
+  /** One queue for history.json writes/reloads so an Off wipe cannot race a restore. */
+  const historyChainRef = useRef<Promise<void>>(Promise.resolve());
+  /** Latest records/retention for queued history jobs (avoid stale closures). */
+  const historySnapshotRef = useRef({
+    records: state.records,
+    retention: state.settings.transcriptRetention,
+  });
+  historySnapshotRef.current = {
+    records: state.records,
+    retention: state.settings.transcriptRetention,
+  };
 
   const dictionaryHydratedRef = useRef(!dictionaryPers.enabled);
   const allowDictionaryPersistRef = useRef(!dictionaryPers.enabled);
   const dictionaryPersistGenRef = useRef(0);
   /** Last successfully saved words — roll back UI on save failure. */
   const lastSavedWordsRef = useRef<string[] | null>(null);
+
+  const enqueueHistoryJob = (job: () => Promise<void>) => {
+    historyChainRef.current = historyChainRef.current.then(job, job);
+  };
+
+  /** True when UI is Off but settings.json has not confirmed Off yet. */
+  const retentionOffPending = () => (
+    historySnapshotRef.current.retention === 'off'
+    && lastSavedSettingsRef.current?.settings.transcriptRetention !== 'off'
+  );
+
+  const saveHistorySnapshot = async () => {
+    if (!historyPers.enabled || !historyHydratedRef.current || !allowHistoryPersistRef.current) {
+      return;
+    }
+    // Leave history.json alone until Off is confirmed on settings.json.
+    if (retentionOffPending()) return;
+    const gen = historyPersistGenRef.current;
+    const { records, retention } = historySnapshotRef.current;
+    try {
+      await historyPers.store.save(records, retention, clock());
+      if (gen !== historyPersistGenRef.current) return;
+      dispatch({ message: null, type: 'set-history-error' });
+    } catch (error: unknown) {
+      if (gen !== historyPersistGenRef.current) return;
+      const message = error instanceof Error ? error.message : String(error);
+      dispatch({
+        message: `Failed to save history: ${message}`,
+        type: 'set-history-error',
+      });
+    }
+  };
+
+  const reloadHistoryFromDisk = async (retention: typeof state.settings.transcriptRetention) => {
+    if (!historyPers.enabled || !historyHydratedRef.current) return;
+    // Supersede any in-flight wipe: bump gen, then load after prior jobs finish.
+    historyPersistGenRef.current += 1;
+    const gen = historyPersistGenRef.current;
+    const result = await historyPers.store.load(retention, clock());
+    if (gen !== historyPersistGenRef.current) return;
+    if (result.ok) {
+      dispatch({ now: clock(), records: result.records, type: 'hydrate-records' });
+      dispatch({ message: null, type: 'set-history-error' });
+    } else {
+      dispatch({
+        message: result.error,
+        sticky: true,
+        type: 'set-history-error',
+      });
+    }
+  };
+
+  const patchHistoryDeleteOnDisk = async (id: string) => {
+    if (!historyPers.enabled || !historyHydratedRef.current || !allowHistoryPersistRef.current) {
+      return;
+    }
+    if (!retentionOffPending()) return;
+    const diskRetention = lastSavedSettingsRef.current?.settings.transcriptRetention ?? 'forever';
+    if (diskRetention === 'off') return;
+    const gen = historyPersistGenRef.current;
+    try {
+      const loaded = await historyPers.store.load(diskRetention, clock());
+      if (gen !== historyPersistGenRef.current || !loaded.ok) return;
+      const next = loaded.records.filter((record) => record.id !== id);
+      await historyPers.store.save(next, diskRetention, clock());
+      if (gen !== historyPersistGenRef.current) return;
+      dispatch({ message: null, type: 'set-history-error' });
+    } catch (error: unknown) {
+      if (gen !== historyPersistGenRef.current) return;
+      const message = error instanceof Error ? error.message : String(error);
+      dispatch({
+        message: `Failed to save history: ${message}`,
+        type: 'set-history-error',
+      });
+    }
+  };
+
+  const history = useMemo(() => ({
+    delete: (id: string) => {
+      historyDispatch.delete(id);
+      // While Off is optimistic, memory no longer mirrors disk — patch disk so a
+      // failed Off save + reload cannot revive a row the user just deleted.
+      enqueueHistoryJob(() => patchHistoryDeleteOnDisk(id));
+    },
+  }), [historyDispatch]);
 
   const needsBootHydrate = settingsPers.enabled
     || historyPers.enabled
@@ -347,6 +443,16 @@ export function AppProvider({
     lastRequestedRef: lastRequestedSettingsRef,
     lastSavedRef: lastSavedSettingsRef,
     onboardingComplete: state.onboarding.complete,
+    onRolledBack: (file) => {
+      // Settings rolled back; reload transcripts from disk (Off wipe was deferred).
+      enqueueHistoryJob(() => reloadHistoryFromDisk(file.settings.transcriptRetention));
+    },
+    onSaved: (file) => {
+      // Confirmed Off: now wipe history.json through the same serial queue.
+      if (file.settings.transcriptRetention === 'off') {
+        enqueueHistoryJob(() => saveHistorySnapshot());
+      }
+    },
     persistence: settingsPers,
     persistGenRef: settingsPersistGenRef,
     settings: state.settings,
@@ -389,35 +495,12 @@ export function AppProvider({
     })();
   }, [dictionaryPers, state.words]);
 
-  // Persist history after a successful hydrate whenever records or retention
-  // change.
+  // Persist history after hydrate whenever records or retention change.
+  // Writes are serialized. Optimistic Retention Off skips the wipe until
+  // settings.json confirms Off (onSaved); foreign Off already updated
+  // lastSavedSettingsRef before hydrate, so the wipe runs here.
   useEffect(() => {
-    if (
-      !historyPers.enabled
-      || !historyHydratedRef.current
-      || !allowHistoryPersistRef.current
-    ) {
-      return;
-    }
-    const gen = historyPersistGenRef.current;
-    void (async () => {
-      try {
-        await historyPers.store.save(
-          state.records,
-          state.settings.transcriptRetention,
-          clock(),
-        );
-        if (gen !== historyPersistGenRef.current) return;
-        dispatch({ message: null, type: 'set-history-error' });
-      } catch (error: unknown) {
-        if (gen !== historyPersistGenRef.current) return;
-        const message = error instanceof Error ? error.message : String(error);
-        dispatch({
-          message: `Failed to save history: ${message}`,
-          type: 'set-history-error',
-        });
-      }
-    })();
+    enqueueHistoryJob(() => saveHistorySnapshot());
   }, [
     clock,
     historyPers,
