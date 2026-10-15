@@ -141,7 +141,7 @@ impl ModelStore {
             )),
             _ => Err(SttErrorDto::new(
                 "model-missing",
-                "Model file is damaged. Download it again in Settings → Models.",
+                "Model file is damaged. Download it again in Settings.",
             )),
         }
     }

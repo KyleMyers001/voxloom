@@ -164,7 +164,10 @@ fn existing_file_mismatch_reports_failed_and_is_not_deleted() {
 
     let err = store.resolved_path(spec.id).unwrap_err();
     assert_eq!(err.code, "model-missing");
-    assert!(err.message.contains("damaged"), "{}", err.message);
+    assert_eq!(
+        err.message,
+        "Model file is damaged. Download it again in Settings."
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
