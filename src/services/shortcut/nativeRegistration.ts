@@ -125,7 +125,7 @@ export function createNativeShortcutController({
   /**
    * True while the Mac hold-release poll/tap watch is the *primary* finish
    * path. Carbon Released is only suppressed during a short post-arm grace;
-   * after grace it is a backup finish (Clara: dead 2nd-session watch).
+   * after grace it is a backup finish (dead 2nd-session watch).
    */
   let holdWatchMonitoring = false;
   /** Suppress Carbon Released only during post-arm grace (spurious focus). */

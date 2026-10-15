@@ -90,7 +90,7 @@ export interface UseDogfoodCaptureResult {
 /**
  * HUD rules 3–6: only Copied (or maybe-copied) and a definite failure show
  * anything after delivery. Unverified and "may have been inserted, nothing
- * copied" dismiss silently like a success (Kyle); History keeps the
+ * copied" dismiss silently like a success; History keeps the
  * Unverified badge.
  */
 export function hudResultFor(
