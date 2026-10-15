@@ -43,6 +43,8 @@ export function useSettingsPersist({
         await persistence.store.save(snapshot.settings, snapshot.onboardingComplete);
         if (gen !== persistGenRef.current) return;
         lastSavedRef.current = snapshot;
+        // Off is confirmed on disk only if no newer save is queued.
+        if (lastRequestedRef.current === snapshot) dispatch({ type: 'settings-saved' });
         dispatch({ message: null, type: 'set-settings-error' });
       } catch (error: unknown) {
         if (gen !== persistGenRef.current) return;
@@ -54,7 +56,7 @@ export function useSettingsPersist({
         if (rollback && lastRequestedRef.current === snapshot) {
           // The rollback is what we now expect on disk; don't re-save it.
           lastRequestedRef.current = rollback;
-          dispatch({ onboardingComplete: rollback.onboardingComplete, settings: rollback.settings, now: Date.now(), type: 'hydrate-settings' });
+          dispatch({ onboardingComplete: rollback.onboardingComplete, settings: rollback.settings, now: Date.now(), rollback: true, type: 'hydrate-settings' });
         }
         dispatch({ message: `Failed to save settings: ${message}`, type: 'set-settings-error' });
       }

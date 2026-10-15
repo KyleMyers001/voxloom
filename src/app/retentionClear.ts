@@ -38,3 +38,19 @@ export function recordsForRetention(
 ): AppState['records'] {
   return settings.transcriptRetention === 'off' ? keepRecoverable(records, now) : records;
 }
+
+/**
+ * Stash for undoing an Off that fails to save. Entering Off stashes the
+ * pre-clear records; any other change away from Off (or a rollback) drops it,
+ * so a confirmed Off-then-On never resurrects deleted transcripts.
+ */
+export function retentionStashAfter(
+  state: AppState,
+  next: AppState['settings'],
+): AppState['records'] | null {
+  const wasOff = state.settings.transcriptRetention === 'off';
+  const isOff = next.transcriptRetention === 'off';
+  if (!wasOff && isOff) return state.records;
+  if (wasOff && isOff) return state.retentionOffStash ?? null;
+  return null;
+}
