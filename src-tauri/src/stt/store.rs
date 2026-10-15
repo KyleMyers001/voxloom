@@ -137,7 +137,7 @@ impl ModelStore {
             Some(existing::Verdict::Verified) => Ok(path),
             Some(existing::Verdict::Unreadable) => Err(SttErrorDto::new(
                 "model-missing",
-                "Couldn't read the model file. Check the disk, then try again.",
+                "Couldn't open the model file. Try again, or download it again if this keeps happening.",
             )),
             _ => Err(SttErrorDto::new(
                 "model-missing",

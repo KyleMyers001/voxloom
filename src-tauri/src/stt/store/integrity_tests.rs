@@ -249,7 +249,11 @@ fn unreadable_file_is_not_reported_damaged() {
         return;
     }
     let err = store.resolved_path(spec.id).unwrap_err();
-    assert!(err.message.contains("Couldn't read"), "{}", err.message);
+    assert!(
+        err.message.contains("Couldn't open the model file"),
+        "{}",
+        err.message
+    );
     assert_ne!(store.status(spec.id).unwrap().status, "failed");
     fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
     let _ = fs::remove_dir_all(&dir);
