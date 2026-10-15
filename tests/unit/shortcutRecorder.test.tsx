@@ -61,7 +61,7 @@ describe('captureShortcut', () => {
   });
 });
 
-describe('Shift-only shortcuts (Kyle, BUS-47)', () => {
+describe('Shift-only shortcuts (BUS-47)', () => {
   it('captures Shift+Space and Shift+letter; a bare key is still refused', () => {
     expect(captureShortcut(ev('Space', ' ', { shiftKey: true }))).toEqual({ combo: 'Shift + Space', kind: 'captured' });
     expect(captureShortcut(ev('KeyD', 'D', { shiftKey: true }))).toEqual({ combo: 'Shift + D', kind: 'captured' });
