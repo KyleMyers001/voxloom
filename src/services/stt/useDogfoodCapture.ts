@@ -104,10 +104,8 @@ export function hudResultFor(
 function errorText(error: unknown): string {
   if (error instanceof SttError) {
     if (error.code === 'model-missing') {
-      return (
-        `${error.message} Open Settings → Speech-to-text models and `
-        + 'Download the selected model first.'
-      );
+      // Settings guidance lives here once; missingModelMessage is the fact only.
+      return `${error.message} Download the selected model in Settings first.`;
     }
     return error.message;
   }
@@ -117,11 +115,8 @@ function errorText(error: unknown): string {
 
 function missingModelMessage(modelId: string, status: string | null): string {
   const detail = status ? ` (status: ${status})` : '';
-  return (
-    `Model “${modelId}” is not downloaded${detail}. `
-    + 'Open Settings → Speech-to-text models and Download it first '
-    + '(no silent download).'
-  );
+  // Fact only — errorText appends the short Settings suffix once.
+  return `Model “${modelId}” is not downloaded${detail}.`;
 }
 
 function resolvePlatform(
