@@ -390,7 +390,7 @@ describe('useDogfoodCapture', () => {
 
     expect(result.current.phase).toBe('error');
     expect(result.current.message).toMatch(/not downloaded/i);
-    expect(result.current.message).toMatch(/no silent download/i);
+    expect(result.current.message).toMatch(/Download the selected model in Settings first\.?/);
     expect(toast).toHaveBeenCalledWith(
       expect.stringMatching(/not downloaded/i),
     );

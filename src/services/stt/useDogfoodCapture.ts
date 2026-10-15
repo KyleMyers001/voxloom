@@ -119,8 +119,7 @@ function missingModelMessage(modelId: string, status: string | null): string {
   const detail = status ? ` (status: ${status})` : '';
   return (
     `Model “${modelId}” is not downloaded${detail}. `
-    + 'Open Settings → Speech-to-text models and Download it first '
-    + '(no silent download).'
+    + 'Download the selected model in Settings first.'
   );
 }
 
