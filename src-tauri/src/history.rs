@@ -99,7 +99,10 @@ mod tests {
         assert!(!remove_orphaned_tmp(&path, Some("{not json")));
         assert!(tmp.exists());
         // Main file valid: the tmp is a stale orphan, delete it.
-        assert!(remove_orphaned_tmp(&path, Some("{\"version\":1,\"records\":[]}")));
+        assert!(remove_orphaned_tmp(
+            &path,
+            Some("{\"version\":1,\"records\":[]}")
+        ));
         assert!(!tmp.exists());
         let _ = fs::remove_dir_all(&dir);
     }
