@@ -97,3 +97,38 @@ describe('Off before the first history load (BUS-78)', () => {
     expect(loaded.records.map((r) => r.id)).toEqual(['b']);
   });
 });
+
+describe('Retention Off rollback restores records (BUS-78 P1)', () => {
+  const now = 5_000;
+  const base = createInitialState(1_000);
+  const forever = {
+    ...base,
+    records: [rec('a', 'inserted', null), rec('b', 'failed', now + 60_000)],
+    settings: { ...base.settings, transcriptRetention: 'forever' as const },
+  };
+
+  it('restores transcripts Off cleared when the settings save rolls back', () => {
+    const off = appReducer(forever, { key: 'transcriptRetention', now, type: 'set-setting', value: 'off' });
+    expect(off.records.map((r) => r.id)).toEqual(['b']);
+    const withNew = appReducer(off, { record: rec('n', 'inserted', null), type: 'append-record' });
+    const rolled = appReducer(withNew, {
+      onboardingComplete: true, now, rollback: true, settings: forever.settings, type: 'hydrate-settings',
+    });
+    expect(rolled.settings.transcriptRetention).toBe('forever');
+    expect(rolled.records.map((r) => r.id)).toEqual(['n', 'a', 'b']);
+    expect(rolled.retentionOffStash).toBeNull();
+  });
+
+  it('does not restore once Off saved, nor on a non-rollback change away from Off', () => {
+    const off = appReducer(forever, { key: 'transcriptRetention', now, type: 'set-setting', value: 'off' });
+    const saved = appReducer(off, { type: 'settings-saved' });
+    const rolled = appReducer(saved, {
+      onboardingComplete: true, now, rollback: true, settings: forever.settings, type: 'hydrate-settings',
+    });
+    expect(rolled.records.map((r) => r.id)).toEqual(['b']);
+    const foreign = appReducer(off, {
+      onboardingComplete: true, now, settings: forever.settings, type: 'hydrate-settings',
+    });
+    expect(foreign.records.map((r) => r.id)).toEqual(['b']);
+  });
+});

@@ -22,9 +22,12 @@ export type AppAction =
   | {
       now: number;
       onboardingComplete: boolean;
+      /** True when undoing a failed settings save (useSettingsPersist). */
+      rollback?: boolean;
       settings: Settings;
       type: 'hydrate-settings';
     }
+  | { type: 'settings-saved' }
   | {
       completion: 'automatic' | 'held';
       runId: number;

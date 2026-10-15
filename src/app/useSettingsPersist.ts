@@ -47,6 +47,8 @@ export function useSettingsPersist({
         await persistence.store.save(snapshot.settings, snapshot.onboardingComplete);
         if (gen !== persistGenRef.current) return;
         lastSavedRef.current = snapshot;
+        // Off is confirmed on disk only if no newer save is queued.
+        if (lastRequestedRef.current === snapshot) dispatch({ type: 'settings-saved' });
         dispatch({ message: null, type: 'set-settings-error' });
       } catch (error: unknown) {
         if (gen !== persistGenRef.current) return;
@@ -62,6 +64,7 @@ export function useSettingsPersist({
             onboardingComplete: rollback.onboardingComplete,
             settings: rollback.settings,
             now: nowRef.current(),
+            rollback: true,
             type: 'hydrate-settings',
           });
         }
