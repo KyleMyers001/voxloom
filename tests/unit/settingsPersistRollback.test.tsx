@@ -184,4 +184,56 @@ describe('Retention Off: reload-from-disk on failed save (BUS-78)', () => {
     await waitFor(() => expect(api!.state.records.map((r) => r.id)).toEqual(['a']));
     expect(JSON.parse(historyIo.snapshot()!).records.map((r: DictationRecord) => r.id)).toEqual(['a']);
   });
+  it('abandoning a pending Off before it confirms keeps durable transcripts', async () => {
+    const rows = [rec('a', 'inserted'), rec('b', 'failed', Date.now() + 60_000)];
+    const releases: (() => void)[] = [];
+    const { historyIo } = mounts({
+      historyRecords: rows,
+      settingsSave: () => new Promise<void>((resolve) => { releases.push(resolve); }),
+    });
+    await waitFor(() => expect(api?.bootReady).toBe(true));
+    const before = historyIo.snapshot();
+
+    act(() => api!.settings.update({ key: 'transcriptRetention', value: 'off' }));
+    await waitFor(() => expect(releases.length).toBe(1));
+    act(() => api!.settings.update({ key: 'transcriptRetention', value: 'forever' }));
+    // Off never confirmed: history.json must not receive the filtered list.
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(historyIo.snapshot()).toBe(before);
+
+    await act(async () => { releases[0](); });
+    await waitFor(() => expect(releases.length).toBe(2));
+    expect(historyIo.snapshot()).toBe(before);
+    await act(async () => { releases[1](); });
+
+    await waitFor(() => expect(api!.state.records.map((r) => r.id).sort()).toEqual(['a', 'b']));
+    const ids = JSON.parse(historyIo.snapshot()!).records.map((r: DictationRecord) => r.id).sort();
+    expect(ids).toEqual(['a', 'b']);
+  });
+
+  it('a failed unrelated save while already Off does not reload history from disk', async () => {
+    const rows = [rec('a', 'inserted'), rec('b', 'failed', Date.now() + 60_000)];
+    let fail = false;
+    const saveCalls: Settings[] = [];
+    const { historyIo } = mounts({
+      historyRecords: rows,
+      settingsSave: async (settings) => {
+        saveCalls.push(settings);
+        if (fail) throw new Error('disk full');
+      },
+    });
+    await waitFor(() => expect(api?.bootReady).toBe(true));
+    act(() => api!.settings.update({ key: 'transcriptRetention', value: 'off' }));
+    await waitFor(() => expect(JSON.parse(historyIo.snapshot()!).records).toEqual([]));
+    // Recovery row lives only in memory while Off.
+    expect(api!.state.records.map((r) => r.id)).toEqual(['b']);
+
+    fail = true;
+    act(() => api!.settings.update({ key: 'style', value: 'casual' }));
+    await waitFor(() => expect(api!.state.settingsError).toMatch(/disk full/));
+    await waitFor(() => expect(api!.state.settings.style).toBe('formal'));
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(api!.state.settings.transcriptRetention).toBe('off');
+    expect(api!.state.records.map((r) => r.id)).toEqual(['b']);
+  });
 });

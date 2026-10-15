@@ -159,6 +159,20 @@ export function AppProvider({
     records: state.records,
     retention: state.settings.transcriptRetention,
   };
+  /**
+   * True from the moment the UI enters Off before settings.json confirms Off,
+   * until that Off is confirmed (wipe) or abandoned (reload from disk). While
+   * set, in-memory records are Off-filtered but history.json still holds the
+   * pre-Off rows, so no snapshot save may run. Survives switching away from
+   * Off: leaving a pending Off must not persist the filtered list.
+   */
+  const historyDivergedRef = useRef(false);
+  if (
+    state.settings.transcriptRetention === 'off'
+    && lastSavedSettingsRef.current?.settings.transcriptRetention !== 'off'
+  ) {
+    historyDivergedRef.current = true;
+  }
 
   const dictionaryHydratedRef = useRef(!dictionaryPers.enabled);
   const allowDictionaryPersistRef = useRef(!dictionaryPers.enabled);
@@ -170,11 +184,8 @@ export function AppProvider({
     historyChainRef.current = historyChainRef.current.then(job, job);
   };
 
-  /** True when UI is Off but settings.json has not confirmed Off yet. */
-  const retentionOffPending = () => (
-    historySnapshotRef.current.retention === 'off'
-    && lastSavedSettingsRef.current?.settings.transcriptRetention !== 'off'
-  );
+  /** Memory is Off-filtered but history.json not yet wiped (Off pending or abandoned). */
+  const retentionOffPending = () => historyDivergedRef.current;
 
   const saveHistorySnapshot = async () => {
     if (!historyPers.enabled || !historyHydratedRef.current || !allowHistoryPersistRef.current) {
@@ -206,7 +217,15 @@ export function AppProvider({
     const result = await historyPers.store.load(retention, clock());
     if (gen !== historyPersistGenRef.current) return;
     if (result.ok) {
-      dispatch({ now: clock(), records: result.records, type: 'hydrate-records' });
+      // Merge against memory read now (after the await): rows added while the
+      // load was in flight stay; pre-Off rows come back from disk.
+      const current = historySnapshotRef.current.records;
+      const diskIds = new Set(result.records.map((record) => record.id));
+      const merged = [...current.filter((record) => !diskIds.has(record.id)), ...result.records];
+      historyDivergedRef.current = false;
+      // Queued saves run before React re-renders; give them the merged list.
+      historySnapshotRef.current = { ...historySnapshotRef.current, records: merged };
+      dispatch({ now: clock(), records: merged, type: 'hydrate-records' });
       dispatch({ message: null, type: 'set-history-error' });
     } else {
       dispatch({
@@ -239,6 +258,25 @@ export function AppProvider({
         message: `Failed to save history: ${message}`,
         type: 'set-history-error',
       });
+    }
+  };
+
+  /**
+   * settings.json now holds `retention` (confirmed save or rollback target).
+   * Only acts when a local Off transition left memory ahead of disk:
+   * Off confirmed → wipe history.json; Off abandoned → reload pre-Off rows.
+   * Any other save/rollback leaves history alone (no reload while already Off).
+   */
+  const settleRetentionOff = (retention: typeof state.settings.transcriptRetention) => {
+    if (!historyDivergedRef.current) {
+      if (retention === 'off') enqueueHistoryJob(() => saveHistorySnapshot());
+      return;
+    }
+    if (retention === 'off') {
+      historyDivergedRef.current = false;
+      enqueueHistoryJob(() => saveHistorySnapshot());
+    } else {
+      enqueueHistoryJob(() => reloadHistoryFromDisk(retention));
     }
   };
 
@@ -443,16 +481,8 @@ export function AppProvider({
     lastRequestedRef: lastRequestedSettingsRef,
     lastSavedRef: lastSavedSettingsRef,
     onboardingComplete: state.onboarding.complete,
-    onRolledBack: (file) => {
-      // Settings rolled back; reload transcripts from disk (Off wipe was deferred).
-      enqueueHistoryJob(() => reloadHistoryFromDisk(file.settings.transcriptRetention));
-    },
-    onSaved: (file) => {
-      // Confirmed Off: now wipe history.json through the same serial queue.
-      if (file.settings.transcriptRetention === 'off') {
-        enqueueHistoryJob(() => saveHistorySnapshot());
-      }
-    },
+    onRolledBack: (file) => settleRetentionOff(file.settings.transcriptRetention),
+    onSaved: (file) => settleRetentionOff(file.settings.transcriptRetention),
     persistence: settingsPers,
     persistGenRef: settingsPersistGenRef,
     settings: state.settings,
