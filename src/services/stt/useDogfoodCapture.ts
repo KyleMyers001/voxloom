@@ -109,6 +109,7 @@ export function errorText(error: unknown): string {
     if (error.code === 'model-missing') {
       // BUS-77: damaged / unreadable messages already say what to do.
       if (MODEL_FILE_PREFIXES.some((p) => error.message.startsWith(p))) return error.message;
+      // Settings guidance lives here once; missingModelMessage is the fact only.
       return `${error.message} Download the selected model in Settings first.`;
     }
     return error.message;
@@ -119,11 +120,8 @@ export function errorText(error: unknown): string {
 
 function missingModelMessage(modelId: string, status: string | null): string {
   const detail = status ? ` (status: ${status})` : '';
-  return (
-    `Model “${modelId}” is not downloaded${detail}. `
-    + 'Open Settings → Speech-to-text models and Download it first '
-    + '(no silent download).'
-  );
+  // Fact only — errorText appends the short Settings suffix once.
+  return `Model “${modelId}” is not downloaded${detail}.`;
 }
 
 function resolvePlatform(
