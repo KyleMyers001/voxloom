@@ -1,4 +1,4 @@
-import { recordsAfterSettingsChange } from './retentionClear';
+import { recordsAfterSettingsChange, recordsForRetention } from './retentionClear';
 import { dictationReducer } from '../domain/dictationMachine';
 import { initialOnboarding } from '../domain/fixtures';
 import {
@@ -144,10 +144,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       historyError: null,
       historyErrorSticky: false,
       historyHydrated: true,
-      records: mergePreHydrateRecords(
+      records: recordsForRetention(state.settings, mergePreHydrateRecords(
         action.records,
         pendingPreHydrateRecords(state.historyHydrated, state.records),
-      ),
+      ), action.now),
     };
   }
   if (action.type === 'set-history-error') {

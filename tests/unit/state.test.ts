@@ -200,7 +200,7 @@ describe('appReducer', () => {
     };
     const hydrated = appReducer(errored, {
       records: [row],
-      type: 'hydrate-records',
+      now: Date.now(), type: 'hydrate-records',
     });
     expect(hydrated.records).toEqual([row]);
     expect(hydrated.historyError).toBeNull();
@@ -219,7 +219,7 @@ describe('appReducer', () => {
     };
     const hydrated = appReducer(
       createInitialState(1_000, { persistHistory: true }),
-      { records: [row], type: 'hydrate-records' },
+      { records: [row], now: Date.now(), type: 'hydrate-records' },
     );
     const configured = {
       ...hydrated,
@@ -250,7 +250,7 @@ describe('appReducer', () => {
     };
     const hydrated = appReducer(
       createInitialState(1_000, { persistHistory: true }),
-      { records: [row], type: 'hydrate-records' },
+      { records: [row], now: Date.now(), type: 'hydrate-records' },
     );
     const wiped = appReducer(hydrated, {
       now: 20_000,

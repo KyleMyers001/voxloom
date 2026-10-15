@@ -17,7 +17,7 @@ export type AppAction =
   | { type: 'delete-word'; word: string }
   | { type: 'expire-recovery'; now: number }
   | { type: 'fail-dictation'; now: number; runId: number }
-  | { type: 'hydrate-records'; records: DictationRecord[] }
+  | { now: number; type: 'hydrate-records'; records: DictationRecord[] }
   | { type: 'hydrate-words'; words: string[] }
   | {
       now: number;

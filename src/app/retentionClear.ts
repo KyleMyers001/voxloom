@@ -6,8 +6,7 @@ import type { AppState } from './state';
  * the file. Shared by `set-setting` (this window) and `hydrate-settings`
  * (a save from the Settings window, or a load), so both paths behave alike.
  * Keeps only failed rows whose recovery window is still open at the
- * action's `now`
- * (Home's paste-again); they expire on their own.
+ * action's `now` (Home's paste-again).
  */
 export function recordsAfterSettingsChange(
   state: AppState,
@@ -17,5 +16,25 @@ export function recordsAfterSettingsChange(
   if (next.transcriptRetention !== 'off' || state.settings.transcriptRetention === 'off') {
     return state.records;
   }
-  return state.records.filter((record) => canRetry(record, now));
+  return keepRecoverable(state.records, now);
+}
+
+/** Rows Retention Off may still hold in memory: recoverable failed rows. */
+export function keepRecoverable(
+  records: AppState['records'],
+  now: number,
+): AppState['records'] {
+  return records.filter((record) => canRetry(record, now));
+}
+
+/**
+ * `hydrate-records` can land after Off already arrived (e.g. from the
+ * Settings window before main's first history load); filter the same way.
+ */
+export function recordsForRetention(
+  settings: AppState['settings'],
+  records: AppState['records'],
+  now: number,
+): AppState['records'] {
+  return settings.transcriptRetention === 'off' ? keepRecoverable(records, now) : records;
 }

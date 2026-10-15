@@ -295,7 +295,7 @@ export function AppProvider({
       if (historyResult.ok && (settingsBlocked || historyBackupFailed)) {
         // Any history version: show it, but never rewrite or prune it on
         // default retention while settings writes are blocked.
-        dispatch({ records: historyResult.records, type: 'hydrate-records' });
+        dispatch({ records: historyResult.records, now: Date.now(), type: 'hydrate-records' });
         allowHistoryPersistRef.current = false;
         dispatch({
           message: settingsBlocked
@@ -305,13 +305,13 @@ export function AppProvider({
           type: 'set-history-error',
         });
       } else if (historyResult.ok) {
-        dispatch({ records: historyResult.records, type: 'hydrate-records' });
+        dispatch({ records: historyResult.records, now: Date.now(), type: 'hydrate-records' });
         allowHistoryPersistRef.current = true;
       } else {
         // Unreadable / unknown-version history.json: never write over it
         // (the store already tried to back it up). BUS-42. Dictations made
         // before this load stay visible in memory but are never written.
-        dispatch({ records: [], type: 'hydrate-records' });
+        dispatch({ records: [], now: Date.now(), type: 'hydrate-records' });
         allowHistoryPersistRef.current = false;
         dispatch({
           message: historyResult.error,

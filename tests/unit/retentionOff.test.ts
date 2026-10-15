@@ -76,3 +76,24 @@ describe('retention Off uses the action clock (BUS-78)', () => {
     expect(appReducer(forever, { ...off, now: 10_000 }).records).toHaveLength(0);
   });
 });
+
+describe('Off before the first history load (BUS-78)', () => {
+  it('hydrate-records after Off keeps only recoverable failed rows', () => {
+    const base = createInitialState(1_000);
+    const off = appReducer(
+      { ...base, records: [], settings: { ...base.settings, transcriptRetention: 'forever' } },
+      {
+        now: 5_000,
+        onboardingComplete: true,
+        settings: { ...base.settings, transcriptRetention: 'off' },
+        type: 'hydrate-settings',
+      },
+    );
+    const loaded = appReducer(off, {
+      now: 5_000,
+      records: [rec('a', 'inserted', null), rec('b', 'failed', 9_999), rec('c', 'failed', 4_000)],
+      type: 'hydrate-records',
+    });
+    expect(loaded.records.map((r) => r.id)).toEqual(['b']);
+  });
+});
