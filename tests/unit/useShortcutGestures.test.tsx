@@ -866,7 +866,7 @@ describe('useShortcutGestures', () => {
         vi.advanceTimersByTime(320);
       });
 
-      // Clara c9e0df5: do not silently ignore busy — abandon prior, start new.
+      // c9e0df5: do not silently ignore busy — abandon prior, start new.
       expect(dogfood.cancel).toHaveBeenCalledOnce();
       expect(dictation.cancel).toHaveBeenCalledWith(7);
       expect(dictation.start).toHaveBeenCalledOnce();

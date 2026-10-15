@@ -37,7 +37,7 @@ export interface SttModelStore {
  * Transcribes a local audio buffer to text.
  * Does not upload audio or transcripts; cloud paths are out of scope.
  *
- * `modelId` is required and explicit (Emma review): the engine does not
+ * `modelId` is required and explicit: the engine does not
  * silently pick or download a model. Callers select a model first, then
  * construct or bind an engine to that id.
  */
