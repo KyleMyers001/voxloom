@@ -27,9 +27,11 @@ processes running as you. Recorded audio is never saved.
 
 - **One transcript:** History → the row's **Delete transcript** (trash) button.
 - **All transcripts, and stop keeping them:** Settings → Privacy →
-  **Transcript retention → Off**. `history.json` is rewritten with no records
-  right away, new dictations are not stored, and transcripts already loaded
-  are cleared from History and Home. The one exception is a dictation that
+  **Transcript retention → Off**. Transcripts already loaded are cleared
+  from History and Home right away, and new dictations are not stored.
+  `history.json` is emptied only after that Off setting is saved successfully.
+  If the Off save fails, `history.json` is left unchanged and the cleared
+  transcripts reload from disk. The one exception is a dictation that
   failed to insert and still offers recovery on Home; it stays in memory,
   not written to disk while Retention is Off, until you restart Voxloom.
   If Voxloom couldn't load `history.json` (it shows an error banner), Off
