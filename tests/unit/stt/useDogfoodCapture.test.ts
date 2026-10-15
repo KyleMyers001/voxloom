@@ -389,11 +389,11 @@ describe('useDogfoodCapture', () => {
     });
 
     expect(result.current.phase).toBe('error');
-    expect(result.current.message).toMatch(/not downloaded/i);
-    expect(result.current.message).toMatch(/no silent download/i);
-    expect(toast).toHaveBeenCalledWith(
-      expect.stringMatching(/not downloaded/i),
-    );
+    const expected =
+      'Model “whisper-tiny.en” is not downloaded (status: missing). '
+      + 'Download the selected model in Settings first.';
+    expect(result.current.message).toBe(expected);
+    expect(toast).toHaveBeenCalledWith(expected);
     expect(dogfood).not.toHaveBeenCalled();
   });
 
