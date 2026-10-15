@@ -1,3 +1,4 @@
+import { recordsAfterSettingsChange } from './retentionClear';
 import { dictationReducer } from '../domain/dictationMachine';
 import { initialOnboarding } from '../domain/fixtures';
 import {
@@ -93,17 +94,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
   if (action.type === 'set-screen') return { ...state, screen: action.screen };
   if (action.type === 'set-setting') {
     const settings = { ...state.settings, [action.key]: action.value };
-    if (
-      action.key === 'transcriptRetention'
-      && action.value === 'off'
-      && state.settings.transcriptRetention !== 'off'
-    ) {
-      // BUS-78: Off clears loaded transcripts too, not just the file. Keep
-      // only failed rows still offering recovery (Home's paste-again), which
-      // expire on their own.
-      return { ...state, records: state.records.filter(isRecoverable), settings };
-    }
-    return { ...state, settings };
+    return { ...state, records: recordsAfterSettingsChange(state, settings), settings };
   }
   if (action.type === 'set-onboarding') {
     return { ...state, onboarding: action.value };
@@ -173,6 +164,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         ...state.onboarding,
         complete: action.onboardingComplete,
       },
+      records: recordsAfterSettingsChange(state, action.settings),
       settings: action.settings,
       settingsError: null,
     };
@@ -295,8 +287,4 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 
 export function canStartDictation(dictation: DictationState): boolean {
   return dictation.kind !== 'listening' && dictation.kind !== 'processing';
-}
-
-function isRecoverable(record: AppState['records'][number]): boolean {
-  return record.status === 'failed' && record.recoveryExpiresAt !== null;
 }

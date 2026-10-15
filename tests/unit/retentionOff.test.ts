@@ -10,7 +10,7 @@ function rec(id: string, status: DictationRecord['status'], recovery: number | n
 describe('transcript retention Off (BUS-78)', () => {
   const start = {
     ...createInitialState(1_000),
-    records: [rec('a', 'inserted', null), rec('b', 'failed', 9_999), rec('c', 'failed', null)],
+    records: [rec('a', 'inserted', null), rec('b', 'failed', Date.now() + 600_000), rec('c', 'failed', null)],
   };
   const forever = { ...start, settings: { ...start.settings, transcriptRetention: 'forever' as const } };
 
@@ -23,5 +23,40 @@ describe('transcript retention Off (BUS-78)', () => {
   it('leaves records alone for other retention changes', () => {
     const next = appReducer(forever, { key: 'transcriptRetention', type: 'set-setting', value: '30-days' });
     expect(next.records).toHaveLength(3);
+  });
+});
+
+describe('retention Off: expiry and cross-window (BUS-78)', () => {
+  const now = Date.now();
+  const base = createInitialState(1_000);
+  const forever = {
+    ...base,
+    records: [rec('a', 'inserted', null), rec('b', 'failed', now + 60_000)],
+    settings: { ...base.settings, transcriptRetention: 'forever' as const },
+  };
+
+  it('drops a failed row whose recovery window has ended (expire-recovery)', () => {
+    const expired = appReducer(forever, { now, type: 'expire-recovery' });
+    const next = appReducer(expired, { key: 'transcriptRetention', type: 'set-setting', value: 'off' });
+    expect(next.records).toEqual([]);
+  });
+
+  it('clears records when Off arrives from the Settings window (hydrate-settings)', () => {
+    const next = appReducer(forever, {
+      onboardingComplete: true,
+      settings: { ...forever.settings, transcriptRetention: 'off' },
+      type: 'hydrate-settings',
+    });
+    expect(next.settings.transcriptRetention).toBe('off');
+    expect(next.records.map((r) => r.id)).toEqual(['b']);
+  });
+
+  it('hydrate-settings with other retention keeps records', () => {
+    const next = appReducer(forever, {
+      onboardingComplete: true,
+      settings: { ...forever.settings, style: 'casual' },
+      type: 'hydrate-settings',
+    });
+    expect(next.records).toHaveLength(2);
   });
 });

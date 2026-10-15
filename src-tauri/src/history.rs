@@ -30,12 +30,13 @@ pub fn history_load(app: AppHandle) -> Result<Option<String>, String> {
 }
 
 /// Delete a `history.json.tmp` left by a crash between write and rename
-/// (BUS-78). Conservative: only when `history.json` itself read back as valid
-/// JSON, so a tmp that might be the only good copy (main file missing or
-/// damaged) is left for the user to recover.
+/// (BUS-78). Conservative: only when `history.json` itself passes the same
+/// envelope checks the frontend applies (`parseHistoryJson`), so a tmp that
+/// might be the only good copy (main file missing, damaged, `{}`, or an
+/// unsupported version) is left for the user to recover.
 fn remove_orphaned_tmp(path: &std::path::Path, loaded: Option<&str>) -> bool {
     let Some(body) = loaded else { return false };
-    if serde_json::from_str::<serde_json::Value>(body).is_err() {
+    if !is_valid_history(body) {
         return false;
     }
     let tmp = path.with_extension("json.tmp");
@@ -43,6 +44,22 @@ fn remove_orphaned_tmp(path: &std::path::Path, loaded: Option<&str>) -> bool {
         Ok(meta) if meta.is_file() => fs::remove_file(&tmp).is_ok(),
         _ => false,
     }
+}
+
+/// Schema versions the frontend reader accepts (`READABLE_HISTORY_VERSIONS`).
+const READABLE_HISTORY_VERSIONS: [u64; 2] = [1, 2];
+
+/// Mirror of the frontend envelope check: object root, readable numeric
+/// `version`, and a `records` array. Bad rows are skipped there, not fatal.
+fn is_valid_history(body: &str) -> bool {
+    let Ok(serde_json::Value::Object(root)) = serde_json::from_str(body) else {
+        return false;
+    };
+    let version_ok = root
+        .get("version")
+        .and_then(serde_json::Value::as_f64)
+        .is_some_and(|v| READABLE_HISTORY_VERSIONS.iter().any(|&r| r as f64 == v));
+    version_ok && root.get("records").is_some_and(serde_json::Value::is_array)
 }
 
 /// Atomically replace `history.json` with `contents`.
@@ -98,6 +115,20 @@ mod tests {
         // Main file damaged: keep tmp too.
         assert!(!remove_orphaned_tmp(&path, Some("{not json")));
         assert!(tmp.exists());
+        // Valid JSON but not a readable history file: keep tmp.
+        for body in [
+            "{}",
+            "[]",
+            "{\"version\":3,\"records\":[]}",
+            "{\"version\":\"1\",\"records\":[]}",
+            "{\"version\":1}",
+            "{\"version\":1,\"records\":{}}",
+        ] {
+            assert!(!remove_orphaned_tmp(&path, Some(body)), "{body}");
+            assert!(tmp.exists());
+        }
+        // Version 2 (BUS-16 sibling schema) is readable too.
+        assert!(is_valid_history("{\"version\":2,\"records\":[]}"));
         // Main file valid: the tmp is a stale orphan, delete it.
         assert!(remove_orphaned_tmp(
             &path,

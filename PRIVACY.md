@@ -43,7 +43,8 @@ processes running as you. Recorded audio is never saved.
   - `history.json.tmp`, a temporary file a crash during save can leave behind.
     It may hold transcripts. Voxloom deletes it on launch once `history.json`
     loads, but keeps it if `history.json` is missing or damaged, because it
-    may then be the only good copy.
+    may then be the only good copy. If Voxloom crashes after writing the
+    `.tmp` but before renaming it, that newest save is discarded on launch.
 
   A missing `history.json` is treated as empty history on next launch.
 - **Unreadable-file backups:** if Voxloom can't read `history.json` (corrupt,
