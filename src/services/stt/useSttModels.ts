@@ -95,7 +95,10 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
     // BUS-52: never two downloads at once, even if a stale button fires.
     if (inFlightRef.current) throw new SttError('download-failed', 'Another model is downloading');
     inFlightRef.current = modelId;
-    pendingDownload.modelId = modelId;
+    // Only claim the marker when free: a second mount (own inFlightRef null)
+    // must not overwrite another mount's pending download before native refuses.
+    const ownsPending = pendingDownload.modelId === null;
+    if (ownsPending) pendingDownload.modelId = modelId;
     setError(null);
     setFailures((prev) => {
       const next = { ...prev };
@@ -130,7 +133,7 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
       throw err;
     } finally {
       inFlightRef.current = null;
-      if (pendingDownload.modelId === modelId) pendingDownload.modelId = null;
+      if (ownsPending) pendingDownload.modelId = null;
       setProgress((current) =>
         current?.modelId === modelId ? null : current,
       );

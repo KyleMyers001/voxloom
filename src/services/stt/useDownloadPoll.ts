@@ -17,11 +17,15 @@ export const DOWNLOAD_POLL_MS = 1000;
  */
 export const pendingDownload: { modelId: string | null } = { modelId: null };
 
-/** Show the pending model as downloading while the backend still says missing. */
+/**
+ * Show the pending model as downloading while the backend still says missing.
+ * Tagged `pending`: native cancel is a no-op until the download registers, so
+ * the row must not offer Cancel yet.
+ */
 export function withPending(models: readonly SttModelInfo[]): readonly SttModelInfo[] {
   const id = pendingDownload.modelId;
   if (!id) return models;
-  return models.map((m) => (m.id === id && m.status === 'missing' ? { ...m, status: 'downloading' } : m));
+  return models.map((m) => (m.id === id && m.status === 'missing' ? { ...m, pending: true, status: 'downloading' } : m));
 }
 
 export function useDownloadPoll(

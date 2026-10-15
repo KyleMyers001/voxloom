@@ -41,6 +41,11 @@ export interface SttModelInfo {
   readonly label: string;
   readonly sizeBytes: number;
   readonly status: SttModelStatus;
+  /**
+   * BUS-76: UI-only. Shown as downloading because a mount started it, but the
+   * backend has not registered it yet, so it cannot be canceled.
+   */
+  readonly pending?: boolean;
 }
 
 export interface SttDownloadProgress {
