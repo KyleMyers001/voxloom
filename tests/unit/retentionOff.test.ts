@@ -10,24 +10,24 @@ function rec(id: string, status: DictationRecord['status'], recovery: number | n
 describe('transcript retention Off (BUS-78)', () => {
   const start = {
     ...createInitialState(1_000),
-    records: [rec('a', 'inserted', null), rec('b', 'failed', Date.now() + 600_000), rec('c', 'failed', null)],
+    records: [rec('a', 'inserted', null), rec('b', 'failed', 9_999), rec('c', 'failed', null)],
   };
   const forever = { ...start, settings: { ...start.settings, transcriptRetention: 'forever' as const } };
 
   it('clears loaded transcripts except a recoverable failed row', () => {
-    const next = appReducer(forever, { key: 'transcriptRetention', type: 'set-setting', value: 'off' });
+    const next = appReducer(forever, { key: 'transcriptRetention', now: 5_000, type: 'set-setting', value: 'off' });
     expect(next.settings.transcriptRetention).toBe('off');
     expect(next.records.map((r) => r.id)).toEqual(['b']);
   });
 
   it('leaves records alone for other retention changes', () => {
-    const next = appReducer(forever, { key: 'transcriptRetention', type: 'set-setting', value: '30-days' });
+    const next = appReducer(forever, { key: 'transcriptRetention', now: 5_000, type: 'set-setting', value: '30-days' });
     expect(next.records).toHaveLength(3);
   });
 });
 
 describe('retention Off: expiry and cross-window (BUS-78)', () => {
-  const now = Date.now();
+  const now = 5_000;
   const base = createInitialState(1_000);
   const forever = {
     ...base,
@@ -37,7 +37,7 @@ describe('retention Off: expiry and cross-window (BUS-78)', () => {
 
   it('drops a failed row whose recovery window has ended (expire-recovery)', () => {
     const expired = appReducer(forever, { now, type: 'expire-recovery' });
-    const next = appReducer(expired, { key: 'transcriptRetention', type: 'set-setting', value: 'off' });
+    const next = appReducer(expired, { key: 'transcriptRetention', now, type: 'set-setting', value: 'off' });
     expect(next.records).toEqual([]);
   });
 
@@ -45,6 +45,7 @@ describe('retention Off: expiry and cross-window (BUS-78)', () => {
     const next = appReducer(forever, {
       onboardingComplete: true,
       settings: { ...forever.settings, transcriptRetention: 'off' },
+      now,
       type: 'hydrate-settings',
     });
     expect(next.settings.transcriptRetention).toBe('off');
@@ -55,8 +56,23 @@ describe('retention Off: expiry and cross-window (BUS-78)', () => {
     const next = appReducer(forever, {
       onboardingComplete: true,
       settings: { ...forever.settings, style: 'casual' },
+      now,
       type: 'hydrate-settings',
     });
     expect(next.records).toHaveLength(2);
+  });
+});
+
+describe('retention Off uses the action clock (BUS-78)', () => {
+  const base = createInitialState(1_000);
+  const forever = {
+    ...base,
+    records: [rec('b', 'failed', 9_999)],
+    settings: { ...base.settings, transcriptRetention: 'forever' as const },
+  };
+  it('keeps a failed row before its expiry and drops it after', () => {
+    const off = { key: 'transcriptRetention', type: 'set-setting', value: 'off' } as const;
+    expect(appReducer(forever, { ...off, now: 9_998 }).records).toHaveLength(1);
+    expect(appReducer(forever, { ...off, now: 10_000 }).records).toHaveLength(0);
   });
 });

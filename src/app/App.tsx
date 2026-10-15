@@ -50,7 +50,7 @@ export function App() {
   }, [state.onboarding.complete]);
 
   const onShortcutRevert = useCallback(
-    (shortcut: string) => dispatch({ key: 'shortcut', type: 'set-setting', value: shortcut }),
+    (shortcut: string) => dispatch({ key: 'shortcut', now: Date.now(), type: 'set-setting', value: shortcut }),
     [dispatch],
   );
 

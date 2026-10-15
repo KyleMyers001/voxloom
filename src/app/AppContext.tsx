@@ -198,7 +198,7 @@ export function AppProvider({
           dispatch({
             onboardingComplete: result.file.onboardingComplete,
             settings: result.file.settings,
-            type: 'hydrate-settings',
+            now: Date.now(), type: 'hydrate-settings',
           });
           lastSavedSettingsRef.current = result.file;
           lastRequestedSettingsRef.current = result.file;
@@ -219,7 +219,7 @@ export function AppProvider({
           dispatch({
             onboardingComplete: result.file.onboardingComplete,
             settings: result.file.settings,
-            type: 'hydrate-settings',
+            now: Date.now(), type: 'hydrate-settings',
           });
           lastSavedSettingsRef.current = result.file;
           lastRequestedSettingsRef.current = result.file;

@@ -54,7 +54,7 @@ export function useSettingsPersist({
         if (rollback && lastRequestedRef.current === snapshot) {
           // The rollback is what we now expect on disk; don't re-save it.
           lastRequestedRef.current = rollback;
-          dispatch({ onboardingComplete: rollback.onboardingComplete, settings: rollback.settings, type: 'hydrate-settings' });
+          dispatch({ onboardingComplete: rollback.onboardingComplete, settings: rollback.settings, now: Date.now(), type: 'hydrate-settings' });
         }
         dispatch({ message: `Failed to save settings: ${message}`, type: 'set-settings-error' });
       }

@@ -61,7 +61,7 @@ describe('store read errors (BUS-42)', () => {
       act(() => api!.dispatch({
         settings: { ...api!.state.settings, transcriptRetention: 'off' },
         onboardingComplete: true,
-        type: 'hydrate-settings',
+        now: Date.now(), type: 'hydrate-settings',
       }));
       await settle();
       expect(settingsIo.writes).toEqual([]);

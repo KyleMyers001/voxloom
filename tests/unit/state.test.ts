@@ -288,7 +288,7 @@ describe('appReducer', () => {
     const hydrated = appReducer(errored, {
       onboardingComplete: true,
       settings: nextSettings,
-      type: 'hydrate-settings',
+      now: Date.now(), type: 'hydrate-settings',
     });
     expect(hydrated.settings).toEqual(nextSettings);
     expect(hydrated.onboarding.complete).toBe(true);

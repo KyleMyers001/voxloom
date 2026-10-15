@@ -94,7 +94,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
   if (action.type === 'set-screen') return { ...state, screen: action.screen };
   if (action.type === 'set-setting') {
     const settings = { ...state.settings, [action.key]: action.value };
-    return { ...state, records: recordsAfterSettingsChange(state, settings), settings };
+    return { ...state, records: recordsAfterSettingsChange(state, settings, action.now), settings };
   }
   if (action.type === 'set-onboarding') {
     return { ...state, onboarding: action.value };
@@ -164,7 +164,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         ...state.onboarding,
         complete: action.onboardingComplete,
       },
-      records: recordsAfterSettingsChange(state, action.settings),
+      records: recordsAfterSettingsChange(state, action.settings, action.now),
       settings: action.settings,
       settingsError: null,
     };
