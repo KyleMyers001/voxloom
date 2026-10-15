@@ -176,7 +176,7 @@ describe('appReducer', () => {
       style: 'formal' as const,
       text: 'session history from dogfood',
     };
-    const next = appReducer(initial, { record, type: 'append-record' });
+    const next = appReducer(initial, { now: 1_000, record, type: 'append-record' });
     expect(next.records[0]).toEqual(record);
     expect(next.records).toHaveLength(initial.records.length + 1);
   });

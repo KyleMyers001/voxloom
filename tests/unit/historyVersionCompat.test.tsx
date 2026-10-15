@@ -105,7 +105,7 @@ describe('BUS-42 history file version compatibility', () => {
     expect(api!.state.records.map((r) => r.id)).toEqual(['v2-cleaned', 'v2-legacy']);
     expect(io.backups()).toEqual([V2]);
 
-    act(() => api!.dispatch({ record: newRow, type: 'append-record' }));
+    act(() => api!.dispatch({ now: NOW, record: newRow, type: 'append-record' }));
     await waitFor(() => expect(io.snapshot() ?? '').toContain('new-after-boot'));
     const disk = JSON.parse(io.snapshot()!) as { records: { id: string }[]; version: number };
     expect(disk.version).toBe(1);
@@ -123,7 +123,7 @@ describe('BUS-42 history file version compatibility', () => {
     expect(api!.state.historyError).toMatch(/Unsupported history file version: 99/);
     expect(api!.state.records).toEqual([]);
 
-    act(() => api!.dispatch({ record: newRow, type: 'append-record' }));
+    act(() => api!.dispatch({ now: NOW, record: newRow, type: 'append-record' }));
     act(() => api!.dispatch({ settings: { ...api!.state.settings, transcriptRetention: 'off' }, now: Date.now(), type: 'hydrate-settings', onboardingComplete: true }));
     await settle();
     expect(io.snapshot()).toBe(future);
@@ -466,7 +466,7 @@ describe('BUS-42 history file version compatibility', () => {
     );
     await waitFor(() => expect(api?.bootReady).toBe(true));
     act(() => api!.dispatch({ key: 'style', now: Date.now(), type: 'set-setting', value: 'casual' }));
-    act(() => api!.dispatch({ record: newRow, type: 'append-record' }));
+    act(() => api!.dispatch({ now: NOW, record: newRow, type: 'append-record' }));
     act(() => api!.dispatch({ type: 'hydrate-words', words: ['voxloom'] }));
     await waitFor(() => expect(settingsWrites.at(-1)).toContain('"style": "casual"'));
     await waitFor(() => expect(histWrites.at(-1)).toContain('new-after-boot'));

@@ -173,6 +173,11 @@ export function AppProvider({
   ) {
     historyDivergedRef.current = true;
   }
+  /**
+   * While reloadHistoryFromDisk awaits load, deletes must not be undone by the
+   * merge. Null when no reload is in flight.
+   */
+  const reloadDeletedIdsRef = useRef<Set<string> | null>(null);
 
   const dictionaryHydratedRef = useRef(!dictionaryPers.enabled);
   const allowDictionaryPersistRef = useRef(!dictionaryPers.enabled);
@@ -214,25 +219,46 @@ export function AppProvider({
     // Supersede any in-flight wipe: bump gen, then load after prior jobs finish.
     historyPersistGenRef.current += 1;
     const gen = historyPersistGenRef.current;
-    const result = await historyPers.store.load(retention, clock());
-    if (gen !== historyPersistGenRef.current) return;
-    if (result.ok) {
-      // Merge against memory read now (after the await): rows added while the
-      // load was in flight stay; pre-Off rows come back from disk.
-      const current = historySnapshotRef.current.records;
-      const diskIds = new Set(result.records.map((record) => record.id));
-      const merged = [...current.filter((record) => !diskIds.has(record.id)), ...result.records];
-      historyDivergedRef.current = false;
-      // Queued saves run before React re-renders; give them the merged list.
-      historySnapshotRef.current = { ...historySnapshotRef.current, records: merged };
-      dispatch({ now: clock(), records: merged, type: 'hydrate-records' });
-      dispatch({ message: null, type: 'set-history-error' });
-    } else {
-      dispatch({
-        message: result.error,
-        sticky: true,
-        type: 'set-history-error',
-      });
+    const deletedDuringReload = new Set<string>();
+    reloadDeletedIdsRef.current = deletedDuringReload;
+    try {
+      const result = await historyPers.store.load(retention, clock());
+      if (gen !== historyPersistGenRef.current) return;
+      if (result.ok) {
+        // Prefer in-memory for shared ids (live edits / deletes already applied).
+        // Drop ids deleted while load was in flight so an explicit Delete is not
+        // undone. Memory-only rows added during the load stay first; disk order
+        // is preserved for restored rows.
+        const current = historySnapshotRef.current.records;
+        const diskIds = new Set(result.records.map((record) => record.id));
+        const memoryById = new Map(
+          current
+            .filter((record) => !deletedDuringReload.has(record.id))
+            .map((record) => [record.id, record]),
+        );
+        const memoryOnly = current.filter(
+          (record) => !deletedDuringReload.has(record.id) && !diskIds.has(record.id),
+        );
+        const fromDisk = result.records
+          .filter((record) => !deletedDuringReload.has(record.id))
+          .map((record) => memoryById.get(record.id) ?? record);
+        const merged = [...memoryOnly, ...fromDisk];
+        historyDivergedRef.current = false;
+        // Queued saves run before React re-renders; give them the merged list.
+        historySnapshotRef.current = { ...historySnapshotRef.current, records: merged };
+        dispatch({ now: clock(), records: merged, type: 'hydrate-records' });
+        dispatch({ message: null, type: 'set-history-error' });
+      } else {
+        dispatch({
+          message: result.error,
+          sticky: true,
+          type: 'set-history-error',
+        });
+      }
+    } finally {
+      if (reloadDeletedIdsRef.current === deletedDuringReload) {
+        reloadDeletedIdsRef.current = null;
+      }
     }
   };
 
@@ -283,6 +309,9 @@ export function AppProvider({
   const history = useMemo(() => ({
     delete: (id: string) => {
       historyDispatch.delete(id);
+      // Tombstone for an in-flight failed-Off reload merge (prefer memory /
+      // drop deleted ids so Delete is not silently undone).
+      reloadDeletedIdsRef.current?.add(id);
       // While Off is optimistic, memory no longer mirrors disk — patch disk so a
       // failed Off save + reload cannot revive a row the user just deleted.
       enqueueHistoryJob(() => patchHistoryDeleteOnDisk(id));

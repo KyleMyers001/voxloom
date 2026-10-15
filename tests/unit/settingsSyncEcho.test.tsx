@@ -41,6 +41,7 @@ function Probe() {
       <button onClick={() => settings.update({ key: 'appearance', value: 'dark' })} type="button">B</button>
       <button
         onClick={() => dispatch({
+          now: 1_000,
           record: { ...createInitialState(1_000).records[0], id: 'kept', status: 'inserted' },
           type: 'append-record',
         })}

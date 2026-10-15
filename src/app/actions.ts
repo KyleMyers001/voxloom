@@ -10,7 +10,7 @@ import type {
 export type SettingAction = SettingUpdate & { now: number; type: 'set-setting' };
 
 export type AppAction =
-  | { type: 'append-record'; record: DictationRecord }
+  | { type: 'append-record'; now: number; record: DictationRecord }
   | { runId: number; type: 'cancel-dictation' }
   | { type: 'complete-dictation'; now: number; runId: number }
   | { type: 'delete-record'; id: string }
