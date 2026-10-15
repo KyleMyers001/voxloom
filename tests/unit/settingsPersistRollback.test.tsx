@@ -236,4 +236,70 @@ describe('Retention Off: reload-from-disk on failed save (BUS-78)', () => {
     expect(api!.state.settings.transcriptRetention).toBe('off');
     expect(api!.state.records.map((r) => r.id)).toEqual(['b']);
   });
+
+  it('delete during a failed-Off reload merge is not undone', async () => {
+    const rows = [rec('a', 'inserted'), rec('b', 'failed', Date.now() + 60_000)];
+    let releaseSave!: (err?: Error) => void;
+    const saveGate = new Promise<void>((resolve, reject) => {
+      releaseSave = (err) => (err ? reject(err) : resolve());
+    });
+    let releaseLoad!: () => void;
+    let loadGate: Promise<void> | null = null;
+    let loads = 0;
+
+    bus.reset();
+    const settingsFile = serializeSettingsFile(
+      { ...initialSettings, transcriptRetention: 'forever' },
+      true,
+    );
+    const settingsIo = createMemorySettingsIo(settingsFile);
+    const innerSettings = createSettingsStore(settingsIo);
+    const settingsStore = {
+      ...innerSettings,
+      save: () => saveGate,
+    };
+    const historyIo = createMemoryHistoryIo(serializeHistoryFile(rows));
+    const innerHistory = createHistoryStore(historyIo);
+    const historyStore = {
+      ...innerHistory,
+      load: async (
+        retention: Parameters<typeof innerHistory.load>[0],
+        now: number,
+      ) => {
+        loads += 1;
+        // Boot is load 1; failed-Off reload is load 2+.
+        if (loads >= 2 && loadGate) await loadGate;
+        return innerHistory.load(retention, now);
+      },
+    };
+    api = null;
+    render(
+      <AppProvider
+        historyPersistence={{ enabled: true, store: historyStore }}
+        settingsPersistence={{ enabled: true, store: settingsStore }}
+      >
+        <Probe />
+      </AppProvider>,
+    );
+    await waitFor(() => expect(api?.bootReady).toBe(true));
+
+    act(() => api!.settings.update({ key: 'transcriptRetention', value: 'off' }));
+    expect(api!.state.records.map((r) => r.id)).toEqual(['b']);
+
+    loadGate = new Promise<void>((resolve) => { releaseLoad = resolve; });
+    await act(async () => {
+      releaseSave(new Error('disk full'));
+      await saveGate.catch(() => {});
+    });
+    await waitFor(() => expect(loads).toBeGreaterThanOrEqual(2));
+
+    await act(async () => {
+      api!.history.delete('b');
+    });
+    expect(api!.state.records.map((r) => r.id)).toEqual([]);
+
+    await act(async () => { releaseLoad(); });
+    await waitFor(() => expect(api!.state.settings.transcriptRetention).toBe('forever'));
+    await waitFor(() => expect(api!.state.records.map((r) => r.id)).toEqual(['a']));
+  });
 });

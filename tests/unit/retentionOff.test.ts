@@ -115,3 +115,43 @@ describe('Off before the first history load (BUS-78)', () => {
     expect(loaded.records.map((r) => r.id)).toEqual(['b']);
   });
 });
+
+describe('new rows while already Off (BUS-78)', () => {
+  const now = 5_000;
+  const base = createInitialState(1_000);
+  const offState = {
+    ...base,
+    records: [rec('b', 'failed', now + 60_000)],
+    settings: { ...base.settings, transcriptRetention: 'off' as const },
+  };
+
+  it('append-record drops inserted/copied rows; keeps recoverable failed', () => {
+    const afterInsert = appReducer(offState, {
+      now,
+      record: rec('new', 'inserted', null),
+      type: 'append-record',
+    });
+    expect(afterInsert.records.map((r) => r.id)).toEqual(['b']);
+
+    const afterFail = appReducer(offState, {
+      now,
+      record: rec('f2', 'failed', now + 60_000),
+      type: 'append-record',
+    });
+    expect(afterFail.records.map((r) => r.id)).toEqual(['f2', 'b']);
+  });
+
+  it('complete-dictation does not leave a successful row in History/Recent', () => {
+    const started = appReducer(offState, { type: 'start-dictation' });
+    const runId = started.dictation.kind === 'listening' ? started.dictation.runId : 1;
+    const processing = appReducer(started, {
+      completion: 'held',
+      runId,
+      type: 'process-dictation',
+    });
+    const complete = appReducer(processing, { now, runId, type: 'complete-dictation' });
+    expect(complete.records.map((r) => r.id)).toEqual(['b']);
+    expect(complete.records.every((r) => r.status === 'failed')).toBe(true);
+  });
+});
+

@@ -28,7 +28,8 @@ processes running as you. Recorded audio is never saved.
 - **One transcript:** History → the row's **Delete transcript** (trash) button.
 - **All transcripts, and stop keeping them:** Settings → Privacy →
   **Transcript retention → Off**. Transcripts already loaded are cleared
-  from History and Home right away, and new dictations are not stored.
+  from History and Recent right away, and new dictations are not stored.
+  Home's **Last transcript** (DictateCard) stays until the next capture.
   `history.json` is emptied only after that Off setting is saved successfully.
   If the Off save fails, `history.json` is left unchanged and the cleared
   transcripts reload from disk. The one exception is a dictation that

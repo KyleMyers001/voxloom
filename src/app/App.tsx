@@ -38,7 +38,7 @@ export function App() {
     clipboardFallback: state.settings.clipboardFallback,
     modelId: state.settings.transcriptionModel,
     now,
-    onHistoryRecord: (record) => dispatch({ record, type: 'append-record' }),
+    onHistoryRecord: (record) => dispatch({ now: now(), record, type: 'append-record' }),
     onToast: announce,
     preferredDeviceId: state.settings.microphone,
     style: state.settings.style,
