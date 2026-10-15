@@ -168,4 +168,19 @@ describe('suspendBinding (BUS-69)', () => {
     expect(api.register.mock.calls[0][0]).toBe(saved);
     expect(onSuspendRecovered).not.toHaveBeenCalled();
   });
+
+  it('BUS-74: a resume that finds a combo already bound clears the stale failure', async () => {
+    const { api, controller, onSuspendRecovered } = setup();
+    await controller.setShortcut('Shift + Space');
+    await controller.suspendBinding(true);
+    api.register.mockRejectedValueOnce(new Error('x')).mockRejectedValueOnce(new Error('x'));
+    await controller.suspendBinding(false);
+    await controller.suspendBinding(true);
+    await controller.setShortcut('Ctrl + Shift + D'); // saved while recording
+    await controller.suspendBinding(false); // already active: nothing to re-bind
+    expect(onSuspendRecovered).not.toHaveBeenCalled();
+    await controller.suspendBinding(true);
+    await controller.suspendBinding(false);
+    expect(onSuspendRecovered).not.toHaveBeenCalled();
+  });
 });
