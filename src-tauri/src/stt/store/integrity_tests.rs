@@ -91,6 +91,16 @@ fn cancel_after_rename_keeps_verified_model() {
 // --- Existing files on disk (Codex P1): hash once, persist a marker. ---
 
 use super::existing::{marker_path, Verdict};
+use std::time::{Duration, SystemTime};
+
+fn set_mtime(path: &std::path::Path, at: SystemTime) {
+    fs::File::options()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_modified(at)
+        .unwrap();
+}
 
 #[test]
 fn existing_file_is_hashed_once_then_trusted_by_marker() {
@@ -111,14 +121,21 @@ fn existing_file_is_hashed_once_then_trusted_by_marker() {
     assert!(marker.starts_with(spec.sha256), "{marker}");
 
     // A fresh store (next launch) trusts the marker without hashing. Proof:
-    // same-length different bytes, which only a re-hash would catch.
+    // same-length different bytes with the original mtime restored.
+    let mtime = fs::metadata(&path).unwrap().modified().unwrap();
     fs::write(&path, vec![0x66u8; body.len()]).unwrap();
+    set_mtime(&path, mtime);
     let fresh = super::ModelStore::new(dir.clone());
     assert_eq!(
         fresh.known_verdict(&spec),
         Some(Verdict::Verified),
         "no re-hash once marked"
     );
+
+    // BUS-77: a same-length change with a new mtime invalidates the marker.
+    set_mtime(&path, mtime + Duration::from_secs(5));
+    let fresh = super::ModelStore::new(dir.clone());
+    assert_eq!(fresh.known_verdict(&spec), None);
 
     // A length change invalidates the marker.
     fs::write(&path, b"short").unwrap();
@@ -174,5 +191,66 @@ fn download_writes_marker() {
     store.download_spec_with_sink(&spec, &url, |_| {}).unwrap();
     assert!(marker_path(&store.model_path(&spec)).is_file());
     assert_eq!(store.known_verdict(&spec), Some(Verdict::Verified));
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn stale_pin_marker_is_not_trusted() {
+    // BUS-77: a marker from an older pin (same length and mtime) is ignored.
+    let body = vec![0x88u8; 4 * 1024];
+    let spec = spec_for_body("whisper-tiny.en", &body);
+    let (store, dir) = temp_store("stale-pin");
+    fs::create_dir_all(&dir).unwrap();
+    let path = store.model_path(&spec);
+    fs::write(&path, &body).unwrap();
+    assert_eq!(store.verify_existing(&spec), Some(Verdict::Verified));
+    let marker = fs::read_to_string(marker_path(&path)).unwrap();
+    let stale = marker.replacen(spec.sha256, &"0".repeat(64), 1);
+    assert_ne!(stale, marker);
+    fs::write(marker_path(&path), stale).unwrap();
+    let fresh = super::ModelStore::new(dir.clone());
+    assert_eq!(fresh.known_verdict(&spec), None);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn legacy_two_field_marker_is_rehashed() {
+    let body = vec![0x99u8; 4 * 1024];
+    let spec = spec_for_body("whisper-tiny.en", &body);
+    let (store, dir) = temp_store("legacy-marker");
+    fs::create_dir_all(&dir).unwrap();
+    let path = store.model_path(&spec);
+    fs::write(&path, &body).unwrap();
+    fs::write(
+        marker_path(&path),
+        format!("{} {}\n", spec.sha256, body.len()),
+    )
+    .unwrap();
+    assert_eq!(store.known_verdict(&spec), None);
+    assert_eq!(store.verify_existing(&spec), Some(Verdict::Verified));
+    let marker = fs::read_to_string(marker_path(&path)).unwrap();
+    assert_eq!(marker.split_whitespace().count(), 3, "{marker}");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn unreadable_file_is_not_reported_damaged() {
+    use std::os::unix::fs::PermissionsExt;
+    let (store, dir) = temp_store("unreadable");
+    fs::create_dir_all(&dir).unwrap();
+    let spec = catalog::find("whisper-base.en").unwrap();
+    let path = store.model_path(spec);
+    fs::write(&path, b"x").unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+    if fs::File::open(&path).is_ok() {
+        // Running as root: permissions can't make the file unreadable.
+        let _ = fs::remove_dir_all(&dir);
+        return;
+    }
+    let err = store.resolved_path(spec.id).unwrap_err();
+    assert!(err.message.contains("Couldn't read"), "{}", err.message);
+    assert_ne!(store.status(spec.id).unwrap().status, "failed");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
     let _ = fs::remove_dir_all(&dir);
 }

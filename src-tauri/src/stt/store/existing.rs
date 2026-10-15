@@ -2,7 +2,8 @@
 //!
 //! A file at the model path is trusted only after its SHA-256 matched the
 //! catalog pin once. The result is persisted as a marker next to the model
-//! (`<file>.verified`: `<sha256> <len>`), so each file is hashed at most once.
+//! (`<file>.verified`: `<sha256> <len> <mtime-ns>`), so each file is hashed at
+//! most once. A changed length or mtime (BUS-77) invalidates the marker.
 //! Hashing runs on a background thread at startup (never on the UI/IPC thread)
 //! or, if transcription needs the model first, on its blocking worker.
 //!
@@ -14,6 +15,7 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::UNIX_EPOCH;
 
 use super::verify::Integrity;
 use super::ModelStore;
@@ -23,6 +25,8 @@ use crate::stt::catalog::{self, ModelSpec};
 pub(super) enum Verdict {
     Verified,
     Corrupt,
+    /// The file could not be read (BUS-77): not cached, retried next time.
+    Unreadable,
 }
 
 pub(super) type VerdictMap = HashMap<&'static str, Verdict>;
@@ -33,9 +37,17 @@ pub(super) fn marker_path(model: &Path) -> PathBuf {
     model.with_file_name(name)
 }
 
-/// Marker is trusted only if it names the pinned hash and the current length.
+/// Length and mtime (ns since the epoch) that a marker records.
+fn fingerprint(model: &Path) -> Option<(u64, u128)> {
+    let meta = fs::metadata(model).ok()?;
+    let mtime = meta.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
+    Some((meta.len(), mtime.as_nanos()))
+}
+
+/// Marker is trusted only if it names the pinned hash and the current length
+/// and mtime. Older two-field markers are re-hashed once and rewritten.
 fn marker_matches(spec: &ModelSpec, model: &Path) -> bool {
-    let Ok(len) = fs::metadata(model).map(|m| m.len()) else {
+    let Some((len, mtime)) = fingerprint(model) else {
         return false;
     };
     let Ok(text) = fs::read_to_string(marker_path(model)) else {
@@ -46,13 +58,14 @@ fn marker_matches(spec: &ModelSpec, model: &Path) -> bool {
         .next()
         .is_some_and(|sha| sha.eq_ignore_ascii_case(spec.sha256))
         && parts.next().and_then(|n| n.parse::<u64>().ok()) == Some(len)
+        && parts.next().and_then(|n| n.parse::<u128>().ok()) == Some(mtime)
 }
 
 pub(super) fn write_marker(spec: &ModelSpec, model: &Path) {
-    if let Ok(meta) = fs::metadata(model) {
+    if let Some((len, mtime)) = fingerprint(model) {
         let _ = fs::write(
             marker_path(model),
-            format!("{} {}\n", spec.sha256, meta.len()),
+            format!("{} {len} {mtime}\n", spec.sha256),
         );
     }
 }
@@ -116,7 +129,7 @@ impl ModelStore {
                     "[stt] could not read model {} for verification: {e}",
                     spec.id
                 );
-                return None;
+                return Some(Verdict::Unreadable);
             }
         };
         self.set_verdict(spec, verdict);
@@ -124,12 +137,16 @@ impl ModelStore {
     }
 
     /// Startup: verify any present, unmarked model files on a background thread.
-    pub fn spawn_verify_existing(self: &Arc<Self>) {
+    /// `on_corrupt` runs when a file fails, so Settings can refresh (BUS-77).
+    pub fn spawn_verify_existing(self: &Arc<Self>, on_corrupt: impl Fn() + Send + 'static) {
         let store = Arc::clone(self);
         std::thread::spawn(move || {
             for spec in catalog::CATALOG {
-                if store.model_path(spec).is_file() && store.known_verdict(spec).is_none() {
-                    store.verify_existing(spec);
+                if store.model_path(spec).is_file()
+                    && store.known_verdict(spec).is_none()
+                    && store.verify_existing(spec) == Some(Verdict::Corrupt)
+                {
+                    on_corrupt();
                 }
             }
         });

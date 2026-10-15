@@ -133,13 +133,17 @@ impl ModelStore {
             Some(v) => Some(v),
             None => self.verify_existing(spec),
         };
-        if verdict != Some(existing::Verdict::Verified) {
-            return Err(SttErrorDto::new(
+        match verdict {
+            Some(existing::Verdict::Verified) => Ok(path),
+            Some(existing::Verdict::Unreadable) => Err(SttErrorDto::new(
+                "model-missing",
+                "Couldn't read the model file. Check the disk, then try again.",
+            )),
+            _ => Err(SttErrorDto::new(
                 "model-missing",
                 "Model file is damaged. Download it again in Settings → Models.",
-            ));
+            )),
         }
-        Ok(path)
     }
 
     fn is_downloading(&self, model_id: &str) -> bool {

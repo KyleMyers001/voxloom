@@ -141,7 +141,11 @@ pub fn run() {
             app.manage(coordinator);
             let stt = SttState::new(models, buffers);
             // One-time hash of unmarked model files, off the main thread.
-            stt.models.spawn_verify_existing();
+            // BUS-77: a damaged file found here tells Settings → Models to re-list.
+            let handle = app.handle().clone();
+            stt.models.spawn_verify_existing(move || {
+                let _ = handle.emit("stt:models-changed", ());
+            });
             app.manage(stt);
             #[cfg(target_os = "macos")]
             app.set_menu(settings_window::app_menu(app.handle())?)?;

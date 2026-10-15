@@ -7,6 +7,7 @@ import type { SttModelStore } from './contracts';
 import { createSttModelStore } from './factory';
 import { resolveTranscriptionModelId } from './resolveModelId';
 import { useDownloadPoll } from './useDownloadPoll';
+import { listenModelsChanged } from './modelsChanged';
 import { SttError, type SttDownloadProgress, type SttModelInfo } from './types';
 
 /** BUS-35 checksum failure copy (hashes are only in the native log). */
@@ -85,6 +86,18 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
       aliveRef.current = false;
     };
   }, [reload]);
+
+  // BUS-77: re-list when the startup hash finds a damaged file.
+  useEffect(() => {
+    let stop: (() => void) | null = null;
+    let live = true;
+    void listenModelsChanged(() => { void refresh().catch(() => undefined); })
+      .then((un) => { if (live) stop = un; else un(); }, () => undefined);
+    return () => {
+      live = false;
+      stop?.();
+    };
+  }, [refresh]);
 
   // Also the Retry action: it clears the row's failure as the new attempt starts.
   const downloadModel = useCallback(async (modelId: string) => {
