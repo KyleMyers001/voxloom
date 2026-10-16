@@ -210,3 +210,10 @@ pub fn run() {
         .run(app_context())
         .expect("failed to run Voxloom");
 }
+
+/// The single `generate_context!` expansion. Invoking the macro twice in one
+/// crate (e.g. again in tests) emits `_EMBED_INFO_PLIST` twice and fails to
+/// link on macOS with a duplicate symbol.
+pub(crate) fn app_context<R: tauri::Runtime>() -> tauri::Context<R> {
+    tauri::generate_context!()
+}

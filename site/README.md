@@ -25,7 +25,7 @@ Search for `PLACEHOLDER` (visible `// PLACEHOLDER` labels and `<!-- PLACEHOLDER 
 |---|---|
 | Domain | `https://DOMAIN-PLACEHOLDER.example` in every page's canonical, `og:url`, `og:image`, `twitter:image`; footer label |
 | Download link + version | `href="#download-pending"` on every "Download for macOS" button (index x2, download) |
-| Minimum macOS version | download.html requirements (build config currently says 10.15) |
+| Minimum macOS version | download.html requirements: macOS 13.1+ (matches tauri.conf.json) |
 | Gatekeeper steps for unsigned builds | download.html install step 2 |
 | Privacy last-updated date | privacy.html |
 | Changelog | changelog.html (link to GitHub Releases once published) |

@@ -12,7 +12,9 @@
   --line: #23232e;
   --winline: rgba(255, 255, 255, .1);
   --fg: #ececf1;
-  --mut: #8b8b99;
+  --mut: #9494a3; /* BUS-48: 4.60 on segon, 4.72 on navon, 5.65+ elsewhere */
+  --ctl-line: #6a6a80; /* BUS-48 control borders: 3.21+ on every surface (--line stays for dividers) */
+  --sel-edge: #70943a; /* BUS-48 selected marker: 3.92+ on navon/side/seg/segon */
   --mut-on-nav: #9a9aa8; /* muted text on --navon: 5.09:1 (--mut was 4.2:1) */
   --navon: #2a2a38; /* selected nav: 1.36:1 vs --side (was #1a1a24, 1.12:1) */
   --accfg: #b6ff3c;
@@ -20,7 +22,10 @@
   --info: #3cf0ff;
   --warn: #ffc04d;
   --err: #ff6b6b;
-  --brand: linear-gradient(90deg, #b6ff3c, #3cf0ff);
+  --brand-a: #b6ff3c; /* BUS-51 brand lime, both themes */
+  --brand-b: #3cf0ff; /* BUS-51 brand cyan, both themes */
+  --brand: linear-gradient(90deg, var(--brand-a), var(--brand-b));
+  --tile-glow: color-mix(in srgb, var(--brand-a) 25%, transparent);
   --on-brand: #08080c;
   --knob: #ffffff; /* switch knob, both themes */
   --focus: color-mix(in srgb, #b6ff3c 42%, transparent); /* dark focus ring */
@@ -44,21 +49,21 @@
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
   /* BUS-41 type scale: windowed value at <=1280px wide, growing linearly to
      the fullscreen value at >=1920px (TYPE-SCALE.md). The HUD keeps its own sizes.
-     Media queries + calc(), no clamp(): clamp() needs Safari 13.1 (macOS
-     10.15.4), and the app supports 10.15.0. calc() with `*`/`/` by a number
-     works there (calc() is Safari 7+, nested calc() 11+; MDN browser-compat-data). */
-  --fs-micro: 11px;
-  --fs-badge: 11.5px;
-  --fs-label: 12px;
-  --fs-secondary: 13px;
-  --fs-mono: 12.5px;
-  --fs-body: 15px;
-  --fs-emph: 16px;
-  --fs-section: 16px;
-  --fs-sheet: 17px;
-  --fs-hero: 30px;
-  --fs-page: 34px;
-  --fs-bigkey: 20px;
+     Media queries + calc(), no clamp() (project rule). The app requires macOS
+     13.1+ (Safari 16.2 WebKit, BUS-53), where calc() with `*`/`/` by a number
+     works (calc() is Safari 7+, nested calc() 11+; MDN browser-compat-data). */
+  --fsb-micro: 11px;
+  --fsb-badge: 11.5px;
+  --fsb-label: 12px;
+  --fsb-secondary: 13px;
+  --fsb-mono: 12.5px;
+  --fsb-body: 15px;
+  --fsb-emph: 16px;
+  --fsb-section: 16px;
+  --fsb-sheet: 17px;
+  --fsb-hero: 30px;
+  --fsb-page: 34px;
+  --fsb-bigkey: 20px;
   --lh-body: 1.45;
 
   --shadow-win: 0 0 0 .5px var(--winline), 0 30px 80px rgba(0, 0, 0, .35);
@@ -68,8 +73,8 @@
   --tile-shadow: inset 0 0 0 1px rgba(255, 255, 255, .16),
     inset 0 1px 0 rgba(255, 255, 255, .12), 0 0 0 .5px rgba(0, 0, 0, .6),
     0 2px 6px rgba(0, 0, 0, .35);
-  --hud-shadow: var(--tile-shadow), inset 0 0 0 1px rgba(182, 255, 60, .35),
-    0 0 18px rgba(60, 240, 255, .18);
+  --hud-shadow: var(--tile-shadow), inset 0 0 0 1px color-mix(in srgb, var(--brand-a) 35%, transparent),
+    0 0 18px color-mix(in srgb, var(--brand-b) 18%, transparent);
 }
 
 [data-appearance-resolved="light"] {
@@ -89,6 +94,8 @@
   --winline: rgba(0, 0, 0, .12);
   --fg: #0b0b10;
   --mut: #5d6068;
+  --ctl-line: #808389; /* BUS-48: 3.10+ on every surface */
+  --sel-edge: #376b00; /* BUS-48: = --accfg, 5.25+ */
   --navon: #e7eadf;
   --mut-on-nav: #5d6068; /* 5.16:1 on navon */
   --accfg: #376b00; /* AA: 5.28 on navon; white text on it 6.43 */
@@ -118,37 +125,59 @@ body {
   --text: var(--fg);
 }
 
+/* BUS-41 PR 3 Text size (TYPE-SCALE.md § Optional): every --fs-* is the base
+   --fsb-* times --ts, floored at 11px so Small never drops below 11px. max()
+   is Safari 11.1+; calc() number multiplication works on macOS 13.1+ (no clamp()).
+   Declared once on :root; the --fsb-* media queries below re-resolve it. */
+:root {
+  --ts: 1;
+  --fs-micro: max(11px, calc(var(--fsb-micro) * var(--ts)));
+  --fs-badge: max(11px, calc(var(--fsb-badge) * var(--ts)));
+  --fs-label: max(11px, calc(var(--fsb-label) * var(--ts)));
+  --fs-secondary: max(11px, calc(var(--fsb-secondary) * var(--ts)));
+  --fs-mono: max(11px, calc(var(--fsb-mono) * var(--ts)));
+  --fs-body: max(11px, calc(var(--fsb-body) * var(--ts)));
+  --fs-emph: max(11px, calc(var(--fsb-emph) * var(--ts)));
+  --fs-section: max(11px, calc(var(--fsb-section) * var(--ts)));
+  --fs-sheet: max(11px, calc(var(--fsb-sheet) * var(--ts)));
+  --fs-hero: max(11px, calc(var(--fsb-hero) * var(--ts)));
+  --fs-page: max(11px, calc(var(--fsb-page) * var(--ts)));
+  --fs-bigkey: max(11px, calc(var(--fsb-bigkey) * var(--ts)));
+}
+:root[data-textsize="small"] { --ts: .92; }
+:root[data-textsize="large"] { --ts: 1.12; }
+
 /* BUS-41: linear growth between 1280px and 1920px wide (see :root above). */
 @media (min-width: 1281px) {
   :root {
-    --fs-micro: calc(9px + 0.15625vw);
-    --fs-badge: calc(8.5px + 0.234375vw);
-    --fs-label: calc(9px + 0.234375vw);
-    --fs-secondary: calc(10px + 0.234375vw);
-    --fs-mono: calc(9.5px + 0.234375vw);
-    --fs-body: calc(11px + 0.3125vw);
-    --fs-emph: calc(12px + 0.3125vw);
-    --fs-section: calc(11px + 0.390625vw);
-    --fs-sheet: calc(12px + 0.390625vw);
-    --fs-hero: calc(16px + 1.09375vw);
-    --fs-page: calc(18px + 1.25vw);
-    --fs-bigkey: calc(12px + 0.625vw);
+    --fsb-micro: calc(9px + 0.15625vw);
+    --fsb-badge: calc(8.5px + 0.234375vw);
+    --fsb-label: calc(9px + 0.234375vw);
+    --fsb-secondary: calc(10px + 0.234375vw);
+    --fsb-mono: calc(9.5px + 0.234375vw);
+    --fsb-body: calc(11px + 0.3125vw);
+    --fsb-emph: calc(12px + 0.3125vw);
+    --fsb-section: calc(11px + 0.390625vw);
+    --fsb-sheet: calc(12px + 0.390625vw);
+    --fsb-hero: calc(16px + 1.09375vw);
+    --fsb-page: calc(18px + 1.25vw);
+    --fsb-bigkey: calc(12px + 0.625vw);
   }
 }
 
 @media (min-width: 1920px) {
   :root {
-    --fs-micro: 12px;
-    --fs-badge: 13px;
-    --fs-label: 13.5px;
-    --fs-secondary: 14.5px;
-    --fs-mono: 14px;
-    --fs-body: 17px;
-    --fs-emph: 18px;
-    --fs-section: 18.5px;
-    --fs-sheet: 19.5px;
-    --fs-hero: 37px;
-    --fs-page: 42px;
-    --fs-bigkey: 24px;
+    --fsb-micro: 12px;
+    --fsb-badge: 13px;
+    --fsb-label: 13.5px;
+    --fsb-secondary: 14.5px;
+    --fsb-mono: 14px;
+    --fsb-body: 17px;
+    --fsb-emph: 18px;
+    --fsb-section: 18.5px;
+    --fsb-sheet: 19.5px;
+    --fsb-hero: 37px;
+    --fsb-page: 42px;
+    --fsb-bigkey: 24px;
   }
 }

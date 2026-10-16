@@ -3,7 +3,7 @@
 /// The capture hook and Tauri IPC are mocked globally in setup.ts.
 /// These tests exercise app navigation, dictation flow, onboarding steps,
 /// and shortcut state across screens. Real permission and device flows
-/// are covered by manual tests in docs/review/BUS-9-implementation.md.
+/// are covered by manual on-device tests.
 import { act, fireEvent, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -71,7 +71,7 @@ describe('App integration', () => {
       act(() => vi.advanceTimersByTime(500));
       vi.useRealTimers();
       // Product hold no longer invents Inserted via mock complete (BUS-14).
-      // Real delivery is dogfood STT → deliverTranscript (Clara Mac / Home).
+      // Real delivery is dogfood STT → deliverTranscript (Mac / Home).
       expect(screen.queryByText(
         'Keep the TypeScript boundary small and explicit.',
       )).not.toBeInTheDocument();
@@ -230,7 +230,7 @@ describe('App integration', () => {
       );
       expect(
         screen.getByRole('alert'),
-      ).toHaveTextContent('already in use');
+      ).toHaveTextContent('is in use by another app (simulated)');
     },
   );
 });

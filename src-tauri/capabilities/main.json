@@ -18,6 +18,7 @@
     "core:window:allow-set-focusable",
     "core:window:allow-set-always-on-top",
     "core:window:allow-current-monitor",
+    "core:window:allow-get-all-windows",
     "core:window:allow-primary-monitor",
     "clipboard-manager:allow-write-text",
     "clipboard-manager:allow-read-text",

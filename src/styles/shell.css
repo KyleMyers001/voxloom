@@ -33,9 +33,10 @@
 .tb-settings:hover,
 .tb-settings:focus-visible,
 .tb-settings[aria-current="page"] { background: var(--navon); color: var(--fg); }
+.tb-settings[aria-current="page"] { box-shadow: inset 0 -2px 0 var(--sel-edge); }
 
 .tb-help {
-  border: 1px solid var(--line);
+  border: 1px solid var(--ctl-line);
   border-radius: 50%;
   color: var(--mut);
   height: 24px;
@@ -79,7 +80,7 @@
 
 .nav-button[aria-current="page"] {
   background: var(--navon);
-  box-shadow: inset 0 0 0 1px var(--line);
+  box-shadow: inset 3px 0 0 var(--sel-edge);
   font-weight: 600;
 }
 

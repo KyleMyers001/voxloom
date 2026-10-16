@@ -94,7 +94,7 @@ export interface UseDogfoodCaptureResult {
 /**
  * HUD rules 3–6: only Copied (or maybe-copied) and a definite failure show
  * anything after delivery. Unverified and "may have been inserted, nothing
- * copied" dismiss silently like a success (Kyle); History keeps the
+ * copied" dismiss silently like a success; History keeps the
  * Unverified badge.
  */
 export function hudResultFor(
@@ -108,10 +108,8 @@ export function hudResultFor(
 function errorText(error: unknown): string {
   if (error instanceof SttError) {
     if (error.code === 'model-missing') {
-      return (
-        `${error.message} Open Settings → Speech-to-text models and `
-        + 'Download the selected model first.'
-      );
+      // Settings guidance lives here once; missingModelMessage is the fact only.
+      return `${error.message} Download the selected model in Settings first.`;
     }
     return error.message;
   }
@@ -121,11 +119,8 @@ function errorText(error: unknown): string {
 
 function missingModelMessage(modelId: string, status: string | null): string {
   const detail = status ? ` (status: ${status})` : '';
-  return (
-    `Model “${modelId}” is not downloaded${detail}. `
-    + 'Open Settings → Speech-to-text models and Download it first '
-    + '(no silent download).'
-  );
+  // Fact only — errorText appends the short Settings suffix once.
+  return `Model “${modelId}” is not downloaded${detail}.`;
 }
 
 function resolvePlatform(

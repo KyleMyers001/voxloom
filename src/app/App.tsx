@@ -17,7 +17,7 @@ import { TitleBar } from './shell/TitleBar';
 import { useAppKeys } from './useAppKeys';
 import { useDevSession } from './useDevSession';
 import { toGestureDogfoodBridge, useShortcutGestures } from './useShortcutGestures';
-import { useTheme } from './useTheme';
+import { useTextSize, useTheme } from './useTheme';
 import { useToastMessages } from './useToastMessages';
 
 export function App() {
@@ -26,6 +26,7 @@ export function App() {
   const [shortcutOpen, setShortcutOpen] = useState(false);
   const modalOpener = useRef<HTMLElement | null>(null);
   useTheme(state.settings.appearance);
+  useTextSize(state.settings.textSize);
   const { toast, toastTone, announce, announceError } = useToastMessages([
     state.historyError, state.settingsError, state.dictionaryError,
   ]);
@@ -48,12 +49,18 @@ export function App() {
     if (state.onboarding.complete) setOnboardingOpen(false);
   }, [state.onboarding.complete]);
 
+  const onShortcutRevert = useCallback(
+    (shortcut: string) => dispatch({ key: 'shortcut', type: 'set-setting', value: shortcut }),
+    [dispatch],
+  );
+
   useShortcutGestures({
     dictation,
     dogfood: toGestureDogfoodBridge(dogfood),
     now,
     onboardingOpen,
     onShortcutError: announceError,
+    onShortcutRevert,
     setup,
     shortcutOpen,
     state,

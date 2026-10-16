@@ -112,13 +112,13 @@ describe('KeyCombo', () => {
     expect(comboLabel('Control+Shift+Space', true)).toBe('⌃⇧Space');
     expect(comboLabel('CommandOrControl+,', false)).toBe('Ctrl+,');
     expect(comboLabel('CommandOrControl+,', true)).toBe('⌘,');
-    expect(comboKeys('Cmd+k', false)).toEqual(['⌘', 'K']);
+    expect(comboKeys('Cmd+k', false)).toEqual(['Super', 'K']);
     expect(comboKeys('Option + Cmd + 1')).toEqual(['⌥', '⌘', '1']);
   });
 
-  it('renders hidden key caps plus the original text for screen readers', () => {
+  it('renders hidden key caps plus spoken names for screen readers', () => {
     const { container } = render(<KeyCombo combo="Ctrl + Shift + Space" />);
-    expect(screen.getByText('Ctrl + Shift + Space').className).toBe('sr-only');
+    expect(screen.getByText('Control Shift Space').className).toBe('sr-only');
     expect(container.querySelector('.key-combo__caps')?.getAttribute('aria-hidden')).toBe('true');
     expect([...container.querySelectorAll('kbd')].map((k) => k.textContent)).toEqual(['⌃', '⇧', 'Space']);
   });

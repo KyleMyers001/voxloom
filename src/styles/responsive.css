@@ -11,7 +11,7 @@
     opacity: 1;
     visibility: visible;
   }
-  .recent-row { grid-template-columns: 58px minmax(0, 1fr); }
+  .recent-row { grid-template-columns: auto minmax(0, 1fr); }
   .recent-row > :last-child { grid-column: 2; }
 }
 
@@ -31,6 +31,7 @@
     transition-duration: .01ms !important;
   }
 
-  .wave i { animation: none; transition: none; }
+  .wave i,
+  [data-waveform="processing"] .wave i { animation: none; transition: none; }
 }
 

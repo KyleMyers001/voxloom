@@ -20,13 +20,10 @@ fn capture_loop_accumulates_then_cancel_terminates() {
     let rb = ringbuf::HeapRb::<f32>::new(RING_CAPACITY);
     let (mut producer, mut consumer) = rb.split();
     assert_eq!(producer.push_slice(&[0.5; 480]), 480);
-    let cancel = Arc::new(AtomicBool::new(false));
+    // Cancel only once the loop has drained the samples and reported their
+    // level, so the test does not race a wall-clock sleep (BUS-55).
+    let cancel = AtomicBool::new(false);
     let stop = AtomicBool::new(false);
-    let cancel_for_thread = Arc::clone(&cancel);
-    thread::spawn(move || {
-        thread::sleep(Duration::from_millis(80));
-        cancel_for_thread.store(true, Ordering::Release);
-    });
     let accepting = open_gate();
     let callbacks_in_flight = AtomicUsize::new(0);
     let overflow = AtomicBool::new(false);
@@ -56,7 +53,12 @@ fn capture_loop_accumulates_then_cancel_terminates() {
         start,
         1,
         "request",
-        &|event| events.lock().unwrap().push(event),
+        &|event| {
+            if matches!(event, SessionEvent::CaptureLevel { level, .. } if level > 0.0) {
+                cancel.store(true, Ordering::Release);
+            }
+            events.lock().unwrap().push(event);
+        },
         &runtime,
     );
 

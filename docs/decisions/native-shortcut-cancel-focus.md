@@ -2,7 +2,7 @@
 
 - **Status:** Decided (provisional where OS automation blocks live proof)
 - **Date:** 2026-09-22
-- **Ticket:** [BUS-12](https://kylemyers001.atlassian.net/browse/BUS-12)
+- **Ticket:** BUS-12
 - **Feature IDs:** CAP-01, CAP-02, CAP-03, CAP-04, CAP-07, INS-02, INS-05, ONB-03, ONB-06
 - **Enables:** BUS-13 (overlay / native gesture wiring), BUS-14 (insert polish)
 
@@ -90,7 +90,7 @@ for the one user-configured combo.
     already owns the combo.
 
 **Escalation (only if Pressed/Released prove insufficient for hold timing or
-modifier edge cases on a Clara Mac trial):** a dedicated CGEvent tap / HID
+modifier edge cases on a Mac trial):** a dedicated CGEvent tap / HID
 monitor for that combo. That path typically needs **Accessibility** and may
 prompt **Input Monitoring**. Do not start there for BUS-13 without a recorded
 failure of the plugin path.

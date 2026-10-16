@@ -1,6 +1,7 @@
 import { initialSettings } from '../../domain/fixtures';
 import {
   audioRetentions,
+  textSizes,
   transcriptRetentions,
   writingStyles,
 } from '../../domain/settings';
@@ -21,7 +22,7 @@ const APPEARANCES: readonly Appearance[] = [
   'dark',
 ];
 
-/** Sodium Rain was removed (UI PR 10, approved by Kyle); stored values load as 'system'. */
+/** Sodium Rain was removed (UI PR 10); stored values load as 'system'. */
 const RETIRED_APPEARANCES: Readonly<Record<string, Appearance>> = { 'sodium-rain': 'system' };
 
 export type ParseSettingsResult =
@@ -80,6 +81,8 @@ export function coerceSettings(raw: unknown): Settings {
       writingStyles,
       base.style,
     ) as WritingStyle,
+    // Added in BUS-41 PR 3: older files have no textSize and load as 'default'.
+    textSize: asChoice(raw.textSize, textSizes, base.textSize),
     transcriptRetention: asChoice(
       raw.transcriptRetention,
       transcriptRetentions,

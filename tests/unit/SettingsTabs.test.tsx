@@ -29,19 +29,23 @@ describe('Settings window tabs (UI PR 6a)', () => {
     renderWithApp(<Settings onSetup={vi.fn()} />);
     // S1–S11
     expect(screen.getByRole('button', { name: 'Set up shortcuts' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Shortcut')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^(Shortcut|App-local shortcut|Global shortcut) / })).toBeInTheDocument();
     expect(screen.getByLabelText('Microphone')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Refresh microphones/ })).toBeInTheDocument();
     expect(screen.getByText('Microphone test')).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'English (UK)' })).toBeInTheDocument();
     expect(screen.getByRole('radiogroup', { name: 'Current style' })).toBeInTheDocument();
-    expect(screen.getByLabelText(/Language-processing model · simulated/)).toBeEnabled();
+    expect(screen.getByLabelText(/Language-processing model/)).toBeEnabled();
     expect(screen.getByRole('switch', { name: 'Start at login · simulated' })).toBeEnabled();
-    expect(screen.getByRole('switch', { name: 'Use clipboard if direct insertion fails' })).toBeEnabled();
+    expect(screen.getByRole('switch', { name: 'Clipboard fallback' })).toBeEnabled();
     expect(screen.getByText('Recording indicator')).toBeInTheDocument();
     // A1
     await user.click(screen.getByRole('tab', { name: 'Appearance' }));
-    expect(screen.getAllByRole('radio')).toHaveLength(3); // Follow system · Light · Dark (Sodium Rain removed, PR 10)
+    expect(screen.getAllByRole('radio', { name: /system|Light|Dark/ })).toHaveLength(3); // Follow system · Light · Dark (Sodium Rain removed, PR 10)
+    // BUS-41 PR 3: Text size segmented control
+    const textSize = screen.getByRole('radiogroup', { name: 'Text size' });
+    expect(within(textSize).getAllByRole('radio').map((r) => r.textContent)).toEqual(['Small', 'Default', 'Large']);
+    expect(within(textSize).getByRole('radio', { name: 'Default' })).toHaveAttribute('aria-checked', 'true');
     // R1–R3, E1
     await user.click(screen.getByRole('tab', { name: 'Privacy' }));
     expect(screen.getByRole('radiogroup', { name: 'Transcript retention' })).toBeInTheDocument();
@@ -55,7 +59,7 @@ describe('Settings window tabs (UI PR 6a)', () => {
   it('toggles clipboard fallback through the switch', async () => {
     const user = userEvent.setup();
     renderWithApp(<Settings onSetup={vi.fn()} />);
-    const fallback = screen.getByRole('switch', { name: 'Use clipboard if direct insertion fails' });
+    const fallback = screen.getByRole('switch', { name: 'Clipboard fallback' });
     const before = fallback.getAttribute('aria-checked');
     await user.click(fallback);
     expect(fallback.getAttribute('aria-checked')).not.toBe(before);

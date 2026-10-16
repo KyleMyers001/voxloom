@@ -32,24 +32,43 @@ pub fn retry_eligible(first_write: &Result<(), String>, outcome: &AfterAx, web_h
     web_host && first_write.is_ok() && matches!(outcome, AfterAx::Failed(_))
 }
 
+/// `retry_once` result. `proven_unchanged` is true only when the retry write
+/// returned Ok and read-back proved the field still unchanged: the one case
+/// where typing cannot duplicate text.
+#[derive(Debug, PartialEq, Eq)]
+pub struct RetryOutcome {
+    pub after: AfterAx,
+    pub proven_unchanged: bool,
+}
+
+fn done(after: AfterAx) -> RetryOutcome {
+    RetryOutcome {
+        after,
+        proven_unchanged: false,
+    }
+}
+
 pub fn retry_once(
     first_write: &Result<(), String>,
     before: &str,
     text: &str,
     io: &mut impl RetryIo,
-) -> AfterAx {
+) -> RetryOutcome {
     if let Err(err) = first_write {
-        return AfterAx::Failed(err.clone()); // Never retry after an AX error.
+        return done(AfterAx::Failed(err.clone())); // Never retry after an AX error.
     }
     io.reassert();
     for wait in RETRY_UNCHANGED_READS_MS {
         io.sleep(wait);
         match io.read() {
-            Some(now) if value_confirms_insert(before, &now, text) => return AfterAx::Inserted,
+            Some(now) if value_confirms_insert(before, &now, text) => {
+                return done(AfterAx::Inserted)
+            }
             Some(now) if same_ax_text(&now, before) => {}
-            Some(_) => return AfterAx::Unverified,
+            Some(_) => return done(AfterAx::Unverified),
             None => {
-                return AfterAx::Failed("AXValue unreadable before retry — insert skipped".into())
+                let msg = "AXValue unreadable before retry — insert skipped";
+                return done(AfterAx::Failed(msg.into()));
             }
         }
     }
@@ -64,11 +83,45 @@ pub fn retry_once(
             .as_deref()
             .is_some_and(|now| value_confirms_insert(before, now, text))
         {
-            return AfterAx::Inserted;
+            return done(AfterAx::Inserted);
         }
     }
-    // may_type=false: the typing fallback is decided before this retry.
-    after_ax(false, result, before, last.as_deref(), text)
+    let proven_unchanged =
+        result.is_ok() && last.as_deref().is_some_and(|now| same_ax_text(now, before));
+    // may_type=false: typing is decided by `type_after_retry`.
+    let after = after_ax(false, result, before, last.as_deref(), text);
+    RetryOutcome {
+        after,
+        proven_unchanged,
+    }
+}
+
+/// After the retry re-enabled web AX, Chrome may still keep the field outside
+/// the AXWebArea subtree, so the web-content probe is not required. In a
+/// recognised Chromium/Electron host (`typing_ok`) typing is allowed only
+/// when read-back PROVED the field unchanged after an Ok retry write. Codex
+/// P1: any other Failed (unreadable AXValue, write error, target changed)
+/// stays Failed so text is never duplicated.
+pub fn type_after_retry(retried: RetryOutcome, typing_ok: bool) -> AfterAx {
+    match retried.after {
+        AfterAx::Failed(_) if retried.proven_unchanged && typing_ok => AfterAx::TypeFallback,
+        other => other,
+    }
+}
+
+/// Pure decision for the macOS re-probe. Fails closed: if the focused element
+/// could not be re-read (`refetched`) or no longer matches the validated
+/// target (`still_ours`), the retry result stands (never type).
+pub fn reprobe_decision(
+    retried: RetryOutcome,
+    refetched: bool,
+    still_ours: bool,
+    typing_ok: bool,
+) -> AfterAx {
+    if !refetched || !still_ours {
+        return retried.after;
+    }
+    type_after_retry(retried, typing_ok)
 }
 
 #[cfg(test)]
