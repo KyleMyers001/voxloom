@@ -34,32 +34,30 @@ beforeEach(() => { vi.resetAllMocks(); });
 
 describe('BUS-43 pending acquisition ownership', () => {
   it.each(['cancel-ax-untrusted', 'cancel-tap-create-failed'])(
-    'keeps capture closed and preserves the full %s diagnostic from IPC', async (code) => {
+    'still dictates without Escape-cancel when arming fails with %s', async (code) => {
       const message = `Escape cancellation unavailable [${code}]. ax=true listen=false post=true`;
       const unlisten = vi.fn();
       ipc.listen.mockResolvedValue(unlisten);
       ipc.invoke.mockRejectedValue(message);
-      const startCapture = vi.fn();
-      const dogfood = vi.fn();
-      const copy = vi.fn();
-      const history = vi.fn();
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const store = createMockSttModelStore();
+      await store.download('whisper-tiny.en');
+      const startCapture = vi.fn().mockResolvedValue('started');
       const toast = vi.fn();
       const { result } = renderHook(() => useDogfoodCapture({
         captureApi: { captureState: { kind: 'idle' }, startFullCaptureSession: startCapture,
           cancelActiveCapture: vi.fn() } as unknown as UseCaptureStateResult,
-        clipboard: { copy }, createModelStore: createMockSttModelStore, modelId: 'whisper-tiny.en',
-        dogfood, onHistoryRecord: history, onToast: toast,
+        clipboard: { copy: vi.fn() }, createModelStore: () => store, modelId: 'whisper-tiny.en',
+        dogfood: vi.fn(), onToast: toast,
       }));
       await act(async () => { await result.current.start('gesture'); });
-      expect(result.current.phase).toBe('error');
+      expect(result.current.phase).toBe('recording');
       expect(result.current.scopeReady).toBe(false);
-      expect(result.current.message).toBe(message);
-      expect(toast).toHaveBeenCalledWith(message);
-      expect(startCapture).not.toHaveBeenCalled();
-      expect(dogfood).not.toHaveBeenCalled();
-      expect(history).not.toHaveBeenCalled();
-      expect(copy).not.toHaveBeenCalled();
+      expect(startCapture).toHaveBeenCalledOnce();
+      expect(toast).not.toHaveBeenCalledWith(message);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('Escape cancellation unavailable'), message);
       expect(unlisten).toHaveBeenCalledOnce();
+      warn.mockRestore();
     },
   );
   it.each([

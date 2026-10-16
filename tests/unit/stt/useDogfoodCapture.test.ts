@@ -17,6 +17,7 @@ import {
 } from '../../../src/services/stt/mockStt';
 import { useDogfoodCapture } from
   '../../../src/services/stt/useDogfoodCapture';
+import * as cancelScopeModule from '../../../src/services/shortcut/cancelScope';
 
 function clipboard(): ClipboardAdapter {
   return { copy: vi.fn().mockResolvedValue(undefined) };
@@ -310,6 +311,52 @@ describe('useDogfoodCapture', () => {
     expect(stopFullCapture).toHaveBeenCalledTimes(2);
     expect(snapshot).not.toHaveBeenCalled();
     expect(result.current.intendedTarget).toBeNull();
+  });
+
+  it('keeps dictating without Escape-cancel when the cancel tap cannot arm', async () => {
+    const arm = vi.spyOn(cancelScopeModule, 'beginCancelScope')
+      .mockRejectedValueOnce(new Error('Escape cancellation unavailable [cancel-tap-create-failed].'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const store = createMockSttModelStore();
+    await store.download('whisper-tiny.en');
+    const dogfood = vi.fn(mockDogfoodSuccess);
+    let captureState: CaptureState = { kind: 'idle' };
+    const { result, rerender } = renderHook(
+      ({ state }: { state: CaptureState }) => useDogfoodCapture({
+        captureApi: {
+          ...stubCapture(state),
+          startFullCaptureSession: async () => {
+            captureState = { device: 'Mic', generation: 1, kind: 'active', request_id: 'full-1' };
+            return 'started';
+          },
+          stopFullCapture: async () => {
+            captureState = {
+              audio: { duration_ms: 900, id: 'pcm-notap-1', sample_rate_hz: 16_000 },
+              kind: 'stopped',
+            };
+          },
+        },
+        clipboard: clipboard(),
+        createModelStore: () => store,
+        dogfood: dogfood as never,
+        modelId: 'whisper-tiny.en',
+      }),
+      { initialProps: { state: captureState } },
+    );
+    try {
+      await act(async () => { await result.current.start(); });
+      rerender({ state: captureState });
+      expect(result.current.phase).toBe('recording');
+      expect(result.current.scopeReady).toBe(false);
+      expect(warn).toHaveBeenCalled();
+      await act(async () => { await result.current.stop(); });
+      rerender({ state: captureState });
+      await waitFor(() => expect(result.current.phase).toBe('success'));
+      expect(dogfood).toHaveBeenCalledOnce();
+    } finally {
+      arm.mockRestore();
+      warn.mockRestore();
+    }
   });
 
   it('auto-runs dogfoodTranscribeAndCopy after clean stop with audio', async () => {

@@ -350,15 +350,20 @@ export function useDogfoodCapture(
     try {
       if (retirement) await retirement;
       if (superseded()) return;
-      cancellation.scope = await beginCancelScope(() => {
-        cancellation.cancelled = true;
-        if (session === sessionRef.current) cancelActionRef.current();
-      }, () => !superseded() && !cancellation.cancelled);
+      try {
+        cancellation.scope = await beginCancelScope(() => {
+          cancellation.cancelled = true;
+          if (session === sessionRef.current) cancelActionRef.current();
+        }, () => !superseded() && !cancellation.cancelled);
+      } catch (error: unknown) {
+        // Escape-cancel is optional: a tap failure must never block dictation.
+        console.warn('Escape cancellation unavailable; dictating without it.', error);
+      }
       if (superseded()) {
-        await cancellation.scope.dispose();
+        await cancellation.scope?.dispose();
         return;
       }
-      setScopeReady(true);
+      if (cancellation.scope) setScopeReady(true);
       await ensureModelAvailable(modelIdRef.current);
     } catch (error: unknown) {
       if (superseded()) return;
