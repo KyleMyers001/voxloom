@@ -21,7 +21,7 @@ vi.mock('../../src/services/shortcut', async (importOriginal) => ({
   }),
 }));
 vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => true, invoke: ipc.invoke }));
-vi.mock('@tauri-apps/api/event', () => ({ listen: ipc.listen }));
+vi.mock('@tauri-apps/api/event', () => ({ listen: ipc.listen, emit: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../../src/services/capture/useCaptureState', () => ({ useCaptureState: () => ({}) }));
 
 function deferred<T>() {
@@ -171,7 +171,11 @@ describe('BUS-43 pending acquisition ownership', () => {
       let owner: string | null = null;
       let visible = false;
       let cancelEvent!: (event: { payload: string }) => void;
-      ipc.listen.mockImplementation(async (_event, handler) => { cancelEvent = handler; return vi.fn(); });
+      ipc.listen.mockImplementation(async (event, handler) => {
+        // Shortcut-query listeners share this API but must not replace Escape.
+        if (event === 'dictation:cancel') cancelEvent = handler;
+        return vi.fn();
+      });
       ipc.invoke.mockImplementation(async (command, { session }) => {
         if (command === 'dictation_cancel_arm') { await arm.promise; owner = session; }
         if (command === 'dictation_cancel_end' && owner === session) { owner = null; visible = false; }
@@ -211,6 +215,8 @@ describe('BUS-43 pending acquisition ownership', () => {
       const session = owner!;
       visible = false;
       act(() => cancelEvent({ payload: session }));
+      expect(result.current.phase).toBe('cancelled');
+      expect(result.current.scopeReady).toBe(false);
       await act(async () => { startup.resolve(); await start; });
       expect(result.current.phase).toBe('cancelled');
       expect(visible).toBe(false);

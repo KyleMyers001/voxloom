@@ -25,6 +25,22 @@ test('HUD under prefers-reduced-motion: breathe only on transcribing, none on pr
   expect(wave).toEqual([]);
 });
 
+test('Reduce Motion does not introduce transitions on HUD document style changes', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/overlay.html');
+
+  const transitions = await page.evaluate(() => {
+    const root = document.getElementById('root')!;
+    root.style.color = 'rgb(255, 0, 0)';
+    // Flush the starting style so the change below would create a transition
+    // even after startup has settled (a tiny nonzero duration is not disabled).
+    void getComputedStyle(root).color;
+    root.style.color = 'rgb(0, 0, 255)';
+    return root.getAnimations().map((a) => (a as CSSTransition).transitionProperty);
+  });
+  expect(transitions).toEqual([]);
+});
+
 test('HUD still pulses with motion allowed', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.setViewportSize({ height: 40, width: 248 });
