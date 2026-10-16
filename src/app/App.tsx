@@ -39,6 +39,7 @@ export function App() {
     modelId: state.settings.transcriptionModel,
     now,
     onHistoryRecord: (record) => dispatch({ record, type: 'append-record' }),
+    onErrorToast: announceError,
     onToast: announce,
     preferredDeviceId: state.settings.microphone,
     style: state.settings.style,

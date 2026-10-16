@@ -61,6 +61,37 @@ export interface UseCaptureStateResult {
    */
   stopFullCapture: () => Promise<void>;
   stopMicTest: () => void;
+  /**
+   * Resolve once a cancelled capture's terminal event releases ownership
+   * (bounded), so a fast restart after cancel is not refused as busy.
+   * Resolves at once when no cancelled owner is pending.
+   */
+  waitForCaptureRelease: () => Promise<void>;
+}
+
+/** Bound on waiting for a cancelled capture's terminal event. */
+const RELEASE_TIMEOUT_MS = 5_000;
+
+function createTerminalWaiter(requestId: string): TerminalWaiter {
+  let resolve: (completed: boolean) => void = () => {
+    throw new Error('terminal waiter was not initialized');
+  };
+  const promise = new Promise<boolean>((complete) => {
+    resolve = complete;
+  });
+  return { cancelSent: false, promise, requestId, resolve };
+}
+
+async function raceTimeout(promise: Promise<boolean>, ms: number) {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<boolean>((resolveTimeout) => {
+    timeoutId = setTimeout(() => resolveTimeout(false), ms);
+  });
+  try {
+    return await Promise.race([promise, timedOut]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 interface TerminalWaiter {
@@ -431,18 +462,7 @@ export function useCaptureState(): UseCaptureStateResult {
     setCaptureState({ kind: 'switching-device' });
     let waiter = terminalWaiterRef.current;
     if (!waiter || waiter.requestId !== owner.requestId) {
-      let resolve: (completed: boolean) => void = () => {
-        throw new Error('terminal waiter was not initialized');
-      };
-      const promise = new Promise<boolean>((complete) => {
-        resolve = complete;
-      });
-      waiter = {
-        cancelSent: false,
-        promise,
-        requestId: owner.requestId,
-        resolve,
-      };
+      waiter = createTerminalWaiter(owner.requestId);
       terminalWaiterRef.current = waiter;
     }
 
@@ -459,12 +479,7 @@ export function useCaptureState(): UseCaptureStateResult {
       }
     }
 
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const timedOut = new Promise<boolean>((resolveTimeout) => {
-      timeoutId = setTimeout(() => resolveTimeout(false), 5_000);
-    });
-    const completed = await Promise.race([waiter.promise, timedOut]);
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
+    const completed = await raceTimeout(waiter.promise, RELEASE_TIMEOUT_MS);
     if (!mountedRef.current
         || sequence !== switchSequenceRef.current) return false;
     if (!completed) {
@@ -557,10 +572,25 @@ export function useCaptureState(): UseCaptureStateResult {
   const cancelActiveCapture = useCallback(() => {
     const owner = ownerRef.current;
     if (owner) {
+      // Track the terminal event so a restart can wait for release.
+      let waiter = terminalWaiterRef.current;
+      if (waiter?.requestId !== owner.requestId) {
+        waiter = createTerminalWaiter(owner.requestId);
+        terminalWaiterRef.current = waiter;
+      }
+      waiter.cancelSent = true;
       void cancelCapture(owner.requestId).catch(() => {});
     }
     // Optimistic UX; terminal event still updates to cancelled/idle.
     setCaptureState({ kind: 'cancelled' });
+  }, []);
+
+  const waitForCaptureRelease = useCallback(async () => {
+    const owner = ownerRef.current;
+    const waiter = terminalWaiterRef.current;
+    if (!owner || waiter?.requestId !== owner.requestId
+        || !waiter.cancelSent) return;
+    await raceTimeout(waiter.promise, RELEASE_TIMEOUT_MS);
   }, []);
 
   const stopMicTest = useCallback(() => {
@@ -586,5 +616,6 @@ export function useCaptureState(): UseCaptureStateResult {
     startFullCaptureSession,
     stopFullCapture,
     stopMicTest,
+    waitForCaptureRelease,
   };
 }
