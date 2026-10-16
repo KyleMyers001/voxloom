@@ -18,7 +18,7 @@ This supersedes the global-Escape rejection in the original BUS-12 ADR only for 
 
 ## Permissions and failure policy
 
-An active macOS event tap needs the OS permission that permits event interception. The code never prompts, grants or resets permissions. If the tap cannot be created, starting dictation fails with an Accessibility-permission message rather than offering a popup whose Escape action cannot work. This also affects users who otherwise use Copy-only delivery without Accessibility permission. A disabled/revoked tap cancels its scope fail-closed; it is not silently re-enabled.
+An active macOS event tap needs the OS permission that permits event interception. The code never prompts, grants or resets permissions. If arming fails (the tap cannot be created or the process is not Accessibility-trusted), a warning is logged and dictation still records and delivers, so Copy-only users without Accessibility permission keep working. The cancellable popup is not shown for that session; in-window Escape still cancels, and the next session re-arms fresh. A disabled/revoked tap cancels its scope fail-closed; it is not silently re-enabled.
 
 The document Escape handler supports the focused-window/browser path, but is not evidence of cross-app interception. Native acceptance must be performed with the exact packaged app after user-approved permissions.
 
