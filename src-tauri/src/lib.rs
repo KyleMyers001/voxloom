@@ -127,11 +127,6 @@ fn capture_list_devices(
     coordinator.list_devices()
 }
 
-// Share one generated context: macOS embeds a single _EMBED_INFO_PLIST symbol.
-fn app_context<R: tauri::Runtime>() -> tauri::Context<R> {
-    tauri::generate_context!()
-}
-
 // Application entry
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
