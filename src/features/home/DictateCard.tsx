@@ -66,6 +66,11 @@ export function DictateCard({ dogfood, isNative, onCopy }: Props) {
           <Icon name={failed ? 'warn' : 'check'} size={14} /> {dogfood.message}
         </p>
       )}
+      {dogfood.phase === 'error' && dogfood.message?.startsWith('Escape cancellation unavailable [cancel-') && (
+        <button className="btn" onClick={() => onCopy(dogfood.message!)} type="button">
+          <Icon name="copy" /> Copy error details
+        </button>
+      )}
     </section>
   );
 }
