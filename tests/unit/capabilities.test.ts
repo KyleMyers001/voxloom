@@ -24,3 +24,12 @@ describe('window capabilities', () => {
     expect(ids(cap)).toEqual(expect.arrayContaining(['core:event:allow-emit', 'core:event:allow-listen']));
   });
 });
+
+describe('privacy pane command', () => {
+  it('is granted to the main window only', () => {
+    expect(ids(load('main'))).toContain('allow-privacy-pane-open');
+    for (const other of ['settings', 'overlay']) {
+      expect(ids(load(other))).not.toContain('allow-privacy-pane-open');
+    }
+  });
+});

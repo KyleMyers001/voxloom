@@ -20,6 +20,8 @@ This supersedes the global-Escape rejection in the original BUS-12 ADR only for 
 
 An active macOS event tap needs the OS permission that permits event interception. The code never prompts, grants or resets permissions. If arming fails (the tap cannot be created or the process is not Accessibility-trusted), a warning is logged, Voxloom shows a one-time non-blocking "Escape-cancel is off" hint per app run (with Copy error details on Home, keyed on the native error code), and dictation still records and delivers, so Copy-only users without Accessibility permission keep working. The cancellable popup is not shown for that session; in-window Escape still cancels, and the next session re-arms fresh. A disabled/revoked tap cancels its scope fail-closed; it is not silently re-enabled.
 
+The error code comes from non-prompting preflights taken after the tap fails: `cancel-ax-untrusted` (not Accessibility-trusted), `cancel-listen-denied` (trusted, but `CGPreflightListenEventAccess` is false, so Input Monitoring is missing for this running copy) or `cancel-tap-create-failed` (both present; no single grant to blame). `cancel-arm-failed` covers non-tap arm errors. For the first two, the Home note offers **Open Settings**, which opens only the matching Privacy & Security pane (Accessibility or Input Monitoring) through an allowlisted native command; it never requests or changes a permission. Each arm attempt writes one stderr line, `[cancel] arm ok` or `[cancel] arm failed code=<code>`.
+
 The document Escape handler supports the focused-window/browser path, but is not evidence of cross-app interception. Native acceptance must be performed with the exact packaged app after user-approved permissions.
 
 ## Review and acceptance

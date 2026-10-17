@@ -7,6 +7,7 @@ mod dictionary;
 mod history;
 mod hold_release;
 mod overlay;
+mod privacy_pane;
 mod settings;
 mod settings_window;
 mod store_backup;
@@ -173,6 +174,7 @@ pub fn run() {
             overlay::overlay_ensure,
             overlay::overlay_hide,
             overlay::overlay_show,
+            privacy_pane::privacy_pane_open,
             settings::settings_load,
             settings::settings_save,
             settings_window::settings_request_onboarding,

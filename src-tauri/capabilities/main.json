@@ -48,6 +48,7 @@
     "allow-overlay-ensure",
     "allow-overlay-hide",
     "allow-overlay-show",
+    "allow-privacy-pane-open",
     "allow-settings-load",
     "allow-settings-save",
     "allow-settings-window-open",

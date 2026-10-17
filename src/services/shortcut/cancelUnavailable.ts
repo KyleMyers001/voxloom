@@ -1,9 +1,11 @@
 import { useCallback, useRef, useState } from 'react';
+import type { PrivacyPane } from './privacyPane';
 
 /** Native arm error codes (src-tauri/src/cancel_scope ArmError.code). */
 export type CancelUnavailableCode =
   | 'cancel-arm-failed'
   | 'cancel-ax-untrusted'
+  | 'cancel-listen-denied'
   | 'cancel-tap-create-failed';
 
 /** Why Escape-cancel is off for this run; dictation itself keeps working. */
@@ -14,7 +16,8 @@ export interface CancelUnavailable {
 }
 
 const KNOWN_CODES: readonly string[] = [
-  'cancel-arm-failed', 'cancel-ax-untrusted', 'cancel-tap-create-failed',
+  'cancel-arm-failed', 'cancel-ax-untrusted', 'cancel-listen-denied',
+  'cancel-tap-create-failed',
 ];
 
 /** Read the structured `{ code, message }` arm rejection; never parse text. */
@@ -33,9 +36,23 @@ export function cancelUnavailableFrom(error: unknown): CancelUnavailable {
 }
 
 export function cancelUnavailableHint(code: CancelUnavailableCode): string {
-  return code === 'cancel-ax-untrusted'
-    ? 'Escape-cancel is off: Voxloom does not have Accessibility permission. Dictation still works.'
-    : 'Escape-cancel is off: macOS could not start the Escape listener. Dictation still works.';
+  if (code === 'cancel-ax-untrusted') {
+    return 'Escape-cancel is off: Voxloom does not have Accessibility permission. Dictation still works.';
+  }
+  if (code === 'cancel-listen-denied') {
+    return 'Escape-cancel is off: Voxloom does not have Input Monitoring permission. Dictation still works.';
+  }
+  return 'Escape-cancel is off: macOS could not start the Escape listener. Dictation still works.';
+}
+
+/**
+ * The Settings pane that fixes this code, or null when no single grant is
+ * implicated (the tap failed with both grants present, or arming broke).
+ */
+export function cancelSettingsPane(code: CancelUnavailableCode): PrivacyPane | null {
+  if (code === 'cancel-ax-untrusted') return 'accessibility';
+  if (code === 'cancel-listen-denied') return 'input-monitoring';
+  return null;
 }
 
 /**
