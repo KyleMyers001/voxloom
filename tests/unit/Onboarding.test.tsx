@@ -3,12 +3,13 @@
 /// The real microphone permission flow requires a live TCC context and is
 /// not exercised here; the capture hook is mocked to return controlled
 /// permission state. The real permission + test flows are in manual tests
-/// documented in docs/review/BUS-9-implementation.md.
+/// checked manually on a Mac.
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Onboarding } from '../../src/features/onboarding/Onboarding';
 import { renderWithApp } from './testUtils';
+import { CANCELED, HELP, RECORDING } from '../../src/features/settings/shortcutCopy';
 
 // Controlled permission state and Tauri env flag for Onboarding tests.
 let mockPermissionStatus = 'authorized';
@@ -133,19 +134,19 @@ describe('Onboarding (step 1 — real permission, simulated steps 2–3)', () =>
     expect(close).toHaveBeenCalledOnce();
   });
 
-  it('rejects the simulated shortcut collision only in the browser', async () => {
+  it('refuses a reserved combo with the recorder inline message', async () => {
     mockIsTauri = false;
     mockPermissionStatus = 'authorized';
     const user = userEvent.setup();
     renderWithApp(<Onboarding onClose={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Next' }));
-    const shortcut = screen.getByLabelText(
-      'Preferred app-local shortcut',
-    );
-    await user.clear(shortcut);
-    await user.type(shortcut, 'Ctrl + Space');
-    await user.click(screen.getByRole('button', { name: 'Next' }));
-    expect(screen.getByRole('alert')).toHaveTextContent('already in use');
+    expect(screen.getByText('App-local shortcut')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^(Shortcut|App-local shortcut|Global shortcut) / }));
+    await user.keyboard('{Control>} {/Control}');
+    // The recorder refuses it itself (macOS reserved) and keeps the old combo.
+    expect(screen.getByRole('status')).toHaveTextContent(/switching input sources/);
+    expect(screen.getByRole('button', { name: /^(Shortcut|App-local shortcut|Global shortcut) / }))
+      .toHaveAttribute('aria-pressed', 'true');
   });
 
   it('does not claim native gestures are app-local or practice is STT', async () => {
@@ -153,8 +154,8 @@ describe('Onboarding (step 1 — real permission, simulated steps 2–3)', () =>
     const user = userEvent.setup();
     renderWithApp(<Onboarding onClose={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Next' }));
-    expect(screen.getByLabelText('Preferred global shortcut'))
-      .toBeInTheDocument();
+    expect(screen.getByText('Global shortcut')).toBeInTheDocument();
+    expect(screen.queryByText(/app-local/i)).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Next' }));
     expect(screen.getByLabelText(/Gesture feedback \(not a speech transcript\)/))
       .toBeInTheDocument();
@@ -173,5 +174,65 @@ describe('Onboarding (step 1 — real permission, simulated steps 2–3)', () =>
     expect(
       screen.getAllByText(/System Settings/i).length,
     ).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('Onboarding shortcut step (BUS-47 recorder)', () => {
+  it('renders the shared recorder instead of a text field', async () => {
+    mockPermissionStatus = 'authorized';
+    const user = userEvent.setup();
+    renderWithApp(<Onboarding onClose={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    const field = screen.getByRole('button', { name: /^(Shortcut|App-local shortcut|Global shortcut) / });
+    expect(field).toHaveAttribute('id', 'onboarding-shortcut');
+    expect(field).toHaveAccessibleDescription(HELP);
+  });
+
+  it('records a combo, and Esc cancels recording without closing the sheet', async () => {
+    mockPermissionStatus = 'authorized';
+    const user = userEvent.setup();
+    const close = vi.fn();
+    renderWithApp(<Onboarding onClose={close} />);
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    const field = () => screen.getByRole('button', { name: /^(Shortcut|App-local shortcut|Global shortcut) / });
+    await user.click(field());
+    expect(screen.getByRole('status')).toHaveTextContent(RECORDING);
+    await user.keyboard('{Escape}');
+    expect(close).not.toHaveBeenCalled();
+    expect(field()).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('status')).toHaveTextContent(CANCELED);
+    await user.click(field());
+    await user.keyboard('{Control>}{Alt>}k{/Alt}{/Control}');
+    expect(field()).toHaveAccessibleName(/^Global shortcut Control (Option|Alt) K$/);
+    expect(screen.getByText('Choose your shortcut')).toBeInTheDocument();
+  });
+
+  it('collision reverts the combo; a new combo clears the alert and aria-invalid', async () => {
+    mockIsTauri = false;
+    mockPermissionStatus = 'authorized';
+    Object.defineProperty(window.navigator, 'platform', { configurable: true, get: () => 'Linux x86_64' });
+    try {
+      const user = userEvent.setup();
+      renderWithApp(<Onboarding onClose={vi.fn()} />);
+      await user.click(screen.getByRole('button', { name: 'Next' }));
+      const field = () => screen.getByRole('button', { name: /^(Shortcut|App-local shortcut|Global shortcut) / });
+      expect(field()).toHaveAccessibleName(/^App-local shortcut /);
+      await user.click(field());
+      await user.keyboard('{Control>} {/Control}');
+      await user.click(screen.getByRole('button', { name: 'Next' }));
+      expect(screen.getByRole('alert')).toHaveTextContent('Ctrl+Space is in use by another app (simulated). Kept Ctrl+Shift+Space. Record a different one.');
+      expect(field()).toHaveAttribute('aria-invalid', 'true');
+      expect(screen.getByRole('status')).toHaveTextContent(/^$/);
+      expect(field()).toHaveAccessibleName('App-local shortcut Control Shift Space');
+      expect(field().getAttribute('aria-describedby')).toContain('onboarding-error');
+      await user.click(field());
+      await user.keyboard('{Control>}{Alt>}j{/Alt}{/Control}');
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(screen.getByRole('status')).toHaveTextContent('Shortcut set to Ctrl+Alt+J.');
+      expect(field()).not.toHaveAttribute('aria-invalid');
+    } finally {
+      Object.defineProperty(window.navigator, 'platform', { configurable: true, get: () => 'MacIntel' });
+    }
   });
 });

@@ -62,7 +62,7 @@ describe('HUD view', () => {
     expect(screen.getByRole('status')).toHaveTextContent('May have been inserted; also copied');
   });
 
-  it('unverified and may-have-inserted (nothing copied) dismiss silently, like a success (Kyle)', () => {
+  it('unverified and may-have-inserted (nothing copied) dismiss silently, like a success', () => {
     expect(hudResultFor({ status: 'unverified' })).toBeNull();
     expect(hudResultFor({ mayHaveInserted: true, status: 'failed' })).toBeNull();
     // A null result never reaches overlayBridge.showResult, so there is no pill and no announcement.
@@ -92,7 +92,7 @@ describe('overlayBridge.showResult', () => {
     const bridge = createOverlayBridge(window);
     await bridge.showResult('copied');
     expect(window.setWaveform).toHaveBeenCalledWith('result-copied', 'copied');
-    expect(window.showBottomCenter).toHaveBeenCalledWith({ height: 40, width: 248 });
+    expect(window.showBottomCenter).toHaveBeenCalledWith({ height: 40, width: 248 }, false);
     await bridge.sync({ kind: 'ready' });
     expect(window.hide).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(2499);
@@ -140,7 +140,8 @@ describe('HUD motion (Option A)', () => {
     expect((118 + 2) % 5).toBe(0); // 24 bars × 3px + 23 gaps × 2px
   });
   it('falls back to a slow 3 s opacity breathe under Reduce Motion', () => {
-    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.hud-transcribing \{ animation: hud-breathe 3s ease-in-out infinite; \}\s*\.hud-transcribing i \{ animation: none; \}/);
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.hud-transcribing \{ animation: hud-breathe 3s ease-in-out infinite; \}\s*\.hud-transcribing i \{ animation: none;/);
+    expect(css).toMatch(/@keyframes hud-breathe \{ 0%, 100% \{ opacity: \.6; \} 50% \{ opacity: \.9; \} \}/);
   });
 });
 

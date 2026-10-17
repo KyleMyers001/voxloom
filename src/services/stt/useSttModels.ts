@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SttModelStore } from './contracts';
 import { createSttModelStore } from './factory';
 import { resolveTranscriptionModelId } from './resolveModelId';
+import { useDownloadPoll } from './useDownloadPoll';
 import { SttError, type SttDownloadProgress, type SttModelInfo } from './types';
 
 export interface UseSttModelsOptions {
@@ -41,6 +42,7 @@ function errorMessage(error: unknown): string {
 
 export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
   const storeRef = useRef(options.store ?? createSttModelStore());
+  const inFlightRef = useRef<string | null>(null);
   if (options.store) storeRef.current = options.store;
 
   const [models, setModels] = useState<readonly SttModelInfo[]>([]);
@@ -83,6 +85,9 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
 
   // Also the Retry action: it clears the row's failure as the new attempt starts.
   const downloadModel = useCallback(async (modelId: string) => {
+    // BUS-52: never two downloads at once, even if a stale button fires.
+    if (inFlightRef.current) throw new SttError('download-failed', 'Another model is downloading');
+    inFlightRef.current = modelId;
     setError(null);
     setFailures((prev) => {
       const next = { ...prev };
@@ -97,7 +102,8 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
     });
     try {
       await storeRef.current.download(modelId, (next) => {
-        setProgress(next);
+        // Ignore late or stray progress once this download is no longer the one in flight.
+        if (inFlightRef.current === modelId) setProgress(next);
       });
       await refresh();
     } catch (err) {
@@ -115,6 +121,7 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
       }
       throw err;
     } finally {
+      inFlightRef.current = null;
       setProgress((current) =>
         current?.modelId === modelId ? null : current,
       );
@@ -136,6 +143,12 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
       }
     }
   }, [refresh]);
+
+  const aliveRefresh = useCallback(async () => {
+    const list = await storeRef.current.list();
+    if (aliveRef.current) setModels(list);
+  }, []);
+  useDownloadPoll(models, progress !== null, aliveRefresh);
 
   const selectModel = useCallback((modelId: string) => {
     const id = resolveTranscriptionModelId(modelId);

@@ -2,11 +2,19 @@
 
 - **Status:** Decided (provisional where OS automation blocks live proof)
 - **Date:** 2026-09-22
-- **Ticket:** [BUS-12](https://kylemyers001.atlassian.net/browse/BUS-12)
+- **Ticket:** BUS-12
 - **Feature IDs:** CAP-01, CAP-02, CAP-03, CAP-04, CAP-07, INS-02, INS-05, ONB-03, ONB-06
 - **Enables:** BUS-13 (overlay / native gesture wiring), BUS-14 (insert polish)
 
 ## Current implementation note
+
+**BUS-43 update:** Escape now cancels only while a session-owned listening or
+transcription popup is visible; cancelled runs are omitted from History. The
+popup closes before the native delivery barrier commits, after which Escape is
+not owned by Voxloom. This supersedes the blanket rejection of cross-app Escape
+below, not the rejection of a permanent global Escape shortcut. See
+[`escape-cancellation.md`](escape-cancellation.md) for permission/failure policy,
+late-result guards and the remaining native acceptance checks.
 
 The original planning context and feasibility notes below are historical. Native
 capture, global gestures and insertion are now implemented. The current focus
@@ -82,7 +90,7 @@ for the one user-configured combo.
     already owns the combo.
 
 **Escalation (only if Pressed/Released prove insufficient for hold timing or
-modifier edge cases on a Clara Mac trial):** a dedicated CGEvent tap / HID
+modifier edge cases on a Mac trial):** a dedicated CGEvent tap / HID
 monitor for that combo. That path typically needs **Accessibility** and may
 prompt **Input Monitoring**. Do not start there for BUS-13 without a recorded
 failure of the plugin path.

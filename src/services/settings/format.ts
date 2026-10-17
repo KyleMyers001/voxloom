@@ -22,7 +22,7 @@ const APPEARANCES: readonly Appearance[] = [
   'dark',
 ];
 
-/** Sodium Rain was removed (UI PR 10, approved by Kyle); stored values load as 'system'. */
+/** Sodium Rain was removed (UI PR 10); stored values load as 'system'. */
 const RETIRED_APPEARANCES: Readonly<Record<string, Appearance>> = { 'sodium-rain': 'system' };
 
 export type ParseSettingsResult =

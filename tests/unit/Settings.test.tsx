@@ -2,7 +2,7 @@
 ///
 /// The capture hook is mocked to avoid live IPC. Real permission flow,
 /// real device list, and real mic test are covered in manual tests
-/// documented in docs/review/BUS-9-implementation.md.
+/// checked manually on a Mac.
 import { cleanup, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -78,7 +78,7 @@ describe('Settings', () => {
 
   it('labels remaining mock settings without calling shortcut simulated', async () => {
     renderWithApp(<Settings onSetup={vi.fn()} />);
-    expect(screen.getByLabelText('Shortcut')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^(Shortcut|App-local shortcut|Global shortcut) / })).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: /Start at login/ })).toBeDisabled();
     // S8: hidden in the native app (CHECKLIST § Hidden in the native app).
     expect(screen.queryByLabelText(/Language-processing model/)).toBeNull();
@@ -229,29 +229,15 @@ describe('Settings', () => {
   });
 });
 
-describe('Shortcut field (one representation at a time)', () => {
-  it('hides the key caps while the raw text is being edited', async () => {
+describe('Shortcut recorder (BUS-47)', () => {
+  it('records a chord by pressing it and shows it as key caps', async () => {
     const user = userEvent.setup();
-    const { container } = renderWithApp(<Settings onSetup={vi.fn()} />);
-    const caps = () => container.querySelector('.frow__control .shortcut-caps');
-    expect(caps()).not.toHaveAttribute('data-editing');
-    await user.click(screen.getByLabelText('Shortcut'));
-    // Still mounted (keeps its space, so the field doesn't shift) but visibility: hidden.
-    expect(caps()).toHaveAttribute('data-editing');
-    await user.tab();
-    expect(caps()).not.toHaveAttribute('data-editing');
-  });
-
-  it('freezes the hidden caps while typing so the field never moves', async () => {
-    const user = userEvent.setup();
-    const { container } = renderWithApp(<Settings onSetup={vi.fn()} />);
-    const caps = () => container.querySelector('.frow__control .shortcut-caps')!;
-    const before = caps().innerHTML;
-    const field = screen.getByLabelText('Shortcut');
+    renderWithApp(<Settings onSetup={vi.fn()} />);
+    const field = screen.getByRole('button', { name: /^(Shortcut|App-local shortcut|Global shortcut) / });
     await user.click(field);
-    await user.type(field, '+Alt+K');
-    expect(caps().innerHTML).toBe(before);
-    await user.tab();
-    expect(caps().innerHTML).not.toBe(before);
+    expect(field).toHaveTextContent('Press keys…');
+    await user.keyboard('{Control>}{Alt>}k{/Alt}{/Control}');
+    expect(field).toHaveAccessibleName('Shortcut Control Option K');
+    expect(screen.getByText(/^Shortcut set to/)).toBeInTheDocument();
   });
 });

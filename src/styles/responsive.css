@@ -28,9 +28,11 @@
   *::before,
   *::after {
     scroll-behavior: auto !important;
-    transition-duration: .01ms !important;
+    /* A nonzero duration creates transitions even where none were declared. */
+    transition: none !important;
   }
 
-  .wave i { animation: none; transition: none; }
+  .wave i,
+  [data-waveform="processing"] .wave i { animation: none; transition: none; }
 }
 

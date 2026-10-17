@@ -3,6 +3,9 @@
 // main: everything; settings: settings + model management + the mic test;
 // overlay: none.
 const COMMANDS: &[&str] = &[
+    "dictation_cancel_arm",
+    "dictation_cancel_finish",
+    "dictation_cancel_end",
     "capture_cancel",
     "capture_list_devices",
     "capture_query_permission",

@@ -16,6 +16,7 @@ import {
   type RegisterOutcome,
   type ShortcutBinder,
 } from './registerOrRevert';
+import { isDictationSuspended } from './recordingSuspend';
 
 export interface NativeShortcutApi {
   isAvailable(): boolean;
@@ -101,7 +102,7 @@ export function createNativeShortcutController({
   /**
    * True while the Mac hold-release poll/tap watch is the *primary* finish
    * path. Carbon Released is only suppressed during a short post-arm grace;
-   * after grace it is a backup finish (Clara: dead 2nd-session watch).
+   * after grace it is a backup finish (dead 2nd-session watch).
    */
   let holdWatchMonitoring = false;
   /** Suppress Carbon Released only during post-arm grace (spurious focus). */
@@ -209,7 +210,8 @@ export function createNativeShortcutController({
     onGesture: (gesture) => {
       if (gesture === 'hold-start') {
         // Mac: HotKey Released often missing when modifiers lift first.
-        armHoldWatch();
+        // Not while a recorder records: that start is dropped downstream.
+        if (!isDictationSuspended()) armHoldWatch();
       } else if (
         gesture === 'hold-finish' ||
         gesture === 'latch-start' ||
