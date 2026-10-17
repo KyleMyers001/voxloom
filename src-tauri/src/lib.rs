@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod acl_tests;
+mod cancel_scope;
 mod capture;
 mod delivery;
 mod dictionary;
@@ -150,6 +151,9 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            cancel_scope::dictation_cancel_arm,
+            cancel_scope::dictation_cancel_finish,
+            cancel_scope::dictation_cancel_end,
             capture_cancel,
             capture_list_devices,
             capture_query_permission,
@@ -186,6 +190,7 @@ pub fn run() {
                 return;
             }
             if let tauri::WindowEvent::CloseRequested { .. } = event {
+                cancel_scope::close();
                 if let Some(coordinator) = window.try_state::<CaptureCoordinator>() {
                     coordinator.cancel_any();
                 }

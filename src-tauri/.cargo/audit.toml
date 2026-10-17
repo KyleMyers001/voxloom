@@ -1,0 +1,18 @@
+# cargo-audit config (BUS-63). Every ignore needs a reason and is re-checked
+# when Tauri is upgraded. Vulnerabilities are never ignored here.
+[advisories]
+ignore = [
+  # glib 0.18 VariantStrIter unsoundness: pulled in by Tauri's Linux GTK
+  # backend only; the shipped app is macOS and Voxloom never iterates GVariant.
+  "RUSTSEC-2024-0429",
+  # proc-macro-error unmaintained: build-time only, via gtk3-macros/glib-macros
+  # (Linux backend of Tauri). No runtime code.
+  "RUSTSEC-2024-0370",
+  # unic-* unmaintained: via urlpattern <- tauri-utils. Informational only;
+  # waits on an upstream Tauri bump.
+  "RUSTSEC-2025-0075",
+  "RUSTSEC-2025-0080",
+  "RUSTSEC-2025-0081",
+  "RUSTSEC-2025-0098",
+  "RUSTSEC-2025-0100",
+]
