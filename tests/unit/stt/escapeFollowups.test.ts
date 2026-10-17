@@ -71,6 +71,27 @@ describe('Escape-cancel follow-ups (BUS-91)', () => {
       .toEqual({ code: 'cancel-tap-create-failed', details: 'second' });
   });
 
+  it('drops a queued hint when the next arm succeeds before it was shown', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(cancelScopeModule, 'beginCancelScope')
+      .mockRejectedValueOnce({ code: 'cancel-ax-untrusted', message: 'full diagnostic' })
+      .mockResolvedValueOnce(fakeScope());
+    const capture = stubCapture();
+    capture.startFullCaptureSession = vi.fn()
+      .mockResolvedValueOnce('busy')
+      .mockResolvedValueOnce('started');
+    const { result, toast } = await setup(capture);
+
+    // Arm fails, then capture never starts recording: the hint stays queued.
+    await act(async () => { await result.current.start(); });
+    expect(result.current.phase).toBe('error');
+
+    await act(async () => { await result.current.start(); });
+    expect(result.current.phase).toBe('recording');
+    expect(result.current.cancelUnavailable).toBeNull();
+    expect(toast).not.toHaveBeenCalledWith(expect.stringMatching(/Escape-cancel is off/));
+  });
+
   it('disposes a scope that armed after its session was superseded', async () => {
     const stale = fakeScope();
     let armStale!: () => void;

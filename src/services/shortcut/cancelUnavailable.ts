@@ -74,7 +74,14 @@ export function useCancelUnavailable() {
     return hint;
   }, []);
 
-  const clear = useCallback(() => setNotice(null), []);
+  // A successful arm drops a hint that was queued but never shown; a later
+  // failure in this run may hint again because the user never saw it.
+  const clear = useCallback(() => {
+    setNotice(null);
+    if (pendingHintRef.current === null) return;
+    pendingHintRef.current = null;
+    hintedRef.current = false;
+  }, []);
 
   return { clear, notice, report, takeHint };
 }
