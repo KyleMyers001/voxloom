@@ -17,7 +17,7 @@ function recording(
 ): UseDogfoodCaptureResult {
   return {
     phase: 'recording', message, captureState: { kind: 'idle' }, cancelUnavailable,
-    scopeReady: false, intendedTarget: null, hudResult: null, origin: 'gesture',
+    scopeReady: false, hudReady: false, intendedTarget: null, hudResult: null, origin: 'gesture',
     transcript: null, cancel: vi.fn(), start: vi.fn(), stop: vi.fn(),
   };
 }
