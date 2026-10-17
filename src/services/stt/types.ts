@@ -53,6 +53,7 @@ export interface SttDownloadProgress {
 export type SttErrorCode =
   | 'cancelled'
   | 'download-failed'
+  | 'download-corrupted'
   | 'model-missing'
   | 'transcribe-failed'
   | 'unsupported-audio'
