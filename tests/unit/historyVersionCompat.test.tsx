@@ -105,7 +105,7 @@ describe('BUS-42 history file version compatibility', () => {
     expect(api!.state.records.map((r) => r.id)).toEqual(['v2-cleaned', 'v2-legacy']);
     expect(io.backups()).toEqual([V2]);
 
-    act(() => api!.dispatch({ record: newRow, type: 'append-record' }));
+    act(() => api!.dispatch({ now: NOW, record: newRow, type: 'append-record' }));
     await waitFor(() => expect(io.snapshot() ?? '').toContain('new-after-boot'));
     const disk = JSON.parse(io.snapshot()!) as { records: { id: string }[]; version: number };
     expect(disk.version).toBe(1);
@@ -123,8 +123,8 @@ describe('BUS-42 history file version compatibility', () => {
     expect(api!.state.historyError).toMatch(/Unsupported history file version: 99/);
     expect(api!.state.records).toEqual([]);
 
-    act(() => api!.dispatch({ record: newRow, type: 'append-record' }));
-    act(() => api!.dispatch({ settings: { ...api!.state.settings, transcriptRetention: 'off' }, type: 'hydrate-settings', onboardingComplete: true }));
+    act(() => api!.dispatch({ now: NOW, record: newRow, type: 'append-record' }));
+    act(() => api!.dispatch({ settings: { ...api!.state.settings, transcriptRetention: 'off' }, now: Date.now(), type: 'hydrate-settings', onboardingComplete: true }));
     await settle();
     expect(io.snapshot()).toBe(future);
     expect(io.backups()).toEqual([future]);
@@ -193,7 +193,7 @@ describe('BUS-42 history file version compatibility', () => {
       </AppProvider>,
     );
     await waitFor(() => expect(api?.bootReady).toBe(true));
-    act(() => api!.dispatch({ settings: { ...api!.state.settings, transcriptRetention: 'forever' }, type: 'hydrate-settings', onboardingComplete: true }));
+    act(() => api!.dispatch({ settings: { ...api!.state.settings, transcriptRetention: 'forever' }, now: Date.now(), type: 'hydrate-settings', onboardingComplete: true }));
     act(() => api!.dispatch({ type: 'hydrate-words', words: ['changed'] }));
     await settle();
     expect(settingsIo.snapshot()).toBe(futureSettings);
@@ -308,7 +308,7 @@ describe('BUS-42 history file version compatibility', () => {
     );
     await waitFor(() => expect(api?.bootReady).toBe(true));
     expect(writes).toHaveLength(1);
-    act(() => api!.dispatch({ key: 'style', type: 'set-setting', value: 'casual' }));
+    act(() => api!.dispatch({ key: 'style', now: Date.now(), type: 'set-setting', value: 'casual' }));
     await waitFor(() => expect(writes.at(-1)).toContain('"style": "casual"'));
   });
 
@@ -346,7 +346,7 @@ describe('BUS-42 history file version compatibility', () => {
     expect(api!.state.settings).not.toHaveProperty('cleanupEnabled');
     expect(api!.state.settings).not.toHaveProperty('cleanupModelId');
 
-    act(() => api!.dispatch({ key: 'style', type: 'set-setting', value: 'formal' }));
+    act(() => api!.dispatch({ key: 'style', now: Date.now(), type: 'set-setting', value: 'formal' }));
     await waitFor(() => expect((JSON.parse(settingsIo.snapshot()!) as Disk).settings.style).toBe('formal'));
     expect((JSON.parse(settingsIo.snapshot()!) as Disk).settings).toMatchObject({
       cleanupEnabled: true,
@@ -441,7 +441,7 @@ describe('BUS-42 history file version compatibility', () => {
         </AppProvider>,
       );
       await waitFor(() => expect(api?.bootReady).toBe(true));
-      act(() => api!.dispatch({ key: 'style', type: 'set-setting', value: 'casual' }));
+      act(() => api!.dispatch({ key: 'style', now: Date.now(), type: 'set-setting', value: 'casual' }));
       await settle();
       expect(writes).toEqual([]);
     });
@@ -465,8 +465,8 @@ describe('BUS-42 history file version compatibility', () => {
       </AppProvider>,
     );
     await waitFor(() => expect(api?.bootReady).toBe(true));
-    act(() => api!.dispatch({ key: 'style', type: 'set-setting', value: 'casual' }));
-    act(() => api!.dispatch({ record: newRow, type: 'append-record' }));
+    act(() => api!.dispatch({ key: 'style', now: Date.now(), type: 'set-setting', value: 'casual' }));
+    act(() => api!.dispatch({ now: NOW, record: newRow, type: 'append-record' }));
     act(() => api!.dispatch({ type: 'hydrate-words', words: ['voxloom'] }));
     await waitFor(() => expect(settingsWrites.at(-1)).toContain('"style": "casual"'));
     await waitFor(() => expect(histWrites.at(-1)).toContain('new-after-boot'));

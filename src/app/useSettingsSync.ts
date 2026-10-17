@@ -18,6 +18,8 @@ interface Options {
   allowRef?: MutableRefObject<boolean>;
   /** This window's current (possibly not yet saved) values. */
   current: { onboardingComplete: boolean; settings: Settings };
+  /** AppProvider clock; defaults to Date.now for standalone call sites. */
+  now?: () => number;
 }
 
 /**
@@ -50,9 +52,13 @@ export function mergeForeignSave(
  * writes again if a local pending edit had to be merged in; bumping the
  * generation drops in-flight save results from before the change.
  */
-export function useSettingsSync({ allowRef, enabled, dispatch, lastSavedRef, lastRequestedRef, persistGenRef, current }: Options) {
+export function useSettingsSync({
+  allowRef, enabled, dispatch, lastSavedRef, lastRequestedRef, persistGenRef, current, now = Date.now,
+}: Options) {
   const currentRef = useRef(current);
   currentRef.current = current;
+  const nowRef = useRef(now);
+  nowRef.current = now;
   useEffect(() => {
     if (!enabled) return;
     return subscribe(() => listenSettingsChanged(({ contents }) => {
@@ -66,7 +72,7 @@ export function useSettingsSync({ allowRef, enabled, dispatch, lastSavedRef, las
         allowRef.current = true;
         dispatch({ message: null, type: 'set-settings-error' });
       }
-      dispatch({ ...merged, type: 'hydrate-settings' });
+      dispatch({ ...merged, now: nowRef.current(), type: 'hydrate-settings' });
     }));
   }, [allowRef, dispatch, enabled, lastRequestedRef, lastSavedRef, persistGenRef]);
 }
