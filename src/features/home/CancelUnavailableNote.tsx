@@ -32,7 +32,7 @@ export function CancelUnavailableNote({ notice, onCopy }: Props) {
       <div className="action-group">
         {pane && (
           <button className="btn" onClick={openSettings} type="button">
-            <Icon name="gear" /> Open Settings
+            <Icon name="gear" /> Open System Settings
           </button>
         )}
         <button className="btn" onClick={() => onCopy(notice.details)} type="button">
@@ -41,7 +41,7 @@ export function CancelUnavailableNote({ notice, onCopy }: Props) {
       </div>
       {pane && openFailed && (
         <p className="form-error" role="status">
-          Could not open System Settings. Open Privacy &amp; Security → {PRIVACY_PANE_LABEL[pane]} and allow Voxloom.
+          Couldn&apos;t open System Settings. Open it, go to Privacy &amp; Security, then {PRIVACY_PANE_LABEL[pane]}, and allow Voxloom.
         </p>
       )}
     </div>

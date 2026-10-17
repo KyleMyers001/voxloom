@@ -36,8 +36,8 @@ export function cancelUnavailableFrom(error: unknown): CancelUnavailable {
 export function cancelUnavailableHint(code: CancelUnavailableCode): string {
   if (code === 'cancel-ax-untrusted') {
     // macOS may only apply a new grant to a relaunched process.
-    return 'Escape-cancel is off: Voxloom does not have Accessibility permission. '
-      + 'You may need to quit and reopen Voxloom. Dictation still works.';
+    return 'Escape-cancel is off: Voxloom doesn\'t have Accessibility permission. '
+      + 'Dictation still works. After you allow it, quit and reopen Voxloom.';
   }
   return 'Escape-cancel is off: macOS could not start the Escape listener. Dictation still works.';
 }

@@ -74,22 +74,22 @@ describe('cancellation diagnostics on Home', () => {
   it('gives every code its own hint and asks for a relaunch only for permission', () => {
     const codes = ['cancel-ax-untrusted', 'cancel-tap-create-failed', 'cancel-arm-failed'] as const;
     const hints = codes.map(cancelUnavailableHint);
-    expect(hints[0]).toBe('Escape-cancel is off: Voxloom does not have Accessibility permission. '
-      + 'You may need to quit and reopen Voxloom. Dictation still works.');
+    expect(hints[0]).toBe('Escape-cancel is off: Voxloom doesn\'t have Accessibility permission. '
+      + 'Dictation still works. After you allow it, quit and reopen Voxloom.');
     expect(hints[1]).not.toMatch(/quit and reopen/);
     expect(hints.join(' ')).not.toMatch(/Input Monitoring/);
   });
 
-  it('Open Settings for cancel-ax-untrusted opens the Accessibility pane', () => {
+  it('Open System Settings for cancel-ax-untrusted opens the Accessibility pane', () => {
     render(<DictateCard dogfood={recording({ code: 'cancel-ax-untrusted', details: 'x' })} isNative onCopy={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Open Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open System Settings' }));
     expect(openPrivacyPane).toHaveBeenCalledExactlyOnceWith('accessibility');
   });
 
   it.each(['cancel-tap-create-failed', 'cancel-arm-failed'] as const)(
-    'hides Open Settings for %s (no single pane to fix)', (code) => {
+    'hides Open System Settings for %s (no single pane to fix)', (code) => {
       render(<DictateCard dogfood={recording({ code, details: code })} isNative onCopy={vi.fn()} />);
-      expect(screen.queryByRole('button', { name: 'Open Settings' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Open System Settings' })).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Copy error details' })).toBeInTheDocument();
     });
 
@@ -97,9 +97,9 @@ describe('cancellation diagnostics on Home', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.mocked(openPrivacyPane).mockRejectedValue(new Error('open failed'));
     render(<DictateCard dogfood={recording({ code: 'cancel-ax-untrusted', details: 'x' })} isNative onCopy={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Open Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open System Settings' }));
     expect(await screen.findByText(
-      'Could not open System Settings. Open Privacy & Security → Accessibility and allow Voxloom.',
+      'Couldn\'t open System Settings. Open it, go to Privacy & Security, then Accessibility, and allow Voxloom.',
     )).toBeInTheDocument();
     expect(warn).toHaveBeenCalledOnce();
     warn.mockRestore();
