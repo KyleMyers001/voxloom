@@ -348,6 +348,8 @@ describe('useDogfoodCapture', () => {
       rerender({ state: captureState });
       expect(result.current.phase).toBe('recording');
       expect(result.current.scopeReady).toBe(false);
+      // The HUD (waveform) still shows; only Escape-cancel is unavailable.
+      expect(result.current.hudReady).toBe(true);
       expect(warn).toHaveBeenCalled();
       await act(async () => { await result.current.stop(); });
       rerender({ state: captureState });

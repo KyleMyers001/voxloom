@@ -10,7 +10,7 @@ vi.mock('../../src/app/AppContext', () => ({
 function failure(message: string): UseDogfoodCaptureResult {
   return {
     phase: 'error', message, captureState: { kind: 'idle' },
-    scopeReady: false, intendedTarget: null, hudResult: null, origin: 'gesture',
+    scopeReady: false, hudReady: false, intendedTarget: null, hudResult: null, origin: 'gesture',
     transcript: null, cancel: vi.fn(), start: vi.fn(), stop: vi.fn(),
   };
 }
