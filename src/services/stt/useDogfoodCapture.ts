@@ -84,8 +84,13 @@ export interface UseDogfoodCaptureResult {
   message: string | null;
   origin: 'home' | 'gesture' | null;
   phase: DogfoodPhase;
-  /** Current session has acquired its cancellation scope; popup may show. */
+  /** Current session has acquired its Escape cancellation scope. */
   scopeReady: boolean;
+  /**
+   * The Escape arm attempt has settled (armed or unavailable), so the HUD may
+   * show. A failed arm shows a plain, non-cancellable HUD; it never hides it.
+   */
+  hudReady: boolean;
   start: (origin?: 'home' | 'gesture') => Promise<void>;
   stop: () => Promise<void>;
   transcript: Transcript | null;
@@ -145,6 +150,7 @@ export function useDogfoodCapture(
 
   const [phase, setPhase] = useState<DogfoodPhase>('idle');
   const [scopeReady, setScopeReady] = useState(false);
+  const [hudReady, setHudReady] = useState(false);
   const [hudResult, setHudResult] = useState<OverlayResult | null>(null);
   const [origin, setOrigin] = useState<'home' | 'gesture' | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -337,6 +343,7 @@ export function useDogfoodCapture(
     cancellationRef.current = cancellation;
     activeRef.current = true;
     setScopeReady(false);
+    setHudReady(false);
     setPhase('starting');
     setOrigin(source);
     const superseded = () => session !== sessionRef.current;
@@ -364,6 +371,8 @@ export function useDogfoodCapture(
         return;
       }
       if (cancellation.scope) setScopeReady(true);
+      // Show the HUD (waveform) even when Escape-cancel could not arm.
+      setHudReady(true);
       await ensureModelAvailable(modelIdRef.current);
     } catch (error: unknown) {
       if (superseded()) return;
@@ -425,6 +434,7 @@ export function useDogfoodCapture(
   const cancel = useCallback(() => {
     activeRef.current = false;
     setScopeReady(false);
+    setHudReady(false);
     cancellationRef.current.cancelled = true;
     void cancellationRef.current.scope?.dispose().catch(() => {});
     sessionRef.current += 1;
@@ -476,6 +486,7 @@ export function useDogfoodCapture(
     hudResult,
     phase,
     scopeReady: scopeReady && (phase === 'starting' || phase === 'recording' || phase === 'transcribing'),
+    hudReady: hudReady && (phase === 'starting' || phase === 'recording' || phase === 'transcribing'),
     start,
     stop,
     transcript,

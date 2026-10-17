@@ -75,6 +75,20 @@ describe('overlay visibility', () => {
     expect(visible).toBe(true);
   });
 
+  it('shows the listening HUD without claiming the Escape scope when not cancellable', async () => {
+    const api = {
+      ensureCreated: vi.fn().mockResolvedValue(undefined),
+      hide: vi.fn().mockResolvedValue(undefined),
+      isAvailable: () => true,
+      setWaveform: vi.fn().mockResolvedValue(undefined),
+      showBottomCenter: vi.fn().mockResolvedValue(undefined),
+    };
+    const bridge = createOverlayBridge(api);
+    await bridge.sync({ kind: 'listening', runId: 1, waveform: 'silent' }, false, false);
+    expect(api.setWaveform).toHaveBeenCalledWith('silent');
+    expect(api.showBottomCenter).toHaveBeenLastCalledWith({ height: 28, width: 142 }, false);
+  });
+
   it('overlaySyncPlan hides after cancel/error', () => {
     expect(overlaySyncPlan({
       kind: 'listening',
