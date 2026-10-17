@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SttModelStore } from './contracts';
 import { createSttModelStore } from './factory';
 import { resolveTranscriptionModelId } from './resolveModelId';
+import { useDownloadPoll } from './useDownloadPoll';
 import { SttError, type SttDownloadProgress, type SttModelInfo } from './types';
 
 export interface UseSttModelsOptions {
@@ -142,6 +143,12 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
       }
     }
   }, [refresh]);
+
+  const aliveRefresh = useCallback(async () => {
+    const list = await storeRef.current.list();
+    if (aliveRef.current) setModels(list);
+  }, []);
+  useDownloadPoll(models, progress !== null, aliveRefresh);
 
   const selectModel = useCallback((modelId: string) => {
     const id = resolveTranscriptionModelId(modelId);

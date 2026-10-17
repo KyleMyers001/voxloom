@@ -82,6 +82,7 @@ function makeDogfood(
   return {
     cancel: overrides.cancel ?? vi.fn(),
     phase: overrides.phase ?? 'idle',
+    scopeReady: overrides.scopeReady ?? true,
     start: overrides.start ?? vi.fn().mockResolvedValue(undefined),
     stop: overrides.stop ?? vi.fn().mockResolvedValue(undefined),
   };
@@ -144,6 +145,22 @@ describe('useShortcutGestures', () => {
   });
 
   describe('native mode focus survival', () => {
+    it('keeps the popup cancellable through startup and transcription, then hides on cancel', async () => {
+      vi.mocked(isTauri).mockReturnValue(true);
+      const native = makeNativeController();
+      const overlay = makeOverlay();
+      mocks.createNativeShortcutController.mockReturnValue(native);
+      mocks.createOverlayBridge.mockReturnValue(overlay);
+      const { rerender } = renderHook(({ phase }: { phase: DogfoodPhase }) =>
+        useShortcutGestures(makeOptions({ dogfood: makeDogfood({ phase }) })),
+      { initialProps: { phase: 'starting' as DogfoodPhase } });
+      await waitFor(() => expect(overlay.sync).toHaveBeenLastCalledWith(expect.anything(), true));
+      rerender({ phase: 'transcribing' });
+      expect(overlay.sync).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'processing' }), false);
+      rerender({ phase: 'cancelled' });
+      expect(overlay.sync).toHaveBeenLastCalledWith({ kind: 'ready' });
+    });
+
     it.each(['hold', 'latch'] as const)('%s finish stops before a listening commit', async (mode) => {
       vi.mocked(isTauri).mockReturnValue(true);
       const native = makeNativeController();
@@ -866,7 +883,7 @@ describe('useShortcutGestures', () => {
         vi.advanceTimersByTime(320);
       });
 
-      // Clara c9e0df5: do not silently ignore busy — abandon prior, start new.
+      // c9e0df5: do not silently ignore busy — abandon prior, start new.
       expect(dogfood.cancel).toHaveBeenCalledOnce();
       expect(dictation.cancel).toHaveBeenCalledWith(7);
       expect(dictation.start).toHaveBeenCalledOnce();

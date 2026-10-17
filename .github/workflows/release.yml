@@ -98,6 +98,8 @@ jobs:
     if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: build-macos
     runs-on: ubuntu-latest
+    # BUS-59: publishing needs approval from a required reviewer on the 'release' Environment.
+    environment: release
     permissions:
       contents: write
     steps:

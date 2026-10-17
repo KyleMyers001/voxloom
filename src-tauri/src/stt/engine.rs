@@ -1,8 +1,8 @@
 //! Whisper transcription engine.
 //!
 //! Real whisper.cpp linkage is behind the `whisper` cargo feature so Linux
-//! CI / this box can compile without cmake + ggml. On Kyle's Mac, build with
-//! `--features whisper` (see docs/review/BUS-10-whisper.md).
+//! CI on Linux can compile without cmake + ggml. On a Mac, build with
+//! `--features whisper` (see README, Local STT).
 
 use super::cleanup::DropReason;
 use super::error::SttErrorDto;
@@ -72,7 +72,7 @@ pub fn transcribe_pcm(
             "engine-unavailable",
             "Native whisper.cpp is not linked in this build. On macOS rebuild \
              with `--features whisper` after installing cmake (see \
-             docs/review/BUS-10-whisper.md). Model store / download / buffer \
+             README, Local STT). Model store / download / buffer \
              handoff still work without that feature.",
         ))
     }

@@ -17,6 +17,7 @@ function stubDogfood(
     message: null,
     origin: null,
     phase: 'idle',
+    scopeReady: false,
     start: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn().mockResolvedValue(undefined),
     transcript: null,

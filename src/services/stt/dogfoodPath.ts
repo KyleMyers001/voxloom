@@ -42,6 +42,8 @@ export interface DogfoodTranscribeOptions {
   snapshotTarget?: () => Promise<TargetSnapshot | null>;
   /** False after cancel/supersession: no new target lookup or delivery writes. */
   isCurrent?: () => boolean;
+  /** Close the native cancellation window before target lookup or delivery. */
+  beforeDelivery?: () => Promise<void>;
   /**
    * Explicit selected model id (Settings `transcriptionModel`).
    * Resolved via `resolveTranscriptionModelId` — never auto-downloaded.
@@ -90,6 +92,7 @@ export async function dogfoodTranscribeAndCopy(
   const engine = (options.createEngine ?? createSttEngine)(modelId);
   const handle = audioHandleFromCapture(options.audio);
   const transcript = await engine.transcribe(handle);
+  if (options.isCurrent?.() ?? true) await options.beforeDelivery?.();
 
   const platform = resolvePlatform(
     options.clipboard,
