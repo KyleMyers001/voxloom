@@ -186,6 +186,7 @@ export function useDogfoodCapture(
   const errorToastRef = useRef(options.onErrorToast);
   errorToastRef.current = options.onErrorToast;
   const {
+    clear: clearCancelUnavailable,
     notice: cancelNotice,
     report: reportCancelUnavailable,
     takeHint: takeCancelHint,
@@ -392,7 +393,10 @@ export function useDogfoodCapture(
         await cancellation.scope?.dispose();
         return;
       }
-      if (cancellation.scope) setScopeReady(true);
+      if (cancellation.scope) {
+        clearCancelUnavailable();
+        setScopeReady(true);
+      }
       // Show the HUD (waveform) even when Escape-cancel could not arm.
       setHudReady(true);
       await ensureModelAvailable(modelIdRef.current);
@@ -443,6 +447,7 @@ export function useDogfoodCapture(
     announce,
     announceError,
     capture,
+    clearCancelUnavailable,
     ensureModelAvailable,
     options.preferredDeviceId,
     reportCancelUnavailable,

@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
+import type { PrivacyPane } from './privacyPane';
 
 /** Native arm error codes (src-tauri/src/cancel_scope ArmError.code). */
 export type CancelUnavailableCode =
@@ -33,14 +34,25 @@ export function cancelUnavailableFrom(error: unknown): CancelUnavailable {
 }
 
 export function cancelUnavailableHint(code: CancelUnavailableCode): string {
-  return code === 'cancel-ax-untrusted'
-    ? 'Escape-cancel is off: Voxloom does not have Accessibility permission. Dictation still works.'
-    : 'Escape-cancel is off: macOS could not start the Escape listener. Dictation still works.';
+  if (code === 'cancel-ax-untrusted') {
+    // macOS may only apply a new grant to a relaunched process.
+    return 'Escape-cancel is off: Voxloom doesn\'t have Accessibility permission. '
+      + 'Dictation still works. After you allow it, quit and reopen Voxloom.';
+  }
+  return 'Escape-cancel is off: macOS could not start the Escape listener. Dictation still works.';
 }
 
 /**
- * Remember the first arm failure of this app run. The hint is handed out
- * once (`takeHint`); later failures only log, so it never nags or blocks.
+ * The Settings pane that fixes this code, or null when no grant is known to
+ * be missing (the tap failed despite Accessibility trust, or arming broke).
+ */
+export function cancelSettingsPane(code: CancelUnavailableCode): PrivacyPane | null {
+  return code === 'cancel-ax-untrusted' ? 'accessibility' : null;
+}
+
+/**
+ * Track the latest arm failure (`clear` on a successful arm). The toast hint
+ * is handed out once per app run (`takeHint`), so it never nags or blocks.
  */
 export function useCancelUnavailable() {
   const [notice, setNotice] = useState<CancelUnavailable | null>(null);
@@ -50,7 +62,7 @@ export function useCancelUnavailable() {
   const report = useCallback((error: unknown) => {
     console.warn('Escape cancellation unavailable; dictating without it.', error);
     const unavailable = cancelUnavailableFrom(error);
-    setNotice((previous) => previous ?? unavailable);
+    setNotice(unavailable);
     if (hintedRef.current) return;
     hintedRef.current = true;
     pendingHintRef.current = cancelUnavailableHint(unavailable.code);
@@ -62,5 +74,14 @@ export function useCancelUnavailable() {
     return hint;
   }, []);
 
-  return { notice, report, takeHint };
+  // A successful arm drops a hint that was queued but never shown; a later
+  // failure in this run may hint again because the user never saw it.
+  const clear = useCallback(() => {
+    setNotice(null);
+    if (pendingHintRef.current === null) return;
+    pendingHintRef.current = null;
+    hintedRef.current = false;
+  }, []);
+
+  return { clear, notice, report, takeHint };
 }

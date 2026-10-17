@@ -77,7 +77,11 @@ impl ScopeState {
 #[tauri::command]
 pub fn dictation_cancel_arm(app: tauri::AppHandle, session: String) -> Result<(), ArmError> {
     #[cfg(target_os = "macos")]
-    return macos::arm(app, session);
+    {
+        let result = macos::arm(app, session);
+        eprintln!("{}", diagnostics::arm_log_line(&result));
+        result
+    }
     #[cfg(not(target_os = "macos"))]
     {
         let _ = (app, session);
