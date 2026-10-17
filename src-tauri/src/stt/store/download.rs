@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use tauri::{AppHandle, Emitter};
 
+use super::verify::Integrity;
 use super::{DownloadProgressDto, Inflight, ModelStore};
 use crate::stt::catalog::{self, ModelSpec};
 use crate::stt::error::SttErrorDto;
@@ -88,22 +89,24 @@ impl ModelStore {
 
         *self.inflight.lock().unwrap() = None;
 
+        // A verified, renamed model is never deleted by a late cancel (BUS-35):
+        // Ok means the final file exists and matched its SHA-256.
+        if result.is_ok() {
+            return result;
+        }
+
         if cancel.load(Ordering::Acquire) {
-            let partial = self.model_path(spec);
-            let _ = fs::remove_file(&partial);
-            let tmp = partial.with_extension("bin.partial");
-            let _ = fs::remove_file(tmp);
+            // Only the partial is ours to remove; the final path is untouched.
+            let _ = fs::remove_file(self.model_path(spec).with_extension("bin.partial"));
             return Err(SttErrorDto::new(
                 "cancelled",
                 format!("Download cancelled: {}", spec.id),
             ));
         }
 
-        if result.is_err() {
-            // A failed attempt leaves nothing behind, so Retry starts clean and
-            // the UI's "Nothing was saved." stays true.
-            let _ = fs::remove_file(self.model_path(spec).with_extension("bin.partial"));
-        }
+        // A failed attempt leaves nothing behind, so Retry starts clean and
+        // the UI's "Nothing was saved." stays true.
+        let _ = fs::remove_file(self.model_path(spec).with_extension("bin.partial"));
         result
     }
 
@@ -127,17 +130,17 @@ impl ModelStore {
             .call()
             .map_err(|e| SttErrorDto::new("download-failed", format!("request failed: {e}")))?;
 
-        let total = response
+        let declared = response
             .header("Content-Length")
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(spec.size_bytes);
+            .and_then(|v| v.parse::<u64>().ok());
+        let total = declared.unwrap_or(spec.size_bytes);
 
         let mut reader = response.into_reader();
         let mut file = File::create(&tmp)
             .map_err(|e| SttErrorDto::new("download-failed", format!("create temp file: {e}")))?;
 
         let mut buf = [0u8; 64 * 1024];
-        let mut received: u64 = 0;
+        let mut integrity = Integrity::default();
         let mut last_emit = 0u64;
 
         loop {
@@ -157,7 +160,8 @@ impl ModelStore {
             }
             file.write_all(&buf[..n])
                 .map_err(|e| SttErrorDto::new("download-failed", format!("write failed: {e}")))?;
-            received += n as u64;
+            integrity.update(&buf[..n]);
+            let received = integrity.received();
             // Intermediate progress only — never claim ratio 1.0 until the
             // file is renamed into place (completion is the Ok return + final emit).
             if received - last_emit >= 256 * 1024 || received == total {
@@ -178,7 +182,14 @@ impl ModelStore {
 
         file.flush()
             .map_err(|e| SttErrorDto::new("download-failed", format!("flush failed: {e}")))?;
+        // Durable before the rename, so a crash cannot leave a short "verified" file.
+        file.sync_all()
+            .map_err(|e| SttErrorDto::new("download-failed", format!("sync failed: {e}")))?;
         drop(file);
+
+        let received = integrity.received();
+        // Short read or wrong bytes: never rename; the caller removes the partial.
+        integrity.finish(spec, declared)?;
 
         if cancel.load(Ordering::Acquire) {
             let _ = fs::remove_file(&tmp);
@@ -190,6 +201,9 @@ impl ModelStore {
 
         fs::rename(&tmp, &dest)
             .map_err(|e| SttErrorDto::new("download-failed", format!("finalize failed: {e}")))?;
+        // Bytes were just hashed: record it so the file is never re-hashed.
+        super::existing::write_marker(spec, &dest);
+        self.set_verdict(spec, super::existing::Verdict::Verified);
 
         // Only after the destination file exists do we report completion.
         debug_assert!(dest.is_file());

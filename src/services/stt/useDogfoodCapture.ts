@@ -110,9 +110,14 @@ export function hudResultFor(
   return null; // inserted, unverified, or may-have-inserted: silent dismiss
 }
 
-function errorText(error: unknown): string {
+/** Native resolved_path copy that needs no suffix (store.rs). */
+const MODEL_FILE_PREFIXES = ['Model file is damaged.', 'Couldn\'t open the model file.'];
+
+export function errorText(error: unknown): string {
   if (error instanceof SttError) {
     if (error.code === 'model-missing') {
+      // BUS-77: damaged / unreadable messages already say what to do.
+      if (MODEL_FILE_PREFIXES.some((p) => error.message.startsWith(p))) return error.message;
       // Settings guidance lives here once; missingModelMessage is the fact only.
       return `${error.message} Download the selected model in Settings first.`;
     }

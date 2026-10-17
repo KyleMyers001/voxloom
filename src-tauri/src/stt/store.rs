@@ -17,6 +17,10 @@ use super::catalog::{self, ModelSpec};
 use super::error::SttErrorDto;
 
 mod download;
+mod existing;
+#[cfg(test)]
+mod integrity_tests;
+mod verify;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -43,6 +47,10 @@ struct Inflight {
 pub struct ModelStore {
     root: PathBuf,
     inflight: Mutex<Option<(String, Inflight)>>,
+    /// Existing-file verification results (see `existing.rs`).
+    verdicts: Mutex<existing::VerdictMap>,
+    /// Serializes hashing so a file is never hashed twice concurrently.
+    hashing: Mutex<()>,
 }
 
 impl ModelStore {
@@ -51,6 +59,8 @@ impl ModelStore {
         Self {
             root,
             inflight: Mutex::new(None),
+            verdicts: Mutex::new(Default::default()),
+            hashing: Mutex::new(()),
         }
     }
 
@@ -85,7 +95,12 @@ impl ModelStore {
         let status = if self.is_downloading(spec.id) {
             "downloading"
         } else if path.is_file() {
-            "available"
+            // Not yet verified (startup hash still running) reads as available;
+            // transcription verifies synchronously before use (resolved_path).
+            match self.known_verdict(spec) {
+                Some(existing::Verdict::Corrupt) => "failed",
+                _ => "available",
+            }
         } else {
             "missing"
         };
@@ -114,7 +129,21 @@ impl ModelStore {
                 ),
             ));
         }
-        Ok(path)
+        let verdict = match self.known_verdict(spec) {
+            Some(v) => Some(v),
+            None => self.verify_existing(spec),
+        };
+        match verdict {
+            Some(existing::Verdict::Verified) => Ok(path),
+            Some(existing::Verdict::Unreadable) => Err(SttErrorDto::new(
+                "model-missing",
+                "Couldn't open the model file. Try again, or download it again if this keeps happening.",
+            )),
+            _ => Err(SttErrorDto::new(
+                "model-missing",
+                "Model file is damaged. Download it again in Settings.",
+            )),
+        }
     }
 
     fn is_downloading(&self, model_id: &str) -> bool {
@@ -138,7 +167,7 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
-    fn temp_store(label: &str) -> (ModelStore, PathBuf) {
+    pub(super) fn temp_store(label: &str) -> (ModelStore, PathBuf) {
         let dir = env::temp_dir().join(format!(
             "voxloom-stt-{}-{}-{}",
             label,
@@ -152,9 +181,22 @@ mod tests {
         (ModelStore::new(dir.clone()), dir)
     }
 
+    /// Catalog spec whose pinned SHA-256 matches `body` (test fixtures only).
+    pub(super) fn spec_for_body(id: &str, body: &[u8]) -> ModelSpec {
+        use sha2::{Digest, Sha256};
+        let hex: String = Sha256::digest(body)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        ModelSpec {
+            sha256: Box::leak(hex.into_boxed_str()),
+            ..*catalog::find(id).unwrap()
+        }
+    }
+
     /// Serve `body` over HTTP/1.1 on a random localhost port. Optional delay
     /// before each chunk so cancel races can observe inflight state.
-    fn serve_bytes(body: Vec<u8>, chunk_delay: Option<Duration>) -> String {
+    pub(super) fn serve_bytes(body: Vec<u8>, chunk_delay: Option<Duration>) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         let port = listener.local_addr().unwrap().port();
         thread::spawn(move || {
@@ -214,7 +256,7 @@ mod tests {
         let body = vec![0xABu8; 8 * 1024];
         let url = serve_bytes(body.clone(), None);
         let (store, dir) = temp_store("complete-order");
-        let spec = catalog::find("whisper-tiny.en").unwrap();
+        let spec = &spec_for_body("whisper-tiny.en", &body);
 
         let events: Arc<Mutex<Vec<(f64, bool)>>> = Arc::new(Mutex::new(Vec::new()));
         let events2 = Arc::clone(&events);
@@ -288,7 +330,7 @@ mod tests {
     }
 
     /// Declare `declared` bytes but send only `body`, then drop the connection.
-    fn serve_truncated(body: Vec<u8>, declared: usize) -> String {
+    pub(super) fn serve_truncated(body: Vec<u8>, declared: usize) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         let port = listener.local_addr().unwrap().port();
         thread::spawn(move || {

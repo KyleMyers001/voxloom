@@ -140,7 +140,14 @@ pub fn run() {
                 .unwrap_or_else(|_| ModelStore::new(std::env::temp_dir().join("voxloom-models")));
             let coordinator = CaptureCoordinator::with_pcm_store(Arc::clone(&buffers));
             app.manage(coordinator);
-            app.manage(SttState::new(models, buffers));
+            let stt = SttState::new(models, buffers);
+            // One-time hash of unmarked model files, off the main thread.
+            // BUS-77: a damaged file found here tells Settings → Models to re-list.
+            let handle = app.handle().clone();
+            stt.models.spawn_verify_existing(move || {
+                let _ = handle.emit("stt:models-changed", ());
+            });
+            app.manage(stt);
             #[cfg(target_os = "macos")]
             app.set_menu(settings_window::app_menu(app.handle())?)?;
             Ok(())

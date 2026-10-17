@@ -7,7 +7,11 @@ import type { SttModelStore } from './contracts';
 import { createSttModelStore } from './factory';
 import { resolveTranscriptionModelId } from './resolveModelId';
 import { useDownloadPoll } from './useDownloadPoll';
+import { listenModelsChanged } from './modelsChanged';
 import { SttError, type SttDownloadProgress, type SttModelInfo } from './types';
+
+/** BUS-35 checksum failure copy (hashes are only in the native log). */
+export const DOWNLOAD_DAMAGED = 'Download was damaged. Nothing was saved.';
 
 export interface UseSttModelsOptions {
   /** Persist selection (Settings `transcriptionModel`). */
@@ -83,6 +87,18 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
     };
   }, [reload]);
 
+  // BUS-77: re-list when the startup hash finds a damaged file.
+  useEffect(() => {
+    let stop: (() => void) | null = null;
+    let live = true;
+    void listenModelsChanged(() => { void refresh().catch(() => undefined); })
+      .then((un) => { if (live) stop = un; else un(); }, () => undefined);
+    return () => {
+      live = false;
+      stop?.();
+    };
+  }, [refresh]);
+
   // Also the Retry action: it clears the row's failure as the new attempt starts.
   const downloadModel = useCallback(async (modelId: string) => {
     // BUS-52: never two downloads at once, even if a stale button fires.
@@ -111,7 +127,9 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
       if (!cancelled) {
         setFailures((prev) => ({
           ...prev,
-          [modelId]: `Download failed: ${errorMessage(err)}. Nothing was saved.`,
+          [modelId]: err instanceof SttError && err.code === 'download-corrupted'
+            ? DOWNLOAD_DAMAGED
+            : `Download failed: ${errorMessage(err).replace(/\.+$/, '')}. Nothing was saved.`,
         }));
       }
       try {
