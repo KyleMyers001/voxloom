@@ -53,6 +53,9 @@ export interface GestureDogfoodBridge {
   hudResult?: OverlayResult | null;
   origin?: 'home' | 'gesture' | null;
   phase: DogfoodPhase;
+  scopeReady: boolean;
+  /** Arm attempt settled; defaults to scopeReady. False only while arming. */
+  hudReady?: boolean;
   start: () => Promise<void>;
   stop: () => Promise<void>;
 }
@@ -272,9 +275,21 @@ export function useShortcutGestures(options: GestureOptions) {
   useEffect(() => {
     const overlay = overlayRef.current;
     if (!overlay) return;
-    const homeRecording = options.dogfood.origin === 'home'
-      && options.dogfood.phase === 'recording';
-    void overlay.sync(options.state.dictation, homeRecording);
+    const phase = options.dogfood.phase;
+    const homeRecording = phase === 'starting'
+      || (options.dogfood.origin === 'home' && phase === 'recording');
+    // The gesture state is cleared on release; STT still owns a cancellable HUD.
+    const visualState = phase === 'transcribing'
+      ? { kind: 'processing' as const, completion: 'held' as const, runId: -1 }
+      : options.state.dictation;
+    // Arming can lag the starting/listening render. Hide until the arm
+    // attempt settles, then resync even if model/microphone startup has not
+    // changed the phase. A failed arm still shows the HUD, just not as a
+    // cancellable popup (overlay_show refuses cancellable without a scope).
+    const { scopeReady } = options.dogfood;
+    const hudReady = options.dogfood.hudReady ?? scopeReady;
+    void overlay.sync(hudReady ? visualState : { kind: 'ready' },
+      hudReady && homeRecording, scopeReady);
     const kind = options.state.dictation.kind;
     if (kind === 'listening') {
       pendingFinishRef.current?.onListening();
@@ -291,7 +306,7 @@ export function useShortcutGestures(options: GestureOptions) {
       // Document path resets via context; also clear if mid-hold somehow.
     }
   }, [options.state.dictation, options.dogfood.origin,
-    options.dogfood.phase]);
+    options.dogfood.phase, options.dogfood.scopeReady, options.dogfood.hudReady]);
 
   // When dogfood *enters* success/error/cancelled, guarantee overlay
   // dictation is cleared without synthetic Inserted rows (Home Stop / cancel
@@ -378,6 +393,8 @@ export function toGestureDogfoodBridge(
 ): GestureDogfoodBridge {
   return {
     cancel: dogfood.cancel,
+    scopeReady: dogfood.scopeReady,
+    hudReady: dogfood.hudReady,
     hudResult: dogfood.hudResult,
     origin: dogfood.origin,
     phase: dogfood.phase,
