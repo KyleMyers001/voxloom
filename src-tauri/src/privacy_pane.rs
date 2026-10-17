@@ -1,23 +1,25 @@
 //! Opens one allowlisted System Settings privacy pane so a user can fix the
 //! grant a Home diagnostic names. It never prompts for or changes a permission.
 
-const SECURITY: &str = "x-apple.systempreferences:com.apple.preference.security";
+// System Settings' Privacy & Security extension (macOS 13+; the app's minimum
+// is 13.1). Needs a Mac check that it lands on the Accessibility list.
+const ACCESSIBILITY: &str =
+    "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility";
 
 /// Map the frontend's pane id to a fixed URL; anything else is refused, so
 /// the webview can never open an arbitrary URL through this command.
-fn pane_url(pane: &str) -> Option<String> {
-    let anchor = match pane {
-        "accessibility" => "Privacy_Accessibility",
-        "input-monitoring" => "Privacy_ListenEvent",
-        _ => return None,
-    };
-    Some(format!("{SECURITY}?{anchor}"))
+fn pane_url(pane: &str) -> Option<&'static str> {
+    match pane {
+        "accessibility" => Some(ACCESSIBILITY),
+        _ => None,
+    }
 }
 
-#[tauri::command]
+/// Async: spawning `open` must not block the UI thread.
+#[tauri::command(async)]
 pub fn privacy_pane_open(pane: String) -> Result<(), String> {
     let url = pane_url(&pane).ok_or_else(|| format!("Unknown privacy pane: {pane}"))?;
-    open(&url)
+    open(url)
 }
 
 #[cfg(target_os = "macos")]
@@ -43,14 +45,10 @@ mod tests {
     use super::pane_url;
 
     #[test]
-    fn known_panes_map_to_fixed_privacy_urls() {
+    fn accessibility_maps_to_the_fixed_privacy_url() {
         assert_eq!(
-            pane_url("accessibility").as_deref(),
-            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
-        );
-        assert_eq!(
-            pane_url("input-monitoring").as_deref(),
-            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
+            pane_url("accessibility"),
+            Some("x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility")
         );
     }
 
@@ -58,6 +56,7 @@ mod tests {
     fn unknown_or_url_like_panes_are_refused() {
         for pane in [
             "",
+            "input-monitoring",
             "Privacy_Camera",
             "https://example.com",
             "accessibility;rm",

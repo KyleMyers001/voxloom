@@ -37,7 +37,6 @@ describe('cancellation diagnostics on Home', () => {
 
   it.each([
     ['cancel-ax-untrusted', /Accessibility permission/],
-    ['cancel-listen-denied', /Input Monitoring permission/],
     ['cancel-tap-create-failed', /could not start the Escape listener/],
   ] as const)('shows a non-blocking %s hint and copies details only on request', (code, hint) => {
     const details = `Escape cancellation unavailable [${code}]. (ax=true listen=false post=true; app=com.voxloom.prototype version=0.1.0)`;
@@ -66,28 +65,25 @@ describe('cancellation diagnostics on Home', () => {
 
   it.each([
     ['cancel-ax-untrusted', 'accessibility'],
-    ['cancel-listen-denied', 'input-monitoring'],
     ['cancel-tap-create-failed', null],
     ['cancel-arm-failed', null],
   ] as const)('maps %s to the %s Settings pane', (code, pane) => {
     expect(cancelSettingsPane(code)).toBe(pane);
   });
 
-  it('gives every code its own hint', () => {
-    const hints = (['cancel-ax-untrusted', 'cancel-listen-denied', 'cancel-tap-create-failed'] as const)
-      .map(cancelUnavailableHint);
-    expect(new Set(hints).size).toBe(3);
-    expect(cancelUnavailableHint('cancel-listen-denied'))
-      .toBe('Escape-cancel is off: Voxloom does not have Input Monitoring permission. Dictation still works.');
+  it('gives every code its own hint and asks for a relaunch only for permission', () => {
+    const codes = ['cancel-ax-untrusted', 'cancel-tap-create-failed', 'cancel-arm-failed'] as const;
+    const hints = codes.map(cancelUnavailableHint);
+    expect(hints[0]).toBe('Escape-cancel is off: Voxloom does not have Accessibility permission. '
+      + 'You may need to quit and reopen Voxloom. Dictation still works.');
+    expect(hints[1]).not.toMatch(/quit and reopen/);
+    expect(hints.join(' ')).not.toMatch(/Input Monitoring/);
   });
 
-  it.each([
-    ['cancel-ax-untrusted', 'accessibility'],
-    ['cancel-listen-denied', 'input-monitoring'],
-  ] as const)('Open Settings for %s opens the %s pane', (code, pane) => {
-    render(<DictateCard dogfood={recording({ code, details: code })} isNative onCopy={vi.fn()} />);
+  it('Open Settings for cancel-ax-untrusted opens the Accessibility pane', () => {
+    render(<DictateCard dogfood={recording({ code: 'cancel-ax-untrusted', details: 'x' })} isNative onCopy={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: 'Open Settings' }));
-    expect(openPrivacyPane).toHaveBeenCalledExactlyOnceWith(pane);
+    expect(openPrivacyPane).toHaveBeenCalledExactlyOnceWith('accessibility');
   });
 
   it.each(['cancel-tap-create-failed', 'cancel-arm-failed'] as const)(
@@ -100,17 +96,17 @@ describe('cancellation diagnostics on Home', () => {
   it('says where to go by hand when System Settings cannot be opened', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.mocked(openPrivacyPane).mockRejectedValue(new Error('open failed'));
-    render(<DictateCard dogfood={recording({ code: 'cancel-listen-denied', details: 'x' })} isNative onCopy={vi.fn()} />);
+    render(<DictateCard dogfood={recording({ code: 'cancel-ax-untrusted', details: 'x' })} isNative onCopy={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: 'Open Settings' }));
     expect(await screen.findByText(
-      'Could not open System Settings. Open Privacy & Security → Input Monitoring and allow Voxloom.',
+      'Could not open System Settings. Open Privacy & Security → Accessibility and allow Voxloom.',
     )).toBeInTheDocument();
     expect(warn).toHaveBeenCalledOnce();
     warn.mockRestore();
   });
 
-  it('reads the new listen-denied code from the native rejection', () => {
-    expect(cancelUnavailableFrom({ code: 'cancel-listen-denied', message: 'full' }))
-      .toEqual({ code: 'cancel-listen-denied', details: 'full' });
+  it('treats an unknown or retired code as a generic arm failure', () => {
+    expect(cancelUnavailableFrom({ code: 'cancel-listen-denied', message: 'full' }).code)
+      .toBe('cancel-arm-failed');
   });
 });

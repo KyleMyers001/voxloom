@@ -37,7 +37,7 @@ async function setup(capture = stubCapture(), extra: { onErrorToast?: (m: string
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe('Escape-cancel follow-ups (BUS-91)', () => {
-  it('hints once per app run when arming fails, keeps dictating, and re-arms next session', async () => {
+  it('hints once per app run, keeps dictating, re-arms, and keeps the note current', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const scope = fakeScope();
     const arm = vi.spyOn(cancelScopeModule, 'beginCancelScope')
@@ -58,13 +58,17 @@ describe('Escape-cancel follow-ups (BUS-91)', () => {
     await act(async () => { await result.current.start(); });
     expect(arm).toHaveBeenCalledTimes(2);
     expect(result.current.scopeReady).toBe(true);
+    // A successful arm clears the stale note.
+    expect(result.current.cancelUnavailable).toBeNull();
 
     act(() => result.current.cancel());
     expect(scope.dispose).toHaveBeenCalled();
     await act(async () => { await result.current.start(); });
     expect(result.current.phase).toBe('recording');
     expect(hints()).toHaveLength(1);
-    expect(result.current.cancelUnavailable?.code).toBe('cancel-ax-untrusted');
+    // The note shows the latest failure, not the run's first.
+    expect(result.current.cancelUnavailable)
+      .toEqual({ code: 'cancel-tap-create-failed', details: 'second' });
   });
 
   it('disposes a scope that armed after its session was superseded', async () => {

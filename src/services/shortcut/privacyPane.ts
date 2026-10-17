@@ -1,11 +1,10 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 
 /** System Settings privacy panes Voxloom can deep-link to (native allowlist). */
-export type PrivacyPane = 'accessibility' | 'input-monitoring';
+export type PrivacyPane = 'accessibility';
 
 export const PRIVACY_PANE_LABEL: Record<PrivacyPane, string> = {
   accessibility: 'Accessibility',
-  'input-monitoring': 'Input Monitoring',
 };
 
 /** Open the pane; never prompts for or changes a permission. */
