@@ -38,7 +38,7 @@ import type {
  * Overlay visibility is torn down on finish/cancel/error unconditionally
  * (try/finally) so a failed stop/STT/deliver cannot leave the waveform up.
  * Dogfood terminal (Home Stop / success / error / cancel) also forces overlay
- * clear — do not rely only on gesture finish (Clara: Stop clears capture but
+ * clear — do not rely only on gesture finish (Stop clears capture but
  * waveform stayed). That teardown is **edge-triggered** on the phase
  * transition only: the phase stays "success"/"cancelled" until the next
  * start, so re-running it on every dictation change cancelled the *next*
@@ -53,6 +53,7 @@ export interface GestureDogfoodBridge {
   hudResult?: OverlayResult | null;
   origin?: 'home' | 'gesture' | null;
   phase: DogfoodPhase;
+  scopeReady: boolean;
   start: () => Promise<void>;
   stop: () => Promise<void>;
 }
@@ -272,9 +273,17 @@ export function useShortcutGestures(options: GestureOptions) {
   useEffect(() => {
     const overlay = overlayRef.current;
     if (!overlay) return;
-    const homeRecording = options.dogfood.origin === 'home'
-      && options.dogfood.phase === 'recording';
-    void overlay.sync(options.state.dictation, homeRecording);
+    const phase = options.dogfood.phase;
+    const homeRecording = phase === 'starting'
+      || (options.dogfood.origin === 'home' && phase === 'recording');
+    // The gesture state is cleared on release; STT still owns a cancellable HUD.
+    const visualState = phase === 'transcribing'
+      ? { kind: 'processing' as const, completion: 'held' as const, runId: -1 }
+      : options.state.dictation;
+    // Arming can lag the starting/listening render. Hide until ready, then
+    // resync even if model/microphone startup has not changed the phase.
+    void overlay.sync(options.dogfood.scopeReady ? visualState : { kind: 'ready' },
+      options.dogfood.scopeReady && homeRecording);
     const kind = options.state.dictation.kind;
     if (kind === 'listening') {
       pendingFinishRef.current?.onListening();
@@ -291,7 +300,7 @@ export function useShortcutGestures(options: GestureOptions) {
       // Document path resets via context; also clear if mid-hold somehow.
     }
   }, [options.state.dictation, options.dogfood.origin,
-    options.dogfood.phase]);
+    options.dogfood.phase, options.dogfood.scopeReady]);
 
   // When dogfood *enters* success/error/cancelled, guarantee overlay
   // dictation is cleared without synthetic Inserted rows (Home Stop / cancel
@@ -378,6 +387,7 @@ export function toGestureDogfoodBridge(
 ): GestureDogfoodBridge {
   return {
     cancel: dogfood.cancel,
+    scopeReady: dogfood.scopeReady,
     hudResult: dogfood.hudResult,
     origin: dogfood.origin,
     phase: dogfood.phase,

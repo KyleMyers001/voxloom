@@ -2,7 +2,7 @@
 
 - **Status:** Proposed (amends the BUS-14 / #25 completion-target rule)
 - **Date:** 2026-10-11
-- **Context:** On Kyle's MacBook Air, Chrome page fields reported `Copied — insert failed: AXSelectedText reported success but nothing changed`. The Chrome address bar (native AppKit) and Notes worked, and **restarting Chrome fixed it** until it broke again. The Mac mini worked with the same build and permissions.
+- **Context:** On a MacBook Air, Chrome page fields reported `Copied — insert failed: AXSelectedText reported success but nothing changed`. The Chrome address bar (native AppKit) and Notes worked, and **restarting Chrome fixed it** until it broke again. The Mac mini worked with the same build and permissions.
   - #25 enabled Chromium's `AXEnhancedUserInterface` / Electron's `AXManualAccessibility` **once per pid** (cached) and only in a background warm-up. If the app later drops its web accessibility tree while idle, we never re-enable it.
   - The completion target was always the first, pre-warm-up observation, so the first dictation after a cold or dropped tree always fell back to Copy.
   - Another AX client on the mini (password manager, Grammarly, Raycast, Rectangle, Accessibility Inspector, VoiceOver…) can keep Chromium's tree on, which masked the bug there.
@@ -37,7 +37,7 @@
    - It runs only when the first write returned **Ok** and read back unchanged; never after an AX error.
    - Re-assert, then require **two unchanged reads** (after 150 ms, then 300 ms). If the late first write shows up on either read, report Inserted with no second write; any other change → Unverified with no write.
    - Otherwise write once more (after re-checking focus) and **poll** the read-back (30 × 20 ms).
-   - The retry doesn't apply on the TypeFallback path: that's only taken when the field is provably web content, and it already has its own per-chunk verification. Kyle's Chrome error comes from the `Failed` branch, so it is covered: when the tree is dropped, the field has no DOM id and no AXWebArea ancestor, so `may_type` is false.
+   - The retry doesn't apply on the TypeFallback path: that's only taken when the field is provably web content, and it already has its own per-chunk verification. The reported Chrome error comes from the `Failed` branch, so it is covered: when the tree is dropped, the field has no DOM id and no AXWebArea ancestor, so `may_type` is false.
 4. **Read-back normalization.** Both sides are compared after mapping U+00A0 → space and `\r\n`/`\r` → `\n`, and dropping U+FFFC. Nothing else is folded, so partial and transformed writes are still rejected.
 
 ## Why the #25 rule is relaxed

@@ -33,7 +33,7 @@ export interface OverlayWindowApi {
   hide(): Promise<void>;
   isAvailable(): boolean;
   setWaveform(waveform: OverlayWaveform, result?: OverlayResult): Promise<void>;
-  showBottomCenter(size?: OverlaySize): Promise<void>;
+  showBottomCenter(size?: OverlaySize, cancellable?: boolean): Promise<void>;
 }
 
 export interface OverlayTimers {
@@ -73,9 +73,7 @@ export function createOverlayBridge(
   timers: OverlayTimers = defaultTimers,
 ): OverlayBridge {
   const windowApi = api ?? createTauriOverlayApi();
-  let lastVisible: boolean | null = null;
   let lastWaveform: OverlayWaveform | null = null;
-  let lastSize: OverlaySize | null = null;
   let disposed = false;
   /** Pending hide timer of a result state; non-null while a result is shown. */
   let resultTimer: unknown = null;
@@ -90,16 +88,14 @@ export function createOverlayBridge(
   const hideNow = async (gen: number) => {
     await windowApi.hide();
     if (gen !== syncGeneration) return;
-    lastVisible = false;
     lastWaveform = null;
-    lastSize = null;
   };
-  const show = async (gen: number, size: OverlaySize) => {
-    if (lastVisible === true && lastSize === size) return;
-    await windowApi.showBottomCenter(size);
+  const show = async (gen: number, size: OverlaySize, cancellable = true) => {
+    // Native cancellation/delivery may hide independently of this cache.
+    // Reassert visibility; never focus the window.
+    if (cancellable) await windowApi.showBottomCenter(size);
+    else await windowApi.showBottomCenter(size, false);
     if (gen !== syncGeneration) return;
-    lastVisible = true;
-    lastSize = size;
   };
   /** Serialize show/hide so a late show cannot outrun a newer hide. */
   let syncGeneration = 0;
@@ -165,7 +161,7 @@ export function createOverlayBridge(
           await windowApi.setWaveform(waveform, result);
           if (gen !== syncGeneration) return;
           lastWaveform = waveform;
-          await show(gen, RESULT_SIZE);
+          await show(gen, RESULT_SIZE, false);
         } catch {
           // non-fatal
         }
