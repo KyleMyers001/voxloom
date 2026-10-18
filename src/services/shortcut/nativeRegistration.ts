@@ -54,6 +54,8 @@ export function createTauriShortcutApi(): NativeShortcutApi {
   };
 }
 
+const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
 export interface NativeShortcutController {
   activeHotkey(): string | null;
   dispose(): Promise<void>;
@@ -63,6 +65,12 @@ export interface NativeShortcutController {
    * and returns an honest outcome for Settings/toast.
    */
   setShortcut(settingsShortcut: string): Promise<RegisterOutcome>;
+  /**
+   * BUS-69: unbind the OS hotkey while a recorder records (Carbon hotkeys
+   * swallow the keystroke, so the recorder would never see the current
+   * combo), and re-bind it afterwards.
+   */
+  suspendBinding(on: boolean): Promise<void>;
   setContext: GestureMachine['setContext'];
   resetPartial: GestureMachine['resetPartial'];
 }
@@ -80,6 +88,13 @@ export interface NativeShortcutControllerOptions {
   holdRelease?: HoldReleaseApi;
   onGesture: (gesture: ShortcutGesture) => void;
   onRegisterFailure?: (message: string) => void;
+  /**
+   * BUS-69: suspendBinding could not unbind ('unbind': the hotkey stays
+   * active) or could not re-bind after a retry ('rebind': nothing active).
+   */
+  onSuspendFailure?: (kind: 'unbind' | 'rebind', message: string) => void;
+  /** BUS-69: a later resume re-bound the hotkey after a reported 'rebind' failure. */
+  onSuspendRecovered?: () => void;
   scheduler: Scheduler;
 }
 
@@ -92,9 +107,17 @@ export function createNativeShortcutController({
   holdRelease = createTauriHoldReleaseApi(),
   onGesture,
   onRegisterFailure,
+  onSuspendFailure,
+  onSuspendRecovered,
   scheduler,
 }: NativeShortcutControllerOptions): NativeShortcutController {
   let active: string | null = null;
+  /** Hotkey unbound by suspendBinding(true), re-bound on resume. */
+  let suspendedHotkey: string | null = null;
+  /** suspendBinding(true) is in effect (a recorder is recording). */
+  let recording = false;
+  /** A resume re-bind failure was reported; report the recovery too. */
+  let rebindFailed = false;
   let lastKnownGood: string | null = null;
   let disposed = false;
   let generation = 0;
@@ -315,6 +338,65 @@ export function createNativeShortcutController({
       disarmHoldWatch();
       machine.setContext(ctx);
     },
+    suspendBinding(on) {
+      const run = async () => {
+        if (disposed) return;
+        recording = on;
+        if (on) {
+          if (!active || suspendedHotkey) return;
+          const hotkey = active;
+          try {
+            await api.unregister(hotkey);
+          } catch (err) {
+            // The OS may still hold it: stay bound (gesture state intact, so
+            // the shortcut still stops a dictation) and say so, rather than
+            // marking it suspended and later "re-binding" a live hotkey.
+            onSuspendFailure?.('unbind', errorText(err));
+            return;
+          }
+          generation += 1;
+          active = null;
+          suspendedHotkey = hotkey;
+          // A hold/latch started before recording must end with its normal
+          // finish, or (with the hotkey unbound) nothing could stop the mic.
+          // Finishes pass suspendable(); only starts are swallowed.
+          machine.finishActive();
+          disarmHoldWatch();
+          return;
+        }
+        const hotkey = suspendedHotkey;
+        // A save during recording already bound the new combo.
+        if (!hotkey || active) {
+          suspendedHotkey = null;
+          return;
+        }
+        let lastError: unknown = null;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          if (disposed) return;
+          try {
+            await binder.register(hotkey);
+            active = hotkey;
+            suspendedHotkey = null;
+            if (rebindFailed) {
+              rebindFailed = false;
+              onSuspendRecovered?.();
+            }
+            return;
+          } catch (err) {
+            lastError = err;
+          }
+        }
+        // Keep suspendedHotkey so the next resume retries it; report the
+        // inactive state so Settings and Home show it.
+        const message = errorText(lastError);
+        rebindFailed = true;
+        onRegisterFailure?.(message);
+        onSuspendFailure?.('rebind', message);
+      };
+      const pending = setShortcutQueue.then(run, run);
+      setShortcutQueue = pending.catch(() => undefined);
+      return pending;
+    },
     async setShortcut(settingsShortcut) {
       const next = toPluginHotkey(settingsShortcut);
       const run = async (): Promise<RegisterOutcome> => {
@@ -347,6 +429,12 @@ export function createNativeShortcutController({
         if (outcome.ok) {
           active = outcome.active;
           lastKnownGood = outcome.lastKnownGood;
+          // Outside recording, a stale suspended combo must not be re-bound
+          // later over the one just saved.
+          if (!recording) {
+            suspendedHotkey = null;
+            rebindFailed = false;
+          }
         } else {
           active = outcome.active;
           if (outcome.message) onRegisterFailure?.(outcome.message);
