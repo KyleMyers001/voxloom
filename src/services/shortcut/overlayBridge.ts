@@ -17,7 +17,8 @@ import {
 
 export interface OverlayBridge {
   dispose(): Promise<void>;
-  sync(dictation: DictationState, homeRecording?: boolean): Promise<void>;
+  /** `cancellable` false: show without claiming the native Escape scope. */
+  sync(dictation: DictationState, homeRecording?: boolean, cancellable?: boolean): Promise<void>;
   /**
    * Brief result state after a gesture run (Copied ~1.5 s, failure ~2.5 s),
    * then hide. Hides that sync() asks for meanwhile are held off; a new
@@ -112,7 +113,7 @@ export function createOverlayBridge(
         // ignore
       }
     },
-    async sync(dictation, homeRecording = false) {
+    async sync(dictation, homeRecording = false, cancellable = true) {
       if (disposed || !windowApi.isAvailable()) return;
       const plan = overlaySyncPlan(dictation, homeRecording);
       // A result state owns the HUD until its timer hides it.
@@ -130,7 +131,7 @@ export function createOverlayBridge(
               if (gen !== syncGeneration) return;
               lastWaveform = plan.waveform;
             }
-            await show(gen, LISTEN_SIZE);
+            await show(gen, LISTEN_SIZE, cancellable);
           } else {
             // Always hide when not visible so a raced late show cannot stick.
             await hideNow(gen);

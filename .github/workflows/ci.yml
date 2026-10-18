@@ -58,6 +58,30 @@ jobs:
       - run: cargo clippy --all-targets
       - run: cargo test
 
+  cargo-audit:
+    # RustSec advisories for src-tauri/Cargo.lock (BUS-63). Runs inside
+    # src-tauri so .cargo/audit.toml (the reasoned ignore list) is loaded;
+    # -D warnings fails on any advisory not ignored there.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri
+          shared-key: cargo-audit
+      - name: Install cargo-audit 0.22.2
+        run: |
+          if [ "$(cargo audit --version 2>/dev/null)" != "cargo-audit-audit 0.22.2" ]; then
+            cargo install cargo-audit --locked --version 0.22.2
+          fi
+      - run: cargo audit -D warnings
+
   rust-macos:
     # Compiles the macOS-only code paths (AX / text insertion) that the
     # Linux job never builds. Default features only (whisper is opt-in).
