@@ -368,6 +368,8 @@ export function createNativeShortcutController({
         // A save during recording already bound the new combo.
         if (!hotkey || active) {
           suspendedHotkey = null;
+          // BUS-74: the combo is bound again; a stale failure must not linger.
+          rebindFailed = false;
           return;
         }
         let lastError: unknown = null;
