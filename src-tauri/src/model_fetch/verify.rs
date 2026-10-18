@@ -24,13 +24,6 @@ pub enum FetchError {
     HashMismatch { expected: String, actual: String },
 }
 
-impl FetchError {
-    /// True for a completed transfer whose bytes are not the pinned file.
-    pub fn is_verification_failure(&self) -> bool {
-        matches!(self, Self::SizeMismatch { .. } | Self::HashMismatch { .. })
-    }
-}
-
 impl fmt::Display for FetchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

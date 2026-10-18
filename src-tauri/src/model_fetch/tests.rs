@@ -7,6 +7,10 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+fn agent() -> ureq::Agent {
+    loopback_test_agent(Duration::from_secs(10))
+}
+
 fn temp_dir(label: &str) -> PathBuf {
     let dir = env::temp_dir().join(format!(
         "voxloom-fetch-{label}-{}-{}",
@@ -74,6 +78,7 @@ fn success_writes_verified_file_and_reports_progress_before_rename() {
     let dest = dir.join("model.bin");
     let mut events = Vec::new();
     fetch_verified(
+        &agent(),
         &serve(body.clone(), None),
         &dest,
         &pinned(&body),
@@ -99,6 +104,7 @@ fn hash_mismatch_deletes_partial_and_reports_digests() {
     let dir = temp_dir("hash");
     let dest = dir.join("model.bin");
     let err = fetch_verified(
+        &agent(),
         &serve(tampered.clone(), None),
         &dest,
         &pinned(&body),
@@ -106,7 +112,6 @@ fn hash_mismatch_deletes_partial_and_reports_digests() {
         |_, _| {},
     )
     .unwrap_err();
-    assert!(err.is_verification_failure());
     match err {
         FetchError::HashMismatch { expected, actual } => {
             assert_eq!(expected, sha_hex(&body));
@@ -124,6 +129,7 @@ fn short_body_is_a_size_mismatch() {
     let dir = temp_dir("short");
     let dest = dir.join("model.bin");
     let err = fetch_verified(
+        &agent(),
         &serve(expected[..5000].to_vec(), None),
         &dest,
         &pinned(&expected),
@@ -148,6 +154,7 @@ fn oversized_body_stops_at_the_pinned_size() {
     let dir = temp_dir("long");
     let dest = dir.join("model.bin");
     let err = fetch_verified(
+        &agent(),
         &serve(vec![4u8; 512 * 1024], None),
         &dest,
         &pinned(&expected),
@@ -187,6 +194,7 @@ fn cancel_mid_stream_removes_partial() {
         flag.store(true, Ordering::Release);
     });
     let err = fetch_verified(
+        &agent(),
         &serve(body.clone(), Some(Duration::from_millis(10))),
         &dest,
         &pinned(&body),
@@ -207,6 +215,7 @@ fn network_failure_removes_stale_partial() {
     let dest = dir.join("model.bin");
     fs::write(partial_path(&dest), b"stale").unwrap();
     let err = fetch_verified(
+        &agent(),
         "http://127.0.0.1:9/artifact.bin",
         &dest,
         &pinned(b"x"),
@@ -246,4 +255,93 @@ fn verify_file_checks_size_then_hash() {
         Err(FetchError::HashMismatch { .. })
     ));
     let _ = fs::remove_dir_all(&dir);
+}
+
+/// Serve headers plus `prefix`, then hold the socket open without sending more.
+fn serve_then_stall(total_len: usize, prefix: Vec<u8>, hold: Duration) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().unwrap().port();
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        let mut req = [0u8; 4096];
+        let _ = stream.read(&mut req);
+        let header =
+            format!("HTTP/1.1 200 OK\r\nContent-Length: {total_len}\r\nConnection: close\r\n\r\n");
+        stream.write_all(header.as_bytes()).unwrap();
+        stream.write_all(&prefix).unwrap();
+        stream.flush().unwrap();
+        thread::sleep(hold);
+    });
+    format!("http://127.0.0.1:{port}/artifact.bin")
+}
+
+#[test]
+fn stalled_body_times_out_and_removes_partial() {
+    let body = vec![6u8; 64 * 1024];
+    let dir = temp_dir("stall");
+    let dest = dir.join("model.bin");
+    let url = serve_then_stall(body.len(), body[..4096].to_vec(), Duration::from_secs(5));
+    let started = std::time::Instant::now();
+    let err = fetch_verified(
+        &loopback_test_agent(Duration::from_millis(200)),
+        &url,
+        &dest,
+        &pinned(&body),
+        &AtomicBool::new(false),
+        |_, _| {},
+    )
+    .unwrap_err();
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "read timeout must fire, not wait for the server: {:?}",
+        started.elapsed()
+    );
+    match err {
+        FetchError::Network(msg) => assert!(msg.starts_with("read failed"), "{msg}"),
+        other => panic!("expected read timeout, got {other:?}"),
+    }
+    assert_clean(&dest);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn shared_agent_refuses_plain_http_before_connecting() {
+    // Listener that would accept: proves the refusal is the agent's policy,
+    // not a connection failure. Covers https→http redirects too, since ureq
+    // applies `https_only` to every hop.
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().unwrap().port();
+    let dir = temp_dir("https-only");
+    fs::create_dir_all(&dir).unwrap();
+    let dest = dir.join("model.bin");
+    fs::write(partial_path(&dest), b"stale").unwrap();
+    let err = fetch_verified(
+        shared_agent(),
+        &format!("http://127.0.0.1:{port}/artifact.bin"),
+        &dest,
+        &pinned(b"x"),
+        &AtomicBool::new(false),
+        |_, _| {},
+    )
+    .unwrap_err();
+    match err {
+        FetchError::Network(msg) => assert!(msg.contains("https_only"), "{msg}"),
+        other => panic!("expected https_only refusal, got {other:?}"),
+    }
+    listener.set_nonblocking(true).unwrap();
+    assert!(listener.accept().is_err(), "no connection may be attempted");
+    assert_clean(&dest);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn shared_agent_has_explicit_timeouts() {
+    let config = format!("{:?}", shared_agent());
+    assert!(config.contains("timeout_connect: Some(30s)"), "{config}");
+    assert!(config.contains("timeout_read: Some(30s)"), "{config}");
+    assert!(
+        config.contains("timeout: None"),
+        "no overall deadline: {config}"
+    );
+    assert!(config.contains("https_only: true"), "{config}");
 }

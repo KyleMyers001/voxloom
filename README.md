@@ -168,7 +168,10 @@ download (explicit user action only) and transcription.
 Model downloads are pinned: `stt/catalog.rs` lists a fixed Hugging Face
 revision plus each file's exact size and SHA-256, and `src-tauri/src/model_fetch`
 verifies both before the atomic rename (a mismatch deletes the partial file and
-reports `download-failed`). Model files downloaded before pinning keep working
+reports `download-failed`). Downloads use one shared HTTPS-only client (an
+https→http redirect is refused) with a 30 s connect timeout and a 30 s read
+timeout, so a stalled transfer fails instead of hanging; there is no overall
+time limit. Model files downloaded before pinning keep working
 and are not re-hashed; verification applies to new downloads and re-downloads.
 
 Real whisper.cpp linkage is **opt-in** on macOS:

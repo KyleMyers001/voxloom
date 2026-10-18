@@ -13,6 +13,8 @@ use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
+use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
@@ -27,6 +29,40 @@ mod tests;
 /// Bytes between progress callbacks.
 const PROGRESS_STEP: u64 = 256 * 1024;
 
+/// Connect timeout for model hosts (same as ureq's default, made explicit).
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+/// Longest a single socket read may wait for bytes, headers or body. A CDN that
+/// stalls mid-body fails with a network error instead of blocking forever, so
+/// cancel is honoured and the single-flight slot is released. There is no
+/// overall deadline: multi-GB models may legitimately take a long time.
+pub const READ_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The one agent used for every production model download: explicit connect
+/// and read timeouts, and `https_only`, so an https→http redirect (or any
+/// plain-http URL) is refused before a connection is made.
+pub fn shared_agent() -> &'static ureq::Agent {
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    AGENT.get_or_init(|| {
+        ureq::AgentBuilder::new()
+            .timeout_connect(CONNECT_TIMEOUT)
+            .timeout_read(READ_TIMEOUT)
+            .https_only(true)
+            .build()
+    })
+}
+
+/// Test-only agent for loopback `http://127.0.0.1` servers. Production never
+/// builds this; it differs from [`shared_agent`] only in allowing plain http
+/// and taking a (short) read timeout.
+#[cfg(test)]
+pub fn loopback_test_agent(read_timeout: Duration) -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .timeout_connect(CONNECT_TIMEOUT)
+        .timeout_read(read_timeout)
+        .https_only(false)
+        .build()
+}
+
 /// `<dest>.partial` next to the destination (e.g. `ggml-tiny.en.bin.partial`).
 pub fn partial_path(dest: &Path) -> PathBuf {
     let mut name = dest.file_name().unwrap_or_default().to_os_string();
@@ -39,7 +75,9 @@ pub fn partial_path(dest: &Path) -> PathBuf {
 /// `on_progress(received, total)` fires every 256 KiB and at end of stream,
 /// always **before** the rename; `total` is the pinned size. Completion is the
 /// `Ok` return, after `dest` exists. Blocking: run off the main thread.
+/// Pass [`shared_agent`] in production.
 pub fn fetch_verified<F>(
+    agent: &ureq::Agent,
     url: &str,
     dest: &Path,
     artifact: &PinnedArtifact,
@@ -50,12 +88,13 @@ where
     F: FnMut(u64, u64),
 {
     let tmp = partial_path(dest);
-    let result = stream_to_partial(url, &tmp, artifact, cancel, &mut on_progress).and_then(|()| {
-        if cancel.load(Ordering::Acquire) {
-            return Err(FetchError::Cancelled);
-        }
-        fs::rename(&tmp, dest).map_err(|e| FetchError::Io(format!("finalize failed: {e}")))
-    });
+    let result =
+        stream_to_partial(agent, url, &tmp, artifact, cancel, &mut on_progress).and_then(|()| {
+            if cancel.load(Ordering::Acquire) {
+                return Err(FetchError::Cancelled);
+            }
+            fs::rename(&tmp, dest).map_err(|e| FetchError::Io(format!("finalize failed: {e}")))
+        });
     if result.is_err() {
         let _ = fs::remove_file(&tmp);
     }
@@ -63,6 +102,7 @@ where
 }
 
 fn stream_to_partial<F>(
+    agent: &ureq::Agent,
     url: &str,
     tmp: &Path,
     artifact: &PinnedArtifact,
@@ -75,7 +115,8 @@ where
     if let Some(dir) = tmp.parent() {
         fs::create_dir_all(dir).map_err(|e| FetchError::Io(format!("create models dir: {e}")))?;
     }
-    let response = ureq::get(url)
+    let response = agent
+        .get(url)
         .call()
         .map_err(|e| FetchError::Network(format!("request failed: {e}")))?;
     let mut reader = response.into_reader();

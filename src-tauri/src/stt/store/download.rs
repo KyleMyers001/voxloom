@@ -49,11 +49,12 @@ impl ModelStore {
         let spec = catalog::find(model_id).ok_or_else(|| {
             SttErrorDto::new("download-failed", format!("Unknown model: {model_id}"))
         })?;
-        self.download_spec_with_sink(spec, spec.url, on_progress)
+        self.download_spec_with_sink(model_fetch::shared_agent(), spec, spec.url, on_progress)
     }
 
     pub(super) fn download_spec_with_sink<F>(
         &self,
+        agent: &ureq::Agent,
         spec: &ModelSpec,
         url: &str,
         mut on_progress: F,
@@ -81,6 +82,7 @@ impl ModelStore {
 
         let dest = self.model_path(spec);
         let result = model_fetch::fetch_verified(
+            agent,
             url,
             &dest,
             &spec.artifact(),
@@ -134,7 +136,7 @@ fn cancelled(spec: &ModelSpec) -> SttErrorDto {
 fn fetch_error(spec: &ModelSpec, err: FetchError) -> SttErrorDto {
     match err {
         FetchError::Cancelled => cancelled(spec),
-        e if e.is_verification_failure() => SttErrorDto::new(
+        e @ (FetchError::SizeMismatch { .. } | FetchError::HashMismatch { .. }) => SttErrorDto::new(
             "download-failed",
             format!(
                 "Downloaded {} did not match the expected file ({e}). Nothing was saved; try again.",
@@ -142,6 +144,5 @@ fn fetch_error(spec: &ModelSpec, err: FetchError) -> SttErrorDto {
             ),
         ),
         FetchError::Network(msg) | FetchError::Io(msg) => SttErrorDto::new("download-failed", msg),
-        other => SttErrorDto::new("download-failed", other.to_string()),
     }
 }

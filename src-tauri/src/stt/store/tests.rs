@@ -10,6 +10,11 @@ use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
+/// Loopback (plain http) agent; production uses `model_fetch::shared_agent`.
+fn test_agent() -> ureq::Agent {
+    crate::model_fetch::loopback_test_agent(Duration::from_secs(10))
+}
+
 /// A catalog entry re-pinned to `body`, so loopback tests can pass verification.
 fn spec_for(model_id: &str, body: &[u8]) -> ModelSpec {
     let base = *catalog::find(model_id).unwrap();
@@ -102,7 +107,7 @@ fn download_does_not_claim_complete_before_file_finalized() {
     let events2 = Arc::clone(&events);
     let dest = store.model_path(spec);
 
-    let result = store.download_spec_with_sink(spec, &url, |p| {
+    let result = store.download_spec_with_sink(&test_agent(), spec, &url, |p| {
         let exists = dest.is_file();
         events2.lock().unwrap().push((p.ratio, exists));
     });
@@ -153,7 +158,7 @@ fn cancel_during_download_removes_partial_and_errors() {
         let _ = store_cancel.cancel("whisper-base.en");
     });
 
-    let result = store.download_spec_with_sink(spec, &url, |_| {});
+    let result = store.download_spec_with_sink(&test_agent(), spec, &url, |_| {});
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert_eq!(err.code, "cancelled");
@@ -195,7 +200,7 @@ fn mid_stream_failure_removes_partial_file() {
     let url = serve_truncated(vec![7u8; 600 * 1024], 2 * 1024 * 1024);
     let mut progressed = 0u64;
     let err = store
-        .download_spec_with_sink(spec, &url, |p| progressed = p.bytes_received)
+        .download_spec_with_sink(&test_agent(), spec, &url, |p| progressed = p.bytes_received)
         .unwrap_err();
     assert_eq!(err.code, "download-failed");
     assert!(progressed > 0, "bytes were written before the failure");
@@ -215,7 +220,7 @@ fn failed_download_removes_partial_file_so_retry_starts_clean() {
     fs::write(&partial, b"stale bytes").unwrap();
     // Port 9 (discard) on loopback: connection refused, no network needed.
     let err = store
-        .download_spec_with_sink(spec, "http://127.0.0.1:9/model.bin", |_| {})
+        .download_spec_with_sink(&test_agent(), spec, "http://127.0.0.1:9/model.bin", |_| {})
         .unwrap_err();
     assert_eq!(err.code, "download-failed");
     assert!(!partial.exists());
@@ -253,7 +258,7 @@ fn mismatched_download_fails_clearly_and_saves_nothing() {
     let url = serve_bytes(tampered, None);
     let mut last_ratio = 0.0;
     let err = store
-        .download_spec_with_sink(&pinned, &url, |p| last_ratio = p.ratio)
+        .download_spec_with_sink(&test_agent(), &pinned, &url, |p| last_ratio = p.ratio)
         .unwrap_err();
     assert_eq!(err.code, "download-failed");
     assert!(err.message.contains("did not match"), "{}", err.message);
