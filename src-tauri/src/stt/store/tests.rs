@@ -250,7 +250,7 @@ fn second_download_while_inflight_fails() {
 }
 
 #[test]
-fn mismatched_download_fails_clearly_and_saves_nothing() {
+fn hash_mismatch_is_download_corrupted_and_saves_nothing() {
     let body = vec![0x11u8; 16 * 1024];
     let (store, dir) = temp_store("mismatch");
     let pinned = spec_for("whisper-tiny.en", &body);
@@ -260,14 +260,32 @@ fn mismatched_download_fails_clearly_and_saves_nothing() {
     let err = store
         .download_spec_with_sink(&test_agent(), &pinned, &url, |p| last_ratio = p.ratio)
         .unwrap_err();
-    assert_eq!(err.code, "download-failed");
-    assert!(err.message.contains("did not match"), "{}", err.message);
-    assert!(err.message.contains("SHA-256"), "{}", err.message);
+    assert_eq!(err.code, "download-corrupted");
+    assert_eq!(err.message, "Download was damaged. Nothing was saved.");
+    assert!(!err.message.contains(pinned.sha256), "no hashes in UI copy");
     assert!(last_ratio < 1.0, "never reports completion on mismatch");
     assert!(!dir.join("ggml-tiny.en.bin").exists());
     assert!(!dir.join("ggml-tiny.en.bin.partial").exists());
     assert!(store.inflight.lock().unwrap().is_none());
     assert_eq!(store.status("whisper-tiny.en").unwrap().status, "missing");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn size_mismatch_is_download_corrupted_and_saves_nothing() {
+    let pinned_body = vec![0x33u8; 8 * 1024];
+    let (store, dir) = temp_store("size-mismatch");
+    let pinned = spec_for("whisper-tiny.en", &pinned_body);
+    // A complete response (Content-Length matches) that is shorter than the pin.
+    let url = serve_bytes(pinned_body[..5000].to_vec(), None);
+    let err = store
+        .download_spec_with_sink(&test_agent(), &pinned, &url, |_| {})
+        .unwrap_err();
+    assert_eq!(err.code, "download-corrupted");
+    assert_eq!(err.message, "Download was damaged. Nothing was saved.");
+    assert!(!dir.join("ggml-tiny.en.bin").exists());
+    assert!(!dir.join("ggml-tiny.en.bin.partial").exists());
+    assert!(store.inflight.lock().unwrap().is_none());
     let _ = fs::remove_dir_all(&dir);
 }
 

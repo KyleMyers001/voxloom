@@ -131,18 +131,19 @@ fn cancelled(spec: &ModelSpec) -> SttErrorDto {
     SttErrorDto::new("cancelled", format!("Download cancelled: {}", spec.id))
 }
 
-/// Map a shared fetch failure to the existing `download-failed` / `cancelled`
-/// codes so the UI's retry flow is unchanged; mismatches get a clear message.
+/// Map a shared fetch failure to a UI error code. A size or SHA-256 mismatch
+/// is `download-corrupted` with the designer copy (BUS-35); its sizes and
+/// hashes go only to the native log, never to the UI.
 fn fetch_error(spec: &ModelSpec, err: FetchError) -> SttErrorDto {
     match err {
         FetchError::Cancelled => cancelled(spec),
-        e @ (FetchError::SizeMismatch { .. } | FetchError::HashMismatch { .. }) => SttErrorDto::new(
-            "download-failed",
-            format!(
-                "Downloaded {} did not match the expected file ({e}). Nothing was saved; try again.",
-                spec.id
-            ),
-        ),
+        e @ (FetchError::SizeMismatch { .. } | FetchError::HashMismatch { .. }) => {
+            eprintln!("[stt] download of {} failed verification: {e}", spec.id);
+            SttErrorDto::new(
+                "download-corrupted",
+                "Download was damaged. Nothing was saved.",
+            )
+        }
         FetchError::Network(msg) | FetchError::Io(msg) => SttErrorDto::new("download-failed", msg),
     }
 }

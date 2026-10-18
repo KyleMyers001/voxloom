@@ -167,8 +167,10 @@ download (explicit user action only) and transcription.
 
 Model downloads are pinned: `stt/catalog.rs` lists a fixed Hugging Face
 revision plus each file's exact size and SHA-256, and `src-tauri/src/model_fetch`
-verifies both before the atomic rename (a mismatch deletes the partial file and
-reports `download-failed`). Downloads use one shared HTTPS-only client (an
+verifies both before the atomic rename. A mismatch deletes the partial file and
+reports `download-corrupted`, which the Models tab shows as "Download was
+damaged. Nothing was saved." with Retry; sizes and hashes go only to the
+native log. Downloads use one shared HTTPS-only client (an
 https→http redirect is refused) with a 30 s connect timeout and a 30 s read
 timeout, so a stalled transfer fails instead of hanging; there is no overall
 time limit. Model files downloaded before pinning keep working
