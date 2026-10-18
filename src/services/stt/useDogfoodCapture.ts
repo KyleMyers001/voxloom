@@ -7,6 +7,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { beginCancelScope, type CancelScope } from '../shortcut/cancelScope';
+import {
+  useCancelUnavailable,
+  type CancelUnavailable,
+} from '../shortcut/cancelUnavailable';
 import type { DeliveryOutcome } from '../delivery/types';
 import type { OverlayResult } from '../shortcut/overlayVisibility';
 
@@ -58,8 +62,10 @@ export interface UseDogfoodCaptureOptions {
    * Cancel / blank audio / STT errors never call this.
    */
   onHistoryRecord?: (record: DictationRecord) => void;
-  /** Toast / announce callback for loading / success / error. */
+  /** Toast / announce callback for loading / success. */
   onToast?: (message: string) => void;
+  /** Error toast (error tone); falls back to onToast. */
+  onErrorToast?: (message: string) => void;
   /** Preferred mic id; system default means omit and let native pick. */
   preferredDeviceId?: string;
   /** Writing style stamped onto the history row. */
@@ -76,6 +82,8 @@ export interface UseDogfoodCaptureOptions {
 
 export interface UseDogfoodCaptureResult {
   cancel: () => void;
+  /** Escape-cancel could not arm this app run; dictation still works. */
+  cancelUnavailable: CancelUnavailable | null;
   captureState: CaptureState;
   /** Completion-time target (null until final transcription / if unavailable). */
   intendedTarget: TargetSnapshot | null;
@@ -175,6 +183,13 @@ export function useDogfoodCapture(
   clipboardFallbackRef.current = options.clipboardFallback !== false;
   const toastRef = useRef(options.onToast);
   toastRef.current = options.onToast;
+  const errorToastRef = useRef(options.onErrorToast);
+  errorToastRef.current = options.onErrorToast;
+  const {
+    notice: cancelNotice,
+    report: reportCancelUnavailable,
+    takeHint: takeCancelHint,
+  } = useCancelUnavailable();
   const historyRef = useRef(options.onHistoryRecord);
   historyRef.current = options.onHistoryRecord;
   const styleRef = useRef(options.style ?? 'formal');
@@ -209,6 +224,13 @@ export function useDogfoodCapture(
     setMessage(text);
     toastRef.current?.(text);
   }, []);
+  const errorToast = useCallback((text: string) => {
+    (errorToastRef.current ?? toastRef.current)?.(text);
+  }, []);
+  const announceError = useCallback((text: string) => {
+    setMessage(text);
+    errorToast(text);
+  }, [errorToast]);
 
   const ensureModelAvailable = useCallback(async (rawModelId: string) => {
     const modelId = resolveTranscriptionModelId(rawModelId);
@@ -296,14 +318,14 @@ export function useDogfoodCapture(
       if (current()) {
         setHudResult('transcribe-failed');
         setPhase('error');
-        announce(errorText(error));
+        announceError(errorText(error));
       } else {
-        toastRef.current?.(errorText(error));
+        errorToast(errorText(error));
       }
     } finally {
       await cancellation.scope?.dispose().catch(() => {});
     }
-  }, [announce, ensureModelAvailable]);
+  }, [announce, announceError, ensureModelAvailable, errorToast]);
 
   // Auto dogfood on clean stop (user stop or 120s/capacity bound).
   // Automatic bounds use the same completion-time target policy.
@@ -323,13 +345,13 @@ export function useDogfoodCapture(
     const audio = capture.captureState.audio;
     if (!audio) {
       setPhase('error');
-      announce('Capture stopped without audio — nothing to transcribe.');
+      announceError('Capture stopped without audio — nothing to transcribe.');
       return;
     }
     if (handledAudioIdRef.current === audio.id) return;
     handledAudioIdRef.current = audio.id;
     void runDogfood(audio);
-  }, [announce, capture.captureState, runDogfood]);
+  }, [announceError, capture.captureState, runDogfood]);
 
   const start = useCallback(async (source: 'home' | 'gesture' = 'home') => {
     const session = ++sessionRef.current;
@@ -364,7 +386,7 @@ export function useDogfoodCapture(
         }, () => !superseded() && !cancellation.cancelled);
       } catch (error: unknown) {
         // Escape-cancel is optional: a tap failure must never block dictation.
-        console.warn('Escape cancellation unavailable; dictating without it.', error);
+        reportCancelUnavailable(error);
       }
       if (superseded()) {
         await cancellation.scope?.dispose();
@@ -377,7 +399,7 @@ export function useDogfoodCapture(
     } catch (error: unknown) {
       if (superseded()) return;
       setPhase('error');
-      announce(errorText(error));
+      announceError(errorText(error));
       return;
     }
     if (superseded()) return;
@@ -395,28 +417,36 @@ export function useDogfoodCapture(
       : undefined;
 
     try {
+      // A just-cancelled capture still owns the mic until its terminal event.
+      await capture.waitForCaptureRelease();
+      if (superseded()) return;
       const started = await capture.startFullCaptureSession(deviceId);
       if (superseded() || started === 'ended') return;
       if (started !== 'started') {
         setPhase('error');
-        announce(started === 'busy'
+        announceError(started === 'busy'
           ? 'A capture session is already active. Wait for it to finish.'
           : 'Microphone capture could not start. Check permission and retry.');
         return;
       }
       setPhase('recording');
       announce('Listening…');
+      const hint = takeCancelHint();
+      if (hint) toastRef.current?.(hint);
       if (stopRequestedRef.current) await capture.stopFullCapture();
     } catch (error: unknown) {
       if (superseded()) return;
       setPhase('error');
-      announce(errorText(error));
+      announceError(errorText(error));
     }
   }, [
     announce,
+    announceError,
     capture,
     ensureModelAvailable,
     options.preferredDeviceId,
+    reportCancelUnavailable,
+    takeCancelHint,
   ]);
 
   const stop = useCallback(async () => {
@@ -427,9 +457,9 @@ export function useDogfoodCapture(
     } catch (error: unknown) {
       if (session !== sessionRef.current) return;
       setPhase('error');
-      announce(errorText(error));
+      announceError(errorText(error));
     }
-  }, [announce, capture]);
+  }, [announceError, capture]);
 
   const cancel = useCallback(() => {
     activeRef.current = false;
@@ -479,6 +509,7 @@ export function useDogfoodCapture(
 
   return {
     cancel,
+    cancelUnavailable: cancelNotice,
     captureState: capture.captureState,
     intendedTarget,
     message,

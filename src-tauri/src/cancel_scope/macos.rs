@@ -115,12 +115,10 @@ unsafe extern "C" fn callback(
 }
 
 impl Tap {
-    fn install(app: AppHandle, session: String) -> Result<Self, String> {
-        let mut state = ScopeState::new(session);
-        state.visible = app
-            .get_webview_window(OVERLAY)
-            .and_then(|w| w.is_visible().ok())
-            .unwrap_or(false);
+    fn install(app: AppHandle, session: String) -> Result<Self, super::ArmError> {
+        // Start hidden even if a passive result banner is still on screen; only
+        // the cancellable overlay_show marks the scope visible.
+        let state = ScopeState::new(session);
         let context = Box::into_raw(Box::new(Context {
             app,
             state: Rc::new(RefCell::new(state)),
@@ -146,7 +144,9 @@ impl Tap {
                 CFMachPortInvalidate(port);
                 CFRelease(port);
                 drop(Box::from_raw(context));
-                return Err("Could not create Escape cancellation monitor".into());
+                return Err("Could not create Escape cancellation monitor"
+                    .to_string()
+                    .into());
             }
             CFRunLoopAddSource(CFRunLoopGetMain(), source, kCFRunLoopCommonModes);
             CGEventTapEnable(port, true);
@@ -178,7 +178,7 @@ impl Drop for Tap {
     }
 }
 
-pub fn arm(app: AppHandle, session: String) -> Result<(), String> {
+pub fn arm(app: AppHandle, session: String) -> Result<(), super::ArmError> {
     main_thread()?;
     close();
     let tap = Tap::install(app, session)?;

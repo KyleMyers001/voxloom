@@ -18,6 +18,7 @@ describe('toastTone (toasts board strings)', () => {
     ['Finish the current dictation before retrying', 'err'],
     ['Recovery buffer expired', 'err'],
     ['Shortcut “Ctrl + Space” is in use; kept Ctrl + Shift + Space', 'err'],
+    ['Escape-cancel is off: Voxloom does not have Accessibility permission. Dictation still works.', 'warn'],
   ])('%s → %s', (message, tone) => expect(toastTone(message)).toBe(tone));
 
   it('renders an icon by severity and an explicit tone wins', () => {

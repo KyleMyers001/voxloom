@@ -46,7 +46,7 @@ describe('BUS-43 pending acquisition ownership', () => {
       const toast = vi.fn();
       const { result } = renderHook(() => useDogfoodCapture({
         captureApi: { captureState: { kind: 'idle' }, startFullCaptureSession: startCapture,
-          cancelActiveCapture: vi.fn() } as unknown as UseCaptureStateResult,
+          cancelActiveCapture: vi.fn(), waitForCaptureRelease: vi.fn().mockResolvedValue(undefined) } as unknown as UseCaptureStateResult,
         clipboard: { copy: vi.fn() }, createModelStore: () => store, modelId: 'whisper-tiny.en',
         dogfood: vi.fn(), onToast: toast,
       }));
@@ -105,7 +105,7 @@ describe('BUS-43 pending acquisition ownership', () => {
     });
     const { result, rerender } = renderHook(({ state }: { state: CaptureState }) => useDogfoodCapture({
       captureApi: { captureState: state, startFullCaptureSession: vi.fn().mockResolvedValue('started'),
-        cancelActiveCapture: vi.fn() } as unknown as UseCaptureStateResult,
+        cancelActiveCapture: vi.fn(), waitForCaptureRelease: vi.fn().mockResolvedValue(undefined) } as unknown as UseCaptureStateResult,
       clipboard: clip, createModelStore: () => store, modelId: 'whisper-tiny.en',
       deliveryPlatform: createStubDeliveryAdapter({ clipboard: clip, snapshot, insert }),
       onHistoryRecord: history, onToast: toast, dogfood,
@@ -191,7 +191,7 @@ describe('BUS-43 pending acquisition ownership', () => {
       store.status = vi.fn(async (id) => { if (stage === 'model') await startup.promise; return status(id); });
       const startCapture = vi.fn(async () => { if (stage === 'microphone') await startup.promise; return 'started'; });
       const api = { captureState: { kind: 'idle' }, startFullCaptureSession: startCapture,
-        cancelActiveCapture: vi.fn() } as unknown as UseCaptureStateResult;
+        cancelActiveCapture: vi.fn(), waitForCaptureRelease: vi.fn().mockResolvedValue(undefined) } as unknown as UseCaptureStateResult;
       const state = createInitialState(0);
       const { result } = renderHook(() => {
         const dogfood = useDogfoodCapture({ captureApi: api, clipboard: { copy: vi.fn() },
@@ -236,7 +236,7 @@ describe('BUS-43 pending acquisition ownership', () => {
     const startCapture = vi.fn().mockResolvedValue('started');
     const { result } = renderHook(() => useDogfoodCapture({
       captureApi: { captureState: { kind: 'idle' }, startFullCaptureSession: startCapture,
-        cancelActiveCapture: vi.fn() } as unknown as UseCaptureStateResult,
+        cancelActiveCapture: vi.fn(), waitForCaptureRelease: vi.fn().mockResolvedValue(undefined) } as unknown as UseCaptureStateResult,
       clipboard: { copy: vi.fn() }, createModelStore: () => store, modelId: 'whisper-tiny.en',
     }));
     let oldStart!: Promise<void>;

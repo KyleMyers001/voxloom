@@ -164,6 +164,24 @@ describe('useShortcutGestures', () => {
       expect(overlay.sync).toHaveBeenLastCalledWith({ kind: 'ready' });
     });
 
+    it('Escape-cancel clears a latched gesture even while dictation stays listening', async () => {
+      vi.mocked(isTauri).mockReturnValue(true);
+      const native = makeNativeController();
+      mocks.createNativeShortcutController.mockReturnValue(native);
+      mocks.createOverlayBridge.mockReturnValue(makeOverlay());
+      const state: AppState = {
+        ...createInitialState(0),
+        dictation: { kind: 'listening', runId: 7, waveform: 'silent' },
+      };
+      const { rerender } = renderHook(({ phase }: { phase: DogfoodPhase }) =>
+        useShortcutGestures(makeOptions({ dogfood: makeDogfood({ phase }), state })),
+      { initialProps: { phase: 'recording' as DogfoodPhase } });
+      await waitFor(() => expect(native.setContext).toHaveBeenCalled());
+      native.resetPartial.mockClear();
+      rerender({ phase: 'cancelled' });
+      expect(native.resetPartial).toHaveBeenCalled();
+    });
+
     it('shows a plain (non-cancellable) HUD with the waveform when Escape-cancel could not arm', async () => {
       vi.mocked(isTauri).mockReturnValue(true);
       const native = makeNativeController();

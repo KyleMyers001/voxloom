@@ -319,6 +319,13 @@ export function useShortcutGestures(options: GestureOptions) {
     if (phase === guard.seen) return;
     guard.seen = phase;
     if (!isDogfoodTerminal(phase)) return;
+    if (phase === 'cancelled') {
+      // Escape/Home cancel: a latched gesture must not need an extra press
+      // to "finish" a run that no longer exists. (A hold-start that cancels
+      // leftover capture pre-marks the guard, so its new run is untouched.)
+      pendingFinishRef.current?.clear();
+      nativeControllerRef.current?.resetPartial();
+    }
     const { hudResult, origin } = optionsRef.current.dogfood;
     // HUD rules 3–6: Copied / failure flash briefly for gesture runs (the
     // bridge holds off the teardown hide); everything else hides at once.
