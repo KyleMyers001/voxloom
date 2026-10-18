@@ -109,9 +109,14 @@ Notarization, alternative: Apple ID. Use these instead of the API key.
 - `APPLE_TEAM_ID` (above) is required for this option.
 
 Set all of one group or none; a partial set fails the build with the missing
-names. On a `v*` tag the build job enters the `release` Environment, so it
-waits for your approval. Tauri imports the certificate into a temporary
-keychain on the runner and deletes it afterwards, signs the app and dmg,
-then notarizes and staples the app. `scripts/release/package-macos.sh` runs
+names.
+
+A `v*` tag release waits for **two** approvals in the `release` Environment.
+The first lets the build job use the signing secrets. The second publishes
+the release. Manual workflow runs need neither.
+
+Tauri imports the certificate into a temporary keychain on the runner and
+deletes it afterwards, signs the app and dmg, then notarizes and staples the
+app. `scripts/release/package-macos.sh` runs
 `xcrun notarytool submit --wait` and `xcrun stapler staple` on the dmg, then
 checks both with `spctl`. Manual workflow runs get no secrets and stay ad-hoc.
