@@ -2,6 +2,9 @@
 # Validate Apple signing/notarization env vars. Prints "true" (sign) or
 # "false" (unsigned) on stdout; exits non-zero with a clear error on
 # partial configuration. Usage: SIGNED="$(scripts/release/signing-env.sh)"
+# APPLE_TEAM_ID is not secret and may be set on its own (BUS-96): it is
+# required with Apple ID notarization, optional otherwise, and never makes
+# a build signed by itself.
 set -euo pipefail
 
 has() { [[ -n "${!1:-}" ]]; }
@@ -15,7 +18,7 @@ need() { # need <reason> <var>...
 }
 
 cert_vars=(APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY)
-id_vars=(APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID)
+id_vars=(APPLE_ID APPLE_PASSWORD)
 api_vars=(APPLE_API_KEY APPLE_API_ISSUER APPLE_API_PRIVATE_KEY)
 
 any() { local v; for v in "$@"; do has "$v" && return 0; done; return 1; }
@@ -34,10 +37,10 @@ if $any_cert; then
 else
   errors+=("notarization secrets are set but the Developer ID certificate secrets (${cert_vars[*]}) are missing")
 fi
-$any_id && need "Apple ID notarization is configured" "${id_vars[@]}"
+$any_id && need "Apple ID notarization is configured" "${id_vars[@]}" APPLE_TEAM_ID
 $any_api && need "App Store Connect API key notarization is configured" "${api_vars[@]}"
 if $any_cert && ! $any_id && ! $any_api; then
-  errors+=("signing without notarization is not supported: set ${id_vars[*]} or ${api_vars[*]}")
+  errors+=("signing without notarization is not supported: set ${id_vars[*]} APPLE_TEAM_ID or ${api_vars[*]}")
 fi
 
 if ((${#errors[@]} > 0)); then

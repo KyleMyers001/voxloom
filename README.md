@@ -121,6 +121,10 @@ does not embed `src-tauri/Entitlements.plist`. Tauri runs `codesign` only when
 a signing identity resolves; `bundle.macOS.signingIdentity` is `"-"` (ad-hoc)
 for that reason. `npm run macos:assert-entitlements -- --repair` re-signs it.
 
+To sign with a Developer ID instead, so permissions survive rebuilds, export
+`APPLE_SIGNING_IDENTITY` (and `APPLE_TEAM_ID`) before building. See
+[docs/macos-signing.md](docs/macos-signing.md).
+
 ## Releases
 
 macOS builds are published as **draft** GitHub Releases by
@@ -140,12 +144,13 @@ publish it. The workflow fails if the tag and manifest versions differ
 (`npm run release:check-version -- v0.2.0`).
 
 **Signing:** builds are ad-hoc signed and labeled **UNSIGNED** until these
-repository secrets exist, after which they are Developer ID signed,
-notarized and stapled automatically: `APPLE_CERTIFICATE` (base64 `.p12`),
-`APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, plus either
-`APPLE_ID` + `APPLE_PASSWORD` (app-specific) + `APPLE_TEAM_ID`, or
-`APPLE_API_KEY` + `APPLE_API_ISSUER` + `APPLE_API_PRIVATE_KEY` (`.p8`
-contents).
+secrets exist in the protected `release` Environment, after which tag builds
+are Developer ID signed, notarized and stapled automatically:
+`APPLE_CERTIFICATE` (base64 `.p12`), `APPLE_CERTIFICATE_PASSWORD`,
+`APPLE_SIGNING_IDENTITY`, `APPLE_TEAM_ID`, plus either `APPLE_API_KEY` +
+`APPLE_API_ISSUER` + `APPLE_API_PRIVATE_KEY` (`.p8` contents, preferred) or
+`APPLE_ID` + `APPLE_PASSWORD` (app-specific). Setup steps:
+[docs/macos-signing.md](docs/macos-signing.md).
 
 **Test build without releasing:** run the *Release* workflow manually
 (Actions → Release → Run workflow). It uploads the build as a workflow
