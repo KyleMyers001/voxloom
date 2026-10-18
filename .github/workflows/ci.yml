@@ -58,6 +58,34 @@ jobs:
       - run: cargo clippy --all-targets
       - run: cargo test
 
+  rust-whisper:
+    # Builds and tests with the opt-in `whisper` feature (whisper-rs ->
+    # whisper.cpp via cmake + bindgen/libclang), which the other Rust jobs
+    # never compile. Separate cache key: whisper.cpp objects differ.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install Tauri Linux and whisper.cpp build dependencies
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libasound2-dev libxdo-dev libssl-dev \
+            cmake clang libclang-dev
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri
+          shared-key: whisper
+      - name: Ensure frontend dist exists for tauri::generate_context!
+        working-directory: .
+        run: mkdir -p dist
+      - run: cargo build --locked --features whisper
+      - run: cargo test --locked --features whisper
+
   cargo-audit:
     # RustSec advisories for src-tauri/Cargo.lock (BUS-63). Runs inside
     # src-tauri so .cargo/audit.toml (the reasoned ignore list) is loaded;
