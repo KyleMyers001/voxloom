@@ -54,7 +54,32 @@ describe('createWhisperSttEngine', () => {
     expect(mockInvoke).toHaveBeenCalledWith('stt_transcribe', {
       modelId: 'whisper-base.en',
       bufferId: 'pcm-1',
+      filter: null,
     });
+  });
+
+  it('forwards BUS-23 filter overrides and returns raw text + drop reason', async () => {
+    mockInvoke.mockResolvedValue({
+      dropped: 'quiet-hallucination',
+      language: 'en',
+      rawText: 'Thank you.',
+      text: '',
+    });
+    const engine = createWhisperSttEngine({
+      filter: { noSpeechThold: 0.5, vad: false },
+      modelId: 'whisper-base.en',
+    });
+    const result = await engine.transcribe({
+      durationMs: 100,
+      id: 'pcm-2',
+      sampleRateHz: 16_000,
+    });
+    expect(mockInvoke).toHaveBeenCalledWith('stt_transcribe', {
+      modelId: 'whisper-base.en',
+      bufferId: 'pcm-2',
+      filter: { noSpeechThold: 0.5, vad: false },
+    });
+    expect(result).toMatchObject({ dropped: 'quiet-hallucination', rawText: 'Thank you.', text: '' });
   });
 
   it('transcribe awaits native async result (text from invoke, not early)', async () => {

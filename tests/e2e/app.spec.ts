@@ -6,7 +6,6 @@ const themes = [
   ['Follow system', 'system'],
   ['Light', 'light'],
   ['Dark', 'dark'],
-  ['Sodium Rain', 'sodium-rain'],
 ] as const;
 
 async function expectAccessible(page: Page) {
@@ -29,6 +28,12 @@ async function holdShortcut(page: Page, holdMs = 350) {
 
 async function tapShortcut(page: Page) {
   await page.keyboard.press('Control+Shift+Space');
+}
+
+/** The dev scenario panel sits in a collapsed "Developer" disclosure (CHECKLIST N10). */
+async function openDevPanel(page: Page) {
+  const summary = page.getByText('Developer', { exact: true });
+  if (await page.locator('details.dev-panel[open]').count() === 0) await summary.click();
 }
 
 async function skipOnboarding(page: Page) {
@@ -85,10 +90,11 @@ test('screens, settings, themes, and baselines stay synchronized', async (
   await expect(page.getByText(
     'Native microphone capture is unavailable here',
   )).toBeVisible();
-  await expect(page.getByLabel('Microphone')).toBeDisabled();
+  await expect(page.getByLabel('Microphone', { exact: true })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Unavailable' }))
     .toBeDisabled();
-  await page.getByLabel('Current style').selectOption('casual');
+  await page.getByRole('radiogroup', { name: 'Current style' })
+    .getByRole('radio', { exact: true, name: 'Casual' }).click();
 
   for (const screen of screens) {
     await page.getByRole('button', { name: screen }).click();
@@ -96,6 +102,7 @@ test('screens, settings, themes, and baselines stay synchronized', async (
   }
   for (const [theme, slug] of themes) {
     await page.getByRole('button', { name: 'Settings' }).click();
+    await page.getByRole('tab', { name: 'Appearance' }).click();
     await page.getByLabel(theme).check();
     for (const screen of screens) {
       await page.getByRole('button', { name: screen }).click();
@@ -107,6 +114,7 @@ test('screens, settings, themes, and baselines stay synchronized', async (
     }
   }
   await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('tab', { name: 'Appearance' }).click();
   await page.getByLabel('Follow system').check();
   await page.emulateMedia({ colorScheme: 'dark' });
   await expect(page.locator('body')).toHaveAttribute(
@@ -115,7 +123,7 @@ test('screens, settings, themes, and baselines stay synchronized', async (
   );
   expect(await page.locator('body').evaluate((body) =>
     getComputedStyle(body).getPropertyValue('--bg').trim()
-  )).toBe('#0b111b');
+  )).toBe('#0b0b10');
   await page.emulateMedia({ colorScheme: 'light' });
   await expect(page.locator('body')).toHaveAttribute(
     'data-appearance-resolved',
@@ -123,10 +131,67 @@ test('screens, settings, themes, and baselines stay synchronized', async (
   );
   expect(await page.locator('body').evaluate((body) =>
     getComputedStyle(body).getPropertyValue('--bg').trim()
-  )).toBe('#f4f5f6');
+  )).toBe('#fbfbf8');
+  // ⌥-digits are ignored while a form control has focus (UI PR 3), so blur first.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.keyboard.press('Alt+1');
-  await expect(page.getByRole('button', { exact: true, name: 'Casual' }))
-    .toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('radio', { exact: true, name: 'Casual' }))
+    .toHaveAttribute('aria-checked', 'true');
+});
+
+test('every Settings tab passes axe in light and dark', async ({ page }) => {
+  await page.goto('/');
+  await skipOnboarding(page);
+  for (const theme of ['Light', 'Dark']) {
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await page.getByRole('tab', { name: 'Appearance' }).click();
+    await page.getByLabel(theme, { exact: true }).check();
+    for (const tab of ['Capture', 'Models', 'Appearance', 'Privacy']) {
+      await page.getByRole('tab', { name: tab }).click();
+      await expect(page.getByRole('tabpanel', { name: tab })).toBeVisible();
+      await expectAccessible(page);
+    }
+  }
+});
+
+test('settings.html (the native Settings window entry) renders and passes axe', async ({ page }) => {
+  await page.goto('/settings.html');
+  await expect(page.getByRole('tablist', { name: 'Settings sections' })).toBeVisible();
+  await page.getByRole('tab', { name: 'Privacy' }).click();
+  await expectAccessible(page);
+});
+
+test('the 760×660 Settings window keeps two-column rows and a two-column recovery grid (QA #42)', async ({ page }) => {
+  await page.setViewportSize({ height: 660, width: 760 });
+  await page.goto('/settings.html');
+  const cols = (sel: string) => page.locator(sel).first().evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ').length);
+  expect(await cols('.settings-rows .frow')).toBe(2);
+  await page.getByRole('tab', { name: 'Privacy' }).click();
+  expect(await cols('.settings-rows .frow')).toBe(2);
+  expect(await cols('.recovery-grid')).toBe(2);
+  await page.getByRole('tab', { name: 'Appearance' }).click();
+  expect(await cols('.appearance-options')).toBe(3);
+});
+
+test('records the shortcut by pressing it (BUS-47)', async ({ page }) => {
+  await page.goto('/');
+  await skipOnboarding(page);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const field = page.getByRole('button', { name: /^(Shortcut|App-local shortcut|Global shortcut) / });
+  const before = await field.boundingBox();
+  await field.click();
+  await expect(field).toHaveText('Press keys…');
+  await page.keyboard.press('Escape');
+  await expect(field).toHaveAccessibleName('Shortcut Control Shift Space');
+  await field.click();
+  await page.keyboard.press('Control+F5');
+  await expect(page.getByText(/can't be used/)).toBeVisible();
+  await page.keyboard.press('Control+Alt+KeyK');
+  await expect(field).toHaveAccessibleName(/^Shortcut Control (Option|Alt) K$/);
+  expect((await field.boundingBox())?.y).toBe(before?.y);
+  if (process.env.BUS47_SHOT) await page.screenshot({ path: process.env.BUS47_SHOT });
+  await page.getByRole('button', { name: 'Reset to default' }).click();
+  await expect(field).toHaveAccessibleName('Shortcut Control Shift Space');
 });
 
 test('browser Settings do not promise native cleanup readiness', async ({ page }) => {
@@ -202,11 +267,13 @@ test('dialogs, reduced motion, narrow and coarse layouts work', async (
 test('mock scenarios cover retry cancellation and expiry', async ({ page }) => {
   await page.goto('/');
   await skipOnboarding(page);
+  await openDevPanel(page);
   await page.getByRole('button', { name: 'Listening · silent' }).click();
   await page.getByRole('button', { name: 'Processing' }).click();
   await page.getByRole('button', { name: 'Complete error' }).click();
   await page.getByRole('button', { name: 'History' }).click();
-  await page.getByLabel('History status').selectOption('failed');
+  await page.getByRole('radiogroup', { name: 'History status' })
+    .getByRole('radio', { name: 'Failed' }).click();
   await expect(page.getByText(/Temporary recovery buffer · expires/).first())
     .toBeVisible();
   await page.getByRole('article').first().hover();
@@ -215,7 +282,8 @@ test('mock scenarios cover retry cancellation and expiry', async ({ page }) => {
   await page.getByRole('button', { name: 'Cancel' }).click();
   await page.getByRole('button', { name: 'Expire recovery buffers' }).click();
   await page.getByRole('button', { name: 'History' }).click();
-  await page.getByLabel('History status').selectOption('failed');
+  await page.getByRole('radiogroup', { name: 'History status' })
+    .getByRole('radio', { name: 'Failed' }).click();
   await expect(page.getByText('Temporary recovery buffer expired').first())
     .toBeVisible();
   await expect(page.getByRole('button', { name: 'Retry transcription' }))
@@ -227,9 +295,11 @@ test('History retry cannot interrupt an active listening run', async (
 ) => {
   await page.goto('/');
   await skipOnboarding(page);
+  await openDevPanel(page);
   await page.getByRole('button', { name: 'Listening · silent' }).click();
   await page.getByRole('button', { name: 'History' }).click();
-  await page.getByLabel('History status').selectOption('failed');
+  await page.getByRole('radiogroup', { name: 'History status' })
+    .getByRole('radio', { name: 'Failed' }).click();
   const failed = page.getByRole('article').first();
   await failed.hover();
   await expect(page.getByRole('button', { name: 'Retry transcription' }))
@@ -238,4 +308,37 @@ test('History retry cannot interrupt an active listening run', async (
   await expect(page.getByRole('img', { name: 'Microphone level' }))
     .toHaveCount(0);
   await page.getByRole('button', { name: 'Cancel' }).click();
+});
+
+test('onboarding records the shortcut with the shared recorder (BUS-47)', async ({ page }) => {
+  const shots = process.env.BUS47_ONBOARDING_DIR;
+  await page.goto('/');
+  const onboarding = page.getByRole('dialog', { name: 'Set up Voxloom' });
+  await page.getByRole('button', { name: 'Next' }).click();
+  await expect(onboarding.getByRole('textbox')).toHaveCount(0);
+  const field = onboarding.getByRole('button', { name: /^(Shortcut|App-local shortcut|Global shortcut) / });
+  await expectAccessible(page);
+  if (shots) await page.screenshot({ path: `${shots}/1-idle.png` });
+  await field.click();
+  await expect(field).toHaveText('Press keys…');
+  await expectAccessible(page);
+  if (shots) await page.screenshot({ path: `${shots}/2-recording.png` });
+  // Esc cancels recording; it must not close the onboarding sheet.
+  await page.keyboard.press('Escape');
+  await expect(onboarding).toBeVisible();
+  await expect(field).toHaveAccessibleName('App-local shortcut Control Shift Space');
+  await expect(onboarding.getByRole('status')).toHaveText('Canceled. Shortcut unchanged.');
+  // Pressing the current shortcut while recording records it; it doesn't dictate.
+  await field.click();
+  await holdShortcut(page);
+  await expect(field).toHaveAttribute('aria-pressed', 'false');
+  await expect(onboarding.getByRole('status')).toHaveText(/Shortcut set to/);
+  await field.click();
+  await page.keyboard.press('Control+F5');
+  await expect(onboarding.getByText(/can't be used/)).toBeVisible();
+  if (shots) await page.screenshot({ path: `${shots}/3-refused.png` });
+  await page.keyboard.press('Control+Alt+KeyK');
+  await expect(field).toHaveAccessibleName(/^App-local shortcut Control (Option|Alt) K$/);
+  await expectAccessible(page);
+  if (shots) await page.screenshot({ path: `${shots}/4-saved.png` });
 });

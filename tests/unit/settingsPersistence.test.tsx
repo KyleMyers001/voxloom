@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/app/App';
@@ -45,8 +45,9 @@ describe('durable settings persistence', () => {
     });
 
     await user.click(screen.getByRole('button', { name: 'Settings' }));
-    const retention = await screen.findByLabelText(/Transcript retention/i);
-    expect(retention).toHaveValue('forever');
+    await user.click(await screen.findByRole('tab', { name: 'Privacy' }));
+    const retention = await screen.findByRole('radiogroup', { name: 'Transcript retention' });
+    expect(within(retention).getByRole('radio', { name: 'Until deleted' })).toHaveAttribute('aria-checked', 'true');
   });
 
   it('persists retention changes and rolls back on save failure', async () => {
@@ -69,8 +70,10 @@ describe('durable settings persistence', () => {
     });
     await user.click(screen.getByRole('button', { name: 'Settings' }));
 
-    const retention = await screen.findByLabelText(/Transcript retention/i);
-    await user.selectOptions(retention, 'off');
+    await user.click(await screen.findByRole('tab', { name: 'Privacy' }));
+
+    const retention = await screen.findByRole('radiogroup', { name: 'Transcript retention' });
+    await user.click(within(retention).getByRole('radio', { name: 'Off' }));
     await waitFor(() => {
       expect(settingsIo.snapshot()).toContain('"transcriptRetention": "off"');
     });
@@ -78,12 +81,12 @@ describe('durable settings persistence', () => {
     const saveSpy = vi.spyOn(store, 'save').mockRejectedValueOnce(
       new Error('disk full'),
     );
-    await user.selectOptions(retention, 'forever');
+    await user.click(within(retention).getByRole('radio', { name: 'Until deleted' }));
     await waitFor(() => {
       expect(screen.getByText(/Failed to save settings/i)).toBeInTheDocument();
     });
     await waitFor(() => {
-      expect(retention).toHaveValue('off');
+      expect(within(retention).getByRole('radio', { name: 'Off' })).toHaveAttribute('aria-checked', 'true');
     });
     saveSpy.mockRestore();
   });
@@ -123,17 +126,19 @@ describe('durable settings persistence', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText(/not valid JSON|Settings file/i))
+      expect(screen.getByText(/couldn't be read and were reset to defaults\. Your original file is saved at memory-backup-1/i))
         .toBeInTheDocument();
     });
-    // Corrupt settings bytes left untouched until a later successful save.
-    expect(settingsIo.snapshot()).toBe('{corrupt');
+    // BUS-42: corrupt bytes are backed up, then replaced with v1 defaults.
+    expect(settingsIo.backups()).toEqual(['{corrupt']);
+    expect(JSON.parse(settingsIo.snapshot()!)).toMatchObject({ version: 2 });
     // History file still holds its original payload.
     expect(historyIo.snapshot()).toContain('keep-me');
 
     await user.click(screen.getByRole('button', { name: 'Skip' }));
     await user.click(screen.getByRole('button', { name: 'Settings' }));
-    const retention = await screen.findByLabelText(/Transcript retention/i);
-    expect(retention).toHaveValue('30-days');
+    await user.click(await screen.findByRole('tab', { name: 'Privacy' }));
+    const retention = await screen.findByRole('radiogroup', { name: 'Transcript retention' });
+    expect(within(retention).getByRole('radio', { name: '30 days' })).toHaveAttribute('aria-checked', 'true');
   });
 });

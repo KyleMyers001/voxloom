@@ -157,7 +157,26 @@ export function createWhisperSttModelStore(): SttModelStore {
   };
 }
 
+/**
+ * BUS-23 native speech filter overrides (all optional; Rust defaults apply).
+ * Mirrors `SpeechFilterConfig` in src-tauri/src/stt/filter_config.rs.
+ */
+export interface SpeechFilterConfig {
+  cleanup?: boolean;
+  noSpeechThold?: number;
+  quietPeak?: number;
+  quietRms?: number;
+  silenceGatePeak?: number;
+  silenceGateRms?: number;
+  stripTrailingOutros?: boolean;
+  suppressBlank?: boolean;
+  suppressNonSpeechTokens?: boolean;
+  vad?: boolean;
+}
+
 export interface WhisperEngineOptions {
+  /** BUS-23 filter overrides; omitted → native defaults. */
+  filter?: SpeechFilterConfig;
   /** Explicit model id — required; never auto-selected silently. */
   modelId: string;
 }
@@ -193,6 +212,7 @@ export function createWhisperSttEngine(
         return await invoke<Transcript>('stt_transcribe', {
           modelId,
           bufferId: audio.id,
+          filter: options.filter ?? null,
         });
       } catch (error) {
         throw mapNativeError(error);

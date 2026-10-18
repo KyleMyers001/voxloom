@@ -7,8 +7,12 @@
 //!   `spawn_blocking` so long I/O and whisper inference do not freeze the UI.
 
 pub mod catalog;
+pub mod cleanup;
 pub mod engine;
 pub mod error;
+pub mod filter_config;
+pub mod gate;
+pub mod pipeline;
 pub mod store;
 
 use std::sync::Arc;
@@ -18,6 +22,7 @@ use tauri::{AppHandle, State};
 use crate::capture::pcm_store::PcmBufferStore;
 use engine::TranscriptDto;
 use error::SttErrorDto;
+use filter_config::SpeechFilterConfig;
 use store::{ModelInfoDto, ModelStore};
 
 pub struct SttState {
@@ -39,7 +44,10 @@ fn err_string(e: SttErrorDto) -> String {
 }
 
 fn join_err(code: &str, e: impl std::fmt::Display) -> String {
-    err_string(SttErrorDto::new(code, format!("background task failed: {e}")))
+    err_string(SttErrorDto::new(
+        code,
+        format!("background task failed: {e}"),
+    ))
 }
 
 #[tauri::command]
@@ -48,10 +56,7 @@ pub fn stt_list_models(state: State<'_, SttState>) -> Vec<ModelInfoDto> {
 }
 
 #[tauri::command]
-pub fn stt_model_status(
-    state: State<'_, SttState>,
-    model_id: String,
-) -> Option<ModelInfoDto> {
+pub fn stt_model_status(state: State<'_, SttState>, model_id: String) -> Option<ModelInfoDto> {
     state.models.status(&model_id)
 }
 
@@ -77,20 +82,21 @@ pub async fn stt_download_model(
 /// Cancel is intentionally synchronous and cheap so it can interrupt an
 /// in-flight `stt_download_model` that is running on the blocking pool.
 #[tauri::command]
-pub fn stt_cancel_download(
-    state: State<'_, SttState>,
-    model_id: String,
-) -> Result<(), String> {
+pub fn stt_cancel_download(state: State<'_, SttState>, model_id: String) -> Result<(), String> {
     state.models.cancel(&model_id).map_err(err_string)
 }
 
 /// Transcribe off-thread so long whisper runs do not freeze the webview.
 /// Consumes the PCM buffer (single-use handle). Requires an explicit modelId.
+/// BUS-23: near-silent clips skip whisper; output is cleaned of non-speech
+/// tags / silence hallucinations before it reaches insert or Copy. `filter`
+/// is optional; omitted fields use `SpeechFilterConfig::default()`.
 #[tauri::command]
 pub async fn stt_transcribe(
     state: State<'_, SttState>,
     model_id: String,
     buffer_id: String,
+    filter: Option<SpeechFilterConfig>,
 ) -> Result<TranscriptDto, String> {
     if model_id.trim().is_empty() {
         return Err(err_string(SttErrorDto::new(
@@ -110,7 +116,11 @@ pub async fn stt_transcribe(
                 format!("Unknown or already-consumed audio buffer: {buffer_id}"),
             ))
         })?;
-        engine::transcribe_pcm(&path, &samples, rate).map_err(err_string)
+        let cfg = filter.unwrap_or_default();
+        pipeline::transcribe_filtered(&samples, rate, &cfg, &gate::NoVad, |pcm| {
+            engine::transcribe_pcm(&path, pcm, rate, &cfg)
+        })
+        .map_err(err_string)
     })
     .await
     .map_err(|e| join_err("transcribe-failed", e))?
@@ -134,10 +144,7 @@ mod tests {
 
     #[test]
     fn transcribe_path_consumes_buffer_and_returns_engine_result() {
-        let dir = std::env::temp_dir().join(format!(
-            "voxloom-stt-async-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("voxloom-stt-async-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         // Place a placeholder so resolved_path succeeds; engine stub still
@@ -152,7 +159,7 @@ mod tests {
 
         let path = models.resolved_path("whisper-tiny.en").unwrap();
         let (samples, rate) = buffers.take(&handle.id).unwrap();
-        let result = engine::transcribe_pcm(&path, &samples, rate);
+        let result = engine::transcribe_pcm(&path, &samples, rate, &SpeechFilterConfig::default());
 
         #[cfg(not(feature = "whisper"))]
         {

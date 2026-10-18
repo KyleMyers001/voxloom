@@ -1,8 +1,11 @@
 # BUS-16 local cleanup implementation
 
+Integration note: main now declares macOS 13.1 for the workerless app; optional
+cleanup remains macOS 13.3. The 10.15 references below are historical.
+
 ## Real-model checkpoint — 2026-10-02
 
-Kyle supplied the local allowlisted GGUF and authorized continuation. Actual
+The maintainer supplied the local allowlisted GGUF and authorized continuation. Actual
 metadata/template verification and three full 138-variant model runs are now
 recorded in [real-model evaluation](BUS-16-model-evaluation.md). No weights,
 worker/app resources or personal data were installed/replaced.
@@ -76,7 +79,7 @@ mutation occurred. Keep PR #24 draft. Earlier checkpoints below are historical.
 
 ## Approved optional-floor checkpoint — 2026-09-30 (historical)
 
-Kyle explicitly approved raising **only optional cleanup to macOS 13.3** while
+The maintainer explicitly approved raising **only optional cleanup to macOS 13.3** while
 preserving the ordinary workerless **10.15** declaration. Both the worker CMake
 floor (before compiler detection) and `tauri.cleanup.conf.json` are now 13.3.
 The default config, upstream pin, architecture and backends are unchanged.
@@ -101,7 +104,7 @@ No weights, upstream modification, push/merge, or PR/Jira mutation. Keep PR #24 
 
 ## Pinned worker build checkpoint — 2026-09-30 (historical)
 
-Kyle explicitly approved fetching the pinned upstream source for scratch
+The maintainer explicitly approved fetching the pinned upstream source for scratch
 compilation/testing, without weights or artifact replacement. A fresh checkout
 of `b10621` matches `c1d0e7a004015f23bc0233470b747b596f29b264` and remains clean.
 The **full worker, template checker, safety checker, and token-state checker

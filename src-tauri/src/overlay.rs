@@ -3,8 +3,8 @@
 //! Delivery/insert is out of scope — this window must never steal focus.
 
 use tauri::{
-    AppHandle, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewUrl,
-    WebviewWindow, WebviewWindowBuilder,
+    AppHandle, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
 };
 
 const OVERLAY_URL: &str = "overlay.html";
@@ -77,25 +77,21 @@ fn build_overlay(
     width: u32,
     height: u32,
 ) -> Result<WebviewWindow, String> {
-    let builder = WebviewWindowBuilder::new(
-        app,
-        label,
-        WebviewUrl::App(OVERLAY_URL.into()),
-    )
-    .title("Voxloom dictation")
-    .inner_size(width as f64, height as f64)
-    .decorations(false)
-    .resizable(false)
-    .maximizable(false)
-    .minimizable(false)
-    .closable(false)
-    .skip_taskbar(true)
-    .always_on_top(true)
-    .focused(false)
-    .focusable(false)
-    .visible(false)
-    .transparent(true)
-    .shadow(false);
+    let builder = WebviewWindowBuilder::new(app, label, WebviewUrl::App(OVERLAY_URL.into()))
+        .title("Voxloom dictation")
+        .inner_size(width as f64, height as f64)
+        .decorations(false)
+        .resizable(false)
+        .maximizable(false)
+        .minimizable(false)
+        .closable(false)
+        .skip_taskbar(true)
+        .always_on_top(true)
+        .focused(false)
+        .focusable(false)
+        .visible(false)
+        .transparent(true)
+        .shadow(false);
 
     // macOS: transparent requires private API (enabled in tauri.conf).
     // Linux builds still compile; transparency works without private API.
@@ -139,18 +135,24 @@ pub fn overlay_show(
     width: u32,
     height: u32,
     margin_bottom: i32,
+    cancellable: bool,
 ) -> Result<(), String> {
+    if cancellable && !crate::cancel_scope::can_show() {
+        return Err("Dictation cancellation scope is no longer active".into());
+    }
     let window = get_or_create(&app, &label, width, height)?;
     position_bottom_center(&window, width, height, margin_bottom)?;
     let _ = window.set_focusable(false);
     let _ = window.set_always_on_top(true);
     // Show without taking focus — never call set_focus(true).
     window.show().map_err(|e| e.to_string())?;
+    crate::cancel_scope::visible(cancellable);
     Ok(())
 }
 
 #[tauri::command]
 pub fn overlay_hide(app: AppHandle, label: String) -> Result<(), String> {
+    crate::cancel_scope::visible(false);
     if let Some(window) = app.get_webview_window(&label) {
         window.hide().map_err(|e| e.to_string())?;
     }

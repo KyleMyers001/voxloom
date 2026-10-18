@@ -1,15 +1,18 @@
-import { type FormEvent, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useApp } from '../../app/AppContext';
-import { Dialog } from '../../components/Dialog';
-import { validateWord } from '../../domain/dictionary';
+import { EmptyState } from '../../components/EmptyState';
+import { Icon } from '../../components/Icon';
+import { IconButton } from '../../components/IconButton';
+import { SearchField } from '../../components/SearchField';
+import { WordDialog } from './WordDialog';
+
+const count = (n: number) => `${n} ${n === 1 ? 'word' : 'words'}`;
 
 export function Dictionary() {
   const { dictionary, state } = useApp();
   const [editing, setEditing] = useState<string>();
-  const [error, setError] = useState('');
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [value, setValue] = useState('');
   const opener = useRef<HTMLElement | null>(null);
   const words = state.words.filter((word) =>
     word.toLowerCase().includes(query.toLowerCase())
@@ -18,90 +21,53 @@ export function Dictionary() {
   function edit(word: string | undefined, element: HTMLElement) {
     opener.current = element;
     setEditing(word);
-    setError('');
     setOpen(true);
-    setValue(word ?? '');
-  }
-
-  function save(event: FormEvent) {
-    event.preventDefault();
-    const result = validateWord(value, state.words, editing);
-    if (!result.ok) {
-      setError(result.error);
-      return;
-    }
-    dictionary.save(result.word, editing);
-    setOpen(false);
   }
 
   return (
-    <section aria-labelledby="dictionary-title">
-      <div className="hero">
+    <section aria-labelledby="dictionary-title" className="dictionary">
+      <header className="page-head page-head--action">
         <div>
           <h1 id="dictionary-title">Dictionary</h1>
-          <p>Canonical words used during simulated local transcription.</p>
+          <p>Your canonical spellings for names and terms.</p>
         </div>
-        <button
-          className="btn accent"
-          onClick={(event) => edit(undefined, event.currentTarget)}
-        >
-          Add term
+        <button className="btn primary" onClick={(event) => edit(undefined, event.currentTarget)} type="button">
+          <Icon name="plus" /> Add term
         </button>
+      </header>
+      <div className="history-tools">
+        <SearchField label="Search dictionary" onChange={setQuery} placeholder="Search words" value={query} />
+        <span aria-live="polite" className="fine">
+          {query ? `${words.length} of ${count(state.words.length)}` : count(state.words.length)}
+        </span>
       </div>
-      <div className="card">
-        <div className="search-row">
-          <input
-            aria-label="Search dictionary"
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search words"
-            type="search"
-            value={query}
-          />
-        </div>
-        <div className="term-list">
-          {words.map((word) => (
-            <div className="term-row" key={word} tabIndex={0}>
-              <strong>{word}</strong>
-              <div className="action-group term-row__actions">
-                <button
-                  aria-label={`Edit ${word}`}
-                  className="action-btn icon-btn"
-                  onClick={(event) => edit(word, event.currentTarget)}
-                >✎</button>
-                <button
-                  aria-label={`Delete ${word}`}
-                  className="action-btn danger icon-btn"
-                  onClick={() => dictionary.delete(word)}
-                >×</button>
-              </div>
+      <div className="term-grid">
+        {words.map((word) => (
+          <div className="term-row" key={word} tabIndex={0}>
+            <strong>{word}</strong>
+            <div className="action-group term-row__actions">
+              <IconButton icon="edit" label={`Edit ${word}`} onClick={(event) => edit(word, event.currentTarget)} />
+              <IconButton icon="trash" label={`Delete ${word}`} onClick={() => dictionary.delete(word)} tone="danger" />
             </div>
-          ))}
-          {!words.length && <p className="empty-note">No words found.</p>}
-        </div>
+          </div>
+        ))}
+        {!words.length && (
+          <EmptyState icon="book" title={query ? 'No words found.' : 'No words yet'}>
+            {query ? 'Try another search.' : 'Add names and terms you use often.'}
+          </EmptyState>
+        )}
       </div>
       {open && (
-        <Dialog
-          label={editing ? 'Edit dictionary word' : 'Add dictionary word'}
+        <WordDialog
+          editing={editing}
           onClose={() => setOpen(false)}
+          onSave={(word, previous) => {
+            dictionary.save(word, previous);
+            setOpen(false);
+          }}
           opener={opener.current}
-        >
-          <h2>{editing ? 'Edit dictionary word' : 'Add dictionary word'}</h2>
-          <form className="editor-form" onSubmit={save}>
-            <label htmlFor="dictionary-word">Word</label>
-            <input
-              autoComplete="off"
-              id="dictionary-word"
-              onChange={(event) => setValue(event.target.value)}
-              value={value}
-            />
-            {error && <p className="form-error" role="alert">{error}</p>}
-            <div className="editor-actions">
-              <button className="btn" onClick={() => setOpen(false)}
-                type="button">Cancel</button>
-              <button className="btn accent" type="submit">Save</button>
-            </div>
-          </form>
-        </Dialog>
+          words={state.words}
+        />
       )}
     </section>
   );

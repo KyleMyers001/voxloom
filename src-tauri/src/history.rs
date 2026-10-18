@@ -19,16 +19,12 @@ fn history_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join(HISTORY_FILE_NAME))
 }
 
-/// Read raw history JSON. Returns `null` when the file does not exist.
+/// Read raw history JSON. Returns `null` only when the file does not exist;
+/// a directory or unreadable path is an error (BUS-42).
 #[tauri::command]
 pub fn history_load(app: AppHandle) -> Result<Option<String>, String> {
     let path = history_path(&app)?;
-    if !path.is_file() {
-        return Ok(None);
-    }
-    let raw = fs::read_to_string(&path)
-        .map_err(|e| format!("read history.json: {e}"))?;
-    Ok(Some(raw))
+    crate::store_read::read_store(&path, "history.json")
 }
 
 /// Atomically replace `history.json` with `contents`.
@@ -36,8 +32,7 @@ pub fn history_load(app: AppHandle) -> Result<Option<String>, String> {
 pub fn history_save(app: AppHandle, contents: String) -> Result<(), String> {
     let path = history_path(&app)?;
     let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, contents.as_bytes())
-        .map_err(|e| format!("write history.json.tmp: {e}"))?;
+    fs::write(&tmp, contents.as_bytes()).map_err(|e| format!("write history.json.tmp: {e}"))?;
     fs::rename(&tmp, &path).map_err(|e| {
         let _ = fs::remove_file(&tmp);
         format!("rename history.json.tmp: {e}")

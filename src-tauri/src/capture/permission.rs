@@ -14,9 +14,7 @@
 mod macos {
     use block2::RcBlock;
     use objc2::runtime::Bool;
-    use objc2_av_foundation::{
-        AVAuthorizationStatus, AVCaptureDevice, AVMediaType,
-    };
+    use objc2_av_foundation::{AVAuthorizationStatus, AVCaptureDevice, AVMediaType};
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum MicPermission {
@@ -29,11 +27,8 @@ mod macos {
     /// Query the current microphone authorization status without prompting.
     pub fn query() -> MicPermission {
         // SAFETY: class method call, no run loop required.
-        let status = unsafe {
-            AVCaptureDevice::authorizationStatusForMediaType(
-                audio_media_type(),
-            )
-        };
+        let status =
+            unsafe { AVCaptureDevice::authorizationStatusForMediaType(audio_media_type()) };
         map_status(status)
     }
 
@@ -57,9 +52,7 @@ mod macos {
 
     fn map_status(s: AVAuthorizationStatus) -> MicPermission {
         match s {
-            AVAuthorizationStatus::NotDetermined => {
-                MicPermission::NotDetermined
-            }
+            AVAuthorizationStatus::NotDetermined => MicPermission::NotDetermined,
             AVAuthorizationStatus::Authorized => MicPermission::Authorized,
             AVAuthorizationStatus::Restricted => MicPermission::Restricted,
             _ => MicPermission::Denied,
@@ -69,8 +62,7 @@ mod macos {
     /// Reference to the AVMediaTypeAudio constant.
     /// SAFETY: always present on macOS 10.7+.
     unsafe fn audio_media_type() -> &'static AVMediaType {
-        objc2_av_foundation::AVMediaTypeAudio
-            .expect("AVMediaTypeAudio missing")
+        objc2_av_foundation::AVMediaTypeAudio.expect("AVMediaTypeAudio missing")
     }
 }
 
@@ -130,5 +122,5 @@ mod tests {
         assert_eq!(p, q);
     }
     // query() and request() require a foreground TCC context.
-    // Manual tests documented in docs/review/BUS-9-implementation.md.
+    // Covered by manual on-device tests.
 }

@@ -1,0 +1,50 @@
+/* Dictionary (UI PR 5): header action, two-column term tiles, dialog errors; boot-loading spinner. */
+.page-head--action {
+  align-items: flex-start;
+  display: flex;
+  gap: var(--s-8);
+  justify-content: space-between;
+}
+
+.term-grid {
+  display: grid;
+  gap: var(--s-4);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.term-grid .term-row {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-tile);
+  min-height: 0;
+  padding: var(--s-4) var(--s-4) var(--s-4) var(--s-7);
+}
+
+.term-grid .term-row strong { font-weight: 600; overflow-wrap: anywhere; }
+.term-grid .term-row__actions { gap: 2px; }
+.term-grid .empty { grid-column: 1 / -1; }
+
+.editor-form input[aria-invalid="true"] {
+  border-color: var(--err);
+  box-shadow: 0 0 0 1px var(--err);
+}
+
+.editor-form .form-error { color: var(--err); }
+
+.spin {
+  animation: spin 900ms linear infinite;
+  border: 2px solid var(--line);
+  border-radius: 50%;
+  border-top-color: var(--accfg);
+  height: 18px;
+  width: 18px;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .spin { animation: none; }
+}
+
+/* Keep "Add term" on one line; never squeezed by the heading (BUS-47 nit). */
+.page-head--action > .btn { flex-shrink: 0; white-space: nowrap; }

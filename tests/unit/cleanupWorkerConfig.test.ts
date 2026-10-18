@@ -18,7 +18,7 @@ describe('cleanup worker resources', () => {
       };
     };
     expect(config.bundle.resources ?? {}).toEqual({});
-    expect(config.bundle.macOS.minimumSystemVersion).toBe('10.15');
+    expect(config.bundle.macOS.minimumSystemVersion).toBe('13.1');
   });
 
   it('bundles only the executable in the optional macOS 13.3+ build', () => {

@@ -2,6 +2,12 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
 import { afterEach, beforeEach, vi } from 'vitest';
 
+// Key labels are platform-aware (glyphs on macOS, words elsewhere). Unit tests
+// default to macOS; off-Mac tests spy on this getter.
+if (typeof window !== 'undefined') {
+  Object.defineProperty(window.navigator, 'platform', { configurable: true, get: () => 'MacIntel' });
+}
+
 // Global mock: Tauri API is unavailable in jsdom.
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn().mockResolvedValue(undefined),

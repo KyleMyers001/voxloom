@@ -5,14 +5,12 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager};
 
 use super::artifact::{
-    copy_private, open_regular, validate as validate_artifact, validate_file,
-    ArtifactSpec,
+    copy_private, open_regular, validate as validate_artifact, validate_file, ArtifactSpec,
 };
 
 pub const MODEL_ID: &str = "qwen3-0.6b-q4-k-m";
 const MODEL_FILE: &str = "qwen3-0.6b-q4-k-m.gguf";
-const MODEL_SHA256: &str =
-    "ac2d97712095a558e31573f62f466a3f9d93990898b0ec79d7c974c1780d524a";
+const MODEL_SHA256: &str = "ac2d97712095a558e31573f62f466a3f9d93990898b0ec79d7c974c1780d524a";
 const MODEL_SIZE: u64 = 396_705_472;
 
 const ARTIFACT: ArtifactSpec = ArtifactSpec {
@@ -120,9 +118,7 @@ impl CleanupModelStore {
         self.import_artifact_with_sync(source, artifact, |parent| {
             File::open(parent)
                 .and_then(|directory| directory.sync_all())
-                .map_err(|error| {
-                    format!("sync cleanup model directory: {error}")
-                })
+                .map_err(|error| format!("sync cleanup model directory: {error}"))
         })
     }
 
@@ -134,9 +130,8 @@ impl CleanupModelStore {
     ) -> Result<(), String> {
         let _guard = self.begin_import()?;
         validate_artifact(source, artifact)?;
-        fs::create_dir_all(&self.root).map_err(|error| {
-            format!("create cleanup model directory: {error}")
-        })?;
+        fs::create_dir_all(&self.root)
+            .map_err(|error| format!("create cleanup model directory: {error}"))?;
         let destination = self.model_path();
         if validate_artifact(&destination, artifact).is_ok() {
             // Also retry durability after a prior post-rename sync failure.
@@ -144,16 +139,14 @@ impl CleanupModelStore {
         }
         let temporary = self.root.join(format!("{MODEL_FILE}.partial"));
         if temporary.exists() {
-            fs::remove_file(&temporary).map_err(|error| {
-                format!("remove stale partial model: {error}")
-            })?;
+            fs::remove_file(&temporary)
+                .map_err(|error| format!("remove stale partial model: {error}"))?;
         }
         let result = copy_private(source, &temporary)
             .and_then(|()| validate_artifact(&temporary, artifact))
             .and_then(|()| {
-                fs::rename(&temporary, &destination).map_err(|error| {
-                    format!("finalize cleanup model: {error}")
-                })?;
+                fs::rename(&temporary, &destination)
+                    .map_err(|error| format!("finalize cleanup model: {error}"))?;
                 sync_parent(&self.root)
             });
         if result.is_err() {
@@ -215,8 +208,7 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     fn temp_root(name: &str) -> PathBuf {
-        std::env::temp_dir()
-            .join(format!("voxloom-cleanup-{name}-{}", std::process::id(),))
+        std::env::temp_dir().join(format!("voxloom-cleanup-{name}-{}", std::process::id(),))
     }
 
     #[test]
@@ -226,9 +218,7 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         let source = root.join("source.gguf");
         fs::write(&source, b"GGUFtest").unwrap();
-        let digest = Box::leak(
-            format!("{:x}", Sha256::digest(b"GGUFtest")).into_boxed_str(),
-        );
+        let digest = Box::leak(format!("{:x}", Sha256::digest(b"GGUFtest")).into_boxed_str());
         let installed = root.join("installed");
         let store = CleanupModelStore::new(installed.clone());
         store
@@ -259,9 +249,7 @@ mod tests {
         let source = root.join("source.gguf");
         fs::write(&source, b"GGUFtest").unwrap();
         let spec = ArtifactSpec {
-            sha256: Box::leak(
-                format!("{:x}", Sha256::digest(b"GGUFtest")).into_boxed_str(),
-            ),
+            sha256: Box::leak(format!("{:x}", Sha256::digest(b"GGUFtest")).into_boxed_str()),
             size: 8,
         };
         let installed = root.join("installed");
@@ -269,10 +257,7 @@ mod tests {
         let error = store
             .import_artifact_with_sync(&source, spec, |parent| {
                 assert_eq!(parent, installed);
-                assert_eq!(
-                    fs::read(parent.join(MODEL_FILE)).unwrap(),
-                    b"GGUFtest"
-                );
+                assert_eq!(fs::read(parent.join(MODEL_FILE)).unwrap(), b"GGUFtest");
                 assert!(!parent.join(format!("{MODEL_FILE}.partial")).exists());
                 Err("directory sync failed".into())
             })
@@ -334,8 +319,7 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         let bytes = b"GGUFtest";
-        let digest =
-            Box::leak(format!("{:x}", Sha256::digest(bytes)).into_boxed_str());
+        let digest = Box::leak(format!("{:x}", Sha256::digest(bytes)).into_boxed_str());
         let store = CleanupModelStore::new(root.clone());
         fs::write(store.model_path(), b"GGUFevil").unwrap();
         let mut lease = store
@@ -374,8 +358,7 @@ mod tests {
         let root = temp_root("descriptor-verification");
         fs::create_dir_all(&root).unwrap();
         let bytes = b"GGUFtest";
-        let digest =
-            Box::leak(format!("{:x}", Sha256::digest(bytes)).into_boxed_str());
+        let digest = Box::leak(format!("{:x}", Sha256::digest(bytes)).into_boxed_str());
         let store = CleanupModelStore::new(root.clone());
         fs::write(store.model_path(), bytes).unwrap();
         let mut lease = store
@@ -412,8 +395,7 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         let bytes = b"GGUFtest";
-        let digest =
-            Box::leak(format!("{:x}", Sha256::digest(bytes)).into_boxed_str());
+        let digest = Box::leak(format!("{:x}", Sha256::digest(bytes)).into_boxed_str());
         let artifact = ArtifactSpec {
             sha256: digest,
             size: bytes.len() as u64,

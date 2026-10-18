@@ -14,6 +14,10 @@ import type {
 } from '../domain/types';
 import type { AppAction } from './actions';
 import { createInitialState } from './initialState';
+import {
+  mergePreHydrateRecords,
+  pendingPreHydrateRecords,
+} from './preHydrateRecords';
 
 export { createInitialState } from './initialState';
 export type { AppAction, SettingAction } from './actions';
@@ -25,6 +29,10 @@ export interface AppState {
   dictionaryError: string | null;
   /** Load/save failure message for durable history; null when healthy. */
   historyError: string | null;
+  /** True while history writes are blocked: new records keep the notice. */
+  historyErrorSticky: boolean;
+  /** False until durable history finished its boot load (BUS-45 queue). */
+  historyHydrated: boolean;
   /** Load/save failure message for durable settings; null when healthy. */
   settingsError: string | null;
   nextRunId: number;
@@ -45,7 +53,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       persistHistory,
       persistSettings,
     });
-    let result = next;
+    let result = { ...next, historyHydrated: state.historyHydrated };
     if (persistHistory && action.wipeHistory !== true) {
       // Session UI reset only — keep durable rows so history.json is not
       // overwritten with fixture seed data.
@@ -127,7 +135,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
   if (action.type === 'append-record') {
     return {
       ...state,
-      historyError: null,
+      historyError: state.historyErrorSticky ? state.historyError : null,
       records: [action.record, ...state.records],
     };
   }
@@ -135,12 +143,20 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     return {
       ...state,
       historyError: null,
-      records: action.records,
+      historyErrorSticky: false,
+      historyHydrated: true,
+      records: mergePreHydrateRecords(
+        action.records,
+        pendingPreHydrateRecords(state.historyHydrated, state.records),
+      ),
     };
   }
   if (action.type === 'set-history-error') {
-    if (state.historyError === action.message) return state;
-    return { ...state, historyError: action.message };
+    const sticky = action.sticky === true;
+    if (state.historyError === action.message && state.historyErrorSticky === sticky) {
+      return state;
+    }
+    return { ...state, historyError: action.message, historyErrorSticky: sticky };
   }
   if (action.type === 'hydrate-settings') {
     return {

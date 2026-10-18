@@ -67,7 +67,7 @@ All 17 final changed outputs were inspected by the coding agent:
 All 72 unchanged outputs and 49 fallbacks exactly matched their raw input.
 No unsafe accepted change was found in this fixed run's agent inspection. The
 meaning-review artifact and evaluator summaries still say **human review pending**
-and `qualityPassed: false`; coding-agent inspection is not Kyle's sign-off.
+and `qualityPassed: false`; coding-agent inspection is not the maintainer's sign-off.
 
 Usefulness remains modest. Most normal inputs are unchanged or fall back; the
 model still mishandles some corrections, repetitions, quotation, casing and

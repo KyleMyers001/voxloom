@@ -92,9 +92,7 @@ impl WorkerProcess {
         let response = match read_receiver.recv_timeout(remaining(deadline)) {
             Ok(Ok(response)) => response,
             Ok(Err(error)) => return Err(ProcessError::Runtime(error)),
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                return Err(ProcessError::Timeout)
-            }
+            Err(mpsc::RecvTimeoutError::Timeout) => return Err(ProcessError::Timeout),
             Err(error) => {
                 return Err(ProcessError::Runtime(format!(
                     "cleanup worker response failed: {error}",

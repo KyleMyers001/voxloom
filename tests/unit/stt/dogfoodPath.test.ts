@@ -133,7 +133,6 @@ describe('dogfoodTranscribeAndCopy delivery (BUS-14)', () => {
       createEngine: (modelId) =>
         createMockSttEngine({ modelId, transcriptText: 'into notes' }),
       deliveryPlatform,
-      intended,
       modelId: 'whisper-tiny.en',
     });
 
@@ -172,7 +171,6 @@ describe('dogfoodTranscribeAndCopy delivery (BUS-14)', () => {
       createEngine: (modelId) =>
         createMockSttEngine({ modelId, transcriptText: 'password' }),
       deliveryPlatform,
-      intended: secure,
       modelId: 'whisper-tiny.en',
     });
 
@@ -276,6 +274,36 @@ describe('dogfoodTranscribeAndCopy cleanup integration', () => {
     expect(result.transcript.text).toBe('Cleaned transcript.');
     expect(clip.copy).toHaveBeenCalledOnce();
     expect(clip.copy).toHaveBeenCalledWith('Cleaned transcript.');
+  });
+
+  it('settles cancellation and snapshots the target only after local cleanup', async () => {
+    const events: string[] = [];
+    const clip = clipboard();
+    const snapshotTarget = vi.fn(async () => {
+      events.push('snapshot');
+      return null;
+    });
+    const result = await dogfoodTranscribeAndCopy({
+      audio: { duration_ms: 100, id: 'cleanup-target-order', sample_rate_hz: 16_000 },
+      beforeDelivery: async () => { events.push('finish-cancel-scope'); },
+      cleanup: {
+        engine: { cancel: vi.fn(), run: vi.fn(async () => {
+          events.push('cleanup');
+          expect(snapshotTarget).not.toHaveBeenCalled();
+          return 'Cleaned transcript.';
+        }) },
+        requestId: 'cleanup-target-order', signal: processingSignal(), snapshot: cleanupSnapshot,
+      },
+      clipboard: clip,
+      createEngine: () => ({ modelId: 'whisper-tiny.en', transcribe: async () => ({
+        rawText: '[Music] cleaned transcript', text: 'cleaned transcript',
+      }) }),
+      modelId: 'whisper-tiny.en', snapshotTarget,
+    });
+    expect(events).toEqual(['cleanup', 'finish-cancel-scope', 'snapshot']);
+    expect(result.rawTranscript?.rawText).toBe('[Music] cleaned transcript');
+    expect(result.transcript.text).toBe('Cleaned transcript.');
+    expect(clip.copy).toHaveBeenCalledExactlyOnceWith('Cleaned transcript.');
   });
 
   it('falls back once to raw text when cleanup output is invalid', async () => {
@@ -383,11 +411,186 @@ describe('dogfoodTranscribeAndCopy cleanup integration', () => {
         snapshotTarget: vi.fn().mockResolvedValue(intended),
         validateTarget: vi.fn().mockResolvedValue(intended),
       },
-      intended,
       modelId: 'whisper-tiny.en',
     });
 
     expect(result.delivery.status).toBe('inserted');
     expect(result.delivery.message).toBe('Inserted');
+  });
+});
+describe('completion-time delivery side effects', () => {
+  it.each(['empty', 'error', 'cancelled'] as const)('avoids target and clipboard work for %s STT', async (mode) => {
+    const clip = clipboard();
+    const snapshotTarget = vi.fn();
+    const validateTarget = vi.fn();
+    const insertText = vi.fn();
+    const clipboardWrite = vi.fn();
+    const clipboardRead = vi.fn();
+    const pending = dogfoodTranscribeAndCopy({
+      audio: { duration_ms: 100, id: 'pcm-side-effects', sample_rate_hz: 16_000 },
+      clipboard: clip,
+      modelId: 'whisper-tiny.en',
+      isCurrent: () => mode !== 'cancelled',
+      createEngine: (modelId) => ({
+        ...createMockSttEngine({ modelId }),
+        transcribe: async () => {
+          if (mode === 'error') throw new Error('STT failed');
+          return { text: mode === 'empty' ? '  ' : 'cancelled text', language: 'en' };
+        },
+      }),
+      deliveryPlatform: { snapshotTarget, validateTarget, insertText, clipboardWrite, clipboardRead, clipboardRestore: vi.fn() },
+    });
+    if (mode === 'error') await expect(pending).rejects.toThrow('STT failed');
+    else expect((await pending).delivery.status).toBe('failed');
+    for (const effect of [snapshotTarget, validateTarget, insertText, clipboardWrite, clipboardRead, clip.copy]) {
+      expect(effect).not.toHaveBeenCalled();
+    }
+  });
+});
+
+describe('completion snapshot failures', () => {
+  it.each([true, false])('honors fallback=%s when an asynchronous snapshot rejects', async (fallback) => {
+    const clip = clipboard();
+    const snapshotTarget = vi.fn().mockRejectedValue(new Error('AX worker rejected'));
+    const result = await dogfoodTranscribeAndCopy({
+      audio: { duration_ms: 100, id: 'pcm-snapshot-reject', sample_rate_hz: 16_000 },
+      clipboard: clip,
+      clipboardFallback: fallback,
+      modelId: 'whisper-tiny.en',
+      createEngine: (modelId) => createMockSttEngine({ modelId, transcriptText: 'recoverable transcript' }),
+      snapshotTarget,
+    });
+    expect(snapshotTarget).toHaveBeenCalledOnce();
+    expect(result.transcript.text).toBe('recoverable transcript');
+    expect(result.delivery.status).toBe(fallback ? 'copied' : 'failed');
+    expect(clip.copy).toHaveBeenCalledTimes(fallback ? 1 : 0);
+    if (fallback) expect(clip.copy).toHaveBeenCalledWith('recoverable transcript');
+  });
+
+  it('cancellation during a rejecting snapshot prevents fallback and all later platform calls', async () => {
+    let reject!: (error: Error) => void;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const snapshot = new Promise<never>((_, fail) => { reject = fail; });
+    let current = true;
+    const clip = clipboard();
+    const platform = {
+      snapshotTarget: vi.fn(() => { entered(); return snapshot; }),
+      validateTarget: vi.fn(), insertText: vi.fn(),
+      clipboardWrite: vi.fn(), clipboardRead: vi.fn(), clipboardRestore: vi.fn(),
+    };
+    const pending = dogfoodTranscribeAndCopy({
+      audio: { duration_ms: 100, id: 'pcm-cancelled-snapshot', sample_rate_hz: 16_000 },
+      clipboard: clip, clipboardFallback: true,
+      modelId: 'whisper-tiny.en',
+      createEngine: (modelId) => createMockSttEngine({ modelId, transcriptText: 'old transcript' }),
+      deliveryPlatform: platform, isCurrent: () => current,
+    });
+    await started;
+    current = false;
+    reject(new Error('late AX failure'));
+    const result = await pending;
+    expect(result.delivery.status).toBe('failed');
+    expect(result.delivery.message).toContain('cancelled or superseded');
+    expect(result.transcript.text).toBe('old transcript');
+    expect(platform.snapshotTarget).toHaveBeenCalledOnce();
+    for (const effect of [platform.validateTarget, platform.insertText, platform.clipboardWrite,
+      platform.clipboardRead, platform.clipboardRestore, clip.copy]) {
+      expect(effect).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each([true, false])('honors fallback=%s when snapshot throws synchronously', async (fallback) => {
+    const clip = clipboard();
+    const result = await dogfoodTranscribeAndCopy({
+      audio: { duration_ms: 100, id: 'pcm-snapshot-fail', sample_rate_hz: 16_000 },
+      clipboard: clip,
+      clipboardFallback: fallback,
+      modelId: 'whisper-tiny.en',
+      createEngine: (modelId) => createMockSttEngine({ modelId }),
+      snapshotTarget: () => { throw new Error('AX unavailable'); },
+    });
+    expect(result.delivery.status).toBe(fallback ? 'copied' : 'failed');
+    expect(clip.copy).toHaveBeenCalledTimes(fallback ? 1 : 0);
+  });
+
+  describe('BUS-23 cleaned-to-empty transcripts', () => {
+    for (const dropped of [
+      'silent-audio',
+      'no-speech',
+      'non-speech-only',
+      'quiet-hallucination',
+    ] as const) {
+      it(`${dropped}: nothing inserted or copied, status is not Inserted/Copied`, async () => {
+        const clip = clipboard();
+        const snapshotTarget = vi.fn();
+        const insertText = vi.fn();
+        const clipboardWrite = vi.fn();
+        const result = await dogfoodTranscribeAndCopy({
+          audio: { duration_ms: 900, id: 'pcm-quiet', sample_rate_hz: 16_000 },
+          clipboard: clip,
+          createEngine: (modelId) => ({
+            modelId,
+            transcribe: () => Promise.resolve({
+              dropped,
+              rawText: dropped === 'quiet-hallucination' ? 'Thank you.' : '',
+              text: '',
+            }),
+          }),
+          deliveryPlatform: {
+            clipboardRead: vi.fn(),
+            clipboardRestore: vi.fn(),
+            clipboardWrite,
+            insertText,
+            snapshotTarget,
+            validateTarget: vi.fn(),
+          },
+          modelId: 'whisper-tiny.en',
+          snapshotTarget,
+        });
+
+        expect(clip.copy).not.toHaveBeenCalled();
+        expect(insertText).not.toHaveBeenCalled();
+        expect(clipboardWrite).not.toHaveBeenCalled();
+        expect(snapshotTarget).not.toHaveBeenCalled();
+        expect(result.copied).toBe(false);
+        expect(result.delivery.status).toBe('failed');
+        expect(result.delivery.message).toMatch(/nothing inserted or copied/);
+        expect(result.delivery.message).not.toMatch(/Inserted|Copied/);
+      });
+    }
+
+    it('keeps the generic wording for blank text without a drop reason', async () => {
+      const clip = clipboard();
+      const result = await dogfoodTranscribeAndCopy({
+        audio: { duration_ms: 900, id: 'pcm-blank', sample_rate_hz: 16_000 },
+        clipboard: clip,
+        createEngine: (modelId) => ({
+          modelId,
+          transcribe: () => Promise.resolve({ text: '' }),
+        }),
+        modelId: 'whisper-tiny.en',
+      });
+      expect(clip.copy).not.toHaveBeenCalled();
+      expect(result.delivery.message).toMatch(/empty transcript/);
+    });
+
+    it('delivers cleaned text (not raw) on the Copy path', async () => {
+      const clip = clipboard();
+      const result = await dogfoodTranscribeAndCopy({
+        audio: { duration_ms: 900, id: 'pcm-clean', sample_rate_hz: 16_000 },
+        clipboard: clip,
+        createEngine: (modelId) => ({
+          modelId,
+          transcribe: () => Promise.resolve({
+            rawText: '[Music] ship it',
+            text: 'ship it',
+          }),
+        }),
+        modelId: 'whisper-tiny.en',
+      });
+      expect(clip.copy).toHaveBeenCalledWith('ship it');
+      expect(result.transcript.rawText).toBe('[Music] ship it');
+    });
   });
 });

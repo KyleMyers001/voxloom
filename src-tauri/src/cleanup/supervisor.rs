@@ -82,14 +82,9 @@ impl WorkerSupervisor {
         false
     }
 
-    pub fn reserve(
-        &self,
-        request_id: String,
-    ) -> Result<WorkerReservation, SupervisorError> {
+    pub fn reserve(&self, request_id: String) -> Result<WorkerReservation, SupervisorError> {
         let mut state = self.shared.state.lock().unwrap();
-        if let Some(index) =
-            state.cancelled.iter().position(|id| id == &request_id)
-        {
+        if let Some(index) = state.cancelled.iter().position(|id| id == &request_id) {
             state.cancelled.remove(index);
             return Err(Self::cancelled_error());
         }
@@ -136,14 +131,9 @@ impl WorkerSupervisor {
 
     /// Marks cancellation without doing process I/O; safe under the registry
     /// lock. The caller must subsequently cancel/reap outside that lock.
-    pub(super) fn mark_cancelled(
-        &self,
-        request_id: &str,
-    ) -> Option<ProcessHandle> {
+    pub(super) fn mark_cancelled(&self, request_id: &str) -> Option<ProcessHandle> {
         let mut state = self.shared.state.lock().unwrap();
-        if let Some(active) =
-            state.active.as_mut().filter(|a| a.request_id == request_id)
-        {
+        if let Some(active) = state.active.as_mut().filter(|a| a.request_id == request_id) {
             active.cancelled = true;
             active.process.clone()
         } else {
@@ -221,11 +211,7 @@ impl WorkerReservation {
         on_started: impl FnOnce(),
     ) -> Result<String, SupervisorError> {
         let path = self.worker_path.clone();
-        self.run_with_spawn_and_started(
-            prompt,
-            || WorkerProcess::spawn(&path, model),
-            on_started,
-        )
+        self.run_with_spawn_and_started(prompt, || WorkerProcess::spawn(&path, model), on_started)
     }
 
     #[cfg(test)]
@@ -311,12 +297,8 @@ impl WorkerReservation {
             ));
         }
         if response.status == "error" {
-            let (Some(code), Some(message)) =
-                (response.error_code, response.error)
-            else {
-                return Err(SupervisorError::runtime(
-                    "malformed cleanup worker error",
-                ));
+            let (Some(code), Some(message)) = (response.error_code, response.error) else {
+                return Err(SupervisorError::runtime("malformed cleanup worker error"));
             };
             if response.text.is_some()
                 || code.is_empty()
@@ -338,17 +320,14 @@ impl WorkerReservation {
                 message,
             });
         }
-        if response.status != "ok"
-            || response.error.is_some()
-            || response.error_code.is_some()
-        {
+        if response.status != "ok" || response.error.is_some() || response.error_code.is_some() {
             return Err(SupervisorError::runtime(
                 "malformed cleanup worker response",
             ));
         }
-        let text = response.text.ok_or_else(|| {
-            SupervisorError::runtime("cleanup worker returned no text")
-        })?;
+        let text = response
+            .text
+            .ok_or_else(|| SupervisorError::runtime("cleanup worker returned no text"))?;
         if text.len() > 32_000 {
             return Err(SupervisorError {
                 code: "invalid-output",
@@ -391,8 +370,7 @@ mod tests {
     use std::thread;
 
     fn fake_root(name: &str) -> PathBuf {
-        std::env::temp_dir()
-            .join(format!("voxloom-supervisor-{}-{name}", std::process::id(),))
+        std::env::temp_dir().join(format!("voxloom-supervisor-{}-{name}", std::process::id(),))
     }
 
     fn fake_worker(name: &str, body: &str) -> PathBuf {
@@ -442,8 +420,7 @@ write({{"error": None, "errorCode": None, "requestId": request["requestId"],
 
     #[test]
     fn cancelled_reservation_keeps_the_slot_until_its_owner_settles() {
-        let supervisor =
-            WorkerSupervisor::new(success_worker("reserved-cancel"));
+        let supervisor = WorkerSupervisor::new(success_worker("reserved-cancel"));
         let reservation = supervisor.reserve("reserved".into()).unwrap();
         supervisor.cancel("reserved");
         supervisor.release("reserved");
@@ -470,11 +447,10 @@ write({{"error": None, "errorCode": None, "requestId": request["requestId"],
         });
         wait_entered.recv_timeout(Duration::from_secs(5)).unwrap();
         let spawned = std::sync::atomic::AtomicBool::new(false);
-        let second =
-            supervisor.run_with_spawn("p".into(), "second".into(), || {
-                spawned.store(true, std::sync::atomic::Ordering::SeqCst);
-                WorkerProcess::spawn(&path, &model_file("overlap-b"))
-            });
+        let second = supervisor.run_with_spawn("p".into(), "second".into(), || {
+            spawned.store(true, std::sync::atomic::Ordering::SeqCst);
+            WorkerProcess::spawn(&path, &model_file("overlap-b"))
+        });
         proceed.send(()).unwrap();
         assert_eq!(running.join().unwrap().unwrap(), "cleaned");
         assert!(!spawned.load(std::sync::atomic::Ordering::SeqCst));
@@ -502,11 +478,7 @@ write({{"error": None, "errorCode": None, "requestId": request["requestId"],
         assert_eq!(running.join().unwrap().unwrap_err().code, "cancelled");
         assert_eq!(
             supervisor
-                .run(
-                    &model_file("spawn-cancel-next"),
-                    "p".into(),
-                    "next".into(),
-                )
+                .run(&model_file("spawn-cancel-next"), "p".into(), "next".into(),)
                 .unwrap(),
             "cleaned"
         );
@@ -515,10 +487,8 @@ write({{"error": None, "errorCode": None, "requestId": request["requestId"],
     #[test]
     fn framed_success_and_recovery_after_malformed_output() {
         let model = model_file("success");
-        let success = WorkerSupervisor::with_timeout(
-            success_worker("success"),
-            Duration::from_secs(2),
-        );
+        let success =
+            WorkerSupervisor::with_timeout(success_worker("success"), Duration::from_secs(2));
         assert_eq!(
             success.run(&model, "p".into(), "r1".into()).unwrap(),
             "cleaned"
@@ -543,10 +513,7 @@ else:
                 malformed_marker.display()
             ),
         );
-        let malformed = WorkerSupervisor::with_timeout(
-            malformed_path,
-            Duration::from_secs(2),
-        );
+        let malformed = WorkerSupervisor::with_timeout(malformed_path, Duration::from_secs(2));
         assert!(malformed.run(&model, "p".into(), "bad".into()).is_err());
         assert_eq!(
             malformed.run(&model, "p".into(), "again".into(),).unwrap(),
@@ -557,8 +524,7 @@ else:
     #[test]
     fn hung_stdin_is_timed_out_reaped_and_next_run_succeeds() {
         let hung = fake_worker("hung-stdin", "import time\ntime.sleep(60)");
-        let supervisor =
-            WorkerSupervisor::with_timeout(hung, Duration::from_millis(100));
+        let supervisor = WorkerSupervisor::with_timeout(hung, Duration::from_millis(100));
         let error = supervisor
             .run(
                 &model_file("hung"),
@@ -568,10 +534,8 @@ else:
             .unwrap_err();
         assert_eq!(error.code, "timeout");
 
-        let supervisor = WorkerSupervisor::with_timeout(
-            success_worker("after-hung"),
-            Duration::from_secs(2),
-        );
+        let supervisor =
+            WorkerSupervisor::with_timeout(success_worker("after-hung"), Duration::from_secs(2));
         assert!(supervisor
             .run(&model_file("next"), "p".into(), "next".into(),)
             .is_ok());
@@ -597,9 +561,8 @@ write({{"error": None, "errorCode": None,
             Duration::from_secs(5),
         ));
         let running = Arc::clone(&supervisor);
-        let handle = thread::spawn(move || {
-            running.run(&model_file("active"), "p".into(), "active".into())
-        });
+        let handle =
+            thread::spawn(move || running.run(&model_file("active"), "p".into(), "active".into()));
         for _ in 0..100 {
             if supervisor.shared.state.lock().unwrap().active.is_some() {
                 break;
@@ -669,8 +632,7 @@ write({{"error": None, "errorCode": None, "requestId": "other",
 "#
             ),
         );
-        let supervisor =
-            WorkerSupervisor::with_timeout(mismatch, Duration::from_secs(2));
+        let supervisor = WorkerSupervisor::with_timeout(mismatch, Duration::from_secs(2));
         assert!(supervisor
             .run(&model_file("mismatch"), "p".into(), "expected".into(),)
             .unwrap_err()
@@ -695,10 +657,7 @@ write({{"error": None, "errorCode": None,
                 crash_marker.display()
             ),
         );
-        let crash = WorkerSupervisor::with_timeout(
-            crash_worker,
-            Duration::from_secs(2),
-        );
+        let crash = WorkerSupervisor::with_timeout(crash_worker, Duration::from_secs(2));
         assert!(crash
             .run(&model_file("crash"), "p".into(), "crash".into(),)
             .is_err());
@@ -765,8 +724,7 @@ write({{"error": None, "errorCode": None,
             request_id: "r".into(),
         };
         let overhead = serde_json::to_vec(&request).unwrap().len();
-        let prompt =
-            "x".repeat(super::super::protocol::MAX_FRAME_BYTES - overhead);
+        let prompt = "x".repeat(super::super::protocol::MAX_FRAME_BYTES - overhead);
         let supervisor = WorkerSupervisor::new(success_worker("frame-exact"));
         assert_eq!(
             supervisor
@@ -910,8 +868,7 @@ write({{"error": {message}, "errorCode": {code}, "requestId": "{id}",
 
     #[test]
     fn readiness_requires_an_executable_regular_file() {
-        let path =
-            fake_worker("readiness", "raise RuntimeError('must not run')");
+        let path = fake_worker("readiness", "raise RuntimeError('must not run')");
         let supervisor = WorkerSupervisor::new(path.clone());
         assert!(supervisor.available());
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();

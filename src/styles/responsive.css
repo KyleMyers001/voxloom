@@ -1,0 +1,38 @@
+/* Responsive and reduced-motion overrides; imported last. */
+/* Settings window (760px) keeps three swatches across; wrap only below 640px. */
+@media (max-width: 640px) {
+  .appearance-options { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 780px) {
+  .form-grid { grid-template-columns: 1fr; }
+  .history-list .action-group,
+  .term-row__actions {
+    opacity: 1;
+    visibility: visible;
+  }
+  .recent-row { grid-template-columns: auto minmax(0, 1fr); }
+  .recent-row > :last-child { grid-column: 2; }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .history-list .action-group,
+  .term-row__actions {
+    opacity: 1;
+    visibility: visible;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    /* A nonzero duration creates transitions even where none were declared. */
+    transition: none !important;
+  }
+
+  .wave i,
+  [data-waveform="processing"] .wave i { animation: none; transition: none; }
+}
+

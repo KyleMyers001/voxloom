@@ -1,0 +1,66 @@
+/* HUD (UI PR 8, SPEC § HUD behavior rules; mocks hud.html, hud-transcribing.html).
+   The HUD is the same dark pill on any wallpaper, so it doesn't follow the app theme. */
+.recording--overlay[data-waveform="processing"] { border-color: color-mix(in srgb, var(--brand-b) 45%, transparent); }
+
+/* Option A: the bars settle into an even row; the gradient shimmers and pulses (1.6 s). */
+/* Listening and transcribing share one 118px row in a 136px pill, so nothing jumps. */
+.recording--overlay .wave { gap: 2px; width: 118px; }
+.recording--overlay .wave i { flex-basis: 3px; }
+
+/* 24 rounded 3px bars on a 5px pitch (exactly 118px, full caps at both ends). */
+.hud-transcribing {
+  animation: hud-pulse 1.6s ease-in-out infinite;
+  height: 6px;
+  margin: 4px 0;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='5' height='6'%3E%3Crect width='3' height='6' rx='1.5'/%3E%3C/svg%3E") 0 0 / 5px 6px repeat-x;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='5' height='6'%3E%3Crect width='3' height='6' rx='1.5'/%3E%3C/svg%3E") 0 0 / 5px 6px repeat-x;
+  overflow: hidden;
+  width: 118px;
+}
+
+/* Shimmer is a compositor-only transform: a 2× wide repeating gradient slides by half. */
+.hud-transcribing i {
+  animation: hud-shimmer 1.6s linear infinite;
+  background: linear-gradient(90deg, var(--brand-a), var(--brand-b), var(--brand-a), var(--brand-b), var(--brand-a));
+  display: block;
+  height: 100%;
+  width: 200%;
+  will-change: transform;
+}
+
+@keyframes hud-shimmer { to { transform: translateX(-50%); } }
+@keyframes hud-pulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+
+@keyframes hud-breathe { 0%, 100% { opacity: .6; } 50% { opacity: .9; } }
+
+/* Reduce Motion (BUS-50): no shimmer, a slow 3 s opacity breathe. */
+@media (prefers-reduced-motion: reduce) {
+  .hud-transcribing { animation: hud-breathe 3s ease-in-out infinite; }
+  .hud-transcribing i { animation: none; will-change: auto; }
+}
+
+/* Result states: ~2.5 s each (timed by overlayBridge). */
+.hud-result {
+  align-items: center;
+  background: #0e0e14;
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand-a) 35%, transparent), 0 0 0 .5px rgba(0, 0, 0, .6), 0 0 18px color-mix(in srgb, var(--brand-b) 14%, transparent);
+  color: #ececf1;
+  display: flex;
+  font-size: 12.5px;
+  font-weight: 600;
+  gap: 7px;
+  height: 30px;
+  left: 50%;
+  padding: 0 14px;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+}
+
+.hud-result--copied .icon { color: var(--brand-a); }
+.hud-result--failed { box-shadow: inset 0 0 0 1px rgba(255, 107, 107, .5), 0 0 0 .5px rgba(0, 0, 0, .6); }
+.hud-result--failed .icon { color: #ff6b6b; }
+.hud-result--unverified { box-shadow: inset 0 0 0 1px rgba(255, 176, 32, .5), 0 0 0 .5px rgba(0, 0, 0, .6); }
+.hud-result--unverified .icon { color: #ffb020; }

@@ -25,6 +25,7 @@ import { DeliveryCancelledError } from '../delivery/types';
 import type { SttEngine } from './contracts';
 import { audioHandleFromCapture } from './fromCapture';
 import { createSttEngine } from './factory';
+import { explainEmptyTranscript } from './noSpeech';
 import { resolveTranscriptionModelId } from './resolveModelId';
 import { SttError, type Transcript } from './types';
 
@@ -53,10 +54,14 @@ export interface DogfoodTranscribeOptions {
   onCleanupStart?: () => void;
   onDeliveryStart?: () => void;
   /**
-   * Invocation-time intended target snapshot (ADR §4).
-   * When omitted, delivery treats the target as unavailable → Copy/Fail.
+   * Called after final STT (including engine cleanup), never during capture.
+   * Defaults to the platform snapshot. Null means unavailable → Copy/Fail.
    */
-  intended?: TargetSnapshot | null;
+  snapshotTarget?: () => Promise<TargetSnapshot | null>;
+  /** False after cancel/supersession: no new target lookup or delivery writes. */
+  isCurrent?: () => boolean;
+  /** Close the native cancellation window before target lookup or delivery. */
+  beforeDelivery?: () => Promise<void>;
   /**
    * Explicit selected model id (Settings `transcriptionModel`).
    * Resolved via `resolveTranscriptionModelId` — never auto-downloaded.
@@ -110,10 +115,10 @@ export async function dogfoodTranscribeAndCopy(
   if (options.cleanup?.signal.aborted) {
     throw new DOMException('Dictation cancelled', 'AbortError');
   }
-  if (!transcript.text.trim()) {
+  if (options.cleanup && !transcript.text.trim() && !transcript.dropped) {
     throw new SttError('no-speech', 'No speech detected — nothing delivered.');
   }
-  const cleanup = options.cleanup
+  const cleanup = options.cleanup && transcript.text.trim() && (options.isCurrent?.() ?? true)
     ? await runCleanup({
         admissionError: options.cleanup.admissionError,
         engine: options.cleanup.engine,
@@ -128,7 +133,10 @@ export async function dogfoodTranscribeAndCopy(
     throw new DOMException('Dictation cancelled', 'AbortError');
   }
   const finalTranscript = { ...transcript, text: cleanup.finalText };
-  options.onDeliveryStart?.();
+  if (options.isCurrent?.() ?? true) {
+    await options.beforeDelivery?.();
+    options.onDeliveryStart?.();
+  }
 
   const platform = resolvePlatform(
     options.clipboard,
@@ -137,13 +145,25 @@ export async function dogfoodTranscribeAndCopy(
   const clipboardFallback = options.clipboardFallback !== false;
 
   try {
-    const delivery = await deliverTranscript({
-      clipboardFallback,
-      canWrite: () => !options.cleanup?.signal.aborted,
-      intended: options.intended ?? null,
-      platform,
-      text: finalTranscript.text,
-    });
+    let intended: TargetSnapshot | null = null;
+    if (finalTranscript.text.trim() && (options.isCurrent?.() ?? true)) {
+      try {
+        intended = await (options.snapshotTarget ?? (() => platform.snapshotTarget()))();
+      } catch {
+        // Unavailable AX must still honor the user's Copy fallback setting.
+      }
+    }
+    const delivery = explainEmptyTranscript(
+      await deliverTranscript({
+        clipboardFallback,
+        canWrite: () => !options.cleanup?.signal.aborted,
+        isCurrent: options.isCurrent,
+        intended,
+        platform,
+        text: finalTranscript.text,
+      }),
+      finalTranscript,
+    );
     return {
       copied: delivery.status === 'copied',
       copyWarning: delivery.status === 'failed'

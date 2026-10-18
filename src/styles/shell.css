@@ -1,0 +1,109 @@
+/* App shell (UI PR 3): toolbar, sidebar (brand, nav, dev disclosure, hint), main. */
+.app {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 100vh;
+}
+
+.titlebar {
+  align-items: center;
+  background: var(--side);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: var(--s-4);
+  grid-column: 1 / -1;
+  min-height: 40px;
+  padding: 0 var(--s-8);
+}
+
+.titlebar__title { color: var(--mut); font-size: var(--fs-secondary); font-weight: 600; }
+
+.tb-settings {
+  align-items: center;
+  border: 0;
+  border-radius: var(--r-ctl);
+  color: var(--mut);
+  display: inline-flex;
+  font-size: var(--fs-secondary);
+  gap: 6px;
+  margin-left: auto;
+  padding: 4px 8px;
+}
+
+.tb-settings:hover,
+.tb-settings:focus-visible,
+.tb-settings[aria-current="page"] { background: var(--navon); color: var(--fg); }
+.tb-settings[aria-current="page"] { box-shadow: inset 0 -2px 0 var(--sel-edge); }
+
+.tb-help {
+  border: 1px solid var(--ctl-line);
+  border-radius: 50%;
+  color: var(--mut);
+  height: 24px;
+  padding: 0;
+  width: 24px;
+}
+
+.sidebar {
+  background: var(--side);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-7);
+  grid-row: 2;
+  padding: var(--s-8) var(--s-5) var(--s-6);
+}
+
+.brand { align-items: center; display: flex; gap: var(--s-5); padding: 0 var(--s-4); }
+.brand__name { display: block; font-size: var(--fs-emph); }
+.brand__status { color: var(--mut); font-size: var(--fs-label); }
+
+.sidebar nav { display: grid; gap: 2px; }
+
+.nav-button {
+  align-items: center;
+  border: 0;
+  border-radius: var(--r-tile);
+  color: var(--fg);
+  display: flex;
+  gap: 9px;
+  padding: var(--s-4) var(--s-5);
+  text-align: left;
+  width: 100%;
+}
+
+.nav-button .icon { color: var(--mut); }
+.nav-button kbd { color: var(--mut); font-size: var(--fs-micro); margin-left: auto; visibility: hidden; }
+.nav-button:hover kbd,
+.nav-button:focus-visible kbd { visibility: visible; }
+.nav-button:hover { background: color-mix(in srgb, var(--navon) 60%, transparent); }
+
+.nav-button[aria-current="page"] {
+  background: var(--navon);
+  box-shadow: inset 3px 0 0 var(--sel-edge);
+  font-weight: 600;
+}
+
+.nav-button[aria-current="page"] .icon { color: var(--accfg); }
+.nav-button[aria-current="page"] kbd { color: var(--mut-on-nav, var(--mut)); }
+
+.sidebar__foot { display: flex; flex-direction: column; gap: var(--s-5); margin-top: auto; }
+.sidebar__hint { color: var(--mut); font-size: var(--fs-label); margin: 0; padding: 0 var(--s-4); }
+
+.dev-panel summary {
+  color: var(--mut);
+  cursor: pointer;
+  font-size: var(--fs-label);
+  padding: 0 var(--s-4);
+}
+
+.dev-panel .state-lab { border-top: 0; margin-top: var(--s-3); padding-top: 0; }
+
+.main {
+  padding: var(--s-10) var(--pad-x) var(--pad-x);
+  width: 100%;
+}
+
+@media (max-width: 780px) {
+  .main { padding: var(--s-10) var(--s-9) 60px; }
+}

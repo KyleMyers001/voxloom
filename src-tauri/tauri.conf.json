@@ -14,7 +14,8 @@
     "security": {
       "capabilities": [
         "main",
-        "overlay"
+        "overlay",
+        "settings"
       ]
     },
     "windows": [
@@ -31,7 +32,8 @@
   "bundle": {
     "active": true,
     "targets": [
-      "app"
+      "app",
+      "dmg"
     ],
     "icon": [
       "icons/32x32.png",
@@ -44,7 +46,7 @@
       "infoPlist": "Info.plist",
       "entitlements": "Entitlements.plist",
       "hardenedRuntime": true,
-      "minimumSystemVersion": "10.15",
+      "minimumSystemVersion": "13.1",
       "signingIdentity": "-"
     }
   }

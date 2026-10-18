@@ -1,12 +1,14 @@
 import { isTauri } from '@tauri-apps/api/core';
+import type { OverlayResult } from '../services/shortcut/overlayVisibility';
 import { useEffect, useRef } from 'react';
-import { hasOpenModal, subscribeModal } from './modalState';
+import { subscribeModal } from './modalState';
+import { handlePractice, interactionContext } from './gestureContext';
+import { suspendable } from '../services/shortcut/recordingSuspend';
+import { unbindWhileRecording } from '../services/shortcut/recordingUnbind';
 import type { AppState } from './state';
-import type { OnboardingState } from '../domain/types';
 import type {
   DictationLifecycle,
   SetupLifecycle,
-  ShortcutContext,
   ShortcutController,
   ShortcutGesture,
 } from '../services/contracts';
@@ -20,6 +22,10 @@ import {
   type OverlayBridge,
   type PendingFinishGate,
 } from '../services/shortcut';
+import { useShortcutRegistration } from './useShortcutRegistration';
+import { bootRefusedText } from '../features/settings/shortcutCopy';
+import { answerShortcutQueries, emitShortcutBound } from '../services/shortcut/bindingEvents';
+import { isSettingsWindowOpen, subscribe } from '../services/settingsWindow';
 import type {
   DogfoodPhase,
   UseDogfoodCaptureResult,
@@ -27,12 +33,12 @@ import type {
 
 /**
  * Product gestures drive real dogfood capture → STT → deliverTranscript.
- * Snapshot runs inside dogfood.start() at gesture invocation (while the
- * other app is still frontmost — global shortcut must not activate Voxloom).
+ * Target snapshot dispatch runs after transcription completes, not at the
+ * finish edge. No product path activates another app.
  * Overlay visibility is torn down on finish/cancel/error unconditionally
  * (try/finally) so a failed stop/STT/deliver cannot leave the waveform up.
  * Dogfood terminal (Home Stop / success / error / cancel) also forces overlay
- * clear — do not rely only on gesture finish (Clara: Stop clears capture but
+ * clear — do not rely only on gesture finish (Stop clears capture but
  * waveform stayed). That teardown is **edge-triggered** on the phase
  * transition only: the phase stays "success"/"cancelled" until the next
  * start, so re-running it on every dictation change cancelled the *next*
@@ -43,8 +49,13 @@ import type {
  */
 export interface GestureDogfoodBridge {
   cancel: () => void;
+  /** Result HUD for the finished run (Copied / failure); null or absent shows nothing. */
+  hudResult?: OverlayResult | null;
   origin?: 'home' | 'gesture' | null;
   phase: DogfoodPhase;
+  scopeReady: boolean;
+  /** Arm attempt settled; defaults to scopeReady. False only while arming. */
+  hudReady?: boolean;
   start: () => Promise<void>;
   stop: () => Promise<void>;
 }
@@ -56,6 +67,8 @@ interface GestureOptions {
   now: () => number;
   onboardingOpen: boolean;
   onShortcutError?: (message: string) => void;
+  /** BUS-47: registration failed; put this last-good combo back in settings. */
+  onShortcutRevert?: (shortcut: string) => void;
   setup: SetupLifecycle;
   shortcutOpen: boolean;
   state: AppState;
@@ -95,11 +108,6 @@ function tearDownOverlayDictation(
   options.dictation.cancel(d.runId);
 }
 
-/** Dictation run the overlay currently shows, if any. */
-function visibleRunId(options: GestureOptions): number | null {
-  const d = options.state.dictation;
-  return d.kind === 'listening' || d.kind === 'processing' ? d.runId : null;
-}
 
 /**
  * Finish hold/latch: stop capture for STT/delivery, but always clear overlay
@@ -107,19 +115,9 @@ function visibleRunId(options: GestureOptions): number | null {
  * Never dictation.finish/complete — that invents synthetic Inserted rows.
  */
 function endGestureCapture(optionsRef: { current: GestureOptions }): void {
-  // Immediate clear on release (Clara: overlay must not wait for STT).
-  const runId = visibleRunId(optionsRef.current);
+  // The audio stop already ran at the gesture edge. This
+  // gate only tears down an overlay whose listening commit may arrive late.
   tearDownOverlayDictation(optionsRef.current);
-  void (async () => {
-    try {
-      await optionsRef.current.dogfood.stop();
-    } catch {
-      // stop / STT / deliver failure must not leave overlay up
-    } finally {
-      // Only this run — a new hold may already be listening by now.
-      if (runId !== null) tearDownOverlayDictation(optionsRef.current, runId);
-    }
-  })();
 }
 
 /**
@@ -138,11 +136,15 @@ export function useShortcutGestures(options: GestureOptions) {
   const overlayRef = useRef<OverlayBridge | null>(null);
   const pendingFinishRef = useRef<PendingFinishGate | null>(null);
   const optionsRef = useRef(options);
+  /** Last combo the OS accepted (settings format); the revert target. */
+  const registeredRef = useRef<string | null>(null);
+  /** BUS-69: combo lost by a failed re-bind after recording (until recovered). */
+  const lostRef = useRef<string | null>(null);
   optionsRef.current = options;
   const phaseGuardRef = useRef<PhaseGuard>({ seen: options.dogfood.phase });
 
   // Shared pending-finish gate (hold release can race React listening commit).
-  // Finish → dogfood.stop (real STT/delivery) + unconditional overlay teardown.
+  // Finish stops audio immediately; this gate handles only overlay teardown.
   // Never dictation.finish/complete — that path invents synthetic Inserted.
   if (pendingFinishRef.current === null) {
     pendingFinishRef.current = createPendingFinishGate({
@@ -161,13 +163,9 @@ export function useShortcutGestures(options: GestureOptions) {
     if (isTauri()) return;
     const controller = createShortcutController({
       clock: options.now,
-      onGesture: (gesture) => handleGesture(
-        optionsRef.current,
-        gesture,
-        pendingFinishRef.current,
-        optionsRef,
-        phaseGuardRef.current,
-      ),
+      onGesture: suspendable((gesture) => handleGesture(
+        optionsRef.current, gesture, pendingFinishRef.current, optionsRef, phaseGuardRef.current,
+      )),
       shortcut: options.state.settings.shortcut,
       target: document,
     });
@@ -189,15 +187,33 @@ export function useShortcutGestures(options: GestureOptions) {
     if (!isTauri()) return;
     const controller = createNativeShortcutController({
       clock: options.now,
-      onGesture: (gesture) => handleGesture(
-        optionsRef.current,
-        gesture,
-        pendingFinishRef.current,
-        optionsRef,
-        phaseGuardRef.current,
-      ),
-      onRegisterFailure: (message) => {
-        optionsRef.current.onShortcutError?.(message);
+      onGesture: suspendable((gesture) => handleGesture(
+        optionsRef.current, gesture, pendingFinishRef.current, optionsRef, phaseGuardRef.current,
+      )),
+      // No onRegisterFailure toast: registration outcomes are reported once,
+      // in words, by the boot path below and useShortcutRegistration.
+      // BUS-69: a failed re-bind after recording is reported the same way.
+      onSuspendFailure: (kind, message) => {
+        if (kind === 'unbind') {
+          // Still bound: only re-recording the same combo is affected.
+          console.warn('[shortcut] unbind while recording failed:', message);
+          return;
+        }
+        const lost = registeredRef.current;
+        if (lost === null) return;
+        lostRef.current = lost;
+        registeredRef.current = null;
+        emitShortcutBound({ active: null, message, ok: false, previous: lost, shortcut: lost });
+        void isSettingsWindowOpen().then((open) => {
+          if (!open) optionsRef.current.onShortcutError?.(bootRefusedText(lost, null));
+        }, () => undefined);
+      },
+      onSuspendRecovered: () => {
+        const back = lostRef.current;
+        lostRef.current = null;
+        if (back === null || registeredRef.current !== null) return;
+        registeredRef.current = back;
+        emitShortcutBound({ active: back, ok: true, shortcut: back });
       },
       scheduler: browserScheduler,
     });
@@ -207,12 +223,18 @@ export function useShortcutGestures(options: GestureOptions) {
 
     let cancelled = false;
     void (async () => {
-      const outcome = await controller.setShortcut(
-        optionsRef.current.state.settings.shortcut,
-      );
+      const bootShortcut = optionsRef.current.state.settings.shortcut;
+      const outcome = await controller.setShortcut(bootShortcut);
+      // Seed the revert target from what the OS accepted, not from settings.
+      registeredRef.current = outcome.ok ? bootShortcut : null;
+      // Tell every window (Home, sidebar, Settings) what the OS holds now.
+      emitShortcutBound({
+        active: outcome.ok ? bootShortcut : outcome.active ?? null,
+        ok: outcome.ok, shortcut: bootShortcut,
+      });
       if (cancelled) return;
-      if (!outcome.ok && outcome.message) {
-        optionsRef.current.onShortcutError?.(outcome.message);
+      if (!outcome.ok) {
+        optionsRef.current.onShortcutError?.(bootRefusedText(bootShortcut, outcome.active));
       }
       controller.setContext(interactionContext(optionsRef.current));
     })();
@@ -220,6 +242,9 @@ export function useShortcutGestures(options: GestureOptions) {
     const update = () =>
       controller.setContext(interactionContext(optionsRef.current));
     const unsubscribe = subscribeModal(update);
+    const unanswer = subscribe(answerShortcutQueries);
+    // BUS-69: the OS hotkey would swallow a re-recording of the same combo.
+    const stopUnbind = unbindWhileRecording(controller, { scheduler: browserScheduler });
 
     // Do NOT resetPartial / clear pending on document visibilitychange.
     // ADR §3: other-app focus must keep an in-flight native hold alive;
@@ -231,39 +256,17 @@ export function useShortcutGestures(options: GestureOptions) {
       nativeControllerRef.current = null;
       overlayRef.current = null;
       unsubscribe();
+      unanswer();
+      stopUnbind();
       pendingFinishRef.current?.clear();
       void controller.dispose();
       void overlay.dispose();
     };
   }, [options.now]);
 
-  // Re-register when Settings shortcut *changes* (native only).
-  // Mount effect owns the initial bind; skipping that first run avoids a
-  // parallel setShortcut for the same combo on boot (Mac RegisterEventHotKey
-  // race). Controller still serializes setShortcut as a safety net.
-  const boundShortcutRef = useRef<string | null>(null);
-  useEffect(() => {
-    const native = nativeControllerRef.current;
-    if (!native || !isTauri()) return;
-    const shortcut = options.state.settings.shortcut;
-    if (boundShortcutRef.current === null) {
-      boundShortcutRef.current = shortcut;
-      return;
-    }
-    if (boundShortcutRef.current === shortcut) return;
-    boundShortcutRef.current = shortcut;
-    let cancelled = false;
-    void (async () => {
-      const outcome = await native.setShortcut(shortcut);
-      if (cancelled) return;
-      if (!outcome.ok && outcome.message) {
-        options.onShortcutError?.(outcome.message);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [options.onShortcutError, options.state.settings.shortcut]);
+  useShortcutRegistration(
+    options.state.settings.shortcut, nativeControllerRef, registeredRef, optionsRef,
+  );
 
   useEffect(() => {
     const ctx = interactionContext(options);
@@ -276,9 +279,21 @@ export function useShortcutGestures(options: GestureOptions) {
   useEffect(() => {
     const overlay = overlayRef.current;
     if (!overlay) return;
-    const homeRecording = options.dogfood.origin === 'home'
-      && options.dogfood.phase === 'recording';
-    void overlay.sync(options.state.dictation, homeRecording);
+    const phase = options.dogfood.phase;
+    const homeRecording = phase === 'starting'
+      || (options.dogfood.origin === 'home' && phase === 'recording');
+    // The gesture state is cleared on release; STT still owns a cancellable HUD.
+    const visualState = phase === 'transcribing' || phase === 'queued' || phase === 'cleaning'
+      ? { kind: 'processing' as const, completion: 'held' as const, runId: -1 }
+      : options.state.dictation;
+    // Arming can lag the starting/listening render. Hide until the arm
+    // attempt settles, then resync even if model/microphone startup has not
+    // changed the phase. A failed arm still shows the HUD, just not as a
+    // cancellable popup (overlay_show refuses cancellable without a scope).
+    const { scopeReady } = options.dogfood;
+    const hudReady = options.dogfood.hudReady ?? scopeReady;
+    void overlay.sync(hudReady ? visualState : { kind: 'ready' },
+      hudReady && homeRecording, scopeReady);
     const kind = options.state.dictation.kind;
     if (kind === 'listening') {
       pendingFinishRef.current?.onListening();
@@ -295,7 +310,7 @@ export function useShortcutGestures(options: GestureOptions) {
       // Document path resets via context; also clear if mid-hold somehow.
     }
   }, [options.state.dictation, options.dogfood.origin,
-    options.dogfood.phase]);
+    options.dogfood.phase, options.dogfood.scopeReady, options.dogfood.hudReady]);
 
   // When dogfood *enters* success/error/cancelled, guarantee overlay
   // dictation is cleared without synthetic Inserted rows (Home Stop / cancel
@@ -308,10 +323,16 @@ export function useShortcutGestures(options: GestureOptions) {
     if (phase === guard.seen) return;
     guard.seen = phase;
     if (!isDogfoodTerminal(phase)) return;
+    const { hudResult, origin } = optionsRef.current.dogfood;
+    // HUD rules 3–6: Copied / failure flash briefly for gesture runs (the
+    // bridge holds off the teardown hide); everything else hides at once.
+    const overlay = overlayRef.current;
+    if (overlay && origin === 'gesture' && hudResult && phase !== 'cancelled') {
+      void overlay.showResult(hudResult);
+    }
     tearDownOverlayDictation(optionsRef.current);
     // Force hide even if cancel no-ops (runId race) or React dictation
     // commit lags — overlay sync to a non-visible kind.
-    const overlay = overlayRef.current;
     if (overlay) {
       void overlay.sync({ kind: 'ready' });
     }
@@ -346,15 +367,17 @@ function handleGesture(
     // Prior processing keeps running in the background; the new start
     // background; dogfood.start() supersedes its phase (session-guarded).
     pending?.resetForStart();
-    // Overlay first (sync), then real capture. dogfood.start snapshots the
-    // frontmost app *before* mic work — global shortcut must not activate
-    // Voxloom (ADR §4). Home Start may still Copy when Voxloom is focused.
+    // Overlay first (sync), then real capture. Target selection waits until
+    // final transcription; global shortcut must not activate Voxloom (ADR §4).
     dictation.start();
     void dogfood.start().catch(() => {
       // start failure → tear down overlay (phase effect also covers terminal)
       tearDownOverlayDictation(optionsRef.current);
     });
   } else if (gesture === 'hold-finish' || gesture === 'latch-finish') {
+    // Stop audio now, before the pending-listening gate or overlay work.
+    // A release racing model/microphone startup must also latch stop now.
+    void dogfood.stop().catch(() => {});
     if (state.dictation.kind === 'listening') {
       const runId = state.dictation.runId;
       if (pending) pending.requestFinish(true, runId);
@@ -368,36 +391,15 @@ function handleGesture(
   }
 }
 
-function interactionContext(options: GestureOptions): ShortcutContext {
-  if (options.onboardingOpen) {
-    return options.state.onboarding.step === 3 ? 'practice' : null;
-  }
-  return options.shortcutOpen || hasOpenModal() ? null : 'product';
-}
-
-function handlePractice(options: GestureOptions, gesture: ShortcutGesture) {
-  const changes: Partial<OnboardingState> = {};
-  if (gesture === 'hold-start') {
-    changes.recognizedText = 'Hold gesture started (no speech captured).';
-  }
-  if (gesture === 'hold-finish') changes.holdTested = true;
-  if (gesture === 'latch-start') {
-    changes.recognizedText =
-      'Double-tap latched. Activate once more to finish (no speech captured).';
-  }
-  if (gesture === 'latch-finish') {
-    changes.recognizedText = 'Double-tap gesture finished (no speech captured).';
-    changes.tapTested = true;
-  }
-  options.setup.update(changes);
-}
-
 /** Test/helper: narrow UseDogfoodCaptureResult to the gesture bridge. */
 export function toGestureDogfoodBridge(
   dogfood: UseDogfoodCaptureResult,
 ): GestureDogfoodBridge {
   return {
     cancel: dogfood.cancel,
+    scopeReady: dogfood.scopeReady,
+    hudReady: dogfood.hudReady,
+    hudResult: dogfood.hudResult,
     origin: dogfood.origin,
     phase: dogfood.phase,
     start: () => dogfood.start('gesture'),

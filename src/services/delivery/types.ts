@@ -13,13 +13,13 @@ export type TargetKind =
   | 'unavailable';
 
 /**
- * Invocation-time snapshot of the intended insertion target
+ * Transcription-completion-time snapshot of the intended insertion target
  * (frontmost app + focused AX element insertability).
  */
 export interface TargetSnapshot {
   /** Frontmost application name when known. */
   appName: string | null;
-  /** Process id when known (identity check at completion). */
+  /** Process id when known (identity check before insertion). */
   appPid: number | null;
   /** Opaque element identity for change detection (role + pid + optional id). */
   elementId: string | null;
@@ -35,7 +35,7 @@ export interface TargetSnapshot {
 }
 
 /** Evidence-backed delivery result — never claim Inserted/Copied/Failed without it. */
-export type DeliveryStatus = 'inserted' | 'copied' | 'failed';
+export type DeliveryStatus = 'inserted' | 'copied' | 'failed' | 'unverified';
 
 export interface DeliveryOutcome {
   /** Clipboard restore ran successfully after a temporary paste path. */
@@ -47,12 +47,48 @@ export interface DeliveryOutcome {
   /** Present when restore was skipped (conflict, no snapshot, write fail). */
   restoreSkippedReason: string | null;
   status: DeliveryStatus;
+  /**
+   * A native write happened but could not be confirmed: the text may already be
+   * (partly) in the field, whatever `status` says (copied, or failed when the
+   * Copy fallback is off or failed). Consumers read this, never the message.
+   */
+  mayHaveInserted?: boolean;
   /** Always the transcript text for manual recovery (even if history is off). */
   text: string;
   /** An OS insertion or clipboard write was invoked. */
   writeStarted: boolean;
   /** The invoked OS write completed successfully. */
   writeCommitted: boolean;
+}
+
+/**
+ * insertText failed after the write may already have started (e.g. the IPC
+ * call died mid-flight). Plain errors mean nothing was written: the native
+ * side reports refusals and verified no-ops as errors, and unconfirmed
+ * mutations as `InsertReport.unverified`.
+ */
+export class InsertError extends Error {
+  readonly writeStarted: boolean;
+  constructor(message: string, writeStarted: boolean) {
+    super(message);
+    this.name = 'InsertError';
+    this.writeStarted = writeStarted;
+  }
+}
+
+/** Structured native insert result (macOS). */
+export interface InsertReport {
+  /** Events posted to Terminal, never proof of input-buffer contents. */
+  terminalDispatch?: 'complete' | 'partial';
+  /** Unicode events posted; not alone proof of input-buffer delivery. */
+  typed: boolean;
+  /**
+   * A mutation happened but read-back could not prove the full transcript
+   * landed — text may be (partially) in the field. Treated as not inserted.
+   */
+  unverified: boolean;
+  /** Diagnostic detail. */
+  detail: string | null;
 }
 
 export interface ClipboardSnapshot {
@@ -78,11 +114,14 @@ export interface DeliveryPlatformAdapter {
    * no full-field value replacement).
    * Must refuse rather than insert into a different app.
    */
-  insertText(text: string, intended: TargetSnapshot): Promise<void>;
+  insertText(
+    text: string,
+    intended: TargetSnapshot,
+  ): Promise<InsertReport | void>;
   /** Snapshot frontmost app + focused element insertability. */
   snapshotTarget(): Promise<TargetSnapshot>;
   /**
-   * Re-check intended target at completion: still present, same identity,
+   * Re-check completion snapshot before insertion: still present, same identity,
    * still insertable — or classify unavailable / secure / changed / unsupported.
    * Closure must not be inferred from unavailable AX focus alone.
    */
@@ -92,13 +131,15 @@ export interface DeliveryPlatformAdapter {
 export interface DeliverOptions {
   /** False immediately before a write means the request was cancelled. */
   canWrite?: () => boolean;
+  /** Session lease, checked after awaits and before dispatching writes. */
+  isCurrent?: () => boolean;
   /** Settings `clipboardFallback` — default-on per fixtures / ADR. */
   clipboardFallback: boolean;
   /** Injectable clock (tests). */
   now?: () => number;
   /** Platform adapter (macOS AX / stub / test double). */
   platform: DeliveryPlatformAdapter;
-  /** Invocation-time snapshot; null means none taken (treat as unavailable). */
+  /** Completion-time snapshot; null means none taken (treat as unavailable). */
   intended: TargetSnapshot | null;
   /** Transcript text to deliver. */
   text: string;

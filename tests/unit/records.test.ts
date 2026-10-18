@@ -122,3 +122,45 @@ describe('createDogfoodRecord', () => {
     expect(record?.recoveryExpiresAt).toBeNull();
   });
 
+
+describe('createDogfoodRecord rawText (BUS-23)', () => {
+  const base = {
+    durationMs: 1_000,
+    id: 'dogfood-raw',
+    now: 1,
+    status: 'copied' as const,
+    style: 'casual' as const,
+  };
+
+  it('keeps raw whisper text when cleanup changed it', () => {
+    const record = createDogfoodRecord({
+      ...base,
+      rawText: '[Music] hello world',
+      text: 'hello world',
+    });
+    expect(record?.text).toBe('hello world');
+    expect(record?.rawText).toBe('[Music] hello world');
+  });
+
+  it('retains rawText when it equals the cleaned text for cleanup provenance', () => {
+    const record = createDogfoodRecord({ ...base, rawText: 'hello', text: 'hello' });
+    expect(record?.rawText).toBe(record?.text);
+  });
+
+  it('still skips rows whose cleaned text is empty', () => {
+    const record = createDogfoodRecord({ ...base, rawText: 'Thank you.', text: '' });
+    expect(record).toBeNull();
+  });
+
+  it('may-have-inserted deliveries become Unverified with the flag (Review #44)', () => {
+    const base = { durationMs: 1_000, id: 'm', now: 1, style: 'formal' as const, text: 'hi' };
+    expect(createDogfoodRecord({ ...base, mayHaveInserted: true, status: 'failed' })).toMatchObject({
+      mayHaveInserted: { copied: false }, status: 'unverified',
+    });
+    expect(createDogfoodRecord({ ...base, mayHaveInserted: true, status: 'copied' })).toMatchObject({
+      mayHaveInserted: { copied: true }, status: 'unverified',
+    });
+    expect(createDogfoodRecord({ ...base, status: 'failed' })).not.toHaveProperty('mayHaveInserted');
+  });
+});
+

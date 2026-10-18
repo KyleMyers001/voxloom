@@ -15,6 +15,12 @@ function sample(overrides: Partial<DictationRecord> = {}): DictationRecord {
     durationSeconds: 2,
     id: 'r1',
     model: 'whisper-tiny.en',
+    rawText: overrides.text ?? 'hello',
+    cleanup: {
+      dictionaryDigest: null, dictionaryVersion: 1,
+      modelDigest: null, modelId: null, promptVersion: 'cleanup-v1',
+      reason: null, status: 'skipped',
+    },
     recoveryExpiresAt: null,
     status: 'copied',
     style: 'formal',
@@ -24,6 +30,32 @@ function sample(overrides: Partial<DictationRecord> = {}): DictationRecord {
 }
 
 describe('parseHistoryJson', () => {
+  it('round-trips optional BUS-23 rawText and rejects a non-string rawText', () => {
+    const row = sample({ rawText: '[Music] hello' });
+    const parsed = parseHistoryJson(serializeHistoryFile([row]));
+    expect(parsed).toEqual({ file: { records: [row], version: 2 }, ok: true, sourceVersion: 2 });
+
+    const bad = JSON.stringify({ records: [{ ...sample(), rawText: 5 }], version: 1 });
+    const badParsed = parseHistoryJson(bad);
+    expect(badParsed.ok && badParsed.file.records).toEqual([]);
+  });
+
+  it('round-trips the may-have-inserted flag on Unverified rows (Review #44)', () => {
+    const row = sample({ mayHaveInserted: { copied: true }, status: 'unverified' });
+    expect(parseHistoryJson(serializeHistoryFile([row]))).toEqual({ file: { records: [row], version: 2 }, ok: true, sourceVersion: 2 });
+  });
+
+  it('applies transcript retention to rows carrying rawText', () => {
+    const row = sample({ rawText: '[Music] hello' });
+    expect(applyTranscriptRetention([row], 'off', Date.now())).toEqual([]);
+  });
+
+  it('preserves unverified delivery rather than claiming insertion or dropping recovery text', () => {
+    const row = sample({ status: 'unverified' });
+    const parsed = parseHistoryJson(serializeHistoryFile([row]));
+    expect(parsed).toEqual({ file: { records: [row], version: 2 }, ok: true, sourceVersion: 2 });
+  });
+
   it('accepts a valid v2 document', () => {
     const raw = serializeHistoryFile([sample()]);
     const parsed = parseHistoryJson(raw);

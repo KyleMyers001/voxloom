@@ -16,9 +16,7 @@ pub fn snapshot_target() -> Result<TargetSnapshotDto, String> {
     ))
 }
 
-pub fn validate_target(
-    intended: TargetSnapshotDto,
-) -> Result<TargetSnapshotDto, String> {
+pub fn validate_target(intended: TargetSnapshotDto) -> Result<TargetSnapshotDto, String> {
     Ok(TargetSnapshotDto {
         insertable: false,
         kind: if intended.kind == "insertable" {
@@ -29,9 +27,7 @@ pub fn validate_target(
         reason: Some(
             intended
                 .reason
-                .unwrap_or_else(|| {
-                    "Accessibility insert is macOS-only in this build".into()
-                }),
+                .unwrap_or_else(|| "Accessibility insert is macOS-only in this build".into()),
         ),
         ..intended
     })
@@ -40,6 +36,6 @@ pub fn validate_target(
 pub fn insert_text(
     _text: &str,
     _intended: &TargetSnapshotDto,
-) -> Result<(), String> {
+) -> Result<super::decide::InsertReport, String> {
     Err("insert unavailable on this platform (macOS AX adapter required)".into())
 }

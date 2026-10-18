@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><defs>
+<linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#b6ff3c"/><stop offset="1" stop-color="#3cf0ff"/></linearGradient>
+<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a2a38"/><stop offset="1" stop-color="#0a0a10"/></linearGradient>
+<linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".55"/><stop offset=".5" stop-color="#fff" stop-opacity=".22"/><stop offset="1" stop-color="#fff" stop-opacity=".30"/></linearGradient></defs>
+<!-- favicon master (tuned for 16–32px tabs): larger body, light inner stroke ~1 device px, bolder bars, no drop shadow -->
+<rect x="72" y="72" width="880" height="880" rx="200" fill="url(#bg)"/>
+<rect x="93.33333333333333" y="93.33333333333333" width="837.3333333333334" height="837.3333333333334" rx="178.66666666666666" fill="none" stroke="url(#sheen)" stroke-width="42.666666666666664"/>
+<rect x="250" y="370" width="150" height="284" rx="75" fill="url(#g)"/><rect x="437" y="222" width="150" height="580" rx="75" fill="url(#g)"/><rect x="624" y="322" width="150" height="380" rx="75" fill="url(#g)"/></svg>

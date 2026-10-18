@@ -6,25 +6,19 @@ use crate::cleanup::{
 use sha2::{Digest, Sha256};
 use std::{fs, path::PathBuf, sync::Arc};
 
-fn fixture(
-    name: &str,
-) -> (RequestRegistry, CleanupModelStore, PathBuf, ArtifactSpec) {
-    let root = std::env::temp_dir()
-        .join(format!("voxloom-owner-{name}-{}", std::process::id()));
+fn fixture(name: &str) -> (RequestRegistry, CleanupModelStore, PathBuf, ArtifactSpec) {
+    let root = std::env::temp_dir().join(format!("voxloom-owner-{name}-{}", std::process::id()));
     fs::create_dir_all(&root).unwrap();
     let source = root.join("source.gguf");
     fs::write(&source, b"GGUFtest").unwrap();
     let spec = ArtifactSpec {
-        sha256: Box::leak(
-            format!("{:x}", Sha256::digest(b"GGUFtest")).into_boxed_str(),
-        ),
+        sha256: Box::leak(format!("{:x}", Sha256::digest(b"GGUFtest")).into_boxed_str()),
         size: 8,
     };
     let store = CleanupModelStore::new(root.join("models"));
     store.import_artifact(&source, spec).unwrap();
-    let registry = RequestRegistry::new(Arc::new(WorkerSupervisor::new(
-        root.join("missing-worker"),
-    )));
+    let registry =
+        RequestRegistry::new(Arc::new(WorkerSupervisor::new(root.join("missing-worker"))));
     (registry, store, source, spec)
 }
 
@@ -156,8 +150,7 @@ fn tampering_after_admission_is_rejected_before_worker_spawn() {
     )
     .unwrap();
     fs::set_permissions(&worker, fs::Permissions::from_mode(0o700)).unwrap();
-    let registry =
-        RequestRegistry::new(Arc::new(WorkerSupervisor::new(worker)));
+    let registry = RequestRegistry::new(Arc::new(WorkerSupervisor::new(worker)));
     let (owner, _) = registry.open_session();
     acquire(&registry, &store, spec, owner, "tampered");
     fs::write(root.join("models/qwen3-0.6b-q4-k-m.gguf"), b"GGUFevil").unwrap();
@@ -202,8 +195,7 @@ sys.stdout.buffer.flush()
     acquire(&registry, &store, spec, owner, "active");
     acquire(&registry, &store, spec, owner, "queued");
     let run = registry.start_run(owner, "active", MODEL_ID).unwrap();
-    let running =
-        std::thread::spawn(move || run.run("synthetic prompt".into()));
+    let running = std::thread::spawn(move || run.run("synthetic prompt".into()));
     let deadline = Instant::now() + Duration::from_secs(5);
     while !marker.exists() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(10));
@@ -214,8 +206,7 @@ sys.stdout.buffer.flush()
     assert_eq!(error.code, "cancelled");
     assert_eq!(error.attempt.unwrap().model_digest, spec.sha256);
     assert!(started, "fixture worker did not start within five seconds");
-    let pid: libc::pid_t =
-        fs::read_to_string(&marker).unwrap().parse().unwrap();
+    let pid: libc::pid_t = fs::read_to_string(&marker).unwrap().parse().unwrap();
     // SAFETY: signal 0 only checks the fixture process; it does not signal it.
     assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
     assert_eq!(
@@ -230,9 +221,7 @@ sys.stdout.buffer.flush()
         .unwrap();
     let mut emitted = None;
     let result = next
-        .run_with_attempt("synthetic prompt".into(), |attempt| {
-            emitted = Some(attempt)
-        })
+        .run_with_attempt("synthetic prompt".into(), |attempt| emitted = Some(attempt))
         .unwrap();
     assert_eq!(result.text, "Recovered.");
     assert_eq!(result.attempt.model_id, MODEL_ID);
@@ -246,8 +235,7 @@ fn attempt_identity_requires_verified_descriptor_and_successful_spawn() {
     use std::os::unix::fs::PermissionsExt;
     let (_, store, source, spec) = fixture("attempt-evidence");
     let path = source.parent().unwrap().join("worker.sh");
-    let registry =
-        RequestRegistry::new(Arc::new(WorkerSupervisor::new(path.clone())));
+    let registry = RequestRegistry::new(Arc::new(WorkerSupervisor::new(path.clone())));
     let (owner, _) = registry.open_session();
     for (id, prompt, expected_code) in [
         ("missing", "p".into(), "runtime-error"),
@@ -269,9 +257,7 @@ fn attempt_identity_requires_verified_descriptor_and_successful_spawn() {
     let error = registry
         .start_run(owner, "spawn-failure", MODEL_ID)
         .unwrap()
-        .run_with_attempt("p".into(), |_| {
-            panic!("failed spawn is not an attempt")
-        })
+        .run_with_attempt("p".into(), |_| panic!("failed spawn is not an attempt"))
         .unwrap_err();
     assert!(error.attempt.is_none());
     // A launched child that crashes is an actual attempt with verified identity.

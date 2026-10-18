@@ -110,10 +110,7 @@ impl RequestRegistry {
         }
     }
 
-    fn retire_locked(
-        &self,
-        inner: &mut RegistryInner,
-    ) -> (Vec<ModelLease>, Vec<String>) {
+    fn retire_locked(&self, inner: &mut RegistryInner) -> (Vec<ModelLease>, Vec<String>) {
         let owner = inner.owner.take();
         let keys: Vec<_> = inner
             .entries
@@ -131,9 +128,7 @@ impl RequestRegistry {
                     running.push(id);
                 }
                 _ => {
-                    if let Some(Entry::Pending(_, lease)) =
-                        inner.entries.remove(&key)
-                    {
+                    if let Some(Entry::Pending(_, lease)) = inner.entries.remove(&key) {
                         leases.push(lease);
                     }
                 }
@@ -156,9 +151,7 @@ impl RequestRegistry {
         }
         // Includes tasks still settling from a retired generation.
         if inner.entries.len() >= 2 {
-            return Err(CleanupCommandError::runtime(
-                "cleanup admission is full",
-            ));
+            return Err(CleanupCommandError::runtime("cleanup admission is full"));
         }
         inner.next_ticket += 1;
         let ticket = inner.next_ticket;
@@ -197,12 +190,7 @@ impl RequestRegistry {
         }
     }
 
-    pub fn start_run(
-        &self,
-        owner: u64,
-        id: &str,
-        model_id: &str,
-    ) -> Result<OwnedRun> {
+    pub fn start_run(&self, owner: u64, id: &str, model_id: &str) -> Result<OwnedRun> {
         let mut inner = self.inner.lock().unwrap();
         authorized(&inner, owner)?;
         if model_id != MODEL_ID {
@@ -298,11 +286,10 @@ impl OwnedRun {
         let lease = self.lease.as_ref().unwrap();
         let identity = lease.identity();
         let mut attempt = None;
-        let result =
-            self.permit.as_mut().unwrap().run(&lease.file, prompt, || {
-                attempt = Some(identity.clone());
-                on_started(identity);
-            });
+        let result = self.permit.as_mut().unwrap().run(&lease.file, prompt, || {
+            attempt = Some(identity.clone());
+            on_started(identity);
+        });
         match result {
             Ok(text) => Ok(super::CleanupRunOutput {
                 text,

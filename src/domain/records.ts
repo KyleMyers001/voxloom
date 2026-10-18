@@ -19,6 +19,8 @@ export interface DogfoodRecordInput {
    * Prefer `status` when present; legacy `copied` boolean still accepted.
    */
   status?: HistoryStatus;
+  /** Delivery may have inserted the text; recorded as `unverified`, never Failed/Copied. */
+  mayHaveInserted?: boolean;
   /** @deprecated Prefer `status`. True when Copy sink wrote successfully. */
   copied?: boolean;
   /** Capture duration in milliseconds (converted to whole seconds). */
@@ -27,6 +29,7 @@ export interface DogfoodRecordInput {
   /** STT model id used for this transcript, when known. */
   model?: string | null;
   now: number;
+  /** Raw engine output before deterministic and optional model cleanup. */
   rawText?: string;
   style: WritingStyle;
   text: string;
@@ -88,7 +91,10 @@ export function createDogfoodRecord(
   if (!text) return null;
 
   let status: HistoryStatus;
-  if (input.status) {
+  const maybe = input.mayHaveInserted === true;
+  if (maybe) {
+    status = 'unverified';
+  } else if (input.status) {
     status = input.status;
   } else if (input.copied === true) {
     status = 'copied';
@@ -97,6 +103,7 @@ export function createDogfoodRecord(
   }
 
   const durationSeconds = Math.max(0, Math.round(input.durationMs / 1_000));
+  const rawText = input.rawText?.trim();
 
   return {
     cleanup: input.cleanup ?? {
@@ -112,9 +119,10 @@ export function createDogfoodRecord(
     durationSeconds,
     id: input.id,
     model: input.model ?? null,
+    ...(maybe ? { mayHaveInserted: { copied: input.status === 'copied' } } : {}),
+    rawText: rawText || text,
     // STT/delivery failures retain text, never a replayable audio buffer.
     recoveryExpiresAt: null,
-    rawText: (input.rawText ?? text).trim(),
     status,
     style: input.style,
     text,

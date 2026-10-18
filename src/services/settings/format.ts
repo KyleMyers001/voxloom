@@ -1,6 +1,7 @@
 import { initialSettings } from '../../domain/fixtures';
 import {
   audioRetentions,
+  textSizes,
   transcriptRetentions,
   writingStyles,
 } from '../../domain/settings';
@@ -19,8 +20,10 @@ const APPEARANCES: readonly Appearance[] = [
   'system',
   'light',
   'dark',
-  'sodium-rain',
 ];
+
+/** Sodium Rain was removed (UI PR 10); stored values load as 'system'. */
+const RETIRED_APPEARANCES: Readonly<Record<string, Appearance>> = { 'sodium-rain': 'system' };
 
 export type ParseSettingsResult =
   | { ok: true; file: SettingsFile }
@@ -61,7 +64,11 @@ export function coerceSettings(raw: unknown): Settings {
   const base = { ...initialSettings };
   if (!isObject(raw)) return base;
   return {
-    appearance: asChoice(raw.appearance, APPEARANCES, base.appearance),
+    appearance: asChoice(
+      typeof raw.appearance === 'string' ? RETIRED_APPEARANCES[raw.appearance] ?? raw.appearance : raw.appearance,
+      APPEARANCES,
+      base.appearance,
+    ),
     audioRetention: asChoice(
       raw.audioRetention,
       audioRetentions,
@@ -71,6 +78,7 @@ export function coerceSettings(raw: unknown): Settings {
     cleanupModelId: asNullableString(raw.cleanupModelId),
     clipboardFallback: asBoolean(raw.clipboardFallback, base.clipboardFallback),
     language: asString(raw.language, base.language),
+    languageModel: asString(raw.languageModel, base.languageModel),
     microphone: asString(raw.microphone, base.microphone),
     shortcut: asString(raw.shortcut, base.shortcut),
     startAtLogin: asBoolean(raw.startAtLogin, base.startAtLogin),
@@ -79,6 +87,8 @@ export function coerceSettings(raw: unknown): Settings {
       writingStyles,
       base.style,
     ) as WritingStyle,
+    // Added in BUS-41 PR 3: older files have no textSize and load as 'default'.
+    textSize: asChoice(raw.textSize, textSizes, base.textSize),
     transcriptRetention: asChoice(
       raw.transcriptRetention,
       transcriptRetentions,
@@ -125,13 +135,37 @@ export function parseSettingsJson(raw: string): ParseSettingsResult {
   };
 }
 
+/**
+ * Keys of the on-disk `settings` object this build does not know.
+ * They never reach app state, but are
+ * written back on save so another build's settings are not lost (BUS-42).
+ */
+export function unknownSettingsKeys(raw: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    return {};
+  }
+  if (!isObject(parsed) || !isObject(parsed.settings)) return {};
+  const known = new Set(Object.keys(initialSettings));
+  // Null prototype: a `__proto__` key is stored as data, not swallowed.
+  const extras = Object.create(null) as Record<string, unknown>;
+  for (const [key, value] of Object.entries(parsed.settings)) {
+    if (!known.has(key)) extras[key] = value;
+  }
+  return extras;
+}
+
 export function serializeSettingsFile(
   settings: Settings,
   onboardingComplete: boolean,
+  extras: Record<string, unknown> = {},
 ): string {
-  const file: SettingsFile = {
+  const file = {
     onboardingComplete,
-    settings,
+    // Coerced values are authoritative for every key this build knows.
+    settings: { ...extras, ...settings },
     version: SETTINGS_FILE_VERSION,
   };
   return `${JSON.stringify(file, null, 2)}\n`;

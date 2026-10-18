@@ -2,8 +2,8 @@
 ///
 /// The capture hook is mocked to avoid live IPC. Real permission flow,
 /// real device list, and real mic test are covered in manual tests
-/// documented in docs/review/BUS-9-implementation.md.
-import { screen } from '@testing-library/react';
+/// checked manually on a Mac.
+import { cleanup, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Settings } from '../../src/features/settings/Settings';
@@ -56,13 +56,14 @@ describe('Settings', () => {
   it('updates style and appearance controls', async () => {
     const user = userEvent.setup();
     renderWithApp(<Settings onSetup={vi.fn()} />);
-    await user.selectOptions(
-      screen.getByLabelText(/Style preference/),
-      'casual',
-    );
-    expect(screen.getByLabelText(/Style preference/)).toHaveValue('casual');
-    await user.click(screen.getByLabelText('Sodium Rain'));
-    expect(screen.getByLabelText('Sodium Rain')).toBeChecked();
+    const style = screen.getByRole('radiogroup', { name: /Current style/ });
+    await user.click(within(style).getByRole('radio', { name: 'Casual' }));
+    expect(within(style).getByRole('radio', { name: 'Casual' })).toHaveAttribute('aria-checked', 'true');
+    await user.click(screen.getByRole('tab', { name: 'Appearance' }));
+    await user.click(screen.getByLabelText('Dark'));
+    expect(screen.getByLabelText('Dark')).toBeChecked();
+    expect(screen.queryByLabelText('Sodium Rain')).toBeNull();
+    expect(within(screen.getByRole('group', { name: 'Theme' })).getAllByRole('radio')).toHaveLength(3);
   });
 
   it('calls onSetup when Set up shortcuts clicked', async () => {
@@ -75,12 +76,12 @@ describe('Settings', () => {
     expect(setup).toHaveBeenCalledOnce();
   });
 
-  it('labels remaining mock settings without calling shortcut simulated', () => {
+  it('labels remaining mock settings without calling shortcut simulated', async () => {
     renderWithApp(<Settings onSetup={vi.fn()} />);
-    expect(screen.getByLabelText(/shortcut/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Start at login/)).toBeDisabled();
-    expect(screen.getByLabelText(/Language-processing model import/))
-      .toBeEnabled();
+    expect(screen.getByRole('button', { name: /^(Shortcut|App-local shortcut|Global shortcut) / })).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: /Start at login/ })).toBeDisabled();
+    expect(screen.getByLabelText(/Language-processing model import/)).toBeEnabled();
+    await userEvent.click(screen.getByRole('tab', { name: 'Privacy' }));
     expect(screen.getByText(/register-or-revert/i)).toBeInTheDocument();
   });
 
@@ -89,7 +90,10 @@ describe('Settings', () => {
     expect(screen.getByLabelText(
       /Clean transcripts with the imported local model/,
     )).toBeDisabled();
-    expect(screen.getByLabelText(/Start at login/)).toBeDisabled();
+    expect(screen.getByRole('switch', { name: /Start at login/ })).toBeDisabled();
+    expect(screen.queryByRole('option', { name: 'English (UK)' })).toBeNull();
+    cleanup();
+    renderWithApp(<Settings initialTab="privacy" onSetup={vi.fn()} />);
     expect(screen.getByLabelText(/Audio retention/)).toBeDisabled();
     expect(screen.queryByText(/Temporary recovery buffers expire/))
       .not.toBeInTheDocument();
@@ -127,7 +131,7 @@ describe('Settings', () => {
   });
 
   it('does not claim audio resets on reload', () => {
-    renderWithApp(<Settings onSetup={vi.fn()} />);
+    renderWithApp(<Settings initialTab="privacy" onSetup={vi.fn()} />);
     // The old false copy "resets on reload" is gone; verify replacement.
     expect(screen.queryByText(/resets on reload/i)).toBeNull();
     expect(screen.getByText(/captured locally/i)).toBeInTheDocument();
@@ -188,7 +192,7 @@ describe('Settings', () => {
     captureMocks.devices = [
       { available: true, id: 'input-1', label: 'Built-in Microphone' },
     ];
-    await user.selectOptions(screen.getByLabelText(/Style preference/), 'casual');
+    await user.click(screen.getByRole('radio', { name: 'Casual' }));
 
     expect(screen.getByLabelText(/Microphone/)).toHaveValue('input-2');
     expect(screen.getByRole('option', {
@@ -207,7 +211,7 @@ describe('Settings', () => {
   });
 
   it('shows honest recovery copy for microphone denied', () => {
-    renderWithApp(<Settings onSetup={vi.fn()} />);
+    renderWithApp(<Settings initialTab="privacy" onSetup={vi.fn()} />);
     expect(
       screen.getByText(/Microphone denied/i),
     ).toBeInTheDocument();
@@ -217,7 +221,7 @@ describe('Settings', () => {
   });
 
   it('lists STT models without starting a download on open', async () => {
-    renderWithApp(<Settings onSetup={vi.fn()} />);
+    renderWithApp(<Settings initialTab="models" onSetup={vi.fn()} />);
     expect(
       await screen.findByRole('heading', { name: 'Speech-to-text models' }),
     ).toBeInTheDocument();
@@ -234,7 +238,7 @@ describe('Settings', () => {
 
   it('selects a modelId into settings without downloading', async () => {
     const user = userEvent.setup();
-    renderWithApp(<Settings onSetup={vi.fn()} />);
+    renderWithApp(<Settings initialTab="models" onSetup={vi.fn()} />);
     await screen.findByText('whisper-base.en');
     const baseRadio = screen.getByRole('radio', {
       name: /Whisper Base \(English\)/i,
@@ -248,11 +252,24 @@ describe('Settings', () => {
 
   it('downloads a model only after explicit Download click', async () => {
     const user = userEvent.setup();
-    renderWithApp(<Settings onSetup={vi.fn()} />);
+    renderWithApp(<Settings initialTab="models" onSetup={vi.fn()} />);
     await screen.findByText('whisper-tiny.en');
     const downloads = screen.getAllByRole('button', { name: 'Download' });
     await user.click(downloads[0]);
     expect(await screen.findByText('On disk')).toBeInTheDocument();
-    expect(screen.getByText('available')).toBeInTheDocument();
+    expect(screen.getByText('On disk')).toHaveClass('badge--available');
+  });
+});
+
+describe('Shortcut recorder (BUS-47)', () => {
+  it('records a chord by pressing it and shows it as key caps', async () => {
+    const user = userEvent.setup();
+    renderWithApp(<Settings onSetup={vi.fn()} />);
+    const field = screen.getByRole('button', { name: /^(Shortcut|App-local shortcut|Global shortcut) / });
+    await user.click(field);
+    expect(field).toHaveTextContent('Press keys…');
+    await user.keyboard('{Control>}{Alt>}k{/Alt}{/Control}');
+    expect(field).toHaveAccessibleName('Shortcut Control Option K');
+    expect(screen.getByText(/^Shortcut set to/)).toBeInTheDocument();
   });
 });

@@ -4,6 +4,12 @@ import type { DictationRecord, HistoryStatus, WritingStyle } from
 /** On-disk schema version for `history.json`. */
 export const HISTORY_FILE_VERSION = 2 as const;
 
+/**
+ * Accepted schema versions. Version 1 predates cleanup provenance; older
+ * files are rewritten only after the store backs up the original (BUS-42).
+ */
+export const READABLE_HISTORY_VERSIONS: readonly number[] = [1, 2];
+
 export type TranscriptRetention = '30-days' | 'forever' | 'off';
 
 export interface HistoryFile {
@@ -11,14 +17,14 @@ export interface HistoryFile {
   version: typeof HISTORY_FILE_VERSION;
 }
 
-const STATUSES: readonly HistoryStatus[] = ['copied', 'failed', 'inserted'];
+const STATUSES: readonly HistoryStatus[] = ['copied', 'failed', 'inserted', 'unverified'];
 const STYLES: readonly WritingStyle[] = ['casual', 'formal', 'very-casual'];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const RETENTION_30_DAYS_MS = 30 * DAY_MS;
 
 export type ParseHistoryResult =
-  | { ok: true; file: HistoryFile }
+  | { ok: true; file: HistoryFile; sourceVersion: number }
   | { ok: false; error: string };
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -92,6 +98,7 @@ function parseRecord(
     createdAt,
     durationSeconds,
     id,
+    mayHaveInserted,
     model,
     rawText,
     recoveryExpiresAt,
@@ -118,14 +125,18 @@ function parseRecord(
   // Optional provenance must never erase otherwise valid transcript evidence.
   const cleanup = legacy ? legacyCleanup()
     : parseCleanup(rawCleanup) ?? unavailableCleanup();
-  const parsedRawText = legacy ? text : rawText;
-  if (typeof parsedRawText !== 'string') return null;
+  if (!(rawText === undefined || typeof rawText === 'string')) return null;
+  const parsedRawText = rawText ?? text;
+  const maybe = isObject(mayHaveInserted) && typeof mayHaveInserted.copied === 'boolean'
+    ? { mayHaveInserted: { copied: mayHaveInserted.copied } }
+    : {};
   return {
     cleanup,
     createdAt,
     durationSeconds,
     id,
     model,
+    ...maybe,
     rawText: parsedRawText,
     recoveryExpiresAt,
     status: status as HistoryStatus,
@@ -149,7 +160,10 @@ export function parseHistoryJson(raw: string): ParseHistoryResult {
   if (!isObject(parsed)) {
     return { error: 'History file root must be an object', ok: false };
   }
-  if (parsed.version !== 1 && parsed.version !== HISTORY_FILE_VERSION) {
+  if (
+    typeof parsed.version !== 'number'
+    || !READABLE_HISTORY_VERSIONS.includes(parsed.version)
+  ) {
     return {
       error: `Unsupported history file version: ${String(parsed.version)}`,
       ok: false,
@@ -167,6 +181,7 @@ export function parseHistoryJson(raw: string): ParseHistoryResult {
   return {
     file: { records, version: HISTORY_FILE_VERSION },
     ok: true,
+    sourceVersion: parsed.version,
   };
 }
 

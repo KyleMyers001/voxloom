@@ -1,27 +1,38 @@
 import { useEffect, useState } from 'react';
 import { useApp } from '../../app/AppContext';
 import { canStartDictation } from '../../app/state';
+import { EmptyState } from '../../components/EmptyState';
+import { SearchField } from '../../components/SearchField';
+import { SegmentedControl } from '../../components/SegmentedControl';
 import { canRetry } from '../../domain/records';
+import type { DictationRecord, HistoryStatus, Settings } from '../../domain/types';
 import { isTauriEnv } from '../../services/capture/captureService';
-import type { HistoryStatus } from '../../domain/types';
+import { HistoryRow } from './HistoryRow';
 
 interface HistoryProps {
   onToast: (message: string) => void;
 }
 
-function formatTime(timestamp: number): string {
-  return new Intl.DateTimeFormat('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(timestamp);
-}
+type Filter = HistoryStatus | 'all';
+const filters: { value: Filter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'inserted', label: 'Inserted' },
+  { value: 'copied', label: 'Copied' },
+  { value: 'failed', label: 'Failed' },
+  { value: 'unverified', label: 'Unverified' },
+];
+const retentionCopy: Record<Settings['transcriptRetention'], string> = {
+  '30-days': 'Kept for 30 days (Settings › Privacy).',
+  forever: 'Kept until you delete them (Settings › Privacy).',
+  off: 'Transcript retention is off (Settings › Privacy).',
+};
 
 export function History({ onToast }: HistoryProps) {
   const { clipboard, dictation, history, now, state } = useApp();
   const isNative = isTauriEnv();
   const [currentTime, setCurrentTime] = useState(now);
   const [query, setQuery] = useState('');
-  const [status, setStatus] = useState<HistoryStatus | 'all'>('all');
+  const [status, setStatus] = useState<Filter>('all');
   const records = [...state.records]
     .filter((record) => status === 'all' || record.status === status)
     .filter((record) => record.text.toLowerCase().includes(query.toLowerCase()))
@@ -41,7 +52,7 @@ export function History({ onToast }: HistoryProps) {
     }
   }
 
-  function retry(record: (typeof records)[number]) {
+  function retry(record: DictationRecord) {
     if (!canStartDictation(state.dictation)) {
       onToast('Finish the current dictation before retrying');
       return;
@@ -55,106 +66,43 @@ export function History({ onToast }: HistoryProps) {
   }
 
   return (
-    <section aria-labelledby="history-title">
-      <div className="hero">
-        <div>
-          <h1 id="history-title">History</h1>
-          <p>Transcript storage follows Settings → retention. Audio retry is not available in the desktop app.</p>
-        </div>
+    <section aria-labelledby="history-title" className="history">
+      <header className="page-head">
+        <h1 id="history-title">History</h1>
+        <p>
+          {retentionCopy[state.settings.transcriptRetention]}{' '}
+          {isNative
+            ? 'Audio isn’t saved, so audio retry isn’t available in the desktop app.'
+            : 'Failed dictations can be retried while their temporary recovery buffer lasts.'}
+        </p>
+      </header>
+      <div className="history-tools">
+        <SearchField label="Search history" onChange={setQuery} placeholder="Search transcripts" value={query} />
+        <SegmentedControl label="History status" onChange={setStatus} options={filters} size="sm" value={status} />
       </div>
-      <div className="card">
-        <div className="search-row">
-          <input
-            aria-label="Search history"
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search transcripts"
-            type="search"
-            value={query}
+      <div className="history-list card">
+        {records.map((record) => (
+          <HistoryRow
+            canStart={canStartDictation(state.dictation)}
+            currentTime={currentTime}
+            isNative={isNative}
+            key={record.id}
+            onCopy={(text) => { void copy(text); }}
+            onDelete={(id) => history.delete(id)}
+            onRetry={retry}
+            record={record}
           />
-          <select
-            aria-label="History status"
-            onChange={(event) => setStatus(
-              event.target.value as HistoryStatus | 'all'
-            )}
-            value={status}
-          >
-            <option value="all">All statuses</option>
-            <option value="inserted">Inserted</option>
-            <option value="copied">Copied</option>
-            <option value="failed">Failed</option>
-          </select>
-        </div>
-        <div className="history-list">
-          {records.map((record) => (
-            <article className="recent-row" key={record.id} tabIndex={0}>
-              <span className="timestamp">{formatTime(record.createdAt)}</span>
-              <div>
-                <h3>{record.text}</h3>
-                <p className="empty-note">
-                  {record.durationSeconds}s · {record.status[0].toUpperCase()}
-                  {record.status.slice(1)} · {
-                    record.model ?? 'Local STT'
-                  } · {
-                    record.style === 'very-casual' ? 'Very Casual' :
-                      `${record.style[0].toUpperCase()}${record.style.slice(1)}`
-                  }
-                </p>
-                {record.cleanup && record.cleanup.promptVersion !== 'legacy-v1' && (
-                  <p className="empty-note">
-                    Cleanup: {record.cleanup.status}
-                    {record.cleanup.reason
-                      ? ` (${record.cleanup.reason})`
-                      : ''}
-                  </p>
-                )}
-                {record.rawText && record.rawText !== record.text && (
-                  <details>
-                    <summary>Show raw transcript</summary>
-                    <p>{record.rawText}</p>
-                  </details>
-                )}
-                {record.status === 'failed' && (
-                  <p className="recovery-state">
-                    {isNative
-                      ? 'No audio retry available; copy the text to recover it.'
-                      : canRetry(record, currentTime) && record.recoveryExpiresAt
-                        ? `Temporary recovery buffer · expires ${
-                          formatTime(record.recoveryExpiresAt)}`
-                        : 'Temporary recovery buffer expired'}
-                  </p>
-                )}
-              </div>
-              <div className="action-group">
-                {record.text.trim() && (
-                  <button
-                    aria-label="Copy transcript"
-                    className="action-btn icon-btn"
-                    onClick={() => void copy(record.text)}
-                    title="Copy transcript"
-                  >⧉</button>
-                )}
-                {!isNative && canRetry(record, currentTime) && (
-                  <button
-                    aria-label="Retry transcription"
-                    className="action-btn icon-btn"
-                    disabled={!canStartDictation(state.dictation)}
-                    onClick={() => retry(record)}
-                    title="Retry transcription"
-                  >↻</button>
-                )}
-                <button
-                  aria-label="Delete transcript"
-                  className="action-btn danger icon-btn"
-                  onClick={() => history.delete(record.id)}
-                  title="Delete transcript"
-                >⌫</button>
-              </div>
-            </article>
-          ))}
-          {!records.length && (
-            <p className="empty-note">No history matches these filters.</p>
-          )}
-        </div>
+        ))}
+        {!state.records.length && (
+          <EmptyState icon="clock" title="No dictations yet">
+            Hold the shortcut in any app to dictate. Transcripts appear here.
+          </EmptyState>
+        )}
+        {state.records.length > 0 && !records.length && (
+          <EmptyState icon="search" title="No history matches these filters">
+            Clear the search or choose All.
+          </EmptyState>
+        )}
       </div>
     </section>
   );

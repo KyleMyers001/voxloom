@@ -12,10 +12,13 @@ function stubDogfood(
   return {
     cancel: vi.fn(),
     captureState: { kind: 'idle' },
+    hudResult: null,
     intendedTarget: null,
     message: null,
     origin: null,
     phase: 'idle',
+    scopeReady: false,
+    hudReady: false,
     start: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn().mockResolvedValue(undefined),
     transcript: null,

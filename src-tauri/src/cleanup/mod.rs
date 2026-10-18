@@ -133,10 +133,7 @@ fn development_worker_path() -> PathBuf {
     PathBuf::new()
 }
 
-fn authorize_labels(
-    webview: &str,
-    window: &str,
-) -> Result<(), CleanupCommandError> {
+fn authorize_labels(webview: &str, window: &str) -> Result<(), CleanupCommandError> {
     if webview != "main" || window != "main" {
         return Err(CleanupCommandError::runtime(
             "cleanup is restricted to the main webview",
@@ -145,11 +142,18 @@ fn authorize_labels(
     Ok(())
 }
 
-fn require_main<R: Runtime>(
-    webview: &Webview<R>,
-) -> Result<(), CleanupCommandError> {
+fn require_main<R: Runtime>(webview: &Webview<R>) -> Result<(), CleanupCommandError> {
     // These labels come from Tauri's invoking Webview, never IPC arguments.
     authorize_labels(webview.label(), webview.window().label())
+}
+
+fn authorize_model_manager(webview: &str, window: &str) -> Result<(), CleanupCommandError> {
+    if webview == window && matches!(window, "main" | "settings") {
+        return Ok(());
+    }
+    Err(CleanupCommandError::runtime(
+        "cleanup models are restricted to main and settings",
+    ))
 }
 
 fn owner(session_id: &str) -> Result<u64, CleanupCommandError> {
@@ -189,9 +193,7 @@ pub async fn cleanup_session_dispose<R: Runtime>(
     tauri::async_runtime::spawn_blocking(move || retired.finish())
         .await
         .map_err(|error| {
-            CleanupCommandError::runtime(format!(
-                "cleanup disposal task failed: {error}"
-            ))
+            CleanupCommandError::runtime(format!("cleanup disposal task failed: {error}"))
         })
 }
 
@@ -201,7 +203,8 @@ pub async fn cleanup_pick_and_import_model<R: Runtime>(
     webview: Webview<R>,
     state: State<'_, CleanupState>,
 ) -> Result<Option<ModelStatus>, String> {
-    require_main(&webview).map_err(|error| error.message)?;
+    authorize_model_manager(webview.label(), webview.window().label())
+        .map_err(|error| error.message)?;
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
     app.run_on_main_thread(move || {
         let _ = sender.send(picker::pick_model_path());
@@ -210,9 +213,7 @@ pub async fn cleanup_pick_and_import_model<R: Runtime>(
     let source = tauri::async_runtime::spawn_blocking(move || receiver.recv())
         .await
         .map_err(|error| format!("model picker task failed: {error}"))?
-        .map_err(|error| {
-            format!("model picker closed unexpectedly: {error}")
-        })??;
+        .map_err(|error| format!("model picker closed unexpectedly: {error}"))??;
     let Some(source_path) = source else {
         return Ok(None);
     };
@@ -231,12 +232,12 @@ pub async fn cleanup_model_status<R: Runtime>(
     webview: Webview<R>,
     state: State<'_, CleanupState>,
 ) -> Result<ModelStatus, String> {
-    require_main(&webview).map_err(|error| error.message)?;
+    authorize_model_manager(webview.label(), webview.window().label())
+        .map_err(|error| error.message)?;
     let models = Arc::clone(&state.models);
-    let mut status =
-        tauri::async_runtime::spawn_blocking(move || models.status())
-            .await
-            .map_err(|error| format!("model status task failed: {error}"))?;
+    let mut status = tauri::async_runtime::spawn_blocking(move || models.status())
+        .await
+        .map_err(|error| format!("model status task failed: {error}"))?;
     status.runtime_available = state.supervisor.available();
     Ok(status)
 }
@@ -259,11 +260,7 @@ pub async fn cleanup_acquire<R: Runtime>(
         requests.complete_acquire(token, models.lease(&model_id))
     })
     .await
-    .map_err(|error| {
-        CleanupCommandError::runtime(format!(
-            "cleanup lease task failed: {error}"
-        ))
-    })?
+    .map_err(|error| CleanupCommandError::runtime(format!("cleanup lease task failed: {error}")))?
 }
 
 #[tauri::command]
@@ -283,11 +280,10 @@ pub async fn cleanup_run<R: Runtime>(
             attempt: None,
         });
     }
-    let running = state.requests.start_run(
-        owner(&session_id)?,
-        &request.request_id,
-        &request.model_id,
-    )?;
+    let running =
+        state
+            .requests
+            .start_run(owner(&session_id)?, &request.request_id, &request.model_id)?;
     tauri::async_runtime::spawn_blocking(move || {
         running.run_with_attempt(request.prompt, |attempt| {
             // Failure to reach a retired renderer does not erase evidence in
@@ -296,9 +292,7 @@ pub async fn cleanup_run<R: Runtime>(
         })
     })
     .await
-    .map_err(|error| {
-        CleanupCommandError::runtime(format!("cleanup task failed: {error}"))
-    })?
+    .map_err(|error| CleanupCommandError::runtime(format!("cleanup task failed: {error}")))?
 }
 
 #[tauri::command]
@@ -312,15 +306,11 @@ pub async fn cleanup_cancel<R: Runtime>(
     validate_request_id(&request_id)?;
     let owner = owner(&session_id)?;
     let requests = state.requests.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        requests.settle(owner, &request_id)
-    })
-    .await
-    .map_err(|error| {
-        CleanupCommandError::runtime(format!(
-            "cleanup cancellation task failed: {error}"
-        ))
-    })?
+    tauri::async_runtime::spawn_blocking(move || requests.settle(owner, &request_id))
+        .await
+        .map_err(|error| {
+            CleanupCommandError::runtime(format!("cleanup cancellation task failed: {error}"))
+        })?
 }
 
 #[tauri::command]
@@ -336,6 +326,14 @@ pub async fn cleanup_release<R: Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_management_allows_settings_but_not_overlay_or_mismatched_labels() {
+        assert!(authorize_model_manager("main", "main").is_ok());
+        assert!(authorize_model_manager("settings", "settings").is_ok());
+        assert!(authorize_model_manager("overlay", "overlay").is_err());
+        assert!(authorize_model_manager("main", "settings").is_err());
+    }
 
     #[test]
     fn only_the_native_main_webview_and_window_are_authorized() {

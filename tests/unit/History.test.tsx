@@ -14,9 +14,7 @@ describe('History', () => {
     })).toBeInTheDocument();
     expect(screen.getByText(/Temporary recovery buffer · expires/))
       .toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('History status'), {
-      target: { value: 'failed' },
-    });
+    fireEvent.click(screen.getByRole('radio', { name: 'Failed' }));
     expect(screen.getAllByRole('article')).toHaveLength(1);
     now += 11 * 60_000;
     act(() => vi.advanceTimersByTime(1_000));
@@ -37,9 +35,7 @@ describe('History', () => {
         .not.toBeInTheDocument();
       expect(screen.queryByText(/Temporary recovery buffer/))
         .not.toBeInTheDocument();
-      fireEvent.change(screen.getByLabelText('History status'), {
-        target: { value: 'failed' },
-      });
+      fireEvent.click(screen.getByRole('radio', { name: 'Failed' }));
       fireEvent.click(screen.getByRole('button', { name: 'Copy transcript' }));
       await waitFor(() => expect(toast).toHaveBeenCalledWith('Copied to clipboard'));
     } finally {

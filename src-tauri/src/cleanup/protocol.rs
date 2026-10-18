@@ -22,9 +22,7 @@ pub struct WorkerResponse {
     pub text: Option<String>,
 }
 
-pub fn read_frame<T: DeserializeOwned>(
-    reader: &mut impl Read,
-) -> Result<T, String> {
+pub fn read_frame<T: DeserializeOwned>(reader: &mut impl Read) -> Result<T, String> {
     let mut header = [0_u8; 4];
     reader
         .read_exact(&mut header)
@@ -37,8 +35,7 @@ pub fn read_frame<T: DeserializeOwned>(
     reader
         .read_exact(&mut body)
         .map_err(|error| format!("read frame body: {error}"))?;
-    serde_json::from_slice(&body)
-        .map_err(|error| format!("parse frame JSON: {error}"))
+    serde_json::from_slice(&body).map_err(|error| format!("parse frame JSON: {error}"))
 }
 
 struct FrameBody(Vec<u8>);
@@ -76,10 +73,7 @@ pub fn encode_frame<T: Serialize>(value: &T) -> Result<Vec<u8>, String> {
     Ok(frame)
 }
 
-pub fn write_encoded_frame(
-    writer: &mut impl Write,
-    frame: &[u8],
-) -> Result<(), String> {
+pub fn write_encoded_frame(writer: &mut impl Write, frame: &[u8]) -> Result<(), String> {
     writer
         .write_all(frame)
         .and_then(|()| writer.flush())
@@ -87,10 +81,7 @@ pub fn write_encoded_frame(
 }
 
 #[cfg(test)]
-pub fn write_frame<T: Serialize>(
-    writer: &mut impl Write,
-    value: &T,
-) -> Result<(), String> {
+pub fn write_frame<T: Serialize>(writer: &mut impl Write, value: &T) -> Result<(), String> {
     write_encoded_frame(writer, &encode_frame(value)?)
 }
 
@@ -117,10 +108,7 @@ mod tests {
         use serde::ser::SerializeSeq;
         struct Large<'a>(&'a std::cell::Cell<usize>);
         impl Serialize for Large<'_> {
-            fn serialize<S: serde::Serializer>(
-                &self,
-                serializer: S,
-            ) -> Result<S::Ok, S::Error> {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
                 let mut sequence = serializer.serialize_seq(Some(100))?;
                 let chunk = "x".repeat(8192);
                 for _ in 0..100 {
@@ -132,7 +120,10 @@ mod tests {
         }
         let written = std::cell::Cell::new(0);
         assert!(encode_frame(&Large(&written)).is_err());
-        assert!(written.get() < 16, "must stop serializing instead of allocating the entire oversize payload");
+        assert!(
+            written.get() < 16,
+            "must stop serializing instead of allocating the entire oversize payload"
+        );
     }
 
     #[test]

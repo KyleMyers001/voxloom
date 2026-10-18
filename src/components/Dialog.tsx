@@ -5,10 +5,13 @@ import {
   useRef,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { Icon } from './Icon';
 import { beginModal } from '../app/modalState';
 
 interface DialogProps {
   children: ReactNode;
+  /** CSS selector for the element focused on open; defaults to the first focusable. */
+  initialFocus?: string;
   label: string;
   onClose: () => void;
   opener?: HTMLElement | null;
@@ -21,7 +24,7 @@ const selector = [
   'textarea:not([disabled])',
 ].join(',');
 
-export function Dialog({ children, label, onClose, opener }: DialogProps) {
+export function Dialog({ children, initialFocus, label, onClose, opener }: DialogProps) {
   const panel = useRef<HTMLDivElement>(null);
 
   useEffect(() => beginModal(), []);
@@ -34,7 +37,9 @@ export function Dialog({ children, label, onClose, opener }: DialogProps) {
       root.inert = true;
       root.setAttribute('aria-hidden', 'true');
     }
-    panel.current?.querySelector<HTMLElement>(selector)?.focus();
+    const panelEl = panel.current;
+    (panelEl?.querySelector<HTMLElement>(initialFocus ?? selector)
+      ?? panelEl?.querySelector<HTMLElement>(selector))?.focus();
     return () => {
       if (root) {
         root.inert = wasInert;
@@ -43,7 +48,7 @@ export function Dialog({ children, label, onClose, opener }: DialogProps) {
       }
       opener?.focus();
     };
-  }, [opener]);
+  }, [initialFocus, opener]);
 
   useEffect(() => {
     const handleEscape = (event: globalThis.KeyboardEvent) => {
@@ -85,10 +90,11 @@ export function Dialog({ children, label, onClose, opener }: DialogProps) {
         event.stopPropagation()} ref={panel}>
         <button
           aria-label={`Close ${label}`}
-          className="icon-btn modal-close"
+          className="xbtn modal-close"
           onClick={onClose}
+          type="button"
         >
-          ×
+          <Icon name="x" size={12} />
         </button>
         {children}
       </div>

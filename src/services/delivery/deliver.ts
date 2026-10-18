@@ -17,9 +17,10 @@ import {
 import type {
   DeliverOptions,
   DeliveryOutcome,
+  InsertReport,
   TargetSnapshot,
 } from './types';
-import { DeliveryCancelledError } from './types';
+import { DeliveryCancelledError, InsertError } from './types';
 
 
 async function readClipboardText(
@@ -67,9 +68,27 @@ export async function deliverTranscript(
   const text = options.text;
   const now = options.now ?? Date.now;
   const platform = options.platform;
+  const current = () => options.isCurrent?.() ?? true;
+  const stale = () => failOutcome(text, 'session cancelled or superseded; delivery skipped');
+
+  // Nothing to deliver: never insert, and never overwrite the clipboard.
+  if (text.trim() === '') {
+    return {
+      clipboardRestored: false,
+      detail: 'empty transcript',
+      message: deliveryMessage('failed', 'nothing to insert (empty transcript)'),
+      restoreSkippedReason: null,
+      status: 'failed',
+      text,
+      writeCommitted: false,
+      writeStarted: false,
+    };
+  }
+
+  if (!current()) return stale();
 
   const intended: TargetSnapshot = options.intended
-    ?? unavailableSnapshot(now(), 'no intended target snapshot at invocation');
+    ?? unavailableSnapshot(now(), 'no intended target snapshot at transcription completion');
 
   let validated: TargetSnapshot;
   try {
@@ -84,26 +103,24 @@ export async function deliverTranscript(
     };
   }
 
+  if (!current()) return stale();
   const plan = planDelivery(validated, options.clipboardFallback);
   assertCanWrite(options);
 
   if (plan.action === 'insert') {
+    let report: InsertReport | void;
     try {
-      await platform.insertText(text, plan.target);
-      return {
-        clipboardRestored: false,
-        detail: null,
-        message: deliveryMessage('inserted', null),
-        restoreSkippedReason: null,
-        status: 'inserted',
-        text,
-        writeCommitted: true,
-        writeStarted: true,
-      };
+      report = await platform.insertText(text, plan.target);
     } catch (error: unknown) {
       const insertFail = error instanceof Error
         ? error.message
         : String(error);
+      if (error instanceof InsertError && error.writeStarted) {
+        // The write may have landed: never say "Couldn't insert" (mayHaveInserted).
+        const report = { detail: `insert error after write began: ${insertFail}`, typed: false, unverified: true };
+        return mayHaveInserted(platform, text, current() && options.canWrite?.() !== false, report, options);
+      }
+      if (!current()) return failOutcome(text, `session cancelled or superseded; insert failed: ${insertFail}`, { writeStarted: true });
       // Insert API failed after a valid-looking target → Copy + toast if enabled.
       // Cancellation forbids a new write, not evidence of the attempted insert.
       if (!options.clipboardFallback || options.canWrite?.() === false) {
@@ -118,6 +135,35 @@ export async function deliverTranscript(
         options,
       );
     }
+    if (report?.terminalDispatch) {
+      // Posting is not input-buffer confirmation. Never copy or retry after
+      // any Terminal dispatch, even if the session was cancelled in flight.
+      const sent = report.terminalDispatch === 'complete' ? 'Text sent' : 'Text partly sent';
+      return {
+        clipboardRestored: false,
+        detail: report.detail,
+        message: `${sent} to Terminal — input not verified. Inspect before retrying.`,
+        restoreSkippedReason: null,
+        status: 'unverified',
+        text,
+        writeStarted: true,
+        writeCommitted: report.terminalDispatch === 'complete',
+      };
+    }
+    if (report?.unverified) {
+      // An in-flight native write cannot be undone; preserve its uncertainty.
+      return mayHaveInserted(platform, text, current() && options.canWrite?.() !== false, report, options);
+    }
+    return {
+      clipboardRestored: false,
+      detail: report?.typed ? 'typed' : null,
+      message: deliveryMessage('inserted', null),
+      restoreSkippedReason: null,
+      status: 'inserted',
+      text,
+      writeCommitted: true,
+      writeStarted: true,
+    };
   }
 
   if (plan.action === 'copy') {
@@ -125,6 +171,30 @@ export async function deliverTranscript(
   }
 
   return failOutcome(text, plan.reason);
+}
+
+/**
+ * Native write happened but could not be proven complete: the text may already
+ * be (partly) in the field. Never claim Inserted, never imply nothing happened
+ * — including when the Copy fallback itself fails or is disabled.
+ */
+async function mayHaveInserted(
+  platform: DeliverOptions['platform'],
+  text: string,
+  canFallback: boolean,
+  report: InsertReport,
+  options: DeliverOptions,
+): Promise<DeliveryOutcome> {
+  const detail = `unverified insert: ${report.detail ?? 'read-back failed'}`;
+  if (!canFallback || !options.clipboardFallback) {
+    const failed = failOutcome(text, detail, { writeStarted: true });
+    return { ...failed, mayHaveInserted: true, message: `May have been inserted — ${failed.message}` };
+  }
+  const copied = await copyFallback(platform, text, detail, options);
+  if (copied.status === 'copied') {
+    return { ...copied, mayHaveInserted: true, message: 'May have been inserted — also copied' };
+  }
+  return { ...copied, mayHaveInserted: true, message: `May have been inserted — ${copied.message}` };
 }
 
 /**
@@ -140,6 +210,9 @@ async function copyFallback(
   options: DeliverOptions,
 ): Promise<DeliveryOutcome> {
   assertCanWrite(options);
+  if (options.isCurrent?.() === false) {
+    return failOutcome(text, 'session cancelled or superseded; delivery skipped');
+  }
   try {
     await platform.clipboardWrite(text);
   } catch (error: unknown) {

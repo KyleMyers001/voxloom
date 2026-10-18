@@ -52,12 +52,14 @@ export const initialSettings: Settings = {
   cleanupModelId: null,
   clipboardFallback: true,
   language: 'English (US)',
+  languageModel: 'Alder Text Small · local',
   // Sentinel value that the Settings mic select treats as
   // "use system default". Must match the <option> value in Settings.tsx.
   microphone: SYSTEM_DEFAULT_DEVICE_ID,
   shortcut: 'Ctrl + Shift + Space',
   startAtLogin: false,
   style: 'formal',
+  textSize: 'default',
   transcriptRetention: '30-days',
   // Explicit STT modelId (ADR / BUS-10 settings pick). Legacy simulated
   // labels are resolved to this default via resolveTranscriptionModelId.

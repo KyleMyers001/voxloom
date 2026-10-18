@@ -14,7 +14,7 @@ Apple Silicon hardware or macOS versions.
 
 The default bundle is workerless. Use `src-tauri/tauri.cleanup.conf.json` to
 bundle only the executable (not this README) with the optional macOS 13.3+ floor.
-The ordinary workerless configuration retains its 10.15 declaration.
+The ordinary workerless configuration declares macOS 13.1.
 Use `--target aarch64-apple-darwin` for the app build. Debug development runs can
 also discover this resource directly; see the root README for build commands.
 

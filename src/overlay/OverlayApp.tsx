@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { toDisplayLevel, WAVEFORM_BARS } from '../components/Waveform';
 import type { CaptureEvent } from '../services/capture/types';
-import type { OverlayWaveform } from '../services/shortcut/overlayVisibility';
+import type { OverlayResult, OverlayWaveform } from '../services/shortcut/overlayVisibility';
 import { OverlayWaveformView } from './OverlayWaveformView';
 
 const emptyLevels = () => Array<number>(WAVEFORM_BARS).fill(0);
@@ -9,6 +9,7 @@ const emptyLevels = () => Array<number>(WAVEFORM_BARS).fill(0);
 /** Separate, non-focusable Tauri window. Only level metadata crosses IPC. */
 export function OverlayApp() {
   const [waveform, setWaveform] = useState<OverlayWaveform>('silent');
+  const [result, setResult] = useState<OverlayResult | null>(null);
   const [levels, setLevels] = useState(emptyLevels);
   const waveformRef = useRef<OverlayWaveform>('silent');
   const sessionRef = useRef<{ generation: number; requestId: string } | null>(null);
@@ -19,11 +20,12 @@ export function OverlayApp() {
     void (async () => {
       try {
         const { listen } = await import('@tauri-apps/api/event');
-        const overlayUnlisten = await listen<{ waveform: OverlayWaveform }>(
+        const overlayUnlisten = await listen<{ result?: OverlayResult; waveform: OverlayWaveform }>(
           'overlay:waveform',
           (event) => {
             waveformRef.current = event.payload.waveform;
             setWaveform(event.payload.waveform);
+            setResult(event.payload.result ?? null);
             if (event.payload.waveform === 'silent') {
               sessionRef.current = null;
               setLevels(emptyLevels());
@@ -72,5 +74,5 @@ export function OverlayApp() {
     };
   }, []);
 
-  return <OverlayWaveformView levels={levels} waveform={waveform} />;
+  return <OverlayWaveformView levels={levels} result={result} waveform={waveform} />;
 }

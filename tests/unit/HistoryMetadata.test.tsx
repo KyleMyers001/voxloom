@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { initialSettings } from '../../src/domain/fixtures';
 import type { DictationRecord } from '../../src/domain/types';
 import { History } from '../../src/features/history/History';
 import { parseHistoryJson } from '../../src/services/history';
@@ -11,7 +12,7 @@ vi.mock('../../src/app/AppContext', () => ({
     dictation: { retry: vi.fn() },
     history: { delete: vi.fn() },
     now: () => 1000,
-    state: { records, dictation: { kind: 'ready' } },
+    state: { records, dictation: { kind: 'ready' }, settings: initialSettings },
   }),
 }));
 
@@ -40,6 +41,7 @@ describe('History metadata presentation', () => {
     expect(screen.getByText('Final words.')).toBeInTheDocument();
     expect(screen.getByText('original words')).toBeInTheDocument();
     expect(screen.getByText(/Cleanup: unavailable/)).toBeInTheDocument();
-    expect(screen.getByText(/1s · Copied/)).toBeInTheDocument();
+    expect(screen.getByText('Copied', { selector: '.badge' })).toBeInTheDocument();
+    expect(screen.getByText(/1s · Local STT/)).toBeInTheDocument();
   });
 });

@@ -1,0 +1,94 @@
+/* Waveform, speech-model list, dogfood capture. */
+.wave {
+  align-items: center;
+  display: flex;
+  gap: 1px;
+  height: 14px;
+  justify-content: center;
+  width: 60px;
+}
+
+.wave i {
+  background: var(--accent);
+  border-radius: 2px;
+  flex: 0 0 1.5px;
+  height: var(--h);
+  opacity: .9;
+  transition: height 85ms ease-out;
+}
+
+[data-waveform="processing"] .wave i {
+  animation: waveform-processing 850ms ease-in-out infinite alternate;
+}
+
+@keyframes waveform-processing {
+  from { opacity: .35; }
+  to { opacity: .9; }
+}
+
+/* Models tab cards (UI PR 7): radio + label/id · size, status badge, action;
+   error and selected notes span the card. */
+.stt-model-list { display: grid; gap: var(--s-4); list-style: none; margin: var(--s-6) 0 0; padding: 0; }
+
+.stt-model-row {
+  align-items: center;
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: var(--r-tile);
+  display: grid;
+  gap: var(--s-3) var(--s-6);
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  padding: var(--s-6) var(--s-7);
+}
+
+.stt-model-row[data-selected] { border-color: var(--accfg); }
+.stt-model-select {
+  align-items: flex-start;
+  color: var(--fg);
+  display: flex;
+  font-size: var(--fs-body);
+  font-weight: 400;
+  gap: var(--s-5);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.stt-model-select > span { display: grid; gap: 2px; }
+.stt-model-id { color: var(--mut); font-family: var(--mono); font-size: var(--fs-mono); }
+.stt-model-size { white-space: nowrap; }
+.stt-model-actions .btn { align-items: center; display: inline-flex; gap: 6px; }
+.stt-model-actions { align-items: center; display: flex; gap: var(--s-4); justify-content: flex-end; }
+.stt-model-actions .prog { min-width: 180px; }
+.stt-model-row > p { grid-column: 1 / -1; margin: 0; }
+.stt-model-error { font-size: var(--fs-secondary); }
+
+@media (max-width: 640px) {
+  .stt-model-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .stt-model-actions { grid-column: 1 / -1; justify-content: flex-start; }
+}
+
+.dogfood-capture-actions {
+  margin-top: 12px;
+}
+
+.dogfood-transcript {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 12px;
+}
+
+.dogfood-transcript__label {
+  color: var(--muted);
+  font-size: var(--fs-secondary);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.dogfood-transcript p {
+  margin: 0;
+}
+

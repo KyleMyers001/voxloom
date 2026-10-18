@@ -28,11 +28,12 @@ import {
   type HistoryStore,
 } from '../services/history';
 import {
-  SETTINGS_FILE_VERSION,
   createDefaultSettingsStore,
   type DurableSettingsStore,
   type SettingsFile,
 } from '../services/settings';
+import { useSettingsPersist } from './useSettingsPersist';
+import { useSettingsSync } from './useSettingsSync';
 import {
   createDictionaryService,
   createHistoryService,
@@ -140,6 +141,8 @@ export function AppProvider({
   const settingsPersistGenRef = useRef(0);
   /** Last successfully saved snapshot — used to roll back UI on save failure. */
   const lastSavedSettingsRef = useRef<SettingsFile | null>(null);
+  /** Last value handed to save() (not yet necessarily on disk). */
+  const lastRequestedSettingsRef = useRef<SettingsFile | null>(null);
 
   const historyHydratedRef = useRef(!historyPers.enabled);
   /** False after a corrupt-load so we never overwrite the broken file. */
@@ -164,8 +167,29 @@ export function AppProvider({
   useEffect(() => {
     let cancelled = false;
 
+    // BUS-42: a migrated (older-version) or backed-up corrupt settings.json
+    // is rewritten as the current version during boot, so every later reader
+    // (including other windows) sees a current file.
+    const rewriteSettings = async (file: SettingsFile) => {
+      try {
+        await settingsPers.store.save(file.settings, file.onboardingComplete);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        dispatch({
+          message: `Failed to save settings: ${message}`,
+          type: 'set-settings-error',
+        });
+      }
+    };
+
     void (async () => {
       let retention = initialSettings.transcriptRetention;
+      // Settings unreadable and not backed up: retention is unknown, so an
+      // older history.json must not be migrated (rewritten) yet. BUS-42.
+      let settingsBlocked = false;
+      // Settings were unreadable, backed up and reset: retention fell back to
+      // the default, so history.json must be backed up before any prune.
+      let settingsReset = false;
 
       if (settingsPers.enabled) {
         const result = await settingsPers.store.load();
@@ -177,17 +201,37 @@ export function AppProvider({
             type: 'hydrate-settings',
           });
           lastSavedSettingsRef.current = result.file;
+          lastRequestedSettingsRef.current = result.file;
           allowSettingsPersistRef.current = true;
           retention = result.file.settings.transcriptRetention;
+          if (result.needsRewrite) {
+            await rewriteSettings(result.file);
+            if (cancelled) return;
+          }
         } else {
-          // Safe defaults already in state; surface error; still allow
-          // first successful write of defaults so the user can recover.
-          allowSettingsPersistRef.current = true;
+          // Safe defaults already in state; surface error. Writing defaults
+          // is allowed only once the unreadable file was backed up.
+          allowSettingsPersistRef.current = !result.writeBlocked;
+          settingsBlocked = result.writeBlocked;
+          settingsReset = !result.writeBlocked;
+          // Defaults, or the parsed values of a file this window may not
+          // migrate (Settings window, BUS-42) so it shows the real values.
+          dispatch({
+            onboardingComplete: result.file.onboardingComplete,
+            settings: result.file.settings,
+            type: 'hydrate-settings',
+          });
           lastSavedSettingsRef.current = result.file;
+          lastRequestedSettingsRef.current = result.file;
           dispatch({
             message: result.error,
             type: 'set-settings-error',
           });
+          if (!result.writeBlocked) {
+            // Corrupt file already backed up: replace it with defaults now.
+            await rewriteSettings(result.file);
+            if (cancelled) return;
+          }
         }
         settingsHydratedRef.current = true;
         settingsPersistGenRef.current += 1;
@@ -207,12 +251,22 @@ export function AppProvider({
           // Safe empty already in state; surface error; still allow first
           // successful write so the user can recover without touching
           // settings.json / history.json.
-          allowDictionaryPersistRef.current = true;
+          allowDictionaryPersistRef.current = !dictResult.writeBlocked;
           lastSavedWordsRef.current = dictResult.file.words;
           dispatch({
             message: dictResult.error,
             type: 'set-dictionary-error',
           });
+          if (!dictResult.writeBlocked) {
+            // Unreadable file already backed up: replace it with a valid
+            // empty file now so the error does not recur every launch.
+            try {
+              await dictionaryPers.store.save(dictResult.file.words);
+            } catch {
+              // Original is backed up; the next edit retries the write.
+            }
+            if (cancelled) return;
+          }
         }
         dictionaryHydratedRef.current = true;
         dictionaryPersistGenRef.current += 1;
@@ -230,13 +284,38 @@ export function AppProvider({
 
       const historyResult = await historyPers.store.load(retention, clock());
       if (cancelled) return;
-      if (historyResult.ok) {
+      let historyBackupFailed = false;
+      if (historyResult.ok && settingsReset && !settingsBlocked) {
+        const outcome = historyPers.store.backup
+          ? await historyPers.store.backup()
+          : 'failed';
+        if (cancelled) return;
+        historyBackupFailed = outcome === 'failed';
+      }
+      if (historyResult.ok && (settingsBlocked || historyBackupFailed)) {
+        // Any history version: show it, but never rewrite or prune it on
+        // default retention while settings writes are blocked.
+        dispatch({ records: historyResult.records, type: 'hydrate-records' });
+        allowHistoryPersistRef.current = false;
+        dispatch({
+          message: settingsBlocked
+            ? 'History is read-only until settings can be read. Your history file was left untouched.'
+            : 'History is read-only because it couldn\'t be backed up after settings were reset. Your history file was left untouched.',
+          sticky: true,
+          type: 'set-history-error',
+        });
+      } else if (historyResult.ok) {
         dispatch({ records: historyResult.records, type: 'hydrate-records' });
         allowHistoryPersistRef.current = true;
       } else {
+        // Unreadable / unknown-version history.json: never write over it
+        // (the store already tried to back it up). BUS-42. Dictations made
+        // before this load stay visible in memory but are never written.
+        dispatch({ records: [], type: 'hydrate-records' });
         allowHistoryPersistRef.current = false;
         dispatch({
           message: historyResult.error,
+          sticky: true,
           type: 'set-history-error',
         });
       }
@@ -251,62 +330,27 @@ export function AppProvider({
     // Intentional once-on-mount boot load (persistence identity is stable).
   }, [clock, dictionaryPers, historyPers, settingsPers]);
 
-  // Persist settings after hydrate whenever settings or onboarding-complete
-  // change. Strategy: optimistic UI (reducer updates immediately) with
-  // rollback to last successful save on write failure.
-  useEffect(() => {
-    if (
-      !settingsPers.enabled
-      || !settingsHydratedRef.current
-      || !allowSettingsPersistRef.current
-    ) {
-      return;
-    }
-    const snapshot: SettingsFile = {
-      onboardingComplete: state.onboarding.complete,
-      settings: state.settings,
-      version: SETTINGS_FILE_VERSION,
-    };
-    const last = lastSavedSettingsRef.current;
-    if (
-      last
-      && last.onboardingComplete === snapshot.onboardingComplete
-      && JSON.stringify(last.settings) === JSON.stringify(snapshot.settings)
-    ) {
-      return;
-    }
-    const gen = settingsPersistGenRef.current;
-    void (async () => {
-      try {
-        await settingsPers.store.save(
-          snapshot.settings,
-          snapshot.onboardingComplete,
-        );
-        if (gen !== settingsPersistGenRef.current) return;
-        lastSavedSettingsRef.current = snapshot;
-        dispatch({ message: null, type: 'set-settings-error' });
-      } catch (error: unknown) {
-        if (gen !== settingsPersistGenRef.current) return;
-        const message = error instanceof Error ? error.message : String(error);
-        const rollback = lastSavedSettingsRef.current;
-        if (rollback) {
-          dispatch({
-            onboardingComplete: rollback.onboardingComplete,
-            settings: rollback.settings,
-            type: 'hydrate-settings',
-          });
-        }
-        dispatch({
-          message: `Failed to save settings: ${message}`,
-          type: 'set-settings-error',
-        });
-      }
-    })();
-  }, [
-    settingsPers,
-    state.onboarding.complete,
-    state.settings,
-  ]);
+  useSettingsSync({
+    allowRef: allowSettingsPersistRef,
+    current: { onboardingComplete: state.onboarding.complete, settings: state.settings },
+    dispatch,
+    enabled: settingsPers.enabled,
+    lastRequestedRef: lastRequestedSettingsRef,
+    lastSavedRef: lastSavedSettingsRef,
+    persistGenRef: settingsPersistGenRef,
+  });
+
+  useSettingsPersist({
+    allowRef: allowSettingsPersistRef,
+    dispatch,
+    hydratedRef: settingsHydratedRef,
+    lastRequestedRef: lastRequestedSettingsRef,
+    lastSavedRef: lastSavedSettingsRef,
+    onboardingComplete: state.onboarding.complete,
+    persistence: settingsPers,
+    persistGenRef: settingsPersistGenRef,
+    settings: state.settings,
+  });
 
   // Persist dictionary after hydrate whenever words change. Optimistic UI
   // with rollback to last successful save on write failure.

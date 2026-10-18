@@ -2,7 +2,16 @@ name: CI
 
 on:
   pull_request:
+    branches: [main, 'ui/**']
+  push:
     branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   browser-app:
@@ -10,14 +19,15 @@ jobs:
     env:
       PLAYWRIGHT_BROWSERS_PATH: .playwright-browsers
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run lint
+      - run: npm run typecheck
       - run: npm run test:unit
       - run: npm run build
       - run: npm run test:e2e
@@ -30,23 +40,20 @@ jobs:
       contents: read
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
           cache: npm
       - run: npm ci
       - run: npm run build
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
       - name: Ensure CMake is available for whisper.cpp
         run: command -v cmake >/dev/null || brew install cmake
-      - uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            src-tauri/target
-          key: native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          workspaces: src-tauri
+          shared-key: native-whisper
       - name: Dependency-free worker safety and offline tool tests
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/native -v
       - name: Check default and Whisper
@@ -62,3 +69,72 @@ jobs:
             cargo test --manifest-path src-tauri/Cargo.toml --locked --lib
             cargo test --manifest-path src-tauri/Cargo.toml --locked --lib --features whisper
           done
+
+  rust:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install Tauri Linux system dependencies
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libasound2-dev libxdo-dev libssl-dev
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri
+      - name: Ensure frontend dist exists for tauri::generate_context!
+        working-directory: .
+        run: mkdir -p dist
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets
+      - run: cargo test
+
+  cargo-audit:
+    # RustSec advisories for src-tauri/Cargo.lock (BUS-63). Runs inside
+    # src-tauri so .cargo/audit.toml (the reasoned ignore list) is loaded;
+    # -D warnings fails on any advisory not ignored there.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri
+          shared-key: cargo-audit
+      - name: Install cargo-audit 0.22.2
+        run: |
+          if [ "$(cargo audit --version 2>/dev/null)" != "cargo-audit-audit 0.22.2" ]; then
+            cargo install cargo-audit --locked --version 0.22.2
+          fi
+      - run: cargo audit -D warnings
+
+  rust-macos:
+    # Compiles the macOS-only code paths (AX / text insertion) that the
+    # Linux job never builds. Default features only (whisper is opt-in).
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri
+      - name: Ensure frontend dist exists for tauri::generate_context!
+        working-directory: .
+        run: mkdir -p dist
+      - run: cargo check --all-targets
+      - run: cargo test

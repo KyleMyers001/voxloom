@@ -34,6 +34,8 @@ export function createInitialState(
     dictation: { kind: 'ready' },
     dictionaryError: null,
     historyError: null,
+    historyErrorSticky: false,
+    historyHydrated: !options.persistHistory,
     settingsError: null,
     nextRunId: 1,
     onboarding: { ...initialOnboarding },

@@ -1,0 +1,183 @@
+/* Console design tokens (SPEC.md § Design tokens). Dark is the default;
+   useTheme.ts sets [data-appearance-resolved] on <body>. */
+:root {
+  color-scheme: dark;
+  --bg: #0b0b10;
+  --side: #0e0e14;
+  --panel: #121219;
+  --sheet: #14141c;
+  --field: #1a1a23;
+  --seg: #1c1c26;
+  --segon: #2c2c3a;
+  --line: #23232e;
+  --winline: rgba(255, 255, 255, .1);
+  --fg: #ececf1;
+  --mut: #9494a3; /* BUS-48: 4.60 on segon, 4.72 on navon, 5.65+ elsewhere */
+  --ctl-line: #6a6a80; /* BUS-48 control borders: 3.21+ on every surface (--line stays for dividers) */
+  --sel-edge: #70943a; /* BUS-48 selected marker: 3.92+ on navon/side/seg/segon */
+  --mut-on-nav: #9a9aa8; /* muted text on --navon: 5.09:1 (--mut was 4.2:1) */
+  --navon: #2a2a38; /* selected nav: 1.36:1 vs --side (was #1a1a24, 1.12:1) */
+  --accfg: #b6ff3c;
+  --ok: #7ff07a;
+  --info: #3cf0ff;
+  --warn: #ffc04d;
+  --err: #ff6b6b;
+  --brand-a: #b6ff3c; /* BUS-51 brand lime, both themes */
+  --brand-b: #3cf0ff; /* BUS-51 brand cyan, both themes */
+  --brand: linear-gradient(90deg, var(--brand-a), var(--brand-b));
+  --tile-glow: color-mix(in srgb, var(--brand-a) 25%, transparent);
+  --on-brand: #08080c;
+  --knob: #ffffff; /* switch knob, both themes */
+  --focus: color-mix(in srgb, #b6ff3c 42%, transparent); /* dark focus ring */
+  --tag-bg: #2c2c3a; /* visible pill on dark panels (1.36:1 vs panel) */
+  --tag-fg: #9a9aa8; /* 4.95:1 on --tag-bg */
+  /* Switch off track: >=3:1 vs bg 3.5, panel 3.33, sheet 3.27, field 3.08, side 3.43; knob on it 5.61 */
+  --switch-off: #66667a;
+
+  --r-kbd: 5px;
+  --r-ctl: 7px;
+  --r-tile: 9px;
+  --r-win: 12px;
+  --r-card: 14px;
+  --r-hero: 18px;
+  --r-pill: 99px;
+
+  --s-1: 2px; --s-2: 4px; --s-3: 6px; --s-4: 8px; --s-5: 10px; --s-6: 12px;
+  --s-7: 14px; --s-8: 16px; --s-9: 18px; --s-10: 22px; --s-11: 32px;
+
+  --font: -apple-system, BlinkMacSystemFont, system-ui, "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  /* BUS-41 type scale: windowed value at <=1280px wide, growing linearly to
+     the fullscreen value at >=1920px (TYPE-SCALE.md). The HUD keeps its own sizes.
+     Media queries + calc(), no clamp() (project rule). The app requires macOS
+     13.1+ (Safari 16.2 WebKit, BUS-53), where calc() with `*`/`/` by a number
+     works (calc() is Safari 7+, nested calc() 11+; MDN browser-compat-data). */
+  --fsb-micro: 11px;
+  --fsb-badge: 11.5px;
+  --fsb-label: 12px;
+  --fsb-secondary: 13px;
+  --fsb-mono: 12.5px;
+  --fsb-body: 15px;
+  --fsb-emph: 16px;
+  --fsb-section: 16px;
+  --fsb-sheet: 17px;
+  --fsb-hero: 30px;
+  --fsb-page: 34px;
+  --fsb-bigkey: 20px;
+  --lh-body: 1.45;
+
+  --shadow-win: 0 0 0 .5px var(--winline), 0 30px 80px rgba(0, 0, 0, .35);
+  --shadow-dialog: 0 24px 60px rgba(0, 0, 0, .4);
+  /* Dark-tile outline fix (QA): keeps dark tiles visible on dark backgrounds. */
+  --tile-bg: linear-gradient(#24242f, #07070b);
+  --tile-shadow: inset 0 0 0 1px rgba(255, 255, 255, .16),
+    inset 0 1px 0 rgba(255, 255, 255, .12), 0 0 0 .5px rgba(0, 0, 0, .6),
+    0 2px 6px rgba(0, 0, 0, .35);
+  --hud-shadow: var(--tile-shadow), inset 0 0 0 1px color-mix(in srgb, var(--brand-a) 35%, transparent),
+    0 0 18px color-mix(in srgb, var(--brand-b) 18%, transparent);
+}
+
+[data-appearance-resolved="light"] {
+  --focus: #376b00; /* solid light focus ring: 5.25 seg, 5.77 side, 5.82 field, 6.2 bg, 6.43 panel (was 42% lime, ~1.9:1) */
+  --tag-bg: var(--seg);
+  --tag-fg: var(--mut);
+  --switch-on: #4c8a00; /* solid ON track (designer): 3.81 side, 3.84 field, 4.10 bg, 4.25 panel; white knob 4.25 */
+  color-scheme: light;
+  --bg: #fbfbf8;
+  --side: #f2f3ee;
+  --panel: #ffffff;
+  --sheet: #ffffff;
+  --field: #f3f4ef;
+  --seg: #e7e9e1;
+  --segon: #ffffff;
+  --line: #e1e3dc;
+  --winline: rgba(0, 0, 0, .12);
+  --fg: #0b0b10;
+  --mut: #5d6068;
+  --ctl-line: #808389; /* BUS-48: 3.10+ on every surface */
+  --sel-edge: #376b00; /* BUS-48: = --accfg, 5.25+ */
+  --navon: #e7eadf;
+  --mut-on-nav: #5d6068; /* 5.16:1 on navon */
+  --accfg: #376b00; /* AA: 5.28 on navon; white text on it 6.43 */
+  --ok: #156d2b; /* AA text: 5.3+ on all surfaces; 10% badge tint: 4.60 seg, 5.04 field, 5.39 bg, 5.56 panel (was #18772f, 4.48 on the #dde8dc badge) */
+  --info: #00717f; /* AA: 5.18 on field, 5.52 bg */
+  --warn: #945600; /* AA: 4.77 seg, 4.8 navon, 5.29 field, 5.64 bg, 5.85 panel */
+  --err: #bf2c32; /* AA: 4.73 seg, 4.76 navon, 5.25 field, 5.59 bg, 5.8 panel */
+  --accent-text: #ffffff;
+  /* >=3:1 vs bg 3.67, panel 3.8, field 3.44, side 3.41; white knob on it 3.8 */
+  --switch-off: #808389;
+}
+
+/* Legacy names used by existing component rules, mapped onto the tokens.
+   Declared on body too so they re-resolve where the theme attribute lives. */
+:root,
+body {
+  --accent: var(--accfg);
+  --accent-soft: var(--navon);
+  --accent-text: var(--on-brand);
+  --action: var(--accfg);
+  --border: var(--line);
+  --danger: var(--err);
+  --identity: var(--info);
+  --muted: var(--mut);
+  --panel-2: var(--field);
+  --rail: var(--side);
+  --text: var(--fg);
+}
+
+/* BUS-41 PR 3 Text size (TYPE-SCALE.md § Optional): every --fs-* is the base
+   --fsb-* times --ts, floored at 11px so Small never drops below 11px. max()
+   is Safari 11.1+; calc() number multiplication works on macOS 13.1+ (no clamp()).
+   Declared once on :root; the --fsb-* media queries below re-resolve it. */
+:root {
+  --ts: 1;
+  --fs-micro: max(11px, calc(var(--fsb-micro) * var(--ts)));
+  --fs-badge: max(11px, calc(var(--fsb-badge) * var(--ts)));
+  --fs-label: max(11px, calc(var(--fsb-label) * var(--ts)));
+  --fs-secondary: max(11px, calc(var(--fsb-secondary) * var(--ts)));
+  --fs-mono: max(11px, calc(var(--fsb-mono) * var(--ts)));
+  --fs-body: max(11px, calc(var(--fsb-body) * var(--ts)));
+  --fs-emph: max(11px, calc(var(--fsb-emph) * var(--ts)));
+  --fs-section: max(11px, calc(var(--fsb-section) * var(--ts)));
+  --fs-sheet: max(11px, calc(var(--fsb-sheet) * var(--ts)));
+  --fs-hero: max(11px, calc(var(--fsb-hero) * var(--ts)));
+  --fs-page: max(11px, calc(var(--fsb-page) * var(--ts)));
+  --fs-bigkey: max(11px, calc(var(--fsb-bigkey) * var(--ts)));
+}
+:root[data-textsize="small"] { --ts: .92; }
+:root[data-textsize="large"] { --ts: 1.12; }
+
+/* BUS-41: linear growth between 1280px and 1920px wide (see :root above). */
+@media (min-width: 1281px) {
+  :root {
+    --fsb-micro: calc(9px + 0.15625vw);
+    --fsb-badge: calc(8.5px + 0.234375vw);
+    --fsb-label: calc(9px + 0.234375vw);
+    --fsb-secondary: calc(10px + 0.234375vw);
+    --fsb-mono: calc(9.5px + 0.234375vw);
+    --fsb-body: calc(11px + 0.3125vw);
+    --fsb-emph: calc(12px + 0.3125vw);
+    --fsb-section: calc(11px + 0.390625vw);
+    --fsb-sheet: calc(12px + 0.390625vw);
+    --fsb-hero: calc(16px + 1.09375vw);
+    --fsb-page: calc(18px + 1.25vw);
+    --fsb-bigkey: calc(12px + 0.625vw);
+  }
+}
+
+@media (min-width: 1920px) {
+  :root {
+    --fsb-micro: 12px;
+    --fsb-badge: 13px;
+    --fsb-label: 13.5px;
+    --fsb-secondary: 14.5px;
+    --fsb-mono: 14px;
+    --fsb-body: 17px;
+    --fsb-emph: 18px;
+    --fsb-section: 18.5px;
+    --fsb-sheet: 19.5px;
+    --fsb-hero: 37px;
+    --fsb-page: 42px;
+    --fsb-bigkey: 24px;
+  }
+}

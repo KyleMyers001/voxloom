@@ -3,8 +3,8 @@
 /// The capture hook and Tauri IPC are mocked globally in setup.ts.
 /// These tests exercise app navigation, dictation flow, onboarding steps,
 /// and shortcut state across screens. Real permission and device flows
-/// are covered by manual tests in docs/review/BUS-9-implementation.md.
-import { act, fireEvent, screen } from '@testing-library/react';
+/// are covered by manual on-device tests.
+import { act, fireEvent, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/app/App';
@@ -71,18 +71,19 @@ describe('App integration', () => {
       act(() => vi.advanceTimersByTime(500));
       vi.useRealTimers();
       // Product hold no longer invents Inserted via mock complete (BUS-14).
-      // Real delivery is dogfood STT → deliverTranscript (Clara Mac / Home).
+      // Real delivery is dogfood STT → deliverTranscript (Mac / Home).
       expect(screen.queryByText(
         'Keep the TypeScript boundary small and explicit.',
       )).not.toBeInTheDocument();
       await user.click(screen.getByRole('button', { name: 'Settings' }));
-      await user.selectOptions(
-        screen.getByLabelText('Current style'),
-        'casual',
-      );
+      await user.click(within(
+        screen.getByRole('radiogroup', { name: 'Current style' }),
+      ).getByRole('radio', { name: 'Casual' }));
+      // ⌥-digits are ignored while a form control has focus, so blur first.
+      (document.activeElement as HTMLElement | null)?.blur();
       await user.keyboard('{Alt>}1{/Alt}');
-      expect(screen.getByRole('button', { name: /^Casual$/ }))
-        .toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByRole('radio', { name: /^Casual$/ }))
+        .toHaveAttribute('aria-checked', 'true');
       await user.click(
         screen.getByRole('button', { name: 'Dictionary' }),
       );
@@ -229,7 +230,7 @@ describe('App integration', () => {
       );
       expect(
         screen.getByRole('alert'),
-      ).toHaveTextContent('collision');
+      ).toHaveTextContent('is in use by another app (simulated)');
     },
   );
 });

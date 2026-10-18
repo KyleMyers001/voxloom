@@ -15,10 +15,7 @@ pub fn copy_private(source: &Path, destination: &Path) -> Result<(), String> {
     copy_private_from(&mut input, destination)
 }
 
-fn copy_private_from(
-    input: &mut impl Read,
-    destination: &Path,
-) -> Result<(), String> {
+fn copy_private_from(input: &mut impl Read, destination: &Path) -> Result<(), String> {
     let mut options = OpenOptions::new();
     options.create_new(true).write(true);
     #[cfg(unix)]
@@ -30,8 +27,7 @@ fn copy_private_from(
     let mut output = options
         .open(destination)
         .map_err(|error| format!("create partial model: {error}"))?;
-    std::io::copy(input, &mut output)
-        .map_err(|error| format!("copy imported model: {error}"))?;
+    std::io::copy(input, &mut output).map_err(|error| format!("copy imported model: {error}"))?;
     output
         .flush()
         .map_err(|error| format!("flush imported model: {error}"))?;
@@ -82,10 +78,7 @@ pub fn open_regular(path: &Path) -> Result<File, String> {
     Ok(file)
 }
 
-pub fn validate_file(
-    file: &mut File,
-    spec: ArtifactSpec,
-) -> Result<(), String> {
+pub fn validate_file(file: &mut File, spec: ArtifactSpec) -> Result<(), String> {
     file.seek(SeekFrom::Start(0))
         .map_err(|error| format!("rewind cleanup model: {error}"))?;
     let metadata = file
@@ -130,8 +123,7 @@ mod tests {
     use super::*;
 
     fn spec(bytes: &'static [u8]) -> ArtifactSpec {
-        let digest =
-            Box::leak(format!("{:x}", Sha256::digest(bytes)).into_boxed_str());
+        let digest = Box::leak(format!("{:x}", Sha256::digest(bytes)).into_boxed_str());
         ArtifactSpec {
             sha256: digest,
             size: bytes.len() as u64,
@@ -173,8 +165,8 @@ mod tests {
                 Ok(0)
             }
         }
-        let root = std::env::temp_dir()
-            .join(format!("voxloom-partial-private-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("voxloom-partial-private-{}", std::process::id()));
         fs::create_dir_all(&root).unwrap();
         let destination = root.join("new.partial");
         copy_private_from(&mut Inspect(&destination), &destination).unwrap();
@@ -184,8 +176,8 @@ mod tests {
     #[test]
     fn copying_rejects_symlink_sources_and_existing_destinations() {
         use std::os::unix::fs::symlink;
-        let root = std::env::temp_dir()
-            .join(format!("voxloom-copy-private-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("voxloom-copy-private-{}", std::process::id()));
         fs::create_dir_all(&root).unwrap();
         let source = root.join("source");
         let link = root.join("link");
@@ -203,8 +195,8 @@ mod tests {
     #[test]
     fn rejects_symlinks() {
         use std::os::unix::fs::symlink;
-        let root = std::env::temp_dir()
-            .join(format!("voxloom-artifact-symlink-{}", std::process::id(),));
+        let root =
+            std::env::temp_dir().join(format!("voxloom-artifact-symlink-{}", std::process::id(),));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         let real = root.join("real.gguf");

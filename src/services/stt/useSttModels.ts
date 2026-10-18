@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SttModelStore } from './contracts';
 import { createSttModelStore } from './factory';
 import { resolveTranscriptionModelId } from './resolveModelId';
+import { useDownloadPoll } from './useDownloadPoll';
 import { SttError, type SttDownloadProgress, type SttModelInfo } from './types';
 
 export interface UseSttModelsOptions {
@@ -20,7 +21,12 @@ export interface UseSttModelsResult {
   cancelDownload: (modelId: string) => Promise<void>;
   downloadModel: (modelId: string) => Promise<void>;
   error: string | null;
+  /** Per-model download failure from this session ("Download failed: … Nothing was saved."). */
+  failures: Readonly<Record<string, string>>;
+  /** List load failed; `reload()` is the "Try again" action. */
+  listError: string | null;
   loading: boolean;
+  reload: () => Promise<void>;
   models: readonly SttModelInfo[];
   progress: SttDownloadProgress | null;
   refresh: () => Promise<void>;
@@ -36,11 +42,14 @@ function errorMessage(error: unknown): string {
 
 export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
   const storeRef = useRef(options.store ?? createSttModelStore());
+  const inFlightRef = useRef<string | null>(null);
   if (options.store) storeRef.current = options.store;
 
   const [models, setModels] = useState<readonly SttModelInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
+  const [failures, setFailures] = useState<Record<string, string>>({});
   const [progress, setProgress] = useState<SttDownloadProgress | null>(null);
   const selectedModelId = resolveTranscriptionModelId(options.selectedModelId);
   const onSelectRef = useRef(options.onSelect);
@@ -51,28 +60,40 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
     setModels(list);
   }, []);
 
-  // List / status only on mount — ADR: no silent download on Settings open.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const list = await storeRef.current.list();
-        if (!cancelled) setModels(list);
-      } catch (err) {
-        if (!cancelled) setError(errorMessage(err));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+  const aliveRef = useRef(true);
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setListError(null);
+    try {
+      const list = await storeRef.current.list();
+      if (aliveRef.current) setModels(list);
+    } catch (err) {
+      if (aliveRef.current) setListError(errorMessage(err));
+    } finally {
+      if (aliveRef.current) setLoading(false);
+    }
   }, []);
 
+  // List / status only on mount — ADR: no silent download on Settings open.
+  useEffect(() => {
+    aliveRef.current = true;
+    void reload();
+    return () => {
+      aliveRef.current = false;
+    };
+  }, [reload]);
+
+  // Also the Retry action: it clears the row's failure as the new attempt starts.
   const downloadModel = useCallback(async (modelId: string) => {
+    // BUS-52: never two downloads at once, even if a stale button fires.
+    if (inFlightRef.current) throw new SttError('download-failed', 'Another model is downloading');
+    inFlightRef.current = modelId;
     setError(null);
+    setFailures((prev) => {
+      const next = { ...prev };
+      delete next[modelId];
+      return next;
+    });
     setProgress({
       bytesReceived: 0,
       bytesTotal: 0,
@@ -81,11 +102,18 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
     });
     try {
       await storeRef.current.download(modelId, (next) => {
-        setProgress(next);
+        // Ignore late or stray progress once this download is no longer the one in flight.
+        if (inFlightRef.current === modelId) setProgress(next);
       });
       await refresh();
     } catch (err) {
-      setError(errorMessage(err));
+      const cancelled = err instanceof SttError && err.code === 'cancelled';
+      if (!cancelled) {
+        setFailures((prev) => ({
+          ...prev,
+          [modelId]: `Download failed: ${errorMessage(err)}. Nothing was saved.`,
+        }));
+      }
       try {
         await refresh();
       } catch {
@@ -93,6 +121,7 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
       }
       throw err;
     } finally {
+      inFlightRef.current = null;
       setProgress((current) =>
         current?.modelId === modelId ? null : current,
       );
@@ -115,6 +144,12 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
     }
   }, [refresh]);
 
+  const aliveRefresh = useCallback(async () => {
+    const list = await storeRef.current.list();
+    if (aliveRef.current) setModels(list);
+  }, []);
+  useDownloadPoll(models, progress !== null, aliveRefresh);
+
   const selectModel = useCallback((modelId: string) => {
     const id = resolveTranscriptionModelId(modelId);
     onSelectRef.current(id);
@@ -124,7 +159,10 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
     cancelDownload,
     downloadModel,
     error,
+    failures,
+    listError,
     loading,
+    reload,
     models,
     progress,
     refresh,

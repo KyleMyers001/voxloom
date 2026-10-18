@@ -137,14 +137,16 @@ describe('durable dictionary persistence', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText(/not valid JSON|Dictionary file/i))
+      expect(screen.getByText(/dictionary couldn't be read and was reset to empty/i))
         .toBeInTheDocument();
     });
-    expect(dictionaryIo.snapshot()).toBe('{corrupt');
+    // Backed up first, then replaced with a valid empty file (BUS-42).
+    expect(dictionaryIo.backups()).toEqual(['{corrupt']);
+    await waitFor(() => expect(dictionaryIo.snapshot()).toContain('"version"'));
     expect(settingsIo.snapshot()).toContain('version');
     expect(historyIo.snapshot()).toContain('keep-me');
 
     await user.click(screen.getByRole('button', { name: 'Dictionary' }));
-    expect(screen.getByText('No words found.')).toBeInTheDocument();
+    expect(screen.getByText('No words yet')).toBeInTheDocument();
   });
 });
