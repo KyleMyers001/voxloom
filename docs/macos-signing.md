@@ -94,7 +94,8 @@ Certificate (required):
   Then `base64 -i Voxloom.p12 | pbcopy` and paste. Delete the `.p12` after.
 - `APPLE_CERTIFICATE_PASSWORD`: the export password.
 - `APPLE_SIGNING_IDENTITY`: the identity string from step a.
-- `APPLE_TEAM_ID`: the Team ID.
+- `APPLE_TEAM_ID`: the Team ID. Required for every signed build, so the
+  build always checks the app's TeamIdentifier against it.
 
 Notarization, preferred: App Store Connect API key. App Store Connect →
 Users and Access → Integrations → App Store Connect API → Team Keys → **+**
@@ -110,18 +111,20 @@ Notarization, alternative: Apple ID. Use these instead of the API key.
 - `APPLE_ID`: your Apple ID email.
 - `APPLE_PASSWORD`: an app-specific password from appleid.apple.com →
   Sign-In and Security → App-Specific Passwords.
-- `APPLE_TEAM_ID` (above) is required for this option.
+- `APPLE_TEAM_ID` from the certificate group above.
 
-Set all of one group or none; a partial set fails the build with the missing
-names.
+Set the whole certificate group (including `APPLE_TEAM_ID`) plus one
+notarization group, or none of them; a partial set fails the build with the
+missing names. `APPLE_TEAM_ID` on its own doesn't sign anything.
 
 A `v*` tag push waits for **two** approvals in the `release` Environment.
 The first lets the build job use the signing secrets. The second publishes
-the release. Manual workflow runs, even on a tag, need neither.
+the release. Manual workflow runs, even on a tag, need neither. The workflow
+also blanks every `APPLE_*` secret outside tag pushes, so a manual run stays
+ad-hoc even if same-named repository-level secrets exist.
 
 Tauri imports the certificate into a temporary keychain on the runner and
 deletes it afterwards, signs the app and dmg, then notarizes and staples the
 app. `scripts/release/package-macos.sh` runs
 `xcrun notarytool submit --wait` and `xcrun stapler staple` on the dmg, then
-checks both with `spctl`. Manual workflow runs get no secrets and stay
-ad-hoc.
+checks both with `spctl`.

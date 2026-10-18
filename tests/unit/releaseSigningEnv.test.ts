@@ -45,14 +45,28 @@ describe('release signing-env.sh', () => {
     expect(r.stdout.trim()).toBe('false');
   });
 
-  it('signs with a certificate and an App Store Connect API key', () => {
-    expect(run({ ...CERT, ...API_KEY }).stdout.trim()).toBe('true');
-  });
-
-  it('accepts APPLE_TEAM_ID alongside the API key', () => {
+  it('signs with a certificate, Team ID and App Store Connect API key', () => {
     const r = run({ ...CERT, ...API_KEY, ...TEAM });
     expect(r.status).toBe(0);
     expect(r.stdout.trim()).toBe('true');
+  });
+
+  it('requires APPLE_TEAM_ID on the signed path with the API key', () => {
+    const r = run({ ...CERT, ...API_KEY });
+    expect(r.status).not.toBe(0);
+    expect(r.stdout).toBe('');
+    expect(r.stderr).toContain(
+      'APPLE_TEAM_ID is required when any Developer ID certificate secret is set',
+    );
+  });
+
+  it('requires APPLE_TEAM_ID when only the signing identity is set', () => {
+    const r = run({
+      APPLE_SIGNING_IDENTITY: CERT.APPLE_SIGNING_IDENTITY,
+      ...API_KEY,
+    });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('APPLE_TEAM_ID is required');
   });
 
   it('signs with a certificate and Apple ID + Team ID', () => {
@@ -63,6 +77,8 @@ describe('release signing-env.sh', () => {
     const r = run({ ...CERT, ...APPLE_ID });
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain('APPLE_TEAM_ID is required');
+    // One clear error, not the same missing variable reported twice.
+    expect(r.stderr.match(/APPLE_TEAM_ID is required/g)).toHaveLength(1);
   });
 
   it('rejects signing without notarization credentials', () => {

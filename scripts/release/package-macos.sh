@@ -23,9 +23,14 @@ SUFFIX=""
 NAME="Voxloom_${VERSION}_macos_${ARCH}${SUFFIX}"
 
 # Fails the build if the mic entitlement is missing; never repairs in CI.
-# Signed builds are also checked for the Developer ID signature and Team ID;
-# unsigned ones are ad-hoc, so those checks must not apply.
+# Signed builds are also checked for the Developer ID signature and Team ID
+# (never skipped: APPLE_TEAM_ID is required); unsigned ones are ad-hoc, so
+# those checks must not apply.
 if [[ "$SIGNED" == "true" ]]; then
+  if [[ -z "${APPLE_TEAM_ID:-}" ]]; then
+    echo "error: APPLE_TEAM_ID is required for signed builds." >&2
+    exit 1
+  fi
   bash "$ROOT/scripts/macos-assert-entitlements.sh" "$APP"
 else
   env -u APPLE_SIGNING_IDENTITY -u APPLE_TEAM_ID \

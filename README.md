@@ -147,9 +147,11 @@ publish it. The workflow fails if the tag and manifest versions differ
 secrets exist in the protected `release` Environment, after which tag pushes
 are Developer ID signed, notarized and stapled automatically:
 `APPLE_CERTIFICATE` (base64 `.p12`), `APPLE_CERTIFICATE_PASSWORD`,
-`APPLE_SIGNING_IDENTITY`, `APPLE_TEAM_ID`, plus either `APPLE_API_KEY` +
-`APPLE_API_ISSUER` + `APPLE_API_PRIVATE_KEY` (`.p8` contents, preferred) or
-`APPLE_ID` + `APPLE_PASSWORD` (app-specific). Setup steps:
+`APPLE_SIGNING_IDENTITY`, `APPLE_TEAM_ID` (required for every signed build),
+plus either `APPLE_API_KEY` + `APPLE_API_ISSUER` + `APPLE_API_PRIVATE_KEY`
+(`.p8` contents, preferred) or `APPLE_ID` + `APPLE_PASSWORD` (app-specific).
+Manual workflow runs never receive these secrets and always build ad-hoc.
+Setup steps:
 [docs/macos-signing.md](docs/macos-signing.md).
 
 **Test build without releasing:** run the *Release* workflow manually

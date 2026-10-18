@@ -2,6 +2,7 @@ import { spawnSync } from 'child_process';
 import {
   chmodSync,
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -34,7 +35,10 @@ const SIGNING_ENV = {
 
 let dir: string;
 
-function runPackage(signed: 'true' | 'false') {
+function runPackage(
+  signed: 'true' | 'false',
+  signingEnv: Record<string, string> = SIGNING_ENV,
+) {
   const out = join(dir, 'assert-env');
   const result = spawnSync(
     'bash',
@@ -46,10 +50,11 @@ function runPackage(signed: 'true' | 'false') {
     ],
     {
       encoding: 'utf8',
-      env: { PATH: '/usr/bin:/bin', STUB_OUT: out, ...SIGNING_ENV },
+      env: { PATH: '/usr/bin:/bin', STUB_OUT: out, ...signingEnv },
     },
   );
-  return { status: result.status, seen: readFileSync(out, 'utf8') };
+  const seen = existsSync(out) ? readFileSync(out, 'utf8') : null;
+  return { status: result.status, stderr: result.stderr, seen };
 }
 
 beforeEach(() => {
@@ -82,5 +87,14 @@ describe('package-macos.sh entitlements check env', () => {
       `identity=${SIGNING_ENV.APPLE_SIGNING_IDENTITY}\n` +
         `team=${SIGNING_ENV.APPLE_TEAM_ID}\n`,
     );
+  });
+
+  it('fails a signed build without APPLE_TEAM_ID before any check', () => {
+    const r = runPackage('true', {
+      APPLE_SIGNING_IDENTITY: SIGNING_ENV.APPLE_SIGNING_IDENTITY,
+    });
+    expect(r.status).toBe(1);
+    expect(r.seen).toBeNull();
+    expect(r.stderr).toContain('APPLE_TEAM_ID is required for signed builds');
   });
 });
