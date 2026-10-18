@@ -131,7 +131,7 @@ describe('durable settings persistence', () => {
     });
     // BUS-42: corrupt bytes are backed up, then replaced with v1 defaults.
     expect(settingsIo.backups()).toEqual(['{corrupt']);
-    expect(JSON.parse(settingsIo.snapshot()!)).toMatchObject({ version: 1 });
+    expect(JSON.parse(settingsIo.snapshot()!)).toMatchObject({ version: 2 });
     // History file still holds its original payload.
     expect(historyIo.snapshot()).toContain('keep-me');
 

@@ -3,14 +3,25 @@ export type HistoryStatus = 'copied' | 'failed' | 'inserted' | 'unverified';
 export type Screen = 'dictionary' | 'history' | 'home' | 'settings';
 export type WritingStyle = 'casual' | 'formal' | 'very-casual';
 
+export interface CleanupProvenance {
+  dictionaryDigest: string | null;
+  dictionaryVersion: number;
+  modelDigest: string | null;
+  modelId: string | null;
+  promptVersion: string;
+  reason: string | null;
+  status: 'cleaned' | 'fallback' | 'skipped' | 'unavailable';
+}
+
 export interface DictationRecord {
+  cleanup?: CleanupProvenance;
   createdAt: number;
   durationSeconds: number;
   id: string;
   /** Transcription model id when known (dogfood / persisted); null for fixtures. */
   model: string | null;
   /**
-   * Whisper output before BUS-23 cleanup, only when it differs from `text`.
+   * Engine output before deterministic and optional model cleanup.
    * Lives in the same row, so transcript retention applies to it too.
    */
   rawText?: string;
@@ -44,6 +55,8 @@ export type TextSize = 'small' | 'default' | 'large';
 export interface Settings {
   appearance: Appearance;
   audioRetention: 'off' | '24-hours' | '7-days';
+  cleanupEnabled: boolean;
+  cleanupModelId: string | null;
   clipboardFallback: boolean;
   language: string;
   languageModel: string;
