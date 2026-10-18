@@ -39,9 +39,13 @@ npm run macos:assert-entitlements
 - Tauri prints "skipping app notarization". That's expected: a build you run
   on your own Mac doesn't need notarization.
 - `macos:assert-entitlements` now also checks that the app carries a
-  Developer ID signature for that Team ID. With `--repair` it re-signs with
-  `APPLE_SIGNING_IDENTITY`. It refuses to put an ad-hoc signature over a
-  Developer ID one, so if you see that error, export the variables and re-run.
+  Developer ID signature for that Team ID. It doesn't switch an existing
+  build to Developer ID: to do that, rebuild with `APPLE_SIGNING_IDENTITY`
+  exported.
+- `--repair` only restores a missing mic entitlement. It re-signs with
+  `APPLE_SIGNING_IDENTITY` (ad-hoc if unset) and refuses to put an ad-hoc
+  signature over a Developer ID one. If you see that error, export the
+  variables and re-run.
 - Unset both variables to go back to ad-hoc builds.
 
 ## c. Re-grant permissions (once, after the first Developer ID build)
@@ -111,12 +115,13 @@ Notarization, alternative: Apple ID. Use these instead of the API key.
 Set all of one group or none; a partial set fails the build with the missing
 names.
 
-A `v*` tag release waits for **two** approvals in the `release` Environment.
+A `v*` tag push waits for **two** approvals in the `release` Environment.
 The first lets the build job use the signing secrets. The second publishes
-the release. Manual workflow runs need neither.
+the release. Manual workflow runs, even on a tag, need neither.
 
 Tauri imports the certificate into a temporary keychain on the runner and
 deletes it afterwards, signs the app and dmg, then notarizes and staples the
 app. `scripts/release/package-macos.sh` runs
 `xcrun notarytool submit --wait` and `xcrun stapler staple` on the dmg, then
-checks both with `spctl`. Manual workflow runs get no secrets and stay ad-hoc.
+checks both with `spctl`. Manual workflow runs get no secrets and stay
+ad-hoc.

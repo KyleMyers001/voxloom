@@ -144,7 +144,7 @@ publish it. The workflow fails if the tag and manifest versions differ
 (`npm run release:check-version -- v0.2.0`).
 
 **Signing:** builds are ad-hoc signed and labeled **UNSIGNED** until these
-secrets exist in the protected `release` Environment, after which tag builds
+secrets exist in the protected `release` Environment, after which tag pushes
 are Developer ID signed, notarized and stapled automatically:
 `APPLE_CERTIFICATE` (base64 `.p12`), `APPLE_CERTIFICATE_PASSWORD`,
 `APPLE_SIGNING_IDENTITY`, `APPLE_TEAM_ID`, plus either `APPLE_API_KEY` +

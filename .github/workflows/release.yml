@@ -30,9 +30,10 @@ jobs:
   build-macos:
     runs-on: macos-latest
     # BUS-59/BUS-96: signing and notarization secrets live only in the
-    # protected 'release' Environment, so tag builds must enter it to sign.
-    # Manual runs use no environment, get no secrets and build ad-hoc.
-    environment: ${{ github.ref_type == 'tag' && 'release' || '' }}
+    # protected 'release' Environment, so tag pushes must enter it to sign.
+    # Same condition as the publish job: manual runs (even on a tag ref) use
+    # no environment, need no approval, get no secrets and build ad-hoc.
+    environment: ${{ github.event_name == 'push' && github.ref_type == 'tag' && 'release' || '' }}
     timeout-minutes: 60
     outputs:
       version: ${{ steps.version.outputs.version }}
