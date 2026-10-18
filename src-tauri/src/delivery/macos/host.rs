@@ -3,7 +3,12 @@
 
 use std::ffi::c_void;
 
+use crate::delivery::decide::host::read_small_file;
 use crate::delivery::decide::unicode_typing_supported;
+
+fn path_exists(p: &str) -> bool {
+    std::path::Path::new(p).exists()
+}
 
 extern "C" {
     // libproc (libSystem).
@@ -60,12 +65,12 @@ pub fn apple_terminal(pid: i32) -> bool {
 
 pub fn unicode_typing_ok(pid: i32) -> bool {
     executable_path(pid)
-        .is_some_and(|exe| unicode_typing_supported(&exe, |p| std::path::Path::new(p).exists()))
+        .is_some_and(|exe| unicode_typing_supported(&exe, path_exists, read_small_file))
 }
 
 pub fn web_ax_activation(pid: i32) -> Option<crate::delivery::decide::host::WebAxActivation> {
     executable_path(pid).and_then(|exe| {
-        crate::delivery::decide::host::web_ax_activation(&exe, |p| std::path::Path::new(p).exists())
+        crate::delivery::decide::host::web_ax_activation(&exe, path_exists, read_small_file)
     })
 }
 
