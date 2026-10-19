@@ -43,8 +43,11 @@ type ListenerResult =
   | { error: string; ok: false };
 
 export interface UseCaptureStateResult {
-  /** Discard in-flight capture (no PCM deposit / no STT). */
-  cancelActiveCapture: () => void;
+  /**
+   * Discard in-flight capture (no PCM deposit / no STT). With `isOwn`, a
+   * capture whose owner token it rejects (an older session's) is left alone.
+   */
+  cancelActiveCapture: (isOwn?: (owner: unknown) => boolean) => void;
   captureReady: boolean;
   captureState: CaptureState;
   deviceListError: string | null;
@@ -72,14 +75,15 @@ export interface UseCaptureStateResult {
    * Clean-stop full capture: deposits PCM and emits `capture-stopped.audio`.
    * Prefer over cancel when the utterance should reach STT.
    */
-  stopFullCapture: () => Promise<void>;
+  stopFullCapture: (isOwn?: (owner: unknown) => boolean) => Promise<void>;
   stopMicTest: () => void;
   /**
    * Resolve once a cancelled or stopping capture's terminal event releases
    * ownership (bounded), so a fast restart is not refused as busy.
-   * Resolves at once when no cancelled or stopping owner is pending.
+   * Resolves at once when no cancelled or stopping owner is pending. On
+   * timeout it cancels that capture, drops its ownership and resolves false.
    */
-  waitForCaptureRelease: () => Promise<void>;
+  waitForCaptureRelease: () => Promise<boolean>;
 }
 
 /** Bound on waiting for a cancelled capture's terminal event. */
@@ -582,9 +586,9 @@ export function useCaptureState(): UseCaptureStateResult {
     waiter.cancelSent = true;
   }, []);
 
-  const stopFullCapture = useCallback(async () => {
+  const stopFullCapture = useCallback(async (isOwn?: (owner: unknown) => boolean) => {
     const owner = ownerRef.current;
-    if (!owner || owner.mode !== 'full') return;
+    if (!owner || owner.mode !== 'full' || isOwn?.(owner.tag) === false) return;
     // A stop releases the mic too: a quick re-hold waits for its stop.
     trackRelease(owner.requestId);
     try {
@@ -596,8 +600,9 @@ export function useCaptureState(): UseCaptureStateResult {
     }
   }, [trackRelease]);
 
-  const cancelActiveCapture = useCallback(() => {
+  const cancelActiveCapture = useCallback((isOwn?: (owner: unknown) => boolean) => {
     const owner = ownerRef.current;
+    if (owner && isOwn?.(owner.tag) === false) return;
     if (owner) {
       trackRelease(owner.requestId);
       void cancelCapture(owner.requestId).catch(() => {});
@@ -615,8 +620,16 @@ export function useCaptureState(): UseCaptureStateResult {
     const owner = ownerRef.current;
     const waiter = terminalWaiterRef.current;
     if (!owner || waiter?.requestId !== owner.requestId
-        || !waiter.cancelSent) return;
-    await raceTimeout(waiter.promise, RELEASE_TIMEOUT_MS);
+        || !waiter.cancelSent) return true;
+    if (await raceTimeout(waiter.promise, RELEASE_TIMEOUT_MS)) return true;
+    if (!mountedRef.current || ownerRef.current !== owner) return true;
+    // The terminal never came: cancel that capture and drop its ownership,
+    // so this and every later start is not refused as busy.
+    void cancelCapture(owner.requestId).catch(() => {});
+    ownerRef.current = null;
+    if (terminalWaiterRef.current === waiter) terminalWaiterRef.current = null;
+    setCaptureState({ kind: 'idle' }); // no capture is live any more
+    return false;
   }, []);
 
   const stopMicTest = useCallback(() => {

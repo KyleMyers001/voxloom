@@ -53,6 +53,13 @@ export interface DogfoodLiveSession {
   listening: boolean;
   /** A notice held until the starting session's "Listening…" has shown. */
   pendingNotice: string | null;
+  /**
+   * How the live session ended without reaching "Listening…": a user
+   * cancel, a release, or a start failure (its toast text).
+   */
+  ended: 'cancelled' | { error: string | null } | null;
+  /** The Escape-cancel hint shown alone at "Listening…", until it times out. */
+  hintShown: { text: string; until: number } | null;
 }
 
 /** One stable object for the hook's lifetime. */
@@ -62,7 +69,9 @@ export function useDogfoodLiveSession(): DogfoodLiveSession {
     cancelAction: () => {},
     cancellation: { cancelled: false },
     captureOwner: null,
+    ended: null,
     handledAudioId: null,
+    hintShown: null,
     listening: false,
     pendingNotice: null,
     processing: null,
@@ -104,9 +113,10 @@ export function beginSession(live: DogfoodLiveSession) {
     ? Promise.all([live.retirement, retire]).then(() => {})
     : undefined;
   const cancellation: Cancellation = { cancelled: false };
+  // A held notice carries over: it shows after this session's "Listening…".
   Object.assign(live, {
-    active: true, cancellation, handledAudioId: null, listening: false, pendingNotice: null,
-    retirement, stopRequested: false,
+    active: true, cancellation, ended: null, handledAudioId: null, hintShown: null,
+    listening: false, retirement, stopRequested: false,
   });
   return { cancellation, retirement, session };
 }
@@ -130,16 +140,7 @@ export function isStaleCaptureEvent(state: CaptureState, live: DogfoodLiveSessio
   return state.kind === 'stopped' && !state.audio;
 }
 
-/** Toast `text` now, or hold it until the starting session's "Listening…". */
-export function showNotice(live: DogfoodLiveSession, text: string, toast: (text: string) => void) {
-  if (live.active && !live.listening) live.pendingNotice = text;
-  else toast(text);
-}
-
-/** After "Listening…": show a held notice and/or the Escape-cancel hint. */
-export function afterListening(live: DogfoodLiveSession, hint: string | null, toast: (text: string) => void) {
-  live.listening = true;
-  const shown = [hint, live.pendingNotice].filter(Boolean).join(' ');
-  live.pendingNotice = null;
-  if (shown) toast(shown);
+/** Whether a capture's owner token is `cancellation`'s session. */
+export function ownedBy(cancellation: Cancellation) {
+  return (owner: unknown) => (owner as CaptureOwner | undefined)?.cancellation === cancellation;
 }

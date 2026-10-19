@@ -15,8 +15,9 @@ import {
   dogfoodTranscribeAndCopy, resolvePlatform, type CaptureAudioMeta,
 } from './dogfoodPath';
 import { hudResultFor, type DogfoodViewActions } from './dogfoodPhase';
+import { showNotice } from './dogfoodNotice';
 import {
-  isStaleCaptureEvent, ownerOf, showNotice, type CaptureOwner, type DogfoodLiveSession,
+  isStaleCaptureEvent, ownerOf, type CaptureOwner, type DogfoodLiveSession,
 } from './dogfoodSessionState';
 import type { UseDogfoodCaptureOptions } from './useDogfoodCapture';
 
@@ -48,8 +49,7 @@ export function useDogfoodProcessing({
 
   const runDogfood = useCallback(async (audio: CaptureAudioMeta, owner: CaptureOwner) => {
     const {
-      announce, announceError, errorToast, setHudResult, setIntendedTarget, setPhase,
-      setTranscript, toast,
+      announce, announceError, errorToast, setHudResult, setIntendedTarget, setPhase, setTranscript,
     } = actions;
     // The capture's own session: an older capture's stop must not finish or
     // end the newer session that is live now.
@@ -149,7 +149,7 @@ export function useDogfoodProcessing({
       // Superseded (a cancel returned above): evidence still surfaces as a
       // toast, phase untouched.
       if (current()) announce(result.delivery.message);
-      else showNotice(live, supersededDeliveryMessage(result.delivery), toast);
+      else showNotice(live, supersededDeliveryMessage(result.delivery), actions);
     } catch (error: unknown) {
       await settleCancellation();
       if (cancellation.cancelled) return;

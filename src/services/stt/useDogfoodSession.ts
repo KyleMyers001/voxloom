@@ -9,7 +9,11 @@ import { beginCancelScope } from '../shortcut/cancelScope';
 import { useCancelUnavailable, type CancelUnavailable } from '../shortcut/cancelUnavailable';
 import { errorText } from './dogfoodModel';
 import type { DogfoodOrigin, DogfoodPhase, DogfoodViewActions } from './dogfoodPhase';
-import { afterListening, beginSession, type DogfoodLiveSession } from './dogfoodSessionState';
+import { afterListening, endWithoutListening } from './dogfoodNotice';
+import { beginSession, ownedBy, type DogfoodLiveSession } from './dogfoodSessionState';
+
+/** The older capture never released the mic; it was cancelled instead. */
+export const RELEASE_TIMEOUT = 'The previous dictation did not stop in time. Try again.';
 
 export interface DogfoodSessionInput {
   actions: DogfoodViewActions;
@@ -45,6 +49,13 @@ export function useDogfoodSession({
     takeHint: takeCancelHint,
   } = useCancelUnavailable();
 
+  /** End as cancelled: by the user (drops a held notice) or by a release. */
+  const endCancelled = useCallback((how: 'cancelled' | 'released') => {
+    setPhase('cancelled');
+    setMessage('Capture cancelled — nothing transcribed.');
+    endWithoutListening(live, how, actions);
+  }, [actions, live]);
+
   const start = useCallback(async (source: DogfoodOrigin = 'home') => {
     // A superseded run is never delivered; stop its cleanup so the worker is
     // free. It falls back to raw text and still reaches History.
@@ -59,9 +70,17 @@ export function useDogfoodSession({
     setHudResult(null);
     setMessage(null);
     setIntendedTarget(null);
+    const fail = (error: string) => {
+      setPhase('error');
+      endWithoutListening(live, { error }, actions);
+    };
 
     try {
       if (retirement) await retirement;
+      if (superseded()) return;
+      // An older capture (a quick tap still stopping) owns the mic until its
+      // terminal event. Wait before arming Escape so no cancel can reach it.
+      if (await capture.waitForCaptureRelease() === false) throw new Error(RELEASE_TIMEOUT);
       if (superseded()) return;
       try {
         cancellation.scope = await beginCancelScope(() => {
@@ -70,50 +89,33 @@ export function useDogfoodSession({
         }, () => !superseded() && !cancellation.cancelled);
       } catch (error: unknown) {
         // Escape-cancel is optional: a tap failure must never block dictation.
-        reportCancelUnavailable(error);
+        // A superseded attempt's failure must not replace the newer report.
+        if (!superseded()) reportCancelUnavailable(error);
       }
       if (superseded()) {
         await cancellation.scope?.dispose();
         return;
       }
-      if (cancellation.scope) {
-        clearCancelUnavailable();
-        setScopeReady(true);
-      }
+      if (cancellation.scope) { clearCancelUnavailable(); setScopeReady(true); }
       // Show the HUD (waveform) even when Escape-cancel could not arm.
       setHudReady(true);
       await ensureModel();
     } catch (error: unknown) {
-      if (superseded()) return;
-      setPhase('error');
-      announceError(errorText(error));
+      if (!superseded()) fail(errorText(error));
       return;
     }
     if (superseded()) return;
 
-    // Hold release may have already requested stop during model validation.
-    if (live.stopRequested) {
-      setPhase('cancelled');
-      setMessage('Capture cancelled — nothing transcribed.');
-      return;
-    }
-
-    const deviceId = preferredDeviceId
-      && preferredDeviceId !== SYSTEM_DEFAULT_DEVICE_ID
-      ? preferredDeviceId
-      : undefined;
+    // Released during the wait or model validation: never open the mic.
+    if (live.stopRequested) return endCancelled('released');
+    const deviceId = preferredDeviceId === SYSTEM_DEFAULT_DEVICE_ID ? undefined : preferredDeviceId || undefined;
 
     try {
-      // A just-cancelled capture still owns the mic until its terminal event.
-      await capture.waitForCaptureRelease();
-      if (superseded()) return;
-      const owner = { cancellation, session };
-      live.captureOwner = owner;
+      const owner = live.captureOwner = { cancellation, session };
       const started = await capture.startFullCaptureSession(deviceId, owner);
       if (superseded() || started === 'ended') return;
       if (started !== 'started') {
-        setPhase('error');
-        announceError(started === 'busy'
+        fail(started === 'busy'
           ? 'A capture session is already active. Wait for it to finish.'
           : 'Microphone capture could not start. Check permission and retry.');
         return;
@@ -123,12 +125,10 @@ export function useDogfoodSession({
       afterListening(live, takeCancelHint(), toast);
       if (live.stopRequested) await capture.stopFullCapture();
     } catch (error: unknown) {
-      if (superseded()) return;
-      setPhase('error');
-      announceError(errorText(error));
+      if (!superseded()) fail(errorText(error));
     }
   }, [
-    actions, capture, clearCancelUnavailable, ensureModel, live, preferredDeviceId,
+    actions, capture, clearCancelUnavailable, endCancelled, ensureModel, live, preferredDeviceId,
     reportCancelUnavailable, takeCancelHint,
   ]);
 
@@ -136,7 +136,8 @@ export function useDogfoodSession({
     const session = live.session;
     live.stopRequested = true;
     try {
-      await capture.stopFullCapture();
+      // Only its own capture: an older one still stopping keeps its audio.
+      await capture.stopFullCapture(ownedBy(live.cancellation));
     } catch (error: unknown) {
       if (session !== live.session) return;
       setPhase('error');
@@ -157,12 +158,12 @@ export function useDogfoodSession({
     live.handledAudioId = null;
     setIntendedTarget(null);
     try {
-      capture.cancelActiveCapture();
+      // Only its own capture: an older one still stopping keeps its audio.
+      capture.cancelActiveCapture(ownedBy(live.cancellation));
     } finally {
-      setPhase('cancelled');
-      setMessage('Capture cancelled — nothing transcribed.');
+      endCancelled('cancelled');
     }
-  }, [actions, capture, live]);
+  }, [actions, capture, endCancelled, live]);
 
   live.cancelAction = cancel;
 

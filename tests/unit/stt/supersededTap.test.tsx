@@ -14,7 +14,7 @@ describe('superseded quick tap (BUS-91)', () => {
     } = await setup();
     await act(async () => { await result.current.start(); });
     await act(async () => { await result.current.stop(); });
-    const release = deferred<void>();
+    const release = deferred<boolean>();
     vi.mocked(capture.waitForCaptureRelease).mockReturnValueOnce(release.promise);
     let rehold!: Promise<void>;
     act(() => { rehold = result.current.start(); });
@@ -29,7 +29,7 @@ describe('superseded quick tap (BUS-91)', () => {
     expect(onToast).not.toHaveBeenCalledWith(SUPERSEDED_DELIVERY_MESSAGE);
     // Real app state, retention off: the row is in History and Copy copies it.
     expect(await copyFromHistoryWithRetentionOff(record)).toEqual(['tap words']);
-    await act(async () => { release.settle(); await rehold; });
+    await act(async () => { release.settle(true); await rehold; });
     const shown = onToast.mock.calls.map(([text]) => text);
     expect(shown.slice(-2)).toEqual(['Listening…', SUPERSEDED_DELIVERY_MESSAGE]);
     expect(onToast).not.toHaveBeenCalledWith(expect.stringContaining('superseded'));
@@ -47,13 +47,13 @@ describe('superseded quick tap (BUS-91)', () => {
     await act(async () => { await result.current.start(); });
     await act(async () => { await result.current.stop(); });
     scopes[0].finish.mockResolvedValueOnce(false); // the latch saw Escape
-    const release = deferred<void>();
+    const release = deferred<boolean>();
     vi.mocked(capture.waitForCaptureRelease).mockReturnValueOnce(release.promise);
     let rehold!: Promise<void>;
     act(() => { rehold = result.current.start(); });
     await waitFor(() => expect(capture.waitForCaptureRelease).toHaveBeenCalledTimes(2));
     rerender({ state: tapAudio });
-    await act(async () => { release.settle(); await rehold; });
+    await act(async () => { release.settle(true); await rehold; });
     expect(transcribe).not.toHaveBeenCalled();
     expect(onHistoryRecord).not.toHaveBeenCalled();
     expect(result.current.phase).toBe('recording');

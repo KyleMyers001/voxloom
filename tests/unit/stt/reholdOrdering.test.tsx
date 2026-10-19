@@ -3,6 +3,7 @@ import { act, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SUPERSEDED_DELIVERY_MESSAGE } from '../../../src/services/delivery';
 import { retireScope, type Cancellation } from '../../../src/services/stt/dogfoodSessionState';
+import { RELEASE_TIMEOUT } from '../../../src/services/stt/useDogfoodSession';
 import { deferred, setup, tapClip } from './dogfoodHarness';
 
 afterEach(() => { vi.restoreAllMocks(); });
@@ -40,7 +41,7 @@ describe('re-hold after a quick tap (BUS-91)', () => {
       await setup({ subscribe: true });
     await act(async () => { await result.current.start(); });
     await act(async () => { await result.current.stop(); });
-    const release = deferred<void>();
+    const release = deferred<boolean>();
     vi.mocked(capture.waitForCaptureRelease).mockReturnValueOnce(release.promise);
     let rehold!: Promise<void>;
     act(() => { rehold = holdAgain(result); });
@@ -49,7 +50,7 @@ describe('re-hold after a quick tap (BUS-91)', () => {
     emitStop(tapClip, 0);
     await waitFor(() => expect(onHistoryRecord).toHaveBeenCalledOnce());
     expect(onHistoryRecord.mock.calls[0][0]).toMatchObject({ status: 'failed', text: 'tap words' });
-    await act(async () => { release.settle(); await rehold; });
+    await act(async () => { release.settle(true); await rehold; });
     expect(result.current.phase).toBe('recording');
     expect(insert).not.toHaveBeenCalled();
     expect(onToast).toHaveBeenLastCalledWith(SUPERSEDED_DELIVERY_MESSAGE);
@@ -114,5 +115,19 @@ describe('re-hold after a quick tap (BUS-91)', () => {
     await retired;
     expect(scope.finish).toHaveBeenCalledOnce();
     expect(cancellation.cancelled).toBe(false);
+  });
+
+  it('a release that timed out ends the re-hold cleanly; the next hold records', async () => {
+    const { capture, onErrorToast, result } = await setup({ subscribe: true });
+    await act(async () => { await result.current.start(); });
+    await act(async () => { await result.current.stop(); });
+    vi.mocked(capture.waitForCaptureRelease).mockResolvedValueOnce(false);
+    await act(async () => { await holdAgain(result); });
+    expect(result.current.phase).toBe('error');
+    expect(onErrorToast).toHaveBeenLastCalledWith(RELEASE_TIMEOUT);
+    expect(capture.startFullCaptureSession).toHaveBeenCalledOnce(); // no mic for the re-hold
+    expect(result.current.hudReady).toBe(false);
+    await act(async () => { await holdAgain(result); });
+    expect(result.current.phase).toBe('recording');
   });
 });

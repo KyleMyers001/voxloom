@@ -90,4 +90,18 @@ describe('review #45 nits', () => {
     expect(result.current.toast).toBe('');
     vi.useRealTimers();
   });
+
+  it('keeps longer toasts up long enough to read (BUS-91)', () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useToastMessages([]));
+    act(() => result.current.announce(SUPERSEDED_DELIVERY_MESSAGE)); // 12 words → 3 s
+    act(() => { vi.advanceTimersByTime(2_999); });
+    expect(result.current.toast).toBe(SUPERSEDED_DELIVERY_MESSAGE);
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(result.current.toast).toBe('');
+    act(() => result.current.announce('Listening…')); // short text keeps the 1.8 s floor
+    act(() => { vi.advanceTimersByTime(1_800); });
+    expect(result.current.toast).toBe('');
+    vi.useRealTimers();
+  });
 });
