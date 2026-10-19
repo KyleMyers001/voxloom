@@ -34,7 +34,8 @@ import {
 } from './dogfoodPath';
 import { createSttModelStore } from './factory';
 import { resolveTranscriptionModelId } from './resolveModelId';
-import { SttError, type Transcript } from './types';
+import { SttError, type SttModelInfo, type Transcript } from './types';
+import { MODEL_UNREADABLE } from './useSttModels';
 
 export type DogfoodPhase =
   | 'idle'
@@ -110,9 +111,29 @@ export function hudResultFor(
   return null; // inserted, unverified, or may-have-inserted: silent dismiss
 }
 
-function errorText(error: unknown): string {
+/** Same wording as the Models row (ModelCard), plus where to fix it. */
+export const MODEL_DAMAGED_MESSAGE = 'Model file is damaged. Download it again in Settings.';
+
+/** Opened but couldn't be read: the row's copy plus where to fix it. */
+export const MODEL_READ_FAILED_MESSAGE = 'Couldn\'t read the model file. Download it again in Settings.';
+
+/** Model-file messages (here and native resolved_path) that already say what to do. */
+const MODEL_FILE_PREFIXES = [
+  'Model file is damaged.',
+  'Couldn\'t open the model file.',
+  'Couldn\'t read the model file.',
+];
+
+function failedModelMessage(reason: SttModelInfo['failureReason']): string {
+  if (reason === 'unreadable') return MODEL_UNREADABLE;
+  if (reason === 'read-failed') return MODEL_READ_FAILED_MESSAGE;
+  return MODEL_DAMAGED_MESSAGE;
+}
+
+export function errorText(error: unknown): string {
   if (error instanceof SttError) {
     if (error.code === 'model-missing') {
+      if (MODEL_FILE_PREFIXES.some((p) => error.message.startsWith(p))) return error.message;
       // Settings guidance lives here once; missingModelMessage is the fact only.
       return `${error.message} Download the selected model in Settings first.`;
     }
@@ -213,6 +234,9 @@ export function useDogfoodCapture(
   const ensureModelAvailable = useCallback(async (rawModelId: string) => {
     const modelId = resolveTranscriptionModelId(rawModelId);
     const info = await storeRef.current.status(modelId);
+    if (info?.status === 'failed') {
+      throw new SttError('model-missing', failedModelMessage(info.failureReason));
+    }
     if (!info || info.status !== 'available') {
       throw new SttError(
         'model-missing',

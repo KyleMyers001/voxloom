@@ -41,9 +41,7 @@ impl fmt::Display for FetchError {
 }
 
 /// Check an existing file against `artifact` (size first, then full hash).
-/// Reads the whole file: call off the main thread. Not yet called outside
-/// tests; kept here for the planned LLM model store (BUS-16).
-#[allow(dead_code)]
+/// Reads the whole file: call off the main thread.
 pub fn verify_file(path: &Path, artifact: &PinnedArtifact) -> Result<(), FetchError> {
     let mut file = File::open(path).map_err(|e| FetchError::Io(format!("open: {e}")))?;
     let len = file
