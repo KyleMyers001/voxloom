@@ -4,6 +4,10 @@ import { SegmentedControl } from '../../components/SegmentedControl';
 import { Switch } from '../../components/Switch';
 import type { WritingStyle } from '../../domain/types';
 import { isTauriEnv } from '../../services/capture/captureService';
+import type { CleanupModelStore } from '../../services/cleanup/contracts';
+import { isCleanupActive } from '../../domain/cleanup';
+import { CleanupSettings } from './CleanupSettings';
+import { cleanupShown, useCleanupModel } from './useCleanupModel';
 import { MicrophoneRows } from './MicrophoneRows';
 import { ShortcutRecorder } from './ShortcutRecorder';
 import { HELP as SHORTCUT_HELP } from './shortcutCopy';
@@ -15,10 +19,17 @@ const styles: { value: WritingStyle; label: string }[] = [
 ];
 
 /** Capture & Output tab (S1–S11). Browser-only rows are gated per CHECKLIST § Hidden in the native app. */
-export function CaptureTab({ onSetup }: { onSetup: (opener: HTMLElement) => void }) {
+export function CaptureTab({ cleanupModelStore, onSetup }: {
+  /** Test seam: cleanup model status/import (defaults to native). */
+  cleanupModelStore?: CleanupModelStore;
+  onSetup: (opener: HTMLElement) => void;
+}) {
   const { settings, state } = useApp();
   const isNative = isTauriEnv();
   const update = settings.update;
+  const cleanupModel = useCleanupModel(isNative, cleanupModelStore);
+  // Same gate as the Local cleanup block: no cleanup wording while it's hidden.
+  const mentionCleanup = isNative && cleanupShown(cleanupModel, isCleanupActive(state.settings));
   return (
     <div className="settings-rows">
       <div className="frow frow--recorder">
@@ -59,16 +70,18 @@ export function CaptureTab({ onSetup }: { onSetup: (opener: HTMLElement) => void
       <div className="frow">
         <span className="frow__label">
           <span>Writing style</span>
-          {isNative && <small className="frow__help">Cleanup not available yet</small>}
+          {mentionCleanup && <small className="frow__help">Used by local cleanup</small>}
         </span>
         <SegmentedControl
-          label={isNative ? 'Style preference · cleanup unavailable' : 'Current style'}
+          label={mentionCleanup ? 'Style preference · used by local cleanup'
+            : isNative ? 'Style preference' : 'Current style'}
           onChange={(value) => update({ key: 'style', value })}
           options={styles}
           size="sm"
           value={state.settings.style}
         />
       </div>
+      <CleanupSettings isNative={isNative} model={cleanupModel} />
       {!isNative && (
         <div className="frow">
           <span className="frow__label">
