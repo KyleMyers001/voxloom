@@ -89,15 +89,56 @@ describe('CleanupSettings', () => {
     expect(latest).toMatchObject({ cleanupEnabled: true, cleanupOptIn: false });
   });
 
-  it('imports a model, then rechecks its status', async () => {
+  it('imports a model and applies the status it returns, without another hash', async () => {
     const user = userEvent.setup();
-    const models = store({ ...ready, available: false }, ready);
+    const models = store({ ...ready, available: false });
+    vi.mocked(models.importModel).mockResolvedValue(ready);
     renderCleanup(models);
     await waitFor(() => expect(screen.getByText(/Not installed/)).toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: 'Import model…' }));
+    const button = screen.getByRole('button', { name: 'Import model…' });
+    await user.click(button);
     expect(models.importModel).toHaveBeenCalledOnce();
     await waitFor(() => expect(screen.getByText('Qwen3 0.6B is installed.')).toBeInTheDocument());
     expect(toggle()).toBeEnabled();
+    expect(models.status).toHaveBeenCalledOnce();
+    // Focus stays on Import (aria-disabled while importing, never disabled).
+    expect(button).toHaveFocus();
+  });
+
+  it('a cancelled picker changes nothing and reads nothing', async () => {
+    const user = userEvent.setup();
+    const models = store({ ...ready, available: false });
+    renderCleanup(models);
+    await waitFor(() => expect(screen.getByText(/Not installed/)).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Import model…' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Import model…' })).toHaveAttribute('aria-disabled', 'false'));
+    expect(models.status).toHaveBeenCalledOnce();
+    expect(screen.getByText(/Not installed/)).toBeInTheDocument();
+  });
+
+  it('Import is aria-disabled while importing: it keeps focus and ignores clicks', async () => {
+    const user = userEvent.setup();
+    let finish!: (status: CleanupModelStatus) => void;
+    const models = store({ ...ready, available: false });
+    vi.mocked(models.importModel).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    renderCleanup(models);
+    const button = await screen.findByRole('button', { name: 'Import model…' });
+    await user.click(button);
+    const busy = screen.getByRole('button', { name: 'Importing…' });
+    expect(busy).toBe(button);
+    expect(busy).toHaveAttribute('aria-disabled', 'true');
+    expect(busy).not.toBeDisabled();
+    expect(busy).toHaveFocus();
+    await user.click(busy);
+    expect(models.importModel).toHaveBeenCalledOnce();
+    expect(busy).toHaveFocus();
+    // Check again is guarded the same way while importing.
+    await user.click(screen.getByRole('button', { name: 'Check again' }));
+    expect(models.status).toHaveBeenCalledOnce();
+    act(() => { button.focus(); });
+    await act(async () => { finish(ready); });
+    expect(button).toHaveFocus();
+    expect(button).toHaveAttribute('aria-disabled', 'false');
   });
 
   it('shows status and import errors without enabling cleanup', async () => {
@@ -226,10 +267,12 @@ describe('CleanupSettings in a production build, after the worker is known', () 
     expect(button).toHaveFocus();
   });
 
-  it('a successful import refresh keeps the block mounted', async () => {
+  it('a successful import keeps the block mounted', async () => {
     vi.stubEnv('DEV', false);
     const user = userEvent.setup();
-    renderCleanup(store(missingModel, ready));
+    const models = store(missingModel);
+    vi.mocked(models.importModel).mockResolvedValue(ready);
+    renderCleanup(models);
     const button = await screen.findByRole('button', { name: 'Import model…' });
     await user.click(button);
     await waitFor(() => expect(toggle()).toBeEnabled());
@@ -284,6 +327,75 @@ describe('focus when turning cleanup off hides the block', () => {
     await user.click(toggle());
     expect(toggle()).toHaveFocus();
     expect(toggle()).toHaveAttribute('aria-checked', 'false');
+  });
+});
+
+describe('cleanup model status: one read per window', () => {
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  it('a stale status response cannot update the worker flag', async () => {
+    vi.stubEnv('DEV', false);
+    const user = userEvent.setup();
+    const pending: ((status: CleanupModelStatus) => void)[] = [];
+    let calls = 0;
+    const models: CleanupModelStore = {
+      importModel: vi.fn(),
+      status: vi.fn(() => (++calls === 1
+        ? Promise.resolve(ready)
+        : new Promise<CleanupModelStatus>((resolve) => { pending.push(resolve); }))),
+    };
+    const { container } = renderCleanup(models);
+    const check = await screen.findByRole('button', { name: 'Check again' });
+    await user.click(check); // request 2 (stale)
+    await user.click(check); // request 3 (latest)
+    expect(pending).toHaveLength(2);
+    await act(async () => { pending[1]({ ...ready, available: false }); });
+    expect(screen.getByText(/Not installed/)).toBeInTheDocument();
+    // The older request answers last, saying the worker is gone: ignored.
+    await act(async () => { pending[0]({ ...ready, runtimeAvailable: false }); });
+    expect(container).not.toBeEmptyDOMElement();
+    expect(screen.getByText(/Not installed/)).toBeInTheDocument();
+  });
+
+  it('Check again re-reads the status', async () => {
+    const user = userEvent.setup();
+    const models = store(ready);
+    renderCleanup(models);
+    await user.click(await screen.findByRole('button', { name: 'Check again' }));
+    await waitFor(() => expect(models.status).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe('focus handoff is armed only when the block will hide', () => {
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  it('turning off with a worker, then losing it, does not steal focus later', async () => {
+    vi.stubEnv('DEV', false);
+    const user = userEvent.setup();
+    let answer!: (status: CleanupModelStatus) => void;
+    let calls = 0;
+    const models: CleanupModelStore = {
+      importModel: vi.fn(),
+      status: vi.fn(() => (++calls === 1
+        ? Promise.resolve(ready)
+        : new Promise<CleanupModelStatus>((resolve) => { answer = resolve; }))),
+    };
+    renderWithApp(<div className="settings-rows">
+      <Probe start={{ cleanupModelId: CLEANUP_MODEL_ID, cleanupOptIn: true }} />
+      <Harness isNative modelStore={models} />
+      <div className="frow"><button type="button">After</button></div>
+      <input aria-label="Elsewhere" />
+    </div>);
+    await waitFor(() => expect(toggle()).toHaveAttribute('aria-checked', 'true'));
+    await user.click(toggle());
+    expect(toggle()).toHaveFocus();
+    // Check again reports the worker gone; the user is typing elsewhere.
+    await user.click(screen.getByRole('button', { name: 'Check again' }));
+    act(() => { screen.getByRole('textbox', { name: 'Elsewhere' }).focus(); });
+    await act(async () => { answer({ ...ready, runtimeAvailable: false }); });
+    expect(screen.queryByText('Local cleanup')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Elsewhere' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'After' })).not.toHaveFocus();
   });
 });
 

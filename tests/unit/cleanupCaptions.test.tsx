@@ -1,6 +1,8 @@
 // BUS-16 PR 2c: the writing-style captions use the same gate as the Local
 // cleanup block (`cleanupShown`): no cleanup wording while it is hidden.
+import { invoke } from '@tauri-apps/api/core';
 import { act, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { useEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useApp } from '../../src/app/AppContext';
@@ -8,6 +10,7 @@ import { initialSettings } from '../../src/domain/fixtures';
 import type { Settings } from '../../src/domain/types';
 import { HomeHero } from '../../src/features/home/HomeHero';
 import { CaptureTab } from '../../src/features/settings/CaptureTab';
+import { Settings as SettingsWindow } from '../../src/features/settings/Settings';
 import type { CleanupModelStore } from '../../src/services/cleanup/contracts';
 import { CLEANUP_MODEL_ID, CLEANUP_MODEL_SHA256, type CleanupModelStatus } from '../../src/services/cleanup/types';
 import { renderWithApp } from './testUtils';
@@ -43,7 +46,7 @@ async function renderBoth(models: CleanupModelStore, settings?: Partial<Settings
     <HomeHero cleanupModelStore={models} isNative />
     <CaptureTab cleanupModelStore={models} onSetup={vi.fn()} />
   </>);
-  await waitFor(() => expect(models.status).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(models.status).toHaveBeenCalledTimes(1));
   await act(async () => { await Promise.resolve(); });
 }
 
@@ -96,5 +99,58 @@ describe('writing-style captions, dev build', () => {
     expect(screen.getByText('Style preference · local cleanup is off')).toBeInTheDocument();
     expect(settingsHelp()).toBeInTheDocument();
     expect(screen.getByText(/doesn't include the cleanup worker yet/)).toBeInTheDocument();
+  });
+});
+
+describe('one cleanup model status read per window', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockResolvedValue(undefined);
+  });
+  const statusCalls = () => vi.mocked(invoke).mock.calls.filter(([command]) => command === 'cleanup_model_status').length;
+
+  it('Home and Capture share one result; remounting Home reads nothing new', async () => {
+    const models = store(status(true));
+    const first = renderWithApp(<HomeHero cleanupModelStore={models} isNative />);
+    await waitFor(() => expect(screen.getByText('Style preference · local cleanup is off')).toBeInTheDocument());
+    first.unmount();
+    // Back to Home (as after History or Dictionary), then Settings → Capture.
+    renderWithApp(<>
+      <HomeHero cleanupModelStore={models} isNative />
+      <CaptureTab cleanupModelStore={models} onSetup={vi.fn()} />
+    </>);
+    expect(screen.getByText('Local cleanup')).toBeInTheDocument();
+    await act(async () => { await Promise.resolve(); });
+    expect(models.status).toHaveBeenCalledOnce();
+  });
+
+  it('Check again in Capture re-reads once and updates Home too', async () => {
+    vi.stubEnv('DEV', false);
+    const user = userEvent.setup();
+    const models = store(status(true));
+    vi.mocked(models.status).mockResolvedValueOnce(status(true)).mockResolvedValueOnce(status(false));
+    renderWithApp(<>
+      <HomeHero cleanupModelStore={models} isNative />
+      <CaptureTab cleanupModelStore={models} onSetup={vi.fn()} />
+    </>);
+    await user.click(await screen.findByRole('button', { name: 'Check again' }));
+    await waitFor(() => expect(screen.getByText('Style preference · cleanup not available yet')).toBeInTheDocument());
+    expect(models.status).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText('Local cleanup')).not.toBeInTheDocument();
+  });
+
+  it('switching Settings tabs never triggers a new native status call', async () => {
+    vi.mocked(invoke).mockClear();
+    vi.mocked(invoke).mockImplementation(async (command: string) => (
+      command === 'cleanup_model_status' ? status(true) : undefined) as never);
+    const user = userEvent.setup();
+    renderWithApp(<SettingsWindow onSetup={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText('Local cleanup')).toBeInTheDocument());
+    for (const tab of ['Models', 'Privacy', 'Capture', 'Appearance', 'Capture']) {
+      await user.click(screen.getByRole('tab', { name: tab }));
+    }
+    expect(screen.getByText('Local cleanup')).toBeInTheDocument();
+    expect(statusCalls()).toBe(1);
   });
 });

@@ -25,7 +25,7 @@ export function CleanupSettings({ isNative, model }: { isNative: boolean; model:
   const { settings, state } = useApp();
   const update = settings.update;
   const active = isCleanupActive(state.settings);
-  const { fail, refresh, store, view } = model;
+  const { apply, fail, refresh, store, view } = model;
   const [importing, setImporting] = useState(false);
   const shown = cleanupShown(model, active);
   const firstRow = useRef<HTMLDivElement>(null);
@@ -41,18 +41,18 @@ export function CleanupSettings({ isNative, model }: { isNative: boolean; model:
   }, [shown]);
 
   const importModel = async () => {
+    if (importing) return;
     setImporting(true);
     try {
-      await store().importModel();
+      // The import verifies the file and returns the new status, so there is
+      // no second hash. A cancelled picker (null) changed nothing.
+      const imported = await store().importModel();
+      if (imported) apply(imported);
     } catch (reason: unknown) {
       fail(reason);
+    } finally {
       setImporting(false);
-      return;
     }
-    // Refresh after success or a cancelled picker: the installed model is
-    // independent of the picker result.
-    await refresh();
-    setImporting(false);
   };
 
   const setActive = (on: boolean) => {
@@ -95,10 +95,16 @@ export function CleanupSettings({ isNative, model }: { isNative: boolean; model:
       </span>
       {isNative && (
         <span className="frow__control">
-          <button className="btn" disabled={importing} onClick={() => { void importModel(); }} type="button">
+          {/* aria-disabled, not disabled: a disabled button drops focus to the body. */}
+          <button aria-disabled={importing} className="btn" onClick={() => { void importModel(); }} type="button">
             {importing ? CLEANUP_IMPORTING : CLEANUP_IMPORT}
           </button>
-          <button className="btn" disabled={importing} onClick={() => { void refresh(); }} type="button">
+          <button
+            aria-disabled={importing}
+            className="btn"
+            onClick={() => { if (!importing) void refresh(); }}
+            type="button"
+          >
             {CLEANUP_REFRESH}
           </button>
         </span>

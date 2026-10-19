@@ -1,21 +1,22 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import type { CleanupModelStore } from '../../services/cleanup/contracts';
-import { createTauriCleanupModelStore } from '../../services/cleanup/tauriAdapter';
+import type { CleanupModelStatus } from '../../services/cleanup/types';
 import type { CleanupModelView } from './cleanupCopy';
-
-const message = (reason: unknown) => reason instanceof Error ? reason.message : String(reason);
+import { cleanupModelCache } from './cleanupModelCache';
 
 export interface CleanupModel {
   /** Transient: checking, an error, or the latest status. */
   view: CleanupModelView;
   /**
    * Last known `runtimeAvailable`. Unknown (never read) counts as false. A
-   * later check or error keeps the last known value, so Check again, the
-   * post-import refresh or an import error never hide the block mid-use.
+   * later check or error keeps the last known value, so Check again or an
+   * import error never hide the block mid-use.
    */
   workerAvailable: boolean;
   /** Re-reads `cleanup_model_status`. */
   refresh: () => Promise<void>;
+  /** Applies a status from an import result, without another read. */
+  apply: (status: CleanupModelStatus) => void;
   /** Shows an error from outside the status read (a failed import). */
   fail: (reason: unknown) => void;
   /** The native store, created lazily. */
@@ -36,46 +37,28 @@ export function cleanupShown(
   return model.workerAvailable || active || import.meta.env.DEV;
 }
 
-/** Cleanup model status from the native side; `modelStore` is a test seam. */
+const BROWSER: CleanupModelView = { kind: 'browser' };
+
+/**
+ * The window's shared cleanup model status (see `cleanupModelCache`). Every
+ * consumer sees one result; mounting another one never re-reads it.
+ * `modelStore` is a test seam.
+ */
 export function useCleanupModel(isNative: boolean, modelStore?: CleanupModelStore): CleanupModel {
-  const [view, setView] = useState<CleanupModelView>(
-    isNative ? { kind: 'checking' } : { kind: 'browser' },
-  );
-  const storeRef = useRef<CleanupModelStore | null>(modelStore ?? null);
-  if (modelStore) storeRef.current = modelStore;
-  const generation = useRef(0);
-  const [workerAvailable, setWorkerAvailable] = useState(false);
-  const store = useCallback(() => storeRef.current ??= createTauriCleanupModelStore(), []);
-
-  const refresh = useCallback(async () => {
-    if (!isNative) return;
-    const request = ++generation.current;
-    setView({ kind: 'checking' });
-    try {
-      const status = await store().status();
-      // Native IPC result: check its shape before trusting it.
-      if (typeof status?.available !== 'boolean' || typeof status.runtimeAvailable !== 'boolean'
-        || typeof status.id !== 'string') {
-        throw new Error('unexpected status from the app');
-      }
-      if (request === generation.current) {
-        setView({ kind: 'status', status });
-        setWorkerAvailable(status.runtimeAvailable);
-      }
-    } catch (reason: unknown) {
-      if (request === generation.current) setView({ kind: 'error', message: message(reason) });
-    }
-  }, [isNative, store]);
-
+  if (isNative) cleanupModelCache.useStore(modelStore);
+  const shared = useSyncExternalStore(cleanupModelCache.subscribe, cleanupModelCache.snapshot);
   useEffect(() => {
-    void refresh();
-    return () => { generation.current++; };
-  }, [refresh]);
-
-  const fail = useCallback((reason: unknown) => {
-    generation.current++;
-    setView({ kind: 'error', message: message(reason) });
-  }, []);
-
-  return { fail, refresh, store, view, workerAvailable };
+    if (isNative) cleanupModelCache.ensureLoaded();
+  }, [isNative]);
+  if (!isNative) {
+    return { apply: () => {}, fail: () => {}, refresh: async () => {}, store: cleanupModelCache.store, view: BROWSER, workerAvailable: false };
+  }
+  return {
+    apply: cleanupModelCache.apply,
+    fail: cleanupModelCache.fail,
+    refresh: cleanupModelCache.refresh,
+    store: cleanupModelCache.store,
+    view: shared.view,
+    workerAvailable: shared.workerAvailable,
+  };
 }
