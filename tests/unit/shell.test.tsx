@@ -146,7 +146,7 @@ describe('Home (UI PR 3)', () => {
     renderWithApp(<Home dogfood={dogfood()} onToast={vi.fn()} />);
     expect(screen.queryByText(/Native capture requires the Tauri shell/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Start capture' })).toBeEnabled();
-    const caption = screen.getByText('Style preference · cleanup not available yet');
+    const caption = screen.getByText('Style preference · local cleanup is off');
     // Caption precedes the segmented control.
     expect(caption.compareDocumentPosition(screen.getByRole('radiogroup', { name: 'Current writing style' })))
       .toBe(Node.DOCUMENT_POSITION_FOLLOWING);

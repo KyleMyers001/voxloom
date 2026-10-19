@@ -4,6 +4,8 @@ import { SegmentedControl } from '../../components/SegmentedControl';
 import { Switch } from '../../components/Switch';
 import type { WritingStyle } from '../../domain/types';
 import { isTauriEnv } from '../../services/capture/captureService';
+import type { CleanupModelStore } from '../../services/cleanup/contracts';
+import { CleanupSettings } from './CleanupSettings';
 import { MicrophoneRows } from './MicrophoneRows';
 import { ShortcutRecorder } from './ShortcutRecorder';
 import { HELP as SHORTCUT_HELP } from './shortcutCopy';
@@ -15,7 +17,11 @@ const styles: { value: WritingStyle; label: string }[] = [
 ];
 
 /** Capture & Output tab (S1–S11). Browser-only rows are gated per CHECKLIST § Hidden in the native app. */
-export function CaptureTab({ onSetup }: { onSetup: (opener: HTMLElement) => void }) {
+export function CaptureTab({ cleanupModelStore, onSetup }: {
+  /** Test seam: cleanup model status/import (defaults to native). */
+  cleanupModelStore?: CleanupModelStore;
+  onSetup: (opener: HTMLElement) => void;
+}) {
   const { settings, state } = useApp();
   const isNative = isTauriEnv();
   const update = settings.update;
@@ -59,16 +65,17 @@ export function CaptureTab({ onSetup }: { onSetup: (opener: HTMLElement) => void
       <div className="frow">
         <span className="frow__label">
           <span>Writing style</span>
-          {isNative && <small className="frow__help">Cleanup not available yet</small>}
+          {isNative && <small className="frow__help">Used by local cleanup</small>}
         </span>
         <SegmentedControl
-          label={isNative ? 'Style preference · cleanup unavailable' : 'Current style'}
+          label={isNative ? 'Style preference · used by local cleanup' : 'Current style'}
           onChange={(value) => update({ key: 'style', value })}
           options={styles}
           size="sm"
           value={state.settings.style}
         />
       </div>
+      <CleanupSettings isNative={isNative} modelStore={cleanupModelStore} />
       {!isNative && (
         <div className="frow">
           <span className="frow__label">

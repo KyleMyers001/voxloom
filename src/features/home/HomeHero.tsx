@@ -4,6 +4,7 @@ import { KeyCombo } from '../../components/KeyCombo';
 import { useShortcutActive } from '../../services/shortcut/activeShortcut';
 import { NO_SHORTCUT_HEADING, NO_SHORTCUT_HINT } from '../settings/shortcutCopy';
 import { SegmentedControl } from '../../components/SegmentedControl';
+import { isCleanupActive } from '../../domain/cleanup';
 import type { WritingStyle } from '../../domain/types';
 
 const styles: { value: WritingStyle; label: string }[] = [
@@ -29,7 +30,9 @@ export function HomeHero({ isNative }: { isNative: boolean }) {
         <p>Speak in any app. Release to type. Transcribed locally with Whisper.</p>
         <div className="home-hero__style">
           <span className="fine">
-            {isNative ? 'Style preference · cleanup not available yet' : 'Writing style'}
+            {!isNative ? 'Writing style'
+              : isCleanupActive(state.settings) ? 'Writing style · local cleanup on'
+              : 'Style preference · local cleanup is off'}
           </span>
           <SegmentedControl
             label="Current writing style"
