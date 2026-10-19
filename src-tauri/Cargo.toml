@@ -55,3 +55,8 @@ libc = "0.2"
 # Mock runtime for the command-ACL test (src/acl_tests.rs); test builds only.
 [dev-dependencies]
 tauri = { version = "2", features = ["macos-private-api", "test"] }
+
+# Full SHA-256 of the ~397 MB cleanup GGUF is painful in unoptimized debug
+# builds (multi-second status/run). Keep release defaults; speed up sha2 only.
+[profile.dev.package.sha2]
+opt-level = 3
