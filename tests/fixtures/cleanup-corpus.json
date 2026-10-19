@@ -433,7 +433,120 @@
       "rawText": "back in the '90s um it was fun", "dictionary": [],
       "candidates": [
         {"text": "Back in the '90s, it was fun.", "acceptWhen": ["off", "on"]},
-        {"text": "Back in the '80s, it was fun.", "acceptWhen": []}
+        {"text": "Back in the '80s, it was fun.", "acceptWhen": []},
+        {"text": "Back in the 90s, it was fun.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "shell-double-ampersand", "categories": ["special-characters", "commands"],
+      "rawText": "run foo && bar", "dictionary": [],
+      "candidates": [
+        {"text": "Run foo && bar.", "acceptWhen": ["off", "on"]},
+        {"text": "Run foo bar.", "acceptWhen": []},
+        {"text": "Run foo & bar.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "shell-ampersand", "categories": ["special-characters", "commands"],
+      "rawText": "run foo & bar", "dictionary": [],
+      "candidates": [
+        {"text": "Run foo & bar.", "acceptWhen": ["off", "on"]},
+        {"text": "Run foo bar.", "acceptWhen": []},
+        {"text": "Run foo && bar.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "other-punctuation", "categories": ["special-characters"],
+      "rawText": "see § four and call me (maybe) tomorrow", "dictionary": [],
+      "candidates": [
+        {"text": "See § four, and call me (maybe) tomorrow.", "acceptWhen": ["off", "on"]},
+        {"text": "See four, and call me (maybe) tomorrow.", "acceptWhen": []},
+        {"text": "See § four, and call me maybe tomorrow.", "acceptWhen": []},
+        {"text": "See § four, and call me (maybe) tomorrow (ok).", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "sentence-punctuation-allowed", "categories": ["punctuation"],
+      "rawText": "well I guess so", "dictionary": [],
+      "candidates": [
+        {"text": "Well, I guess so…", "acceptWhen": ["off", "on"]},
+        {"text": "Well — I guess; so?", "acceptWhen": ["off", "on"]},
+        {"text": "Well, I guess so (ok).", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "possessive-apostrophe-kept", "categories": ["punctuation"],
+      "rawText": "review the defendants' claims", "dictionary": [],
+      "candidates": [
+        {"text": "Review the defendants' claims.", "acceptWhen": ["off", "on"]},
+        {"text": "Review the defendants’ claims.", "acceptWhen": ["off", "on"]},
+        {"text": "Review the defendants claims.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "possessive-apostrophe-dogs", "categories": ["punctuation"],
+      "rawText": "the dogs' bowl", "dictionary": [],
+      "candidates": [
+        {"text": "The dogs' bowl.", "acceptWhen": ["off", "on"]},
+        {"text": "The dogs bowl.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "possessive-inside-quote", "categories": ["quoted-instructions", "punctuation"],
+      "rawText": "she said 'the boys' toys'", "dictionary": [],
+      "candidates": [
+        {"text": "She said 'the boys' toys'.", "acceptWhen": ["off", "on"]},
+        {"text": "She said 'the boys' toys.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "acronym-plural", "categories": ["names"],
+      "rawText": "the APIs are down", "dictionary": [],
+      "candidates": [
+        {"text": "The APIs are down.", "acceptWhen": ["off", "on"]},
+        {"text": "The Apis are down.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "acronym-plural-urls", "categories": ["names"],
+      "rawText": "check the URLs", "dictionary": [],
+      "candidates": [
+        {"text": "Check the URLs.", "acceptWhen": ["off", "on"]},
+        {"text": "Check the Urls.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "acronym-possessive", "categories": ["names", "fillers"],
+      "rawText": "go to the ER's desk", "dictionary": [],
+      "candidates": [
+        {"text": "Go to the ER's desk.", "acceptWhen": ["off", "on"]},
+        {"text": "Go to the Er's desk.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "acronym-possessive-ceo", "categories": ["names"],
+      "rawText": "the CEO's plan", "dictionary": [],
+      "candidates": [
+        {"text": "The CEO's plan.", "acceptWhen": ["off", "on"]},
+        {"text": "The Ceo's plan.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "acronym-possessive-curly", "categories": ["names", "unicode"],
+      "rawText": "read NASA’s report", "dictionary": [],
+      "candidates": [
+        {"text": "Read NASA’s report.", "acceptWhen": ["off", "on"]},
+        {"text": "Read Nasa’s report.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "acronym-plain-technical", "categories": ["names", "numbers"],
+      "rawText": "COVID-19 tests over HTTPS return JSON", "dictionary": [],
+      "candidates": [
+        {"text": "COVID-19 tests over HTTPS return JSON.", "acceptWhen": ["off", "on"]},
+        {"text": "Covid-19 tests over HTTPS return JSON.", "acceptWhen": []},
+        {"text": "COVID-19 tests over Https return JSON.", "acceptWhen": []},
+        {"text": "COVID-19 tests over HTTPS return Json.", "acceptWhen": []}
       ]
     },
     {

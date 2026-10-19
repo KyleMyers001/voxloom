@@ -28,14 +28,21 @@ function expand(text: string): string {
     .replace(/\bn'/giu, 'ne ');
 }
 
+export interface QuoteScan {
+  /** Indices of quotation marks. */
+  quotes: number[];
+  /** Indices of apostrophes outside words: boys', '90s. */
+  apostrophes: number[];
+}
+
 /**
- * Indices of quotation marks in `characters`. Apostrophes are not quotation
+ * Find quotation marks in `characters`. Apostrophes are not quotation
  * boundaries inside words (don't → do not, I'm → I am keep working), in a
  * decade ('90s), or after a word-final s (boys') unless a single quotation is
  * open, so a closing quote after an s (say 'yes' to it) is still anchored.
  */
-export function quoteMarkIndices(characters: readonly string[]): number[] {
-  const indices: number[] = [];
+export function scanQuotes(characters: readonly string[]): QuoteScan {
+  const scan: QuoteScan = { apostrophes: [], quotes: [] };
   const word = /[\p{L}\p{M}\p{N}]/u;
   let singleOpen = false;
   characters.forEach((character, index) => {
@@ -48,11 +55,18 @@ export function quoteMarkIndices(characters: readonly string[]): number[] {
     const possessive = /^s$/iu.test(before) && !word.test(after);
     const decade = /^\p{N}{2}s(?![\p{L}\p{M}\p{N}])/u
       .test(characters.slice(index + 1, index + 5).join(''));
-    if (straight && ((possessive && !singleOpen) || decade)) return;
+    if (straight && ((possessive && !singleOpen) || decade)) {
+      scan.apostrophes.push(index);
+      return;
+    }
     if (single) singleOpen = !singleOpen;
-    indices.push(index);
+    scan.quotes.push(index);
   });
-  return indices;
+  return scan;
+}
+
+export function quoteMarkIndices(characters: readonly string[]): number[] {
+  return scanQuotes(characters).quotes;
 }
 
 /** First word of the text or of a sentence (after . ! ?). */

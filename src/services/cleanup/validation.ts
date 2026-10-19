@@ -3,6 +3,7 @@ import {
   preservesContent,
   sameMultiset,
 } from './contentGuard';
+import { preservesMarks } from './marks';
 import { isDroppableFiller, quoteMarkIndices } from './tokens';
 
 export const CLEANUP_OUTPUT_MAX_BYTES = 32_000;
@@ -20,6 +21,10 @@ function protectedValues(text: string): string[] {
     .filter((value) => /[\p{N}_/@\\=]|[\p{L}]-[\p{L}]|^-+[\p{L}]|^[.~][\p{L}]|[\p{Ll}][\p{Lu}]|[\p{L}]\.[\p{L}]/u.test(value));
 }
 
+// An uppercase stem of 2+ letters, optionally plural or possessive: ER, APIs,
+// CEO's (curly apostrophes are normalized first).
+const ACRONYM = /^\p{Lu}{2,}(?:'?s)?$/u;
+
 function preservesCapitalization(raw: string, candidate: string): boolean {
   const words = (text: string) => text.normalize('NFC').replaceAll('’', '\'')
     .match(/[\p{L}\p{M}]+(?:'[\p{L}\p{M}]+)*/gu) ?? [];
@@ -27,15 +32,15 @@ function preservesCapitalization(raw: string, candidate: string): boolean {
   const keys = (pattern: RegExp) => new Set(source
     .filter((word) => pattern.test(word)).map((word) => word.toLowerCase()));
   const capitalized = keys(/^\p{Lu}/u);
-  const acronyms = keys(/^\p{Lu}{2,}$/u);
+  const acronyms = keys(ACRONYM);
   // Only prohibit new weakened occurrences of a source word: lowercase for a
-  // capitalized word (Émilie → émilie), anything but all caps for an acronym
-  // (MRI → Mri). This permits existing mixed-case repetitions, filler
+  // capitalized word (Émilie → émilie), anything but an uppercase stem for an
+  // acronym (MRI → Mri, APIs → Apis). This permits existing mixed-case repetitions, filler
   // removal, contraction expansion and dictionary repairs.
   const weakened = (tokens: string[]) => tokens.filter((word) => {
     const key = word.toLowerCase();
     return (/^\p{Ll}/u.test(word) && capitalized.has(key))
-      || (acronyms.has(key) && word !== word.toUpperCase());
+      || (acronyms.has(key) && !ACRONYM.test(word));
   });
   const available = new Map<string, number>();
   for (const word of weakened(source)) {
@@ -96,23 +101,6 @@ function wrapsWholeText(text: string): boolean {
     && indices[0] === 0 && indices.at(-1) === characters.length - 1;
 }
 
-// A `!` ending a word: sentence-final emphasis, not a shell or markup mark.
-const FINAL_BANG = /(?<=[\p{L}\p{N}"'”’)\]])!(?=$|[\s"'”’)\]])/gu;
-
-/**
- * Markup, shell and identifier characters (`C#`, `#TODO`, `*bold*`,
- * `sudo !!`, `$HOME`, `a|b`, `x^2`) must keep their exact counts. Only one
- * sentence-final `!` after a word may be added or removed overall.
- */
-function preservesSpecialMarks(raw: string, candidate: string): boolean {
-  const marks = (text: string) => text.normalize('NFC').replace(FINAL_BANG, '')
-    .match(/[#*^|$!]/gu) ?? [];
-  const finalBangs = (text: string) =>
-    text.normalize('NFC').match(FINAL_BANG)?.length ?? 0;
-  return sameMultiset(marks(raw), marks(candidate))
-    && Math.abs(finalBangs(raw) - finalBangs(candidate)) <= 1;
-}
-
 function hasUnsafeEncoding(text: string): boolean {
   // Iterate code points: paired surrogates (emoji) are valid, lone UTF-16
   // surrogates are not. Never silently repair or pass controls to OS delivery.
@@ -143,7 +131,7 @@ export function validateCleanupOutput(
   if (!sameMultiset(protectedValues(rawText), protectedValues(cleaned))) return null;
   if (!preservesCapitalization(rawText, cleaned)) return null;
   if (JSON.stringify(symbols(rawText)) !== JSON.stringify(symbols(cleaned))) return null;
-  if (!preservesSpecialMarks(rawText, cleaned)) return null;
+  if (!preservesMarks(rawText, cleaned)) return null;
   if (JSON.stringify(quotationShape(rawText, dictionary))
     !== JSON.stringify(quotationShape(cleaned, dictionary))) return null;
   if (!preservesContent(rawText, cleaned, dictionary)) return null;
