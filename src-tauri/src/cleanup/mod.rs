@@ -32,19 +32,31 @@ pub struct CleanupState {
 
 impl CleanupState {
     pub fn from_app(app: &AppHandle) -> Result<Self, String> {
+        // Model store first. A resource-dir / worker-path miss must not discard
+        // a working app-data store — disable the runtime instead.
         let models = CleanupModelStore::from_app(app)?;
+        let worker_path = match Self::worker_path(app) {
+            Ok(path) => path,
+            Err(error) => {
+                eprintln!("[cleanup] worker path unavailable, cleanup runtime disabled: {error}");
+                PathBuf::new()
+            }
+        };
+        Ok(Self::with_parts(models, worker_path))
+    }
+
+    fn worker_path(app: &AppHandle) -> Result<PathBuf, String> {
         let resource = app
             .path()
             .resource_dir()
             .map_err(|error| format!("resolve resources: {error}"))?
             .join("cleanup")
             .join("voxloom-cleanup-worker");
-        let worker_path = if resource.is_file() {
+        Ok(if resource.is_file() {
             resource
         } else {
             development_worker_path()
-        };
-        Ok(Self::with_parts(models, worker_path))
+        })
     }
 
     /// Same shape as a normal store, pointed at a disposable temp root and an

@@ -9,7 +9,7 @@ use super::artifact::{
 };
 
 mod status_cache;
-use status_cache::{available_cached, fingerprint, FileFingerprint};
+use status_cache::{fingerprint, FileFingerprint};
 
 pub const MODEL_ID: &str = "qwen3-0.6b-q4-k-m";
 const MODEL_FILE: &str = "qwen3-0.6b-q4-k-m.gguf";
@@ -34,7 +34,7 @@ pub struct ModelStatus {
 struct StoreInner {
     importing: bool,
     leases: usize,
-    /// Last successful status() hash, keyed by inode/size/mtime.
+    /// Last successful status() hash, keyed by dev/ino/size/mtime/ctime.
     verified: Option<FileFingerprint>,
 }
 
@@ -60,7 +60,15 @@ impl ModelLease {
 
     /// Hash the already reserved descriptor, without holding the store lock.
     pub fn verify(&mut self) -> Result<(), String> {
-        validate_file(&mut self.file, self.artifact)
+        match validate_file(&mut self.file, self.artifact) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                // Status may still trust a stale fingerprint (e.g. in-place
+                // rewrite that restored mtime before ctime was keyed). Drop it.
+                self.inner.lock().unwrap().verified = None;
+                Err(error)
+            }
+        }
     }
 }
 
@@ -219,11 +227,37 @@ impl CleanupModelStore {
         })
     }
 
-    /// Cheap status path: skip a full re-hash when inode/size/mtime match.
+    /// Cheap status path: skip a full re-hash when the fingerprint matches.
+    /// Hashing runs without the store lock so lease/import are not blocked.
     fn available_for(&self, artifact: ArtifactSpec) -> bool {
         let path = self.model_path();
+        let to_hash = {
+            let mut inner = self.inner.lock().unwrap();
+            match fingerprint(&path) {
+                Ok(fp) if inner.verified == Some(fp) => return true,
+                Ok(fp) => fp,
+                Err(_) => {
+                    inner.verified = None;
+                    return false;
+                }
+            }
+        };
+
+        let hash_ok = validate_artifact(&path, artifact).is_ok();
+
         let mut inner = self.inner.lock().unwrap();
-        available_cached(&path, artifact, &mut inner.verified)
+        match fingerprint(&path) {
+            Ok(current) if current == to_hash => {
+                inner.verified = hash_ok.then_some(current);
+            }
+            Err(_) => {
+                inner.verified = None;
+            }
+            Ok(_) => {
+                // File changed while we hashed; leave cache alone.
+            }
+        }
+        hash_ok
     }
 
     fn remember_verified(&self, path: &Path) {

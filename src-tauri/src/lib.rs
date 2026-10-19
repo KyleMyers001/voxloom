@@ -144,8 +144,10 @@ pub fn run() {
             app.manage(coordinator);
             // Off-by-default: never crash startup if app-data resolution fails.
             // Mirror ModelStore — fall back to a disposable temp root.
-            let cleanup = cleanup::CleanupState::from_app(app.handle())
-                .unwrap_or_else(|_| cleanup::CleanupState::fallback());
+            let cleanup = cleanup::CleanupState::from_app(app.handle()).unwrap_or_else(|error| {
+                eprintln!("[cleanup] setup failed, using disposable fallback: {error}");
+                cleanup::CleanupState::fallback()
+            });
             app.manage(cleanup);
             let stt = SttState::new(models, buffers);
             // One-time hash of unmarked model files, off the main thread. Each

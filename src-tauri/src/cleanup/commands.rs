@@ -67,7 +67,7 @@ pub async fn cleanup_pick_and_import_model<R: Runtime>(
     })
     .await
     .map_err(|error| CleanupCommandError::runtime(format!("model import task failed: {error}")))?
-    .map_err(CleanupCommandError::model)?;
+    .map_err(CleanupCommandError::runtime)?;
     status.runtime_available = state.supervisor.available();
     Ok(Some(status))
 }

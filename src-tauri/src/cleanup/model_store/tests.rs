@@ -257,8 +257,133 @@ fn missing_model_clears_stale_status_cache() {
         ino: 0,
         len: 8,
         modified: std::time::SystemTime::UNIX_EPOCH,
+        #[cfg(unix)]
+        ctime_secs: 0,
+        #[cfg(unix)]
+        ctime_nsecs: 0,
     });
     assert!(!store.status().available);
     assert!(store.inner.lock().unwrap().verified.is_none());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn lease_is_not_blocked_while_status_hashes() {
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    let root = temp_root("status-lease-concurrency");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    // ~16 MiB: long enough to observe the unlocked hash window even with
+    // profile.dev.package.sha2 opt-level = 3.
+    let mut bytes = vec![0u8; 16 << 20];
+    bytes[..4].copy_from_slice(b"GGUF");
+    let digest = Box::leak(format!("{:x}", Sha256::digest(&bytes)).into_boxed_str());
+    let artifact = ArtifactSpec {
+        sha256: digest,
+        size: bytes.len() as u64,
+    };
+    let store = Arc::new(CleanupModelStore::new(root.clone()));
+    fs::write(store.model_path(), &bytes).unwrap();
+
+    let status_store = Arc::clone(&store);
+    let status = std::thread::spawn(move || status_store.status_available_for(artifact));
+
+    // Poll until status has released the lock for hashing (or finished).
+    let unlocked = (0..200).any(|_| {
+        std::thread::sleep(Duration::from_millis(1));
+        if let Ok(guard) = store.inner.try_lock() {
+            drop(guard);
+            true
+        } else {
+            false
+        }
+    });
+    assert!(
+        unlocked,
+        "status must release the store lock before SHA-256"
+    );
+
+    let started = Instant::now();
+    let lease = store.lease_artifact(MODEL_ID, artifact);
+    let waited = started.elapsed();
+    assert!(lease.is_ok(), "lease during status hash: {lease:?}");
+    assert!(
+        waited < Duration::from_millis(200),
+        "lease blocked for {waited:?} while status hashed (store lock held during SHA-256)"
+    );
+    drop(lease);
+    assert!(status.join().unwrap());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn status_detects_in_place_rewrite_when_mtime_restored() {
+    use std::io::Write;
+    let root = temp_root("status-ctime");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let bytes = b"GGUFtest";
+    let digest = Box::leak(format!("{:x}", Sha256::digest(bytes)).into_boxed_str());
+    let artifact = ArtifactSpec {
+        sha256: digest,
+        size: bytes.len() as u64,
+    };
+    let store = CleanupModelStore::new(root.clone());
+    fs::write(store.model_path(), bytes).unwrap();
+    assert!(store.status_available_for(artifact));
+    assert!(store.inner.lock().unwrap().verified.is_some());
+
+    let path = store.model_path();
+    let prior_mtime = fs::symlink_metadata(&path).unwrap().modified().unwrap();
+    // Same length, different bytes; restore mtime so a pre-ctime key would hit.
+    {
+        let mut file = fs::OpenOptions::new().write(true).open(&path).unwrap();
+        file.write_all(b"GGUFevil").unwrap();
+        file.sync_all().unwrap();
+    }
+    let file = fs::File::options().write(true).open(&path).unwrap();
+    file.set_modified(prior_mtime).unwrap();
+    drop(file);
+
+    assert!(
+        !store.status_available_for(artifact),
+        "ctime must invalidate the status cache after an in-place rewrite"
+    );
+    assert!(store.inner.lock().unwrap().verified.is_none());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn verify_failure_invalidates_status_cache() {
+    let root = temp_root("verify-invalidate");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let bytes = b"GGUFtest";
+    let digest = Box::leak(format!("{:x}", Sha256::digest(bytes)).into_boxed_str());
+    let artifact = ArtifactSpec {
+        sha256: digest,
+        size: bytes.len() as u64,
+    };
+    let store = CleanupModelStore::new(root.clone());
+    fs::write(store.model_path(), b"GGUFevil").unwrap();
+    // Plant a matching fingerprint so status would trust the cache.
+    let fp = super::fingerprint(&store.model_path()).unwrap();
+    store.inner.lock().unwrap().verified = Some(fp);
+    assert!(
+        store.status_available_for(artifact),
+        "planted cache must hit"
+    );
+
+    let mut lease = store.lease_artifact(MODEL_ID, artifact).unwrap();
+    assert!(lease.verify().unwrap_err().contains("SHA-256 mismatch"));
+    assert!(
+        store.inner.lock().unwrap().verified.is_none(),
+        "failed verify must drop the status cache"
+    );
+    assert!(!store.status_available_for(artifact));
+    drop(lease);
     let _ = fs::remove_dir_all(root);
 }

@@ -187,7 +187,7 @@ mod tests {
         use super::relocate_above_stdio;
         use std::os::fd::AsRawFd;
 
-        let file = tempfile_model();
+        let file = tempfile_model("relocate");
         let relocated = relocate_above_stdio(&file).unwrap();
         assert!(
             relocated.as_raw_fd() >= 3,
@@ -196,10 +196,45 @@ mod tests {
         );
     }
 
+    /// The child must see the model on fd 3 via the relocated descriptor,
+    /// not the original (which may be 0/1 when stdio was closed).
     #[cfg(unix)]
-    fn tempfile_model() -> std::fs::File {
+    #[test]
+    fn spawn_passes_relocated_model_on_fd_three() {
+        use crate::cleanup::test_support::{test_root, wait_until, write_executable};
+        use std::fs;
+        use std::time::Duration;
+
+        let root = test_root().join("spawn-fd3");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let marker = root.join("fd3-bytes");
+        let worker = root.join("worker.py");
+        write_executable(
+            &worker,
+            &format!(
+                "#!/usr/bin/env python3\nimport os\nopen(r'{0}', 'wb').write(os.read(3, 8))\n",
+                marker.display()
+            ),
+        );
+        let model_path = root.join("model.gguf");
+        fs::write(&model_path, b"GGUFtest").unwrap();
+        let model = fs::File::open(&model_path).unwrap();
+        let process = super::WorkerProcess::spawn(&worker, &model).unwrap();
+        assert!(
+            wait_until(Duration::from_secs(2), || {
+                fs::read(&marker).ok().as_deref() == Some(b"GGUFtest".as_slice())
+            }),
+            "spawn must inherit the relocated model on fd 3"
+        );
+        process.handle.finish();
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    fn tempfile_model(label: &str) -> std::fs::File {
         let path = crate::cleanup::test_support::test_root()
-            .join(format!("worker-fd-{}.gguf", std::process::id()));
+            .join(format!("worker-fd-{label}-{}.gguf", std::process::id()));
         std::fs::write(&path, b"GGUFtest").unwrap();
         std::fs::File::open(path).unwrap()
     }

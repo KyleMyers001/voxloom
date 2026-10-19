@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { cleanupModelCache } from '../../src/features/settings/cleanupModelCache';
 import type { CleanupModelStore } from '../../src/services/cleanup/contracts';
-import { CLEANUP_MODEL_ID, CLEANUP_MODEL_SHA256, type CleanupModelStatus } from '../../src/services/cleanup/types';
+import { CLEANUP_MODEL_ID, CLEANUP_MODEL_SHA256, CleanupEngineError, type CleanupModelStatus } from '../../src/services/cleanup/types';
 
 const ready: CleanupModelStatus = {
   available: true, id: CLEANUP_MODEL_ID, runtimeAvailable: true, sha256: CLEANUP_MODEL_SHA256,
@@ -97,5 +97,13 @@ describe('cleanupModelCache', () => {
     cleanupModelCache.apply(bad as unknown as CleanupModelStatus);
     expect(view()).toEqual({ kind: 'error', message: 'unexpected status from the app' });
     expect(worker()).toBe(true);
+  });
+
+  it('shows CleanupEngineError.message from a structured native rejection', async () => {
+    const { answers } = deferredStore();
+    cleanupModelCache.ensureLoaded();
+    answers[0].reject(new CleanupEngineError('runtime-error', 'cleanup model is in use'));
+    await flush();
+    expect(view()).toEqual({ kind: 'error', message: 'cleanup model is in use' });
   });
 });

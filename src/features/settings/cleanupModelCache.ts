@@ -18,11 +18,8 @@ export interface CleanupModelSnapshot {
 }
 
 const message = (reason: unknown): string => {
+  // Adapter always wraps native {code, message} in CleanupEngineError.
   if (reason instanceof Error) return reason.message;
-  if (reason && typeof reason === 'object' && 'message' in reason
-    && typeof (reason as { message: unknown }).message === 'string') {
-    return (reason as { message: string }).message;
-  }
   return String(reason);
 };
 

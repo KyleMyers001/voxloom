@@ -1,11 +1,9 @@
 //! Fingerprint cache so status() can skip a full SHA-256 when the
-//! on-disk model is unchanged (inode/size/mtime).
+//! on-disk model is unchanged (dev/ino/size/mtime/ctime).
 
 use std::fs;
 use std::path::Path;
 use std::time::SystemTime;
-
-use super::super::artifact::{validate as validate_artifact, ArtifactSpec};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct FileFingerprint {
@@ -15,12 +13,19 @@ pub(super) struct FileFingerprint {
     pub(super) ino: u64,
     pub(super) len: u64,
     pub(super) modified: SystemTime,
+    /// Change-time (content or metadata). Catches in-place rewrites that
+    /// restore mtime; userspace cannot forge it back on unix.
+    #[cfg(unix)]
+    pub(super) ctime_secs: i64,
+    #[cfg(unix)]
+    pub(super) ctime_nsecs: i64,
 }
 
 pub(super) fn fingerprint(path: &Path) -> Result<FileFingerprint, String> {
-    let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
-    if !metadata.is_file() {
-        return Err("cleanup model must be a regular file".into());
+    // Match artifact::open_regular: never follow a symlink into the model path.
+    let metadata = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+        return Err("cleanup model must be a regular non-symlink file".into());
     }
     let modified = metadata
         .modified()
@@ -38,29 +43,15 @@ pub(super) fn fingerprint(path: &Path) -> Result<FileFingerprint, String> {
         },
         len: metadata.len(),
         modified,
+        #[cfg(unix)]
+        ctime_secs: {
+            use std::os::unix::fs::MetadataExt;
+            metadata.ctime()
+        },
+        #[cfg(unix)]
+        ctime_nsecs: {
+            use std::os::unix::fs::MetadataExt;
+            metadata.ctime_nsec()
+        },
     })
-}
-
-pub(super) fn available_cached(
-    path: &Path,
-    artifact: ArtifactSpec,
-    verified: &mut Option<FileFingerprint>,
-) -> bool {
-    let Ok(fp) = fingerprint(path) else {
-        *verified = None;
-        return false;
-    };
-    if *verified == Some(fp) {
-        return true;
-    }
-    match validate_artifact(path, artifact) {
-        Ok(()) => {
-            *verified = Some(fp);
-            true
-        }
-        Err(_) => {
-            *verified = None;
-            false
-        }
-    }
 }
