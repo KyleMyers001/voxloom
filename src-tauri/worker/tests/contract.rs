@@ -2,16 +2,17 @@
 //! does (env cleared, model on fd 3) and check the protocol replies. Runs on
 //! Linux CPU builds; the happy path needs a real Qwen3 GGUF (ignored test).
 
+mod common;
+
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
-use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-use serde_json::{json, Value};
+use serde_json::Value;
 
-const WORKER: &str = env!("CARGO_BIN_EXE_voxloom-cleanup-worker");
+use common::{request, worker_command, WORKER};
 
 struct Reply {
     frame: Value,
@@ -19,40 +20,40 @@ struct Reply {
 }
 
 /// Run the worker with `input` on stdin and, if given, `model` on fd 3.
+/// Like the app, stdin stays open until the reply is in (BUS-16 3c-2).
 fn run(input: &[u8], model: Option<&File>) -> Reply {
-    let mut command = Command::new(WORKER);
-    command
-        .env_clear()
+    run_stdin(input, model, false)
+}
+
+/// `close_stdin`: end stdin right after `input`, for frames that are cut
+/// short and would otherwise wait for the rest.
+fn run_stdin(input: &[u8], model: Option<&File>, close_stdin: bool) -> Reply {
+    let mut child = worker_command(model.map(AsRawFd::as_raw_fd))
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let source = model.map(AsRawFd::as_raw_fd);
-    // SAFETY: dup2/fcntl/close only, between fork and exec.
-    unsafe {
-        command.pre_exec(move || {
-            // No model: make sure nothing inherited (e.g. a jobserver pipe)
-            // sits on fd 3.
-            let Some(source) = source else {
-                libc::close(3);
-                return Ok(());
-            };
-            if source != 3 && libc::dup2(source, 3) == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            if libc::fcntl(3, libc::F_SETFD, 0) == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-    let mut child = command.spawn().expect("spawn worker");
+        .spawn()
+        .expect("spawn worker");
     let mut stdin = child.stdin.take().unwrap();
     // The worker may answer before reading everything; ignore EPIPE.
     let _ = stdin.write_all(input);
+    if close_stdin {
+        drop(stdin);
+        let output = child.wait_with_output().expect("wait worker");
+        return Reply {
+            frame: decode(&output.stdout),
+            stderr: output.stderr,
+        };
+    }
+    let mut stdout = Vec::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_end(&mut stdout)
+        .unwrap();
     drop(stdin);
     let output = child.wait_with_output().expect("wait worker");
     Reply {
-        frame: decode(&output.stdout),
+        frame: decode(&stdout),
         stderr: output.stderr,
     }
 }
@@ -62,17 +63,6 @@ fn decode(stdout: &[u8]) -> Value {
     let size = u32::from_be_bytes(stdout[..4].try_into().unwrap()) as usize;
     assert_eq!(stdout.len(), 4 + size, "exactly one frame");
     serde_json::from_slice(&stdout[4..]).expect("reply JSON")
-}
-
-fn frame(value: &Value) -> Vec<u8> {
-    let body = serde_json::to_vec(value).unwrap();
-    let mut bytes = (body.len() as u32).to_be_bytes().to_vec();
-    bytes.extend(body);
-    bytes
-}
-
-fn request(model_path: &str, prompt: &str) -> Vec<u8> {
-    frame(&json!({ "modelPath": model_path, "prompt": prompt, "requestId": "r-7" }))
 }
 
 fn assert_error(reply: &Reply, code: &str, request_id: &str) {
@@ -112,7 +102,8 @@ fn oversized_frame_header_gets_an_error_frame() {
 
 #[test]
 fn truncated_or_non_json_frame_gets_an_error_frame() {
-    assert_error(&run(&[0, 0, 0, 9, b'{'], None), "runtime-error", "");
+    let truncated = run_stdin(&[0, 0, 0, 9, b'{'], None, true);
+    assert_error(&truncated, "runtime-error", "");
     let mut bad = 5_u32.to_be_bytes().to_vec();
     bad.extend(b"hello");
     assert_error(&run(&bad, None), "runtime-error", "");

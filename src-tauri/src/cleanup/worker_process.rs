@@ -94,12 +94,15 @@ impl WorkerProcess {
         std::thread::spawn(move || {
             let _ = read_sender.send(read_frame::<WorkerResponse>(&mut stdout));
         });
+        // The worker exits when its stdin closes (BUS-16 3c-2): that is how
+        // it notices the app died. So stdin must stay open until the reply
+        // is in: the writer hands it back through the channel, which holds
+        // it until the reply has been read or this function gives up.
         let (write_sender, write_receiver) = mpsc::channel();
         let mut stdin = self.stdin;
         std::thread::spawn(move || {
             let result = write_encoded_frame(&mut stdin, &frame);
-            drop(stdin);
-            let _ = write_sender.send(result);
+            let _ = write_sender.send(result.map(|()| stdin));
         });
         let response = match read_receiver.recv_timeout(remaining(deadline)) {
             Ok(Ok(response)) => response,
@@ -117,7 +120,7 @@ impl WorkerProcess {
             return Ok(response);
         }
         match write_receiver.recv_timeout(remaining(deadline)) {
-            Ok(Ok(())) => {}
+            Ok(Ok(_stdin)) => {}
             Ok(Err(error)) => return Err(ProcessError::Runtime(error)),
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 return Err(ProcessError::Timeout);

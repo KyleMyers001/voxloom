@@ -23,6 +23,10 @@ fn run(model_path: &str, prompt: &str) -> Result<String, WorkerError> {
     if prompt.trim().is_empty() {
         return Err(WorkerError::runtime("empty prompt"));
     }
+    #[cfg(debug_assertions)]
+    if let Some(result) = crate::test_hook::slow_generation() {
+        return result;
+    }
     engine::generate(MODEL_PATH, prompt)
 }
 
