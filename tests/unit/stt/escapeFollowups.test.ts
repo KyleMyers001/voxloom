@@ -138,6 +138,62 @@ describe('Escape-cancel follow-ups (BUS-91)', () => {
     expect(result.current.phase).toBe('cancelled');
   });
 
+  it.each([
+    { kind: 'cancelled' },
+    { category: 'capture-unavailable', kind: 'error', message: 'old capture failed' },
+  ] as CaptureState[])('a restart ignores the old capture\'s $kind event that releases it', async (stale) => {
+    const scope = fakeScope();
+    vi.spyOn(cancelScopeModule, 'beginCancelScope')
+      .mockResolvedValueOnce(fakeScope()).mockResolvedValueOnce(scope);
+    const store = createMockSttModelStore();
+    await store.download('whisper-tiny.en');
+    const capture = stubCapture();
+    const { result, rerender } = renderHook(({ state }: { state: CaptureState }) => useDogfoodCapture({
+      captureApi: { ...capture, captureState: state }, clipboard: { copy: vi.fn() },
+      createModelStore: () => store, modelId: 'whisper-tiny.en',
+    }), { initialProps: { state: { kind: 'idle' } as CaptureState } });
+    await act(async () => { await result.current.start(); });
+    const escape = () => {
+      const event = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+      act(() => { document.dispatchEvent(event); });
+      return event.defaultPrevented;
+    };
+    expect(escape()).toBe(true);
+    rerender({ state: { kind: 'cancelled' } });
+    let release!: () => void;
+    vi.mocked(capture.waitForCaptureRelease)
+      .mockImplementationOnce(() => new Promise<void>((done) => { release = done; }));
+    let restart!: Promise<void>;
+    act(() => { restart = result.current.start(); });
+    await waitFor(() => expect(capture.waitForCaptureRelease).toHaveBeenCalledTimes(2));
+    // The old capture's terminal event lands; it is also what releases the mic.
+    rerender({ state: stale });
+    await act(async () => { release(); await restart; });
+    expect(capture.startFullCaptureSession).toHaveBeenCalledTimes(2);
+    expect(result.current.phase).toBe('recording');
+    expect(scope.dispose).not.toHaveBeenCalled();
+    expect(escape()).toBe(true);
+    expect(result.current.phase).toBe('cancelled');
+    expect(scope.dispose).toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ kind: 'cancelled' }, 'cancelled', 'Capture cancelled — nothing transcribed.'],
+    [{ category: 'busy', kind: 'error', message: 'mic lost' }, 'error', 'mic lost'],
+  ] as const)('the live session\'s own capture %o still ends it', async (state, phase, message) => {
+    vi.spyOn(cancelScopeModule, 'beginCancelScope').mockResolvedValue(fakeScope());
+    const store = createMockSttModelStore();
+    await store.download('whisper-tiny.en');
+    const { result, rerender } = renderHook(({ state: current }: { state: CaptureState }) => useDogfoodCapture({
+      captureApi: { ...stubCapture(), captureState: current }, clipboard: { copy: vi.fn() },
+      createModelStore: () => store, modelId: 'whisper-tiny.en',
+    }), { initialProps: { state: { kind: 'idle' } as CaptureState } });
+    await act(async () => { await result.current.start(); });
+    rerender({ state });
+    expect(result.current.phase).toBe(phase);
+    expect(result.current.message).toBe(message);
+  });
+
   it('routes start failures to the error toast', async () => {
     vi.spyOn(cancelScopeModule, 'beginCancelScope').mockResolvedValue(fakeScope());
     const capture = stubCapture();
