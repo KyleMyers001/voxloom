@@ -163,15 +163,23 @@ export function createTauriCleanupEngine(): CleanupEngine {
   };
 }
 
+async function modelInvoke<T>(command: string): Promise<T> {
+  try {
+    return await invoke<T>(command);
+  } catch (error: unknown) {
+    throw runtimeError(error);
+  }
+}
+
 export function createTauriCleanupModelStore(): CleanupModelStore {
   return {
     async importModel() {
-      return invoke<CleanupModelStatus | null>(
+      return modelInvoke<CleanupModelStatus | null>(
         'cleanup_pick_and_import_model',
       );
     },
     async status() {
-      return invoke<CleanupModelStatus>('cleanup_model_status');
+      return modelInvoke<CleanupModelStatus>('cleanup_model_status');
     },
   };
 }

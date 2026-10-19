@@ -233,4 +233,21 @@ describe('Tauri cleanup adapters', () => {
       code: 'context-overflow', message: 'prompt does not fit',
     });
   });
+
+  it('surfaces structured model status rejections via CleanupEngineError.message', async () => {
+    invoke.mockRejectedValueOnce({ code: 'runtime-error', message: 'cleanup model is in use' });
+    await expect(createTauriCleanupModelStore().status()).rejects.toMatchObject({
+      code: 'runtime-error',
+      message: 'cleanup model is in use',
+      name: 'CleanupEngineError',
+    });
+  });
+
+  it('surfaces structured import rejections via CleanupEngineError.message', async () => {
+    invoke.mockRejectedValueOnce({ code: 'runtime-error', message: 'SHA-256 mismatch' });
+    await expect(createTauriCleanupModelStore().importModel()).rejects.toMatchObject({
+      code: 'runtime-error',
+      message: 'SHA-256 mismatch',
+    });
+  });
 });

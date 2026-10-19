@@ -19,7 +19,11 @@ export interface CleanupModelSnapshot {
   importError: string | null;
 }
 
-const message = (reason: unknown) => reason instanceof Error ? reason.message : String(reason);
+const message = (reason: unknown): string => {
+  // Adapter always wraps native {code, message} in CleanupEngineError.
+  if (reason instanceof Error) return reason.message;
+  return String(reason);
+};
 
 function checkedStatus(status: CleanupModelStatus | undefined): CleanupModelStatus {
   // Native IPC result: check its shape before trusting it.

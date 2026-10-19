@@ -69,6 +69,7 @@ fn sync_failure_is_reported_after_rename_and_retry_syncs_existing_model() {
         .unwrap();
     assert!(synced);
     assert!(store.lease_artifact(MODEL_ID, spec).is_ok());
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -93,7 +94,7 @@ fn refuses_import_while_a_model_is_leased() {
 fn admission_opens_without_hashing_the_model() {
     let root = temp_root("cheap-admission");
     fs::create_dir_all(&root).unwrap();
-    let store = CleanupModelStore::new(root);
+    let store = CleanupModelStore::new(root.clone());
     fs::write(store.model_path(), b"GGUFevil").unwrap();
     // Admission is only a reservation. Full verification belongs immediately
     // before inference, on this same descriptor, not on the microphone path.
@@ -105,6 +106,7 @@ fn admission_opens_without_hashing_the_model() {
         },
     );
     assert!(lease.is_ok(), "admission must not hash: {lease:?}");
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -137,7 +139,7 @@ fn lease_rejects_same_size_tampering() {
 fn bounds_descriptors_even_while_retired_acquisitions_are_finishing() {
     let root = temp_root("descriptor-capacity");
     fs::create_dir_all(&root).unwrap();
-    let store = CleanupModelStore::new(root);
+    let store = CleanupModelStore::new(root.clone());
     fs::write(store.model_path(), b"GGUFtest").unwrap();
     let first = store.lease(MODEL_ID).unwrap();
     let second = store.lease(MODEL_ID).unwrap();
@@ -145,6 +147,7 @@ fn bounds_descriptors_even_while_retired_acquisitions_are_finishing() {
     drop(first);
     assert!(store.lease(MODEL_ID).is_ok());
     drop(second);
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
