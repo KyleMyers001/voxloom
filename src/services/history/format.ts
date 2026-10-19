@@ -1,15 +1,17 @@
 import type { DictationRecord, HistoryStatus, WritingStyle } from
   '../../domain/types';
+import {
+  legacyCleanup,
+  parseCleanup,
+  unavailableCleanup,
+} from './cleanupMetadata';
 
 /** On-disk schema version for `history.json`. */
-export const HISTORY_FILE_VERSION = 1 as const;
+export const HISTORY_FILE_VERSION = 2 as const;
 
 /**
- * Older/sibling schema versions this reader accepts. Version 2 was written
- * by the BUS-16 local-cleanup branch (#24): same record shape plus a
- * required `rawText` and a `cleanup` provenance object, which this reader
- * ignores. Accepted files are re-written as HISTORY_FILE_VERSION only after
- * the store has backed up the original (BUS-42).
+ * Accepted schema versions. Version 1 predates cleanup provenance; older
+ * files are rewritten only after the store backs up the original (BUS-42).
  */
 export const READABLE_HISTORY_VERSIONS: readonly number[] = [1, 2];
 
@@ -34,9 +36,13 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function parseRecord(value: unknown): DictationRecord | null {
+function parseRecord(
+  value: unknown,
+  legacy: boolean,
+): DictationRecord | null {
   if (!isObject(value)) return null;
   const {
+    cleanup: rawCleanup,
     createdAt,
     durationSeconds,
     id,
@@ -64,17 +70,22 @@ function parseRecord(value: unknown): DictationRecord | null {
     return null;
   }
   if (typeof text !== 'string') return null;
+  // Optional provenance must never erase otherwise valid transcript evidence.
+  const cleanup = legacy ? legacyCleanup()
+    : parseCleanup(rawCleanup) ?? unavailableCleanup();
   if (!(rawText === undefined || typeof rawText === 'string')) return null;
+  const parsedRawText = rawText ?? text;
   const maybe = isObject(mayHaveInserted) && typeof mayHaveInserted.copied === 'boolean'
     ? { mayHaveInserted: { copied: mayHaveInserted.copied } }
     : {};
   return {
+    cleanup,
     createdAt,
     durationSeconds,
     id,
     model,
     ...maybe,
-    ...(rawText === undefined ? {} : { rawText }),
+    rawText: parsedRawText,
     recoveryExpiresAt,
     status: status as HistoryStatus,
     style: style as WritingStyle,
@@ -110,8 +121,9 @@ export function parseHistoryJson(raw: string): ParseHistoryResult {
     return { error: 'History file records must be an array', ok: false };
   }
   const records: DictationRecord[] = [];
+  const legacy = parsed.version === 1;
   for (const row of parsed.records) {
-    const record = parseRecord(row);
+    const record = parseRecord(row, legacy);
     if (record) records.push(record);
   }
   return {
@@ -123,7 +135,11 @@ export function parseHistoryJson(raw: string): ParseHistoryResult {
 
 export function serializeHistoryFile(records: DictationRecord[]): string {
   const file: HistoryFile = {
-    records,
+    records: records.map((record) => ({
+      ...record,
+      cleanup: record.cleanup ?? unavailableCleanup(),
+      rawText: record.rawText ?? record.text,
+    })),
     version: HISTORY_FILE_VERSION,
   };
   return `${JSON.stringify(file, null, 2)}\n`;

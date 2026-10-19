@@ -6,8 +6,26 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SttModelStore } from './contracts';
 import { createSttModelStore } from './factory';
 import { resolveTranscriptionModelId } from './resolveModelId';
-import { useDownloadPoll } from './useDownloadPoll';
+import { listenModelsChanged } from './modelsChanged';
+import { pendingDownload, useDownloadPoll, withPending } from './useDownloadPoll';
 import { SttError, type SttDownloadProgress, type SttModelInfo } from './types';
+
+/** BUS-35 checksum failure copy (hashes are only in the native log). */
+export const DOWNLOAD_DAMAGED = 'Download was damaged. Nothing was saved.';
+
+/** A model file on disk that couldn't be opened (row and dictation copy). */
+export const MODEL_UNREADABLE =
+  'Couldn\'t open the model file. Try again, or download it again if this keeps happening.';
+
+/** Row copy for a model file that opened but couldn't be read (Retry download is next to it). */
+export const MODEL_READ_FAILED = 'Couldn\'t read the model file. Download it again.';
+
+/** Row copy for a native `failureReason`; damaged uses ModelCard's default. */
+export function failureRowCopy(reason: SttModelInfo['failureReason']): string | undefined {
+  if (reason === 'unreadable') return MODEL_UNREADABLE;
+  if (reason === 'read-failed') return MODEL_READ_FAILED;
+  return undefined;
+}
 
 export interface UseSttModelsOptions {
   /** Persist selection (Settings `transcriptionModel`). */
@@ -38,6 +56,13 @@ function errorMessage(error: unknown): string {
   if (error instanceof SttError) return error.message;
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+/** Native refusal of a second concurrent download (download.rs). */
+function busyMessage(err: unknown): string | null {
+  return /already in progress|another model is downloading/i.test(errorMessage(err))
+    ? 'Another model is downloading. Try again when it finishes.'
+    : null;
 }
 
 export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
@@ -83,11 +108,36 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
     };
   }, [reload]);
 
+  // Re-list when the startup check finishes a model file (damaged → Retry).
+  // BUS-85.2: also refresh once after listen registers — models-changed can
+  // fire before the promise resolves, and that early event would be missed.
+  useEffect(() => {
+    let stop: (() => void) | null = null;
+    let live = true;
+    void listenModelsChanged(() => { void refresh().catch(() => undefined); })
+      .then((un) => {
+        if (!live) {
+          un();
+          return;
+        }
+        stop = un;
+        void refresh().catch(() => undefined);
+      }, () => undefined);
+    return () => {
+      live = false;
+      stop?.();
+    };
+  }, [refresh]);
+
   // Also the Retry action: it clears the row's failure as the new attempt starts.
   const downloadModel = useCallback(async (modelId: string) => {
     // BUS-52: never two downloads at once, even if a stale button fires.
     if (inFlightRef.current) throw new SttError('download-failed', 'Another model is downloading');
     inFlightRef.current = modelId;
+    // Only claim the marker when free: a second mount (own inFlightRef null)
+    // must not overwrite another mount's pending download before native refuses.
+    const ownsPending = pendingDownload.modelId === null;
+    if (ownsPending) pendingDownload.modelId = modelId;
     setError(null);
     setFailures((prev) => {
       const next = { ...prev };
@@ -111,7 +161,10 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
       if (!cancelled) {
         setFailures((prev) => ({
           ...prev,
-          [modelId]: `Download failed: ${errorMessage(err)}. Nothing was saved.`,
+          [modelId]: busyMessage(err)
+            ?? (err instanceof SttError && err.code === 'download-corrupted'
+              ? DOWNLOAD_DAMAGED
+              : `Download failed: ${errorMessage(err).replace(/\.+$/, '')}. Nothing was saved.`),
         }));
       }
       try {
@@ -122,6 +175,7 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
       throw err;
     } finally {
       inFlightRef.current = null;
+      if (ownsPending) pendingDownload.modelId = null;
       setProgress((current) =>
         current?.modelId === modelId ? null : current,
       );
@@ -148,7 +202,10 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
     const list = await storeRef.current.list();
     if (aliveRef.current) setModels(list);
   }, []);
-  useDownloadPoll(models, progress !== null, aliveRefresh);
+  // BUS-76: a remount before the backend registers the download still shows
+  // it as downloading (and polls) instead of offering Download again.
+  const shownModels = progress === null ? withPending(models) : models;
+  useDownloadPoll(shownModels, progress !== null, aliveRefresh);
 
   const selectModel = useCallback((modelId: string) => {
     const id = resolveTranscriptionModelId(modelId);
@@ -163,7 +220,7 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
     listError,
     loading,
     reload,
-    models,
+    models: shownModels,
     progress,
     refresh,
     selectModel,

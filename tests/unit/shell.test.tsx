@@ -146,7 +146,7 @@ describe('Home (UI PR 3)', () => {
     renderWithApp(<Home dogfood={dogfood()} onToast={vi.fn()} />);
     expect(screen.queryByText(/Native capture requires the Tauri shell/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Start capture' })).toBeEnabled();
-    const caption = screen.getByText('Style preference · cleanup not available yet');
+    const caption = screen.getByText('Style preference · local cleanup is off');
     // Caption precedes the segmented control.
     expect(caption.compareDocumentPosition(screen.getByRole('radiogroup', { name: 'Current writing style' })))
       .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
@@ -159,6 +159,12 @@ describe('Home (UI PR 3)', () => {
     unmount();
     renderWithApp(<Home dogfood={dogfood({ phase: 'transcribing' })} onToast={vi.fn()} />);
     expect(screen.getByText('Transcribing…')).toHaveAttribute('role', 'status');
+    expect(screen.queryByRole('button', { name: 'Start capture' })).not.toBeInTheDocument();
+  });
+
+  it('shows Cleaning up… while local cleanup runs (BUS-16)', () => {
+    renderWithApp(<Home dogfood={dogfood({ phase: 'cleaning' })} onToast={vi.fn()} />);
+    expect(screen.getByText('Cleaning up…')).toHaveAttribute('role', 'status');
     expect(screen.queryByRole('button', { name: 'Start capture' })).not.toBeInTheDocument();
   });
 });

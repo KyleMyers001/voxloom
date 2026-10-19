@@ -1,6 +1,6 @@
 // BUS-42 (#49 review): the Settings window may not back up settings.json
-// (store_backup is main-only). A v2 file opened there must load calmly,
-// write-blocked, and become writable once main broadcasts the v1 rewrite.
+// (store_backup is main-only). A legacy v1 file must load calmly,
+// write-blocked, until main broadcasts the current v2 rewrite.
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { AppProvider, useApp } from '../../src/app/AppContext';
@@ -50,10 +50,10 @@ const V2 = JSON.stringify({
     cleanupModelId: 'local-cleanup-small',
     transcriptRetention: 'forever',
   },
-  version: 2,
+  version: 1,
 });
 
-describe('Settings window with a v2 settings.json', () => {
+describe('Settings window migrating legacy settings.json', () => {
   it('loads calmly, never writes, and re-enables writes on main\'s settings:changed', async () => {
     const mem = createMemorySettingsIo(V2);
     const writes: string[] = [];
@@ -79,20 +79,23 @@ describe('Settings window with a v2 settings.json', () => {
     expect(writes).toEqual([]);
     expect(mem.snapshot()).toBe(V2);
 
-    // Main rewrote the file as v1 and broadcast it.
-    const v1 = serializeSettingsFile({ ...initialSettings, transcriptRetention: 'forever' }, true);
+    // Main rewrote the file as v2 and broadcast it.
+    const v1 = serializeSettingsFile({
+      ...initialSettings, cleanupEnabled: true, cleanupModelId: 'local-cleanup-small',
+      transcriptRetention: 'forever',
+    }, true);
     act(() => bus.emit({ contents: v1, source: 'main' }));
     await waitFor(() => expect(api!.state.settingsError).toBeNull());
 
     act(() => api!.settings.update({ key: 'appearance', value: 'dark' }));
     await waitFor(() => expect(writes.length).toBeGreaterThan(0));
     const last = parseSettingsJson(writes.at(-1)!);
-    expect(last.ok && last.file.version).toBe(1);
+    expect(last.ok && last.file.version).toBe(2);
     expect(last.ok && last.file.settings).toMatchObject({ appearance: 'dark', transcriptRetention: 'forever' });
     // #24's cleanup keys survive the Settings window save, outside app state.
     expect((JSON.parse(writes.at(-1)!) as { settings: Record<string, unknown> }).settings)
       .toMatchObject({ cleanupEnabled: true, cleanupModelId: 'local-cleanup-small' });
-    expect(api!.state.settings).not.toHaveProperty('cleanupEnabled');
+    expect(api!.state.settings.cleanupEnabled).toBe(true);
   });
 
   it('a future-version file keeps its real error in the Settings window', async () => {
@@ -103,11 +106,11 @@ describe('Settings window with a v2 settings.json', () => {
     expect(result.ok || result.error).toMatch(/Unsupported settings file version: 99/);
   });
 
-  it('a Settings window save of a migrated v1 file keeps #24 cleanup keys', async () => {
+  it('a Settings window save of a current v2 file keeps cleanup keys', async () => {
     const v1 = JSON.stringify({
       onboardingComplete: true,
       settings: { ...initialSettings, cleanupEnabled: true, cleanupModelId: 'local-cleanup-small' },
-      version: 1,
+      version: 2,
     });
     const mem = createMemorySettingsIo(v1);
     render(
@@ -125,7 +128,7 @@ describe('Settings window with a v2 settings.json', () => {
       cleanupModelId: 'local-cleanup-small',
       style: 'casual',
     });
-    expect(api!.state.settings).not.toHaveProperty('cleanupModelId');
+    expect(api!.state.settings.cleanupModelId).toBe('local-cleanup-small');
   });
 });
 

@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import { Badge } from '../../components/Badge';
 import { Icon } from '../../components/Icon';
 import { IconButton } from '../../components/IconButton';
 import { canRetry } from '../../domain/records';
 import type { DictationRecord } from '../../domain/types';
+import { cleanupLabel } from './cleanupProvenance';
 
 export function formatTime(timestamp: number): string {
   return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(timestamp);
@@ -36,7 +38,13 @@ export function HistoryRow({ record, isNative, currentTime, canStart, onCopy, on
     ? 'Terminal input not verified. Inspect before copying or retrying.'
     : record.status === 'failed' ? failedNote : null;
 
+  const [originalOpen, setOriginalOpen] = useState(false);
   const hasText = Boolean(record.text.trim());
+  const cleanup = cleanupLabel(record.cleanup);
+  // Only a cleaned row has a different original worth showing; other rows'
+  // rawText is the Whisper output before the built-in tag cleanup.
+  const original = record.cleanup?.status === 'cleaned' && record.rawText
+    && record.rawText !== record.text ? record.rawText : null;
   return (
     <article className="recent-row history-row" data-status={record.status} tabIndex={0}>
       <span className="timestamp">{formatTime(record.createdAt)}</span>
@@ -45,7 +53,14 @@ export function HistoryRow({ record, isNative, currentTime, canStart, onCopy, on
         <p className="history-row__meta">
           <Badge status={record.status} />
           <span>{record.durationSeconds}s · {record.model ?? 'Local STT'} · {styleLabel(record.style)}</span>
+          {cleanup && <span className="history-row__cleanup">· {cleanup}</span>}
         </p>
+        {original && (
+          <details className="history-row__original" onToggle={(event) => setOriginalOpen(event.currentTarget.open)}>
+            <summary>{originalOpen ? 'Hide original' : 'Show original'}</summary>
+            <p>{original}</p>
+          </details>
+        )}
         {note && (
           <p className="recovery-state">
             <Icon name="warn" size={13} /> {note}

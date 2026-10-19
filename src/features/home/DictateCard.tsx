@@ -13,7 +13,7 @@ type Props = {
 export function DictateCard({ dogfood, isNative, onCopy }: Props) {
   const { state } = useApp();
   const recording = dogfood.phase === 'recording' || dogfood.captureState.kind === 'active';
-  const busy = dogfood.phase === 'transcribing';
+  const busy = dogfood.phase === 'transcribing' || dogfood.phase === 'cleaning';
   const failed = dogfood.phase === 'error' || dogfood.phase === 'cancelled';
   const transcript = dogfood.transcript?.text;
   const notice = dogfood.cancelUnavailable;
@@ -36,7 +36,11 @@ export function DictateCard({ dogfood, isNative, onCopy }: Props) {
               <button className="quiet-button" onClick={() => dogfood.cancel()} type="button">Cancel</button>
             </>
           )}
-          {busy && <span className="empty-note" role="status">Transcribing…</span>}
+          {busy && (
+            <span className="empty-note" role="status">
+              {dogfood.phase === 'cleaning' ? 'Cleaning up…' : 'Transcribing…'}
+            </span>
+          )}
         </div>
         <div className="cap-meta">
           <span>Model: <b>{state.settings.transcriptionModel}</b></span>

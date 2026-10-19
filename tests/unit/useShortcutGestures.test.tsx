@@ -15,6 +15,7 @@ import type {
 import type { AppState } from '../../src/app/state';
 import type { RegisterOutcome } from
   '../../src/services/shortcut/registerOrRevert';
+import { getActiveShortcut, resetActiveShortcut } from '../../src/services/shortcut/activeShortcut';
 import type { OverlayBridge } from
   '../../src/services/shortcut/overlayBridge';
 
@@ -158,6 +159,9 @@ describe('useShortcutGestures', () => {
       { initialProps: { phase: 'starting' as DogfoodPhase } });
       await waitFor(() => expect(overlay.sync).toHaveBeenLastCalledWith(expect.anything(), true, true));
       rerender({ phase: 'transcribing' });
+      expect(overlay.sync).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'processing' }), false, true);
+      // BUS-16: local cleanup keeps the same cancellable processing HUD.
+      rerender({ phase: 'cleaning' });
       expect(overlay.sync).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'processing' }), false, true);
       rerender({ phase: 'cancelled' });
       expect(overlay.sync).toHaveBeenLastCalledWith({ kind: 'ready' });
@@ -1143,5 +1147,31 @@ describe('HUD result states (UI PR 8)', () => {
       expect(overlay.showResult).not.toHaveBeenCalled();
       expect(overlay.sync).toHaveBeenCalledWith({ kind: 'ready' });
     }
+  });
+});
+
+describe('useShortcutGestures native suspend recovery (BUS-74)', () => {
+  afterEach(() => { resetActiveShortcut(); vi.mocked(isTauri).mockReturnValue(false); });
+
+  it('onSuspendRecovered restores the lost combo and reports it bound', async () => {
+    vi.mocked(isTauri).mockReturnValue(true);
+    const native = makeNativeController();
+    mocks.createNativeShortcutController.mockReturnValue(native);
+    mocks.createOverlayBridge.mockReturnValue(makeOverlay());
+    const state = createInitialState(0);
+    const combo = state.settings.shortcut;
+    const { unmount } = renderHook(() => useShortcutGestures(makeOptions({ now: () => 0, state })));
+    await waitFor(() => expect(getActiveShortcut()).toBe(combo));
+    const { onSuspendFailure, onSuspendRecovered } = mocks.createNativeShortcutController.mock.calls[0][0];
+    act(() => onSuspendFailure('rebind', 'taken'));
+    expect(getActiveShortcut()).toBeNull();
+    act(() => onSuspendRecovered());
+    expect(getActiveShortcut()).toBe(combo);
+    // registeredRef is restored: a second failure reports the same combo lost.
+    act(() => onSuspendFailure('rebind', 'taken'));
+    expect(getActiveShortcut()).toBeNull();
+    act(() => onSuspendRecovered());
+    expect(getActiveShortcut()).toBe(combo);
+    unmount();
   });
 });
