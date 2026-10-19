@@ -13,9 +13,10 @@ name = "voxloom-cleanup-worker"
 path = "src/main.rs"
 
 [dependencies]
-# Exact pin: llama-cpp-2 releases weekly. No default features: `openmp`
+# Exact pins (the -sys crate too, per the design note): they release weekly. No default features: `openmp`
 # breaks the macOS link and `common` is unused. CPU-only off macOS.
 llama-cpp-2 = { version = "=0.1.160", default-features = false }
+llama-cpp-sys-2 = { version = "=0.1.160", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.140"
 

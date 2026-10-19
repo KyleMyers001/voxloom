@@ -91,11 +91,12 @@ fn spawn_clears_the_environment() {
     process.handle.finish();
     assert!(seen, "worker never ran");
     let names = std::fs::read_to_string(&marker).unwrap();
-    assert!(std::env::var_os("PATH").is_some(), "test needs PATH set");
+    // Both are set in this test process, so their absence means env_clear.
     for name in ["PATH", "HOME"] {
+        assert!(std::env::var_os(name).is_some(), "test needs {name} set");
         assert!(
             !names.split_whitespace().any(|seen| seen == name),
-            "{name} leaked into the worker: {names}"
+            "{name} leaked into the worker"
         );
     }
     let _ = std::fs::remove_dir_all(&root);

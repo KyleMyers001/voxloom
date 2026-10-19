@@ -10,13 +10,7 @@ pub const MODEL_PATH: &str = "/dev/fd/3";
 pub fn handle(request: WorkerRequest) -> WorkerResponse {
     let request_id = request.request_id;
     match run(&request.model_path, &request.prompt) {
-        Ok(text) => WorkerResponse {
-            error: None,
-            error_code: None,
-            request_id,
-            status: "ok".into(),
-            text: Some(text),
-        },
+        Ok(text) => ok_response(request_id, text),
         Err(error) => error.into_response(request_id),
     }
 }
@@ -30,4 +24,14 @@ fn run(model_path: &str, prompt: &str) -> Result<String, WorkerError> {
         return Err(WorkerError::runtime("empty prompt"));
     }
     engine::generate(MODEL_PATH, prompt)
+}
+
+pub fn ok_response(request_id: String, text: String) -> WorkerResponse {
+    WorkerResponse {
+        error: None,
+        error_code: None,
+        request_id,
+        status: "ok".into(),
+        text: Some(text),
+    }
 }

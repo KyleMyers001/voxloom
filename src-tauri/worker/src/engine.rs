@@ -15,11 +15,10 @@ use llama_cpp_2::{send_logs_to_tracing, LogOptions};
 
 use crate::error::WorkerError;
 use crate::template::{max_new_tokens, suffix, PREFIX};
+use crate::{output, user_tokens};
 
 /// Prompt tokens fed per decode call.
 const BATCH: usize = 512;
-/// Matches the supervisor's output cap (supervisor/response.rs).
-const MAX_OUTPUT_BYTES: usize = 32_000;
 
 pub fn generate(model_path: &str, prompt: &str) -> Result<String, WorkerError> {
     // llama.cpp logs to stderr by default, including prompt-derived details.
@@ -69,17 +68,13 @@ pub fn generate(model_path: &str, prompt: &str) -> Result<String, WorkerError> {
 
     let vocab = model.vocab();
     let mut sampler = LlamaSampler::greedy();
-    let mut output = Vec::new();
-    for _ in 0..budget {
+    output::collect(budget, || {
         let token = sampler.sample(&ctx, batch.n_tokens() - 1);
         sampler.accept(token);
         if vocab.is_eog(token) {
-            return finish(output);
+            return Ok(None);
         }
-        output.extend(vocab.token_to_piece(token, false, None));
-        if output.len() > MAX_OUTPUT_BYTES {
-            return Err(WorkerError::output("cleanup output too long"));
-        }
+        let piece = vocab.token_to_piece(token, false, None);
         batch.clear();
         batch
             .add(token, position, &[0], true)
@@ -87,32 +82,21 @@ pub fn generate(model_path: &str, prompt: &str) -> Result<String, WorkerError> {
         position += 1;
         ctx.decode(&mut batch)
             .map_err(|_| WorkerError::runtime("output decode failed"))?;
-    }
-    Err(WorkerError::output(
-        "cleanup output reached the token limit",
-    ))
+        Ok(Some(piece))
+    })
 }
 
-/// Template parts parse special tokens; the prompt does not, so dictated
-/// text such as "<|im_end|>" stays plain text and cannot end the turn.
+/// Template parts parse special tokens. The prompt does not, which keeps
+/// CONTROL tokens such as "<|im_end|>" as plain text; USER_DEFINED ones
+/// (`<think>`, `<tool_call>` …) are split apart by `user_tokens` first.
 fn chat_tokens(model: &LlamaModel, prompt: &str) -> Vec<LlamaToken> {
     let vocab = model.vocab();
     let mut tokens = vocab.tokenize(PREFIX.as_bytes(), false, true);
-    tokens.extend(vocab.tokenize(prompt.as_bytes(), false, false));
+    tokens.extend(user_tokens::tokenize(model, prompt));
     let template = model.chat_template(None).ok();
     let template = template
         .as_ref()
         .and_then(|template| template.to_str().ok());
     tokens.extend(vocab.tokenize(suffix(template).as_bytes(), false, true));
     tokens
-}
-
-fn finish(output: Vec<u8>) -> Result<String, WorkerError> {
-    let text = String::from_utf8(output)
-        .map_err(|_| WorkerError::output("cleanup output is not UTF-8"))?;
-    let text = text.trim();
-    if text.is_empty() {
-        return Err(WorkerError::output("cleanup output is empty"));
-    }
-    Ok(text.to_owned())
 }
