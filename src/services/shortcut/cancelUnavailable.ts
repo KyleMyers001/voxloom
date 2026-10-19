@@ -63,7 +63,8 @@ export function useCancelUnavailable() {
     console.warn('Escape cancellation unavailable; dictating without it.', error);
     const unavailable = cancelUnavailableFrom(error);
     setNotice(unavailable);
-    if (hintedRef.current) return;
+    // A queued hint not yet shown follows the latest failure's code.
+    if (hintedRef.current && pendingHintRef.current === null) return;
     hintedRef.current = true;
     pendingHintRef.current = cancelUnavailableHint(unavailable.code);
   }, []);

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CaptureState } from '../../../src/services/capture/types';
 import type { UseCaptureStateResult } from '../../../src/services/capture/useCaptureState';
 import * as cancelScopeModule from '../../../src/services/shortcut/cancelScope';
+import { cancelUnavailableHint } from '../../../src/services/shortcut/cancelUnavailable';
 import { createMockSttModelStore } from '../../../src/services/stt/mockStt';
 import { useDogfoodCapture } from '../../../src/services/stt/useDogfoodCapture';
 
@@ -90,6 +91,25 @@ describe('Escape-cancel follow-ups (BUS-91)', () => {
     expect(result.current.phase).toBe('recording');
     expect(result.current.cancelUnavailable).toBeNull();
     expect(toast).not.toHaveBeenCalledWith(expect.stringMatching(/Escape-cancel is off/));
+  });
+
+  it('refreshes a queued hint when the next arm fails with another code', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(cancelScopeModule, 'beginCancelScope')
+      .mockRejectedValueOnce({ code: 'cancel-ax-untrusted', message: 'first' })
+      .mockRejectedValueOnce({ code: 'cancel-tap-create-failed', message: 'second' });
+    const capture = stubCapture();
+    capture.startFullCaptureSession = vi.fn()
+      .mockResolvedValueOnce('busy')
+      .mockResolvedValueOnce('started');
+    const { result, toast } = await setup(capture);
+
+    // Arm fails, then capture never starts recording: the hint stays queued.
+    await act(async () => { await result.current.start(); });
+    await act(async () => { await result.current.start(); });
+    expect(result.current.phase).toBe('recording');
+    const hints = toast.mock.calls.filter(([m]) => /Escape-cancel is off/.test(m));
+    expect(hints).toEqual([[cancelUnavailableHint('cancel-tap-create-failed')]]);
   });
 
   it('disposes a scope that armed after its session was superseded', async () => {
