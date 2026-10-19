@@ -30,6 +30,12 @@ export function cleanupModelNote(view: CleanupModelView): string {
   return 'Qwen3 0.6B is installed.';
 }
 
+/** BUS-101: import failures use their own line, not the check-failure note. */
+export function cleanupImportNote(reason: string, modelInstalled: boolean): string {
+  const base = `Couldn't import that file: ${reason}.`;
+  return modelInstalled ? `${base} Your current model is unchanged.` : base;
+}
+
 /** Cleanup can be turned on only with a verified model and a worker. */
 export function cleanupReady(view: CleanupModelView): view is { kind: 'status'; status: CleanupModelStatus } {
   return view.kind === 'status' && view.status.available && view.status.runtimeAvailable;

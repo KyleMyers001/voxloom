@@ -15,6 +15,8 @@ export interface CleanupModelSnapshot {
   view: CleanupModelView;
   /** Last known `runtimeAvailable`; unknown counts as false. */
   workerAvailable: boolean;
+  /** BUS-101: last import failure; cleared on Check again or the next import. */
+  importError: string | null;
 }
 
 const message = (reason: unknown): string => {
@@ -32,17 +34,36 @@ function checkedStatus(status: CleanupModelStatus | undefined): CleanupModelStat
   return status;
 }
 
-let snapshot: CleanupModelSnapshot = { view: { kind: 'checking' }, workerAvailable: false };
+let snapshot: CleanupModelSnapshot = {
+  view: { kind: 'checking' }, workerAvailable: false, importError: null,
+};
 let generation = 0;
 let requested = false;
 /** A status has been read or applied at least once in this window. */
 let loaded = false;
+/** Last verified status; kept across checking/error so import failure can restore it. */
+let lastStatus: CleanupModelStatus | null = null;
+/** BUS-106: one in-flight status read; overlapping Check again reuses it. */
+let reading: Promise<void> | null = null;
+/** Generation that owns `reading`; apply/fail bump generation so refresh starts fresh. */
+let readingGeneration = 0;
 let modelStore: CleanupModelStore | null = null;
 const listeners = new Set<() => void>();
 
 function publish(next: Partial<CleanupModelSnapshot>) {
   snapshot = { ...snapshot, ...next };
   for (const listener of listeners) listener();
+}
+
+/** Keep a known status on import failure; otherwise show an error view. */
+function publishImportFailure(reason: unknown) {
+  const text = message(reason);
+  if (lastStatus) {
+    publish({ view: { kind: 'status', status: lastStatus }, importError: text });
+    return;
+  }
+  if (!loaded) requested = false;
+  publish({ view: { kind: 'error', message: text }, importError: text });
 }
 
 export const cleanupModelCache = {
@@ -62,23 +83,59 @@ export const cleanupModelCache = {
     requested = true;
     void cleanupModelCache.refresh();
   },
-  /** Explicit re-read (Check again). Only the latest request may publish. */
-  async refresh() {
+  /**
+   * Explicit re-read (Check again). Overlapping calls share one status() only
+   * when that read still belongs to the current generation. apply()/fail()
+   * bump generation so a cancelled in-flight read is not reused (Codex
+   * 4316214003).
+   */
+  refresh(): Promise<void> {
+    if (reading !== null && readingGeneration === generation) return reading;
     requested = true;
     const request = ++generation;
-    publish({ view: { kind: 'checking' } });
-    try {
-      const status = checkedStatus(await cleanupModelCache.store().status());
-      if (request === generation) {
+    publish({ view: { kind: 'checking' }, importError: null });
+    // Reserve the slot before calling status(), so a sync throw's finally can
+    // clear the same promise we return (finally would otherwise run before a
+    // direct `reading = (async () => …)()` assignment).
+    let settle!: () => void;
+    const pending = new Promise<void>((resolve) => { settle = resolve; });
+    reading = pending;
+    readingGeneration = request;
+    void (async () => {
+      try {
+        let statusPromise: Promise<CleanupModelStatus>;
+        try {
+          // Call status() now (overlapping Check again / tests expect it), but
+          // turn a sync throw into a rejection so the reserved slot clears.
+          statusPromise = Promise.resolve(cleanupModelCache.store().status());
+        } catch (reason: unknown) {
+          statusPromise = Promise.reject(reason);
+        }
+        const status = checkedStatus(await statusPromise);
+        if (request !== generation) return;
         loaded = true;
-        publish({ view: { kind: 'status', status }, workerAvailable: status.runtimeAvailable });
+        lastStatus = status;
+        publish({
+          view: { kind: 'status', status },
+          workerAvailable: status.runtimeAvailable,
+          importError: null,
+        });
+      } catch (reason: unknown) {
+        if (request !== generation) return;
+        // Nothing known yet: let the next consumer (e.g. reopening Capture) retry.
+        if (!loaded) requested = false;
+        publish({ view: { kind: 'error', message: message(reason) }, importError: null });
+      } finally {
+        // Clear only this slot; a newer refresh may already own `reading`.
+        if (reading === pending) reading = null;
+        settle();
       }
-    } catch (reason: unknown) {
-      if (request !== generation) return;
-      // Nothing known yet: let the next consumer (e.g. reopening Capture) retry.
-      if (!loaded) requested = false;
-      publish({ view: { kind: 'error', message: message(reason) } });
-    }
+    })();
+    return pending;
+  },
+  /** Clears the import-failure line (start of a new import attempt). */
+  clearImportError() {
+    if (snapshot.importError !== null) publish({ importError: null });
   },
   /** A status from somewhere else (the import result); supersedes pending reads. */
   apply(status: CleanupModelStatus) {
@@ -87,25 +144,31 @@ export const cleanupModelCache = {
       const checked = checkedStatus(status);
       loaded = true;
       requested = true;
-      publish({ view: { kind: 'status', status: checked }, workerAvailable: checked.runtimeAvailable });
+      lastStatus = checked;
+      publish({
+        view: { kind: 'status', status: checked },
+        workerAvailable: checked.runtimeAvailable,
+        importError: null,
+      });
     } catch (reason: unknown) {
-      if (!loaded) requested = false;
-      publish({ view: { kind: 'error', message: message(reason) } });
+      publishImportFailure(reason);
     }
   },
   fail(reason: unknown) {
     generation++;
-    if (!loaded) requested = false;
-    publish({ view: { kind: 'error', message: message(reason) } });
+    publishImportFailure(reason);
   },
 };
 
 /** Tests only: forget the cached status and store. */
 export function resetCleanupModelCacheForTests() {
-  snapshot = { view: { kind: 'checking' }, workerAvailable: false };
+  snapshot = { view: { kind: 'checking' }, workerAvailable: false, importError: null };
   generation++;
   requested = false;
   loaded = false;
+  lastStatus = null;
+  reading = null;
+  readingGeneration = 0;
   modelStore = null;
   listeners.clear();
 }

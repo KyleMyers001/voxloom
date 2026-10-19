@@ -13,12 +13,16 @@ export interface CleanupModel {
    * import error never hide the block mid-use.
    */
   workerAvailable: boolean;
+  /** BUS-101: import-failure line; null when none. */
+  importError: string | null;
   /** Re-reads `cleanup_model_status`. */
   refresh: () => Promise<void>;
   /** Applies a status from an import result, without another read. */
   apply: (status: CleanupModelStatus) => void;
   /** Shows an error from outside the status read (a failed import). */
   fail: (reason: unknown) => void;
+  /** Clears the import-failure line before a new import attempt. */
+  clearImportError: () => void;
   /** The native store, created lazily. */
   store: () => CleanupModelStore;
 }
@@ -38,6 +42,7 @@ export function cleanupShown(
 }
 
 const BROWSER: CleanupModelView = { kind: 'browser' };
+const noop = () => {};
 
 /**
  * The window's shared cleanup model status (see `cleanupModelCache`). Every
@@ -51,11 +56,16 @@ export function useCleanupModel(isNative: boolean, modelStore?: CleanupModelStor
     if (isNative) cleanupModelCache.ensureLoaded();
   }, [isNative]);
   if (!isNative) {
-    return { apply: () => {}, fail: () => {}, refresh: async () => {}, store: cleanupModelCache.store, view: BROWSER, workerAvailable: false };
+    return {
+      apply: noop, clearImportError: noop, fail: noop, importError: null,
+      refresh: async () => {}, store: cleanupModelCache.store, view: BROWSER, workerAvailable: false,
+    };
   }
   return {
     apply: cleanupModelCache.apply,
+    clearImportError: cleanupModelCache.clearImportError,
     fail: cleanupModelCache.fail,
+    importError: shared.importError,
     refresh: cleanupModelCache.refresh,
     store: cleanupModelCache.store,
     view: shared.view,
