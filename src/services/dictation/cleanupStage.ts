@@ -99,6 +99,7 @@ export async function cleanTranscript(input: CleanupStageInput): Promise<Cleanup
       : fallback(rawText, 'runtime-error');
   } finally {
     // Fire and forget: release waits for a pending acquire, which can hang.
-    void engine.release?.(requestId).catch(() => {});
+    // A synchronous throw must not replace the outcome either.
+    void Promise.resolve().then(() => engine.release?.(requestId)).catch(() => {});
   }
 }

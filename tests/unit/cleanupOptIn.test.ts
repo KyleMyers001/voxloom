@@ -1,10 +1,12 @@
-// BUS-16 PR 2c: cleanup runs only with cleanupEnabled AND the explicit opt-in
-// key the 2c Settings UI writes. A #24-era v2 file has cleanupEnabled: true
+// BUS-16 PR 2c: cleanup runs only with the explicit opt-in key the 2c
+// Settings UI writes (Sophie's single-key call). `cleanupEnabled` is legacy:
+// loaded and saved, but ignored. A #24-era v2 file has cleanupEnabled: true
 // but no opt-in, and must stay off.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { isCleanupActive } from '../../src/domain/cleanup';
 import { initialSettings } from '../../src/domain/fixtures';
+import type { Settings } from '../../src/domain/types';
 import {
   createMemorySettingsIo,
   createSettingsStore,
@@ -44,17 +46,32 @@ describe('explicit cleanup opt-in', () => {
     expect(reread.ok && isCleanupActive(reread.file.settings)).toBe(false);
   });
 
-  it('needs both keys', () => {
-    expect(isCleanupActive({ cleanupEnabled: true, cleanupOptIn: false })).toBe(false);
-    expect(isCleanupActive({ cleanupEnabled: false, cleanupOptIn: true })).toBe(false);
-    expect(isCleanupActive({ cleanupEnabled: true, cleanupOptIn: true })).toBe(true);
+  it('gates on the opt-in alone; the legacy cleanupEnabled is ignored', () => {
+    const active = (cleanupEnabled: boolean, cleanupOptIn: boolean) => {
+      const settings: Settings = { ...initialSettings, cleanupEnabled, cleanupOptIn };
+      return isCleanupActive(settings);
+    };
+    expect(active(true, false)).toBe(false);
+    expect(active(false, false)).toBe(false);
+    expect(active(true, true)).toBe(true);
+    expect(active(false, true)).toBe(true);
   });
 
-  it('a v2 file written with both keys round-trips as active', () => {
+  it.each([[true], [false]])('a v2 file with the opt-in and cleanupEnabled: %s runs, and keeps the legacy key', (legacy) => {
     const parsed = parseSettingsJson(serializeSettingsFile(
-      { ...initialSettings, cleanupEnabled: true, cleanupOptIn: true }, true,
+      { ...initialSettings, cleanupEnabled: legacy, cleanupOptIn: true }, true,
     ));
-    expect(parsed.ok && isCleanupActive(parsed.file.settings)).toBe(true);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(isCleanupActive(parsed.file.settings)).toBe(true);
+    expect(parsed.file.settings.cleanupEnabled).toBe(legacy);
+  });
+
+  it('a v1 file with a stray opt-in still loads as off', () => {
+    const parsed = parseSettingsJson(JSON.stringify({
+      onboardingComplete: true, settings: { cleanupEnabled: false, cleanupOptIn: true }, version: 1,
+    }));
+    expect(parsed.ok && isCleanupActive(parsed.file.settings)).toBe(false);
   });
 
   it.each([['yes'], [1], [null], ['true']])('a malformed opt-in (%j) loads as off', (value) => {

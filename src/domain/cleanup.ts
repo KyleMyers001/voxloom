@@ -21,13 +21,11 @@ export function skippedCleanupProvenance(): CleanupProvenance {
 }
 
 /**
- * Cleanup runs only when it is enabled AND the explicit opt-in that the
- * Settings UI writes is set. `cleanupEnabled` alone is not enough: a
- * settings file from a #24 dev build can have it without the user ever
- * opting in on this build.
+ * Cleanup runs only when the explicit opt-in that the Settings UI writes is
+ * set (Sophie's single-key call). `cleanupEnabled` is a legacy key: still
+ * loaded and saved, but ignored here, so a #24-era file that has it without
+ * the opt-in stays off.
  */
-export function isCleanupActive(
-  settings: Pick<Settings, 'cleanupEnabled' | 'cleanupOptIn'>,
-): boolean {
-  return settings.cleanupEnabled === true && settings.cleanupOptIn === true;
+export function isCleanupActive(settings: Pick<Settings, 'cleanupOptIn'>): boolean {
+  return settings.cleanupOptIn === true;
 }

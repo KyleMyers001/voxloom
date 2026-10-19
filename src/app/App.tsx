@@ -37,7 +37,7 @@ export function App() {
   const dogfood = useDogfoodCapture({
     clipboard,
     clipboardFallback: state.settings.clipboardFallback,
-    // BUS-16: cleanupEnabled alone (a #24-era file) never runs cleanup.
+    // BUS-16: only cleanupOptIn gates cleanup; legacy cleanupEnabled is ignored.
     cleanupActive: isCleanupActive(state.settings),
     cleanupModelId: state.settings.cleanupModelId,
     dictionary: state.words,

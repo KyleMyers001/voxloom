@@ -196,4 +196,91 @@ describe('useDogfoodCapture cleanup', () => {
     hook.unmount();
     expect(nativeEngine.dispose).toHaveBeenCalledOnce();
   });
+
+  it('the opt-in alone runs cleanup; the legacy cleanupEnabled is ignored', async () => {
+    const parsed = parseSettingsJson(JSON.stringify({
+      onboardingComplete: true,
+      settings: { cleanupEnabled: false, cleanupModelId: CLEANUP_MODEL_ID, cleanupOptIn: true },
+      version: 2,
+    }));
+    if (!parsed.ok) throw new Error(parsed.error);
+    const engine = fakeEngine(async () => ({ attempt, text: 'Send to Voxloom.' }));
+    const { copy, hook } = await setup({
+      cleanupActive: isCleanupActive(parsed.file.settings), cleanupEngine: engine,
+    });
+    await waitFor(() => expect(hook.result.current.phase).toBe('success'));
+    expect(engine.run).toHaveBeenCalledOnce();
+    expect(copy).toHaveBeenCalledWith('Send to Voxloom.');
+  });
+
+  it('keeps the HUD up and Escape-cancellable while cleaning', async () => {
+    const engine = fakeEngine(() => new Promise(() => {}));
+    const store = createMockSttModelStore();
+    await store.download('whisper-tiny.en');
+    const clipboard = { copy: vi.fn().mockResolvedValue(undefined) };
+    let captureState: CaptureState = { kind: 'idle' };
+    const { result, rerender } = renderHook(({ state }: { state: CaptureState }) => useDogfoodCapture({
+      captureApi: {
+        ...stubCapture(state),
+        startFullCaptureSession: async () => {
+          captureState = { device: 'Mic', generation: 1, kind: 'active', request_id: 'full-1' };
+          return 'started';
+        },
+        stopFullCapture: async () => { captureState = stopped('pcm-hud'); },
+      },
+      cleanupActive: true,
+      cleanupEngine: engine,
+      cleanupModelId: CLEANUP_MODEL_ID,
+      clipboard,
+      createModelStore: () => store,
+      deliveryPlatform: createStubDeliveryAdapter({ clipboard }),
+      dogfood: (path) => dogfoodTranscribeAndCopy({
+        ...path, createEngine: (modelId) => createMockSttEngine({ modelId, transcriptText: RAW }),
+      }),
+      modelId: 'whisper-tiny.en',
+    }), { initialProps: { state: captureState } });
+    await act(async () => { await result.current.start(); });
+    rerender({ state: captureState });
+    await waitFor(() => expect(result.current.scopeReady).toBe(true));
+    await act(async () => { await result.current.stop(); });
+    rerender({ state: captureState });
+    await waitFor(() => expect(result.current.phase).toBe('cleaning'));
+    expect(result.current.hudReady).toBe(true);
+    expect(result.current.scopeReady).toBe(true);
+    act(() => { result.current.cancel(); });
+    await waitFor(() => expect(engine.cancel).toHaveBeenCalledWith('cleanup-pcm-hud'));
+    expect(clipboard.copy).not.toHaveBeenCalled();
+  });
+
+  it('cleanup and the History row use the style captured at stop', async () => {
+    let finish!: (text: string) => void;
+    const engine = fakeEngine(() => new Promise((resolve) => {
+      finish = (text) => resolve({ attempt, text });
+    }));
+    const store = createMockSttModelStore();
+    await store.download('whisper-tiny.en');
+    const clipboard = { copy: vi.fn().mockResolvedValue(undefined) };
+    const onHistoryRecord = vi.fn();
+    const hook = renderHook(({ style }: { style: 'casual' | 'formal' }) => useDogfoodCapture({
+      captureApi: stubCapture(stopped('pcm-1')),
+      cleanupActive: true,
+      cleanupEngine: engine,
+      cleanupModelId: CLEANUP_MODEL_ID,
+      clipboard,
+      createModelStore: () => store,
+      deliveryPlatform: createStubDeliveryAdapter({ clipboard }),
+      dogfood: (path) => dogfoodTranscribeAndCopy({
+        ...path, createEngine: (modelId) => createMockSttEngine({ modelId, transcriptText: RAW }),
+      }),
+      modelId: 'whisper-tiny.en',
+      onHistoryRecord,
+      style,
+    }), { initialProps: { style: 'casual' as 'casual' | 'formal' } });
+    await waitFor(() => expect(hook.result.current.phase).toBe('cleaning'));
+    hook.rerender({ style: 'formal' });
+    await act(async () => { finish('Send to Voxloom.'); });
+    await waitFor(() => expect(onHistoryRecord).toHaveBeenCalledOnce());
+    expect(engine.run.mock.calls[0][0]).toMatchObject({ style: 'casual' });
+    expect(onHistoryRecord.mock.calls[0][0]).toMatchObject({ style: 'casual' });
+  });
 });

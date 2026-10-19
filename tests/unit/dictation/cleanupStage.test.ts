@@ -166,4 +166,36 @@ describe('cleanTranscript', () => {
     expect(removers).toHaveLength(2);
     for (const remove of removers) expect(remove).toHaveBeenCalledOnce();
   });
+
+  it('clears the lease timer once the lease settles', async () => {
+    vi.useFakeTimers();
+    const pending = cleanTranscript(input({ engine: engine({ run: vi.fn(() => new Promise<never>(() => {})) }) }));
+    await vi.advanceTimersByTimeAsync(0);
+    // Only the run's own deadline is left; the lease timer is gone.
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(pending).resolves.toMatchObject({ reason: 'timeout', status: 'fallback' });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('an unexpected throw still delivers the raw text', async () => {
+    const throwing = engine({ acquire: vi.fn(() => { throw new Error('sync boom'); }) });
+    await expect(cleanTranscript(input({ engine: throwing }))).resolves.toEqual({
+      finalText: 'um send to voxlom', reason: 'runtime-error', status: 'fallback',
+    });
+    expect(throwing.run).not.toHaveBeenCalled();
+  });
+
+  it('an unexpected throw after the user cancelled delivers nothing', async () => {
+    const throwing = engine({ acquire: vi.fn(() => { throw new Error('sync boom'); }) });
+    await expect(cleanTranscript(input({ engine: throwing, userCancelled: () => true })))
+      .resolves.toEqual({ reason: 'cancelled', status: 'cancelled' });
+  });
+
+  it('a release that throws synchronously does not change the outcome', async () => {
+    const live = engine({ release: vi.fn(() => { throw new Error('sync release'); }) });
+    await expect(cleanTranscript(input({ engine: live }))).resolves.toMatchObject({ status: 'cleaned' });
+    await Promise.resolve();
+    expect(live.release).toHaveBeenCalledWith('cleanup-a');
+  });
 });
