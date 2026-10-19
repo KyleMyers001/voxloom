@@ -74,9 +74,8 @@ export function CleanupSettings({ isNative, model }: { isNative: boolean; model:
   if (!shown) return null;
 
   const modelInstalled = view.kind === 'status' && view.status.available;
-  // Import failures use their own line (BUS-101); hide the check-error note
-  // when that line is the only thing we know.
-  const statusNote = view.kind === 'error' && importError ? null : cleanupModelNote(view);
+  // Import failures use their own line (BUS-101), next to the status note.
+  const statusNote = cleanupModelNote(view);
   const importNote = importError ? cleanupImportNote(importError, modelInstalled) : null;
   const noteId = 'settings-cleanup-model-note';
   return <>
