@@ -1,14 +1,17 @@
 //! Model download, cancel and failure cleanup for `ModelStore` (split out of
-//! store.rs). A failed or cancelled attempt never leaves a `.partial` behind.
+//! store.rs). Bytes are fetched and verified by the shared
+//! `crate::model_fetch` core: the file is renamed into place only after its
+//! exact size and SHA-256 match the pinned catalog entry. A failed, cancelled
+//! or mismatched attempt never leaves a `.partial` (or a final file) behind.
 
-use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use tauri::{AppHandle, Emitter};
 
 use super::{DownloadProgressDto, Inflight, ModelStore};
+use crate::model_fetch::{self, FetchError};
 use crate::stt::catalog::{self, ModelSpec};
 use crate::stt::error::SttErrorDto;
 
@@ -31,7 +34,7 @@ impl ModelStore {
 
     /// Explicit user-triggered download. Never call from constructors.
     /// Emits `stt:download-progress` while bytes arrive; returns only after
-    /// the file is finalized on disk (or cancel / error).
+    /// the file is verified and finalized on disk (or cancel / error).
     pub fn download(&self, app: &AppHandle, model_id: &str) -> Result<(), SttErrorDto> {
         self.download_with_sink(model_id, |progress| {
             let _ = app.emit("stt:download-progress", progress);
@@ -46,11 +49,12 @@ impl ModelStore {
         let spec = catalog::find(model_id).ok_or_else(|| {
             SttErrorDto::new("download-failed", format!("Unknown model: {model_id}"))
         })?;
-        self.download_spec_with_sink(spec, spec.url, on_progress)
+        self.download_spec_with_sink(model_fetch::shared_agent(), spec, spec.url, on_progress)
     }
 
     pub(super) fn download_spec_with_sink<F>(
         &self,
+        agent: &ureq::Agent,
         spec: &ModelSpec,
         url: &str,
         mut on_progress: F,
@@ -58,7 +62,7 @@ impl ModelStore {
     where
         F: FnMut(DownloadProgressDto),
     {
-        {
+        let cancel = {
             let mut guard = self.inflight.lock().unwrap();
             if guard.is_some() {
                 return Err(SttErrorDto::new(
@@ -66,102 +70,26 @@ impl ModelStore {
                     "Another model download is already in progress",
                 ));
             }
+            let cancel = Arc::new(AtomicBool::new(false));
             *guard = Some((
                 spec.id.to_owned(),
                 Inflight {
-                    cancel: Arc::new(AtomicBool::new(false)),
+                    cancel: Arc::clone(&cancel),
                 },
             ));
-        }
-
-        let cancel = self
-            .inflight
-            .lock()
-            .unwrap()
-            .as_ref()
-            .expect("inflight just set")
-            .1
-            .cancel
-            .clone();
-
-        let result = self.fetch_to_model_path(spec, url, &cancel, &mut on_progress);
-
-        *self.inflight.lock().unwrap() = None;
-
-        if cancel.load(Ordering::Acquire) {
-            let partial = self.model_path(spec);
-            let _ = fs::remove_file(&partial);
-            let tmp = partial.with_extension("bin.partial");
-            let _ = fs::remove_file(tmp);
-            return Err(SttErrorDto::new(
-                "cancelled",
-                format!("Download cancelled: {}", spec.id),
-            ));
-        }
-
-        if result.is_err() {
-            // A failed attempt leaves nothing behind, so Retry starts clean and
-            // the UI's "Nothing was saved." stays true.
-            let _ = fs::remove_file(self.model_path(spec).with_extension("bin.partial"));
-        }
-        result
-    }
-
-    pub(super) fn fetch_to_model_path<F>(
-        &self,
-        spec: &ModelSpec,
-        url: &str,
-        cancel: &AtomicBool,
-        on_progress: &mut F,
-    ) -> Result<(), SttErrorDto>
-    where
-        F: FnMut(DownloadProgressDto),
-    {
-        fs::create_dir_all(&self.root)
-            .map_err(|e| SttErrorDto::new("download-failed", format!("create models dir: {e}")))?;
+            cancel
+        };
 
         let dest = self.model_path(spec);
-        let tmp = dest.with_extension("bin.partial");
-
-        let response = ureq::get(url)
-            .call()
-            .map_err(|e| SttErrorDto::new("download-failed", format!("request failed: {e}")))?;
-
-        let total = response
-            .header("Content-Length")
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(spec.size_bytes);
-
-        let mut reader = response.into_reader();
-        let mut file = File::create(&tmp)
-            .map_err(|e| SttErrorDto::new("download-failed", format!("create temp file: {e}")))?;
-
-        let mut buf = [0u8; 64 * 1024];
-        let mut received: u64 = 0;
-        let mut last_emit = 0u64;
-
-        loop {
-            if cancel.load(Ordering::Acquire) {
-                drop(file);
-                let _ = fs::remove_file(&tmp);
-                return Err(SttErrorDto::new(
-                    "cancelled",
-                    format!("Download cancelled: {}", spec.id),
-                ));
-            }
-            let n = reader
-                .read(&mut buf)
-                .map_err(|e| SttErrorDto::new("download-failed", format!("read failed: {e}")))?;
-            if n == 0 {
-                break;
-            }
-            file.write_all(&buf[..n])
-                .map_err(|e| SttErrorDto::new("download-failed", format!("write failed: {e}")))?;
-            received += n as u64;
-            // Intermediate progress only — never claim ratio 1.0 until the
-            // file is renamed into place (completion is the Ok return + final emit).
-            if received - last_emit >= 256 * 1024 || received == total {
-                last_emit = received;
+        let result = model_fetch::fetch_verified(
+            agent,
+            url,
+            &dest,
+            &spec.artifact(),
+            &cancel,
+            |received, total| {
+                // Intermediate progress only — never claim ratio 1.0 until the
+                // file is verified and renamed into place.
                 let ratio = if total == 0 {
                     0.0
                 } else {
@@ -173,33 +101,49 @@ impl ModelStore {
                     model_id: spec.id.to_owned(),
                     ratio,
                 });
-            }
-        }
+            },
+        );
 
-        file.flush()
-            .map_err(|e| SttErrorDto::new("download-failed", format!("flush failed: {e}")))?;
-        drop(file);
+        *self.inflight.lock().unwrap() = None;
 
         if cancel.load(Ordering::Acquire) {
-            let _ = fs::remove_file(&tmp);
-            return Err(SttErrorDto::new(
-                "cancelled",
-                format!("Download cancelled: {}", spec.id),
-            ));
+            // Cancel wins even if the last bytes landed: nothing stays behind.
+            let _ = fs::remove_file(&dest);
+            let _ = fs::remove_file(model_fetch::partial_path(&dest));
+            return Err(cancelled(spec));
         }
 
-        fs::rename(&tmp, &dest)
-            .map_err(|e| SttErrorDto::new("download-failed", format!("finalize failed: {e}")))?;
+        result.map_err(|e| fetch_error(spec, e))?;
 
-        // Only after the destination file exists do we report completion.
+        // Only after the verified destination file exists do we report completion.
         debug_assert!(dest.is_file());
         on_progress(DownloadProgressDto {
-            bytes_received: total.max(received),
-            bytes_total: total.max(received),
+            bytes_received: spec.size_bytes,
+            bytes_total: spec.size_bytes,
             model_id: spec.id.to_owned(),
             ratio: 1.0,
         });
-
         Ok(())
+    }
+}
+
+fn cancelled(spec: &ModelSpec) -> SttErrorDto {
+    SttErrorDto::new("cancelled", format!("Download cancelled: {}", spec.id))
+}
+
+/// Map a shared fetch failure to a UI error code. A size or SHA-256 mismatch
+/// is `download-corrupted` with the designer copy (BUS-35); its sizes and
+/// hashes go only to the native log, never to the UI.
+fn fetch_error(spec: &ModelSpec, err: FetchError) -> SttErrorDto {
+    match err {
+        FetchError::Cancelled => cancelled(spec),
+        e @ (FetchError::SizeMismatch { .. } | FetchError::HashMismatch { .. }) => {
+            eprintln!("[stt] download of {} failed verification: {e}", spec.id);
+            SttErrorDto::new(
+                "download-corrupted",
+                "Download was damaged. Nothing was saved.",
+            )
+        }
+        FetchError::Network(msg) | FetchError::Io(msg) => SttErrorDto::new("download-failed", msg),
     }
 }
