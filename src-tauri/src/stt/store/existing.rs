@@ -39,7 +39,7 @@ mod marker;
 mod verify;
 
 #[cfg(test)]
-pub(super) use marker::{marker_path, write_marker};
+pub(super) use marker::{fingerprint, marker_path, write_marker};
 
 /// Shown when a model file failed its SHA-256 / size check.
 pub(super) const DAMAGED_MESSAGE: &str = "Model file is damaged. Download it again in Settings.";
@@ -179,7 +179,8 @@ impl ModelStore {
         verdicts.get(model_id).map(|cached| cached.verdict())
     }
 
-    /// Cache a failed check (`Verified` goes through `mark_verified`).
+    /// Seed a failed verdict (tests; hashes use `set_verdict_if_unchanged`).
+    #[cfg(test)]
     pub(super) fn set_verdict(&self, spec: &ModelSpec, verdict: Verdict) {
         debug_assert_ne!(verdict, Verdict::Verified, "use mark_verified");
         self.verdicts

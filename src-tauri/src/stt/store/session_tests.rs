@@ -87,6 +87,10 @@ fn file_rewritten_mid_session_drops_verified_and_is_rechecked() {
     assert_eq!(info.status, "failed", "no longer available");
     assert_eq!(info.failure_reason.as_deref(), Some("damaged"));
     assert!(store.resolved_path(spec.id).is_err());
+    assert!(
+        store.reverifying.lock().unwrap().is_empty(),
+        "a cached Corrupt is not re-checked"
+    );
     assert_eq!(refreshes.load(Ordering::SeqCst), 1, "re-list once");
     let _ = fs::remove_dir_all(&dir);
 }

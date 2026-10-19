@@ -15,10 +15,10 @@ pub(in crate::stt::store) fn marker_path(model: &Path) -> PathBuf {
 }
 
 /// Length and mtime (ns since the epoch) of a model file.
-pub(super) type Fingerprint = (u64, u128);
+pub(in crate::stt::store) type Fingerprint = (u64, u128);
 
 /// The file's current fingerprint: a stat, no read.
-pub(super) fn fingerprint(model: &Path) -> Option<Fingerprint> {
+pub(in crate::stt::store) fn fingerprint(model: &Path) -> Option<Fingerprint> {
     let meta = fs::metadata(model).ok()?;
     let mtime = meta.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
     Some((meta.len(), mtime.as_nanos()))

@@ -7,7 +7,7 @@ use std::path::Path;
 
 use super::super::ModelStore;
 use super::marker::{self, Fingerprint};
-use super::{classify, opens, Verdict};
+use super::{classify, opens, Cached, Verdict};
 use crate::model_fetch::{self, FetchError};
 use crate::stt::catalog::ModelSpec;
 
@@ -54,12 +54,33 @@ impl ModelStore {
             let verdict = classify(result, opens_now);
             if verdict == Verdict::Verified {
                 self.mark_verified_at(spec, &path, before);
-            } else {
-                self.set_verdict(spec, verdict);
+            } else if !self.set_verdict_if_unchanged(spec, &path, before, verdict) {
+                eprintln!("[stt] existing model {} changed while hashing", spec.id);
+                continue;
             }
             return Some(verdict);
         }
         None
+    }
+
+    /// Cache a failed verdict only if `path` still has fingerprint `at`,
+    /// checked under the verdicts lock: a download that replaced the file
+    /// after the hash (and cached its own `Verified`) is never overwritten
+    /// by the stale result (Codex P2). Returns whether it was cached.
+    pub(in crate::stt::store) fn set_verdict_if_unchanged(
+        &self,
+        spec: &ModelSpec,
+        path: &Path,
+        at: Fingerprint,
+        verdict: Verdict,
+    ) -> bool {
+        debug_assert_ne!(verdict, Verdict::Verified, "use mark_verified");
+        let mut verdicts = self.verdicts.lock().unwrap();
+        if marker::fingerprint(path) != Some(at) {
+            return false;
+        }
+        verdicts.insert(spec.id, Cached::Failed(verdict));
+        true
     }
 
     /// `path` just passed its size + SHA-256 check while it had fingerprint

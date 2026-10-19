@@ -190,3 +190,5 @@ mod recovery_tests;
 mod session_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod verdict_cas_tests;
