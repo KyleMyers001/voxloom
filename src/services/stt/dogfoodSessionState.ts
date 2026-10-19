@@ -104,9 +104,10 @@ export function beginSession(live: DogfoodLiveSession) {
     ? Promise.all([live.retirement, retire]).then(() => {})
     : undefined;
   const cancellation: Cancellation = { cancelled: false };
+  // A held notice carries over: it shows after this session's "Listening…".
   Object.assign(live, {
-    active: true, cancellation, handledAudioId: null, listening: false, pendingNotice: null,
-    retirement, stopRequested: false,
+    active: true, cancellation, handledAudioId: null, listening: false, retirement,
+    stopRequested: false,
   });
   return { cancellation, retirement, session };
 }
@@ -136,10 +137,21 @@ export function showNotice(live: DogfoodLiveSession, text: string, toast: (text:
   else toast(text);
 }
 
+/** Whether a capture's owner token is `cancellation`'s session. */
+export function ownedBy(cancellation: Cancellation) {
+  return (owner: unknown) => (owner as CaptureOwner | undefined)?.cancellation === cancellation;
+}
+
+/** `text` with any held notice appended (and no longer held). */
+export function withNotice(live: DogfoodLiveSession, text: string | null): string {
+  const shown = [text, live.pendingNotice].filter(Boolean).join(' ');
+  live.pendingNotice = null;
+  return shown;
+}
+
 /** After "Listening…": show a held notice and/or the Escape-cancel hint. */
 export function afterListening(live: DogfoodLiveSession, hint: string | null, toast: (text: string) => void) {
   live.listening = true;
-  const shown = [hint, live.pendingNotice].filter(Boolean).join(' ');
-  live.pendingNotice = null;
+  const shown = withNotice(live, hint);
   if (shown) toast(shown);
 }

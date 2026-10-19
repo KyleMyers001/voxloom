@@ -241,6 +241,8 @@ describe('BUS-43 pending acquisition ownership', () => {
     }));
     let oldStart!: Promise<void>;
     act(() => { oldStart = result.current.start(); });
+    // The old start is past the release wait and registering its listener.
+    await waitFor(() => expect(ipc.listen).toHaveBeenCalledOnce());
     act(() => result.current.cancel());
     await act(async () => { await result.current.start(); });
     const newerOwner = owner;
