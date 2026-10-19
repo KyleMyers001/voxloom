@@ -81,12 +81,16 @@ export function contentWords(
   const spellings = dictionarySpellings(dictionary);
   const canonical: SourceWord[] = [];
   for (let i = 0; i < tokens.length; i++) {
-    const { end, skippable, start, word } = tokens[i];
-    const joined = word + (tokens[i + 1]?.word ?? '');
-    if (i + 1 < tokens.length && spellings.has(joined)) {
+    const { continuesWord, end, skippable, start, word } = tokens[i];
+    const next = tokens[i + 1];
+    const joined = word + (next?.word ?? '');
+    if (next && spellings.has(joined)) {
+      // One spoken word that expands to a dictionary word (can't, cannot →
+      // can not) is that word as spoken, not a join that needs its spelling.
       canonical.push({
-        canonical: spellings.get(joined), end: tokens[i + 1].end,
-        skippable: false, start, word: joined,
+        canonical: next.continuesWord ? undefined : spellings.get(joined),
+        continuesWord: false, end: next.end, skippable: false, start,
+        word: joined,
       });
       i++;
       continue;
@@ -97,10 +101,10 @@ export function contentWords(
       : [];
     canonical.push(matches.length === 1 && matches[0] !== word
       ? {
-          canonical: spellings.get(matches[0]), end, skippable: false,
-          spoken: word, start, word: matches[0],
+          canonical: spellings.get(matches[0]), continuesWord, end,
+          skippable: false, spoken: word, start, word: matches[0],
         }
-      : { end, skippable, start, word });
+      : { continuesWord, end, skippable, start, word });
   }
   return canonical;
 }
@@ -162,13 +166,14 @@ interface OutputWord {
 }
 
 /**
- * A repaired or joined word written as one word must use the exact
- * dictionary spelling (Voxloom, not voxloom). Keeping the spoken form
- * (Voxlom, vox loom) is always allowed.
+ * A repaired or joined word written as the dictionary word must use its
+ * exact spelling (Voxloom, not voxloom). Keeping the spoken form (Voxlom,
+ * vox loom, can't for [cannot]) is always allowed.
  */
 function spelledAsDictionary(source: SourceWord, output: OutputWord): boolean {
   if (!source.canonical || output.word !== source.word) return true;
-  return /\s/u.test(output.surface) || output.surface === source.canonical;
+  return output.surface.toLowerCase() !== source.word
+    || output.surface === source.canonical;
 }
 
 // The output must be the source in order, minus only skippable source words:
