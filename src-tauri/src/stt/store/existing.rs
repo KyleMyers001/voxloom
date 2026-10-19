@@ -4,9 +4,12 @@
 //! matched the catalog pin once (`model_fetch::verify_file`, the same size +
 //! SHA rule downloads use). The result is persisted as a marker next to the
 //! model (`marker.rs`), so each file is hashed at most once. A changed length
-//! or mtime, or a different pin, invalidates it. Hashing runs only on
-//! background threads (`background.rs`), never on the UI/IPC thread or the
-//! transcription path: a model still being checked stays usable.
+//! or mtime, or a different pin, invalidates it. Within a session a
+//! `Verified` keeps the fingerprint its hash saw and each use compares the
+//! file against it (a stat, no hash, no marker read); a file changed
+//! mid-session gets one background re-check. Hashing (`verify.rs`) runs only
+//! on background threads (`background.rs`), never on the UI/IPC thread or
+//! the transcription path: a model still being checked stays usable.
 //!
 //! A mismatched file (`Corrupt`) is not deleted: it is reported as `failed`
 //! so the Models tab shows "Model file is damaged" with a one-click Retry
@@ -27,15 +30,16 @@ use std::fs::File;
 use std::path::Path;
 
 use super::ModelStore;
-use crate::model_fetch::{self, FetchError};
+use crate::model_fetch::FetchError;
 use crate::stt::catalog::ModelSpec;
+use marker::Fingerprint;
 
 mod background;
 mod marker;
+mod verify;
 
 #[cfg(test)]
-pub(super) use marker::marker_path;
-pub(super) use marker::write_marker;
+pub(super) use marker::{fingerprint, marker_path, write_marker};
 
 /// Shown when a model file failed its SHA-256 / size check.
 pub(super) const DAMAGED_MESSAGE: &str = "Model file is damaged. Download it again in Settings.";
@@ -78,7 +82,24 @@ impl Verdict {
     }
 }
 
-pub(super) type VerdictMap = HashMap<&'static str, Verdict>;
+/// What this session knows about a model file. `Verified` keeps the length
+/// and mtime the hash (or a trusted marker) saw.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Cached {
+    Verified(Fingerprint),
+    Failed(Verdict),
+}
+
+impl Cached {
+    fn verdict(self) -> Verdict {
+        match self {
+            Self::Verified(_) => Verdict::Verified,
+            Self::Failed(verdict) => verdict,
+        }
+    }
+}
+
+pub(super) type VerdictMap = HashMap<&'static str, Cached>;
 pub(super) type PendingSet = HashSet<&'static str>;
 
 fn opens(model: &Path) -> bool {
@@ -99,14 +120,15 @@ pub(super) fn classify(result: Result<(), FetchError>, opens_now: bool) -> Verdi
 impl ModelStore {
     /// Cached verdict, or the marker's, without hashing. `None` = not yet known.
     pub(super) fn known_verdict(&self, spec: &ModelSpec) -> Option<Verdict> {
-        if let Some(v) = self.verdicts.lock().unwrap().get(spec.id) {
-            return Some(*v);
+        let cached = self.verdicts.lock().unwrap().get(spec.id).copied();
+        match cached {
+            Some(Cached::Verified(at)) => return self.recheck_verified(spec, at),
+            Some(Cached::Failed(verdict)) => return Some(verdict),
+            None => {}
         }
-        if marker::marker_matches(spec, &self.model_path(spec)) {
-            self.set_verdict(spec, Verdict::Verified);
-            return Some(Verdict::Verified);
-        }
-        None
+        let at = marker::trusted_fingerprint(spec, &self.model_path(spec))?;
+        self.cache_verified(spec, at);
+        Some(Verdict::Verified)
     }
 
     /// Verdict to act on now, never hashing or taking the hashing lock: only
@@ -127,43 +149,50 @@ impl ModelStore {
         }
     }
 
+    /// A `Verified` holds while the file still has the length and mtime it
+    /// was verified at (a stat; no hash, no marker read, so a marker that
+    /// couldn't be saved never causes re-hashing). A file changed
+    /// mid-session reads as not-yet-checked and gets one background
+    /// re-check, whose verdict replaces the cached one.
+    fn recheck_verified(&self, spec: &ModelSpec, at: Fingerprint) -> Option<Verdict> {
+        if marker::fingerprint(&self.model_path(spec)) == Some(at) {
+            return Some(Verdict::Verified);
+        }
+        self.queue_reverify(spec.id);
+        None
+    }
+
     /// Remove the cached verdict only if it is still `OpenFailed` (checked
     /// under the same lock). Returns whether it was removed.
     fn clear_open_failed(&self, spec: &ModelSpec) -> bool {
         let mut verdicts = self.verdicts.lock().unwrap();
-        if verdicts.get(spec.id) != Some(&Verdict::OpenFailed) {
+        if verdicts.get(spec.id) != Some(&Cached::Failed(Verdict::OpenFailed)) {
             return false;
         }
         verdicts.remove(spec.id);
         true
     }
 
-    pub(super) fn set_verdict(&self, spec: &ModelSpec, verdict: Verdict) {
-        self.verdicts.lock().unwrap().insert(spec.id, verdict);
+    /// The cached verdict as is, without re-checking the file.
+    fn cached_verdict(&self, model_id: &str) -> Option<Verdict> {
+        let verdicts = self.verdicts.lock().unwrap();
+        verdicts.get(model_id).map(|cached| cached.verdict())
     }
 
-    /// Hash the file once if needed (blocking; call off the main thread).
-    pub(super) fn verify_existing(&self, spec: &ModelSpec) -> Option<Verdict> {
-        let path = self.model_path(spec);
-        if !path.is_file() {
-            return None;
-        }
-        // One hash at a time; a second caller waits, then reuses the verdict.
-        let _hashing = self.hashing.lock().unwrap();
-        if let Some(v) = self.known_verdict(spec) {
-            return Some(v);
-        }
-        let result = model_fetch::verify_file(&path, &spec.artifact());
-        if let Err(e) = &result {
-            // Sizes and hashes go to the log, not the UI.
-            eprintln!("[stt] existing model {} failed verification: {e}", spec.id);
-        }
-        let opens_now = result.is_ok() || opens(&path);
-        let verdict = classify(result, opens_now);
-        if verdict == Verdict::Verified {
-            write_marker(spec, &path);
-        }
-        self.set_verdict(spec, verdict);
-        Some(verdict)
+    /// Seed a failed verdict (tests; hashes use `set_verdict_if_unchanged`).
+    #[cfg(test)]
+    pub(super) fn set_verdict(&self, spec: &ModelSpec, verdict: Verdict) {
+        debug_assert_ne!(verdict, Verdict::Verified, "use mark_verified");
+        self.verdicts
+            .lock()
+            .unwrap()
+            .insert(spec.id, Cached::Failed(verdict));
+    }
+
+    fn cache_verified(&self, spec: &ModelSpec, at: Fingerprint) {
+        self.verdicts
+            .lock()
+            .unwrap()
+            .insert(spec.id, Cached::Verified(at));
     }
 }
