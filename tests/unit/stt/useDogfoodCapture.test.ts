@@ -528,12 +528,15 @@ describe('useDogfoodCapture', () => {
     expect(dogfood).not.toHaveBeenCalled();
   });
 
-  it('says the model file could not be opened when its status is failed (unreadable)', async () => {
+  it.each([
+    ['unreadable', 'Couldn\'t open the model file. Try again, or download it again if this keeps happening.'],
+    ['read-failed', 'Couldn\'t read the model file. Download it again in Settings.'],
+  ] as const)('says why the model file failed when its status is failed (%s)', async (reason, expected) => {
     const store = createMockSttModelStore();
     const real = store.status.bind(store);
     vi.spyOn(store, 'status').mockImplementation(async (id) => {
       const info = await real(id);
-      return info ? { ...info, status: 'failed' as const, failureReason: 'unreadable' as const } : info;
+      return info ? { ...info, status: 'failed' as const, failureReason: reason } : info;
     });
     const dogfood = vi.fn();
     const toast = vi.fn();
@@ -551,8 +554,6 @@ describe('useDogfoodCapture', () => {
       await result.current.start();
     });
 
-    const expected =
-      'Couldn\'t open the model file. Try again, or download it again if this keeps happening.';
     expect(result.current.message).toBe(expected);
     expect(toast).toHaveBeenCalledWith(expected);
     expect(dogfood).not.toHaveBeenCalled();

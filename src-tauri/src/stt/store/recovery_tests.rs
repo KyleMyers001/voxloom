@@ -7,7 +7,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use super::existing::{classify, write_marker, Verdict, DAMAGED_MESSAGE, UNREADABLE_MESSAGE};
+use super::existing::{
+    classify, write_marker, Verdict, DAMAGED_MESSAGE, READ_FAILED_MESSAGE, UNREADABLE_MESSAGE,
+};
 use super::tests::{spec_for, temp_store};
 use super::ModelStore;
 use crate::model_fetch::FetchError;
@@ -62,7 +64,7 @@ fn read_failed_verdict_stays_failed_while_the_file_opens() {
     let refreshes = count_refreshes(&store);
     store.set_verdict(spec, Verdict::ReadFailed);
     for _ in 0..3 {
-        assert_refused(&store, spec.id, "unreadable", UNREADABLE_MESSAGE);
+        assert_refused(&store, spec.id, "read-failed", READ_FAILED_MESSAGE);
     }
     assert_eq!(store.known_verdict(spec), Some(Verdict::ReadFailed));
     assert_eq!(refreshes.load(Ordering::SeqCst), 0, "nothing cleared");
@@ -93,6 +95,10 @@ fn copy_matches_the_frontend() {
     assert!(
         dogfood.contains(&ts(DAMAGED_MESSAGE)),
         "MODEL_DAMAGED_MESSAGE"
+    );
+    assert!(
+        dogfood.contains(&ts(READ_FAILED_MESSAGE)),
+        "MODEL_READ_FAILED_MESSAGE"
     );
 }
 

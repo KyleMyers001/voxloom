@@ -26,7 +26,8 @@ pub struct ModelInfoDto {
     pub label: String,
     pub size_bytes: u64,
     pub status: String,
-    /// Why a `failed` model failed its on-disk check: `damaged` or `unreadable`.
+    /// Why a `failed` model failed its on-disk check: `damaged`, `unreadable`
+    /// (couldn't open) or `read-failed` (opened, couldn't read).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure_reason: Option<String>,
 }

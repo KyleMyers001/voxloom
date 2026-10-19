@@ -41,6 +41,7 @@ describe('BUS-35 integrity copy', () => {
 
   it.each([
     ['unreadable', MODEL_UNREADABLE],
+    ['read-failed', 'Couldn\'t read the model file. Download it again.'],
     ['damaged', 'Model file is damaged. Download it again.'],
   ] as const)('shows the %s copy with Retry download on the row', async (reason, copy) => {
     const store = createMockSttModelStore();

@@ -41,8 +41,11 @@ export interface SttModelInfo {
   readonly label: string;
   readonly sizeBytes: number;
   readonly status: SttModelStatus;
-  /** Native on-disk check result when `status` is `failed` (BUS-35). */
-  readonly failureReason?: 'damaged' | 'unreadable';
+  /**
+   * Native on-disk check result when `status` is `failed` (BUS-35):
+   * `unreadable` = couldn't open, `read-failed` = opened but couldn't read.
+   */
+  readonly failureReason?: 'damaged' | 'unreadable' | 'read-failed';
 }
 
 export interface SttDownloadProgress {

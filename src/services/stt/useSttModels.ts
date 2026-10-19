@@ -17,6 +17,16 @@ export const DOWNLOAD_DAMAGED = 'Download was damaged. Nothing was saved.';
 export const MODEL_UNREADABLE =
   'Couldn\'t open the model file. Try again, or download it again if this keeps happening.';
 
+/** Row copy for a model file that opened but couldn't be read (Retry download is next to it). */
+export const MODEL_READ_FAILED = 'Couldn\'t read the model file. Download it again.';
+
+/** Row copy for a native `failureReason`; damaged uses ModelCard's default. */
+export function failureRowCopy(reason: SttModelInfo['failureReason']): string | undefined {
+  if (reason === 'unreadable') return MODEL_UNREADABLE;
+  if (reason === 'read-failed') return MODEL_READ_FAILED;
+  return undefined;
+}
+
 export interface UseSttModelsOptions {
   /** Persist selection (Settings `transcriptionModel`). */
   onSelect: (modelId: string) => void;

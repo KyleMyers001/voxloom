@@ -10,13 +10,13 @@
 //!
 //! A mismatched file (`Corrupt`) is not deleted: it is reported as `failed`
 //! so the Models tab shows "Model file is damaged" with a one-click Retry
-//! download, and transcription refuses it. A file that can't be read is
-//! failed too ("unreadable"), so the user is never left with a dead
-//! "available" row:
-//! - `OpenFailed` (open or metadata failed): re-opened cheaply (no hash) on
+//! download, and transcription refuses it. A file that can't be opened or
+//! read is failed too, so the user is never left with a dead "available"
+//! row:
+//! - `OpenFailed` ("unreadable": open or metadata failed): re-opened cheaply (no hash) on
 //!   each status, list and resolve call; once it opens, the verdict clears,
 //!   Settings re-lists and one background re-check is queued.
-//! - `ReadFailed` (opened, but reading failed mid-hash): kept, like
+//! - `ReadFailed` ("read-failed": opened, but reading failed mid-hash): kept, like
 //!   `Corrupt`, until Retry download or relaunch.
 //! - A verified or not-yet-checked file that stops opening (e.g. chmod 000
 //!   after it was marked) reads as unreadable while it fails; nothing is
@@ -39,9 +39,12 @@ pub(super) use marker::write_marker;
 
 /// Shown when a model file failed its SHA-256 / size check.
 pub(super) const DAMAGED_MESSAGE: &str = "Model file is damaged. Download it again in Settings.";
-/// Shown when a model file can't be opened or read (e.g. permissions).
+/// Shown when a model file can't be opened (e.g. permissions).
 pub(super) const UNREADABLE_MESSAGE: &str =
     "Couldn't open the model file. Try again, or download it again if this keeps happening.";
+/// Shown when a model file opened but couldn't be read; retrying won't help.
+pub(super) const READ_FAILED_MESSAGE: &str =
+    "Couldn't read the model file. Download it again in Settings.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Verdict {
@@ -59,7 +62,8 @@ impl Verdict {
         match self {
             Self::Verified => None,
             Self::Corrupt => Some("damaged"),
-            Self::OpenFailed | Self::ReadFailed => Some("unreadable"),
+            Self::OpenFailed => Some("unreadable"),
+            Self::ReadFailed => Some("read-failed"),
         }
     }
 
@@ -68,7 +72,8 @@ impl Verdict {
         match self {
             Self::Verified => None,
             Self::Corrupt => Some(DAMAGED_MESSAGE),
-            Self::OpenFailed | Self::ReadFailed => Some(UNREADABLE_MESSAGE),
+            Self::OpenFailed => Some(UNREADABLE_MESSAGE),
+            Self::ReadFailed => Some(READ_FAILED_MESSAGE),
         }
     }
 }
