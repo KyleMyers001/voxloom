@@ -550,6 +550,86 @@
       ]
     },
     {
+      "id": "mark-moved-hash", "categories": ["special-characters", "names"],
+      "rawText": "use C# and F", "dictionary": [],
+      "candidates": [
+        {"text": "Use C# and F.", "acceptWhen": ["off", "on"]},
+        {"text": "Use C and F#.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "mark-moved-operators", "categories": ["special-characters", "commands"],
+      "rawText": "run a && b || c", "dictionary": [],
+      "candidates": [
+        {"text": "Run a && b || c.", "acceptWhen": ["off", "on"]},
+        {"text": "Run a || b && c.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "mark-moved-parens", "categories": ["special-characters"],
+      "rawText": "call f(x) and y", "dictionary": [],
+      "candidates": [
+        {"text": "Call f(x) and y.", "acceptWhen": ["off", "on"]},
+        {"text": "Call f x and (y).", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "mark-moved-dollar", "categories": ["special-characters", "commands"],
+      "rawText": "echo $HOME and PATH", "dictionary": [],
+      "candidates": [
+        {"text": "Echo $HOME and PATH.", "acceptWhen": ["off", "on"]},
+        {"text": "Echo HOME and $PATH.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "mark-after-dropped-fillers", "categories": ["special-characters", "fillers", "articles"],
+      "rawText": "um use uh the C# build", "dictionary": [],
+      "candidates": [
+        {"text": "Use the C# build.", "acceptWhen": ["off", "on"]},
+        {"text": "Use C# build.", "acceptWhen": ["off", "on"]},
+        {"text": "Use the C build#.", "acceptWhen": []},
+        {"text": "Use the C build.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "dictionary-source-only-notion", "categories": ["dictionary"],
+      "rawText": "please file the motion", "dictionary": ["Notion"],
+      "candidates": [
+        {"text": "Please file the motion.", "acceptWhen": ["off", "on"]},
+        {"text": "Please file the Notion.", "acceptWhen": ["on"]},
+        {"text": "Please file the nation.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "dictionary-source-only-kubernetes", "categories": ["dictionary"],
+      "rawText": "ask kubernets", "dictionary": ["Kubernetes"],
+      "candidates": [
+        {"text": "Ask kubernets.", "acceptWhen": ["off", "on"]},
+        {"text": "Ask Kubernetes.", "acceptWhen": ["on"]},
+        {"text": "Ask kubernotes.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "digit-en-dash", "categories": ["special-characters", "numbers"],
+      "rawText": "read pages 5 – 10", "dictionary": [],
+      "candidates": [
+        {"text": "Read pages 5 – 10.", "acceptWhen": ["off", "on"]},
+        {"text": "Read pages 5 — 10.", "acceptWhen": []},
+        {"text": "Read pages 5, 10.", "acceptWhen": []},
+        {"text": "Read pages 5 10.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "full-width-bang", "categories": ["special-characters", "unicode"],
+      "rawText": "wow！ great！ go！", "dictionary": [],
+      "candidates": [
+        {"text": "Wow！ Great！ Go！", "acceptWhen": ["off", "on"]},
+        {"text": "Wow！ Great！ Go。", "acceptWhen": ["off", "on"]},
+        {"text": "Wow. Great. Go.", "acceptWhen": []},
+        {"text": "Wow！ Great. Go.", "acceptWhen": []}
+      ]
+    },
+    {
       "id": "input-byte-limit", "categories": ["long-inputs"],
       "lengthClass": "length-limit", "repeat": 8001, "promptReason": "context-overflow",
       "rawText": "é", "dictionary": [], "candidates": []

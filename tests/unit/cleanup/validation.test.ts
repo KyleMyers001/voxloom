@@ -65,6 +65,14 @@ describe('validateCleanupOutput', () => {
     },
   );
 
+  it('anchors marks and quotes in one pass on mark-heavy input', () => {
+    // Prefix-by-prefix anchoring took minutes here; one tokenization is linear.
+    const raw = 'call f(x) & "y" '.repeat(900);
+    const started = performance.now();
+    expect(validateCleanupOutput(raw, raw.trim())).toBe(raw.trim());
+    expect(performance.now() - started).toBeLessThan(2_000);
+  });
+
   it('preserves valid surrogate pairs and formatting whitespace', () => {
     expect(validateCleanupOutput('hello 😀 world', 'Hello 😀\n\tworld.'))
       .toBe('Hello 😀\n\tworld.');

@@ -11,6 +11,8 @@ export interface Token {
   word: string;
   /** The candidate may omit this source word. */
   skippable: boolean;
+  /** UTF-16 offset just past the source word in the NFC text. */
+  end: number;
 }
 
 /** Expand supported contractions, keeping case and quote characters. */
@@ -69,10 +71,22 @@ export function quoteMarkIndices(characters: readonly string[]): number[] {
   return scanQuotes(characters).quotes;
 }
 
-/** First word of the text or of a sentence (after . ! ?). */
-function opensSentence(before: string): boolean {
-  const trimmed = before.replace(/[\s"'“”‘’([]+$/u, '');
-  return trimmed === '' || /[.!?。！？]$/u.test(trimmed);
+/** The UTF-16 string offset of each code point in `characters`. */
+export function utf16Offsets(characters: readonly string[]): number[] {
+  const offsets: number[] = [];
+  let offset = 0;
+  for (const character of characters) {
+    offsets.push(offset);
+    offset += character.length;
+  }
+  return offsets;
+}
+
+/** `text[start]` begins the text or a sentence (after . ! ?). */
+function opensSentence(text: string, start: number): boolean {
+  let at = start - 1;
+  while (at >= 0 && /[\s"'“”‘’([]/u.test(text[at])) at--;
+  return at < 0 || /[.!?。！？]/u.test(text[at]);
 }
 
 /** A filler the speaker can lose: "um", or "Um" opening a sentence; never "UM"/"ER". */
@@ -82,26 +96,29 @@ export function isDroppableFiller(word: string, sentenceStart: boolean): boolean
   return word === lower || (sentenceStart && /^\p{Lu}\p{Ll}+$/u.test(word));
 }
 
+/**
+ * One pass over the NFC text. Contractions expand per word (don't → do not),
+ * so every token keeps its source offset for anchoring quotes and marks.
+ */
 export function tokenize(text: string): Token[] {
-  const expanded = expand(text);
-  const marks = quoteMarkIndices(Array.from(expanded));
-  // quoteMarkIndices works on code points; map them to string offsets.
-  const offsets: number[] = [];
-  let offset = 0;
-  for (const character of expanded) {
-    offsets.push(offset);
-    offset += character.length;
-  }
-  const markOffsets = marks.map((index) => offsets[index]);
+  const normalized = text.normalize('NFC');
+  // scanQuotes works on code points; map its indices to string offsets.
+  const characters = Array.from(normalized);
+  const offsets = utf16Offsets(characters);
+  const quotes = scanQuotes(characters).quotes.map((index) => offsets[index]);
   const tokens: Token[] = [];
-  for (const match of expanded.matchAll(/[\p{L}\p{M}\p{N}]+(?:'[\p{L}\p{M}]+)*/gu)) {
+  let quotesBefore = 0;
+  for (const match of normalized.matchAll(/[\p{L}\p{M}\p{N}]+(?:['’][\p{L}\p{M}]+)*/gu)) {
     const start = match.index;
-    const word = match[0];
-    const quoted = markOffsets.filter((mark) => mark < start).length % 2 === 1;
-    const lower = word.toLowerCase();
-    const skippable = !quoted && (ARTICLES.has(lower)
-      || isDroppableFiller(word, opensSentence(expanded.slice(0, start))));
-    tokens.push({ skippable, word: lower });
+    while (quotesBefore < quotes.length && quotes[quotesBefore] < start) quotesBefore++;
+    const quoted = quotesBefore % 2 === 1;
+    const end = start + match[0].length;
+    expand(match[0]).split(' ').filter(Boolean).forEach((word, part) => {
+      const lower = word.toLowerCase();
+      const skippable = !quoted && (ARTICLES.has(lower)
+        || isDroppableFiller(word, part === 0 && opensSentence(normalized, start)));
+      tokens.push({ end, skippable, word: lower });
+    });
   }
   return tokens;
 }

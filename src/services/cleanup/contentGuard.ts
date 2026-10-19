@@ -38,34 +38,64 @@ function oneEditApart(left: string, right: string): boolean {
   return edits + Number(i < left.length || j < right.length) <= 1;
 }
 
+interface SourceWord extends Token {
+  /** The spoken word when `word` is its dictionary repair. */
+  spoken?: string;
+}
+
 /**
- * Lowercased, dictionary-canonicalized tokens. Skippable source words
- * (fillers, articles outside quotations) may be dropped, never swapped.
+ * Lowercased tokens with dictionary joins (vox loom → voxloom). With `repair`
+ * (source text only), a word of 5+ letters one edit from exactly one
+ * dictionary spelling is that spelling: this is the dictionary repair feature
+ * (motion → Notion), so the output may keep the spoken word or use the exact
+ * spelling (keep this when PR 2c wires the dictionary settings). Output
+ * words are never snapped, or `motion` → `nation` would pass.
+ * Skippable source words (fillers, articles outside quotations) may be
+ * dropped, never swapped.
  */
-function contentWords(text: string, dictionary: readonly string[]): Token[] {
+function contentWords(
+  text: string,
+  dictionary: readonly string[],
+  repair = false,
+): SourceWord[] {
   const tokens = tokenize(text);
   const spellings = dictionary.map((term) => term.normalize('NFC').toLowerCase())
     .filter((term) => /^[\p{L}\p{M}]{5,}$/u.test(term));
-  const canonical: Token[] = [];
+  const canonical: SourceWord[] = [];
   for (let i = 0; i < tokens.length; i++) {
-    const { skippable, word } = tokens[i];
+    const { end, skippable, word } = tokens[i];
     const joined = word + (tokens[i + 1]?.word ?? '');
     if (i + 1 < tokens.length && spellings.includes(joined)) {
-      canonical.push({ skippable: false, word: joined });
+      canonical.push({ end: tokens[i + 1].end, skippable: false, word: joined });
       i++;
       continue;
     }
-    const matches = word.length >= 5
+    const matches = repair && word.length >= 5
       ? spellings.filter((term) => oneEditApart(word, term)) : [];
-    canonical.push(matches.length === 1
-      ? { skippable: false, word: matches[0] } : { skippable, word });
+    canonical.push(matches.length === 1 && matches[0] !== word
+      ? { end, skippable: false, spoken: word, word: matches[0] }
+      : { end, skippable, word });
   }
   return canonical;
 }
 
-/** Words that must survive (not skippable) in `text`; anchors quote marks. */
-export function anchorWordCount(text: string, dictionary: readonly string[]): number {
-  return contentWords(text, dictionary).filter(({ skippable }) => !skippable).length;
+/**
+ * For each UTF-16 offset into the NFC `text` (ascending), how many words that
+ * must survive (not skippable) end at or before it. Anchors quotes and marks,
+ * so a dropped filler or article before a mark does not move it.
+ */
+export function anchorCounts(
+  text: string,
+  offsets: readonly number[],
+  dictionary: readonly string[],
+): number[] {
+  const ends = contentWords(text, dictionary)
+    .filter(({ skippable }) => !skippable).map(({ end }) => end);
+  let count = 0;
+  return offsets.map((offset) => {
+    while (count < ends.length && ends[count] <= offset) count++;
+    return count;
+  });
 }
 
 export function preservesContent(
@@ -91,20 +121,21 @@ export function preservesContent(
   // Every candidate word, fillers included, must map onto the source.
   const output = contentWords(candidate, dictionary).map(({ word }) => word);
   if (!output.length) return sameMultiset(rawWords, candidateWords);
-  return coveredInOrder(contentWords(raw, dictionary), output)
+  return coveredInOrder(contentWords(raw, dictionary, true), output)
     || (correctedRaw !== raw
-      && coveredInOrder(contentWords(correctedRaw, dictionary), output));
+      && coveredInOrder(contentWords(correctedRaw, dictionary, true), output));
 }
 
 // The output must be the source in order, minus only skippable source words:
 // a filler or article may be removed, but a swapped or inserted one is unmatched.
-function coveredInOrder(source: Token[], output: string[]): boolean {
+function coveredInOrder(source: SourceWord[], output: string[]): boolean {
   const required = source.filter(({ skippable }) => !skippable).length;
   if (!required) return false;
   let matched = 0;
   let kept = 0;
-  for (const { skippable, word } of source) {
-    if (word === output[matched]) {
+  for (const { skippable, spoken, word } of source) {
+    const next = output[matched];
+    if (next !== undefined && (word === next || spoken === next)) {
       matched++;
       if (!skippable) kept++;
     } else if (!skippable) {

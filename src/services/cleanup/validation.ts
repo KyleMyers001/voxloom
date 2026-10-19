@@ -1,10 +1,10 @@
 import {
-  anchorWordCount,
+  anchorCounts,
   preservesContent,
   sameMultiset,
 } from './contentGuard';
 import { preservesMarks } from './marks';
-import { isDroppableFiller, quoteMarkIndices } from './tokens';
+import { isDroppableFiller, quoteMarkIndices, utf16Offsets } from './tokens';
 
 export const CLEANUP_OUTPUT_MAX_BYTES = 32_000;
 export const CLEANUP_OUTPUT_EXTRA_CHARS = 256;
@@ -75,10 +75,15 @@ function quotationShape(
   text: string,
   dictionary: readonly string[],
 ): [QuoteMark[], boolean] {
-  const characters = Array.from(text.trim().normalize('NFC'));
-  const marks: QuoteMark[] = quoteMarkIndices(characters).map((index) => [
-    /["“”]/u.test(characters[index]) ? 'double' : 'single',
-    anchorWordCount(characters.slice(0, index).join(''), dictionary),
+  const normalized = text.trim().normalize('NFC');
+  const characters = Array.from(normalized);
+  const indices = quoteMarkIndices(characters);
+  const offsets = utf16Offsets(characters);
+  const anchors = anchorCounts(
+    normalized, indices.map((index) => offsets[index]), dictionary,
+  );
+  const marks: QuoteMark[] = indices.map((index, at) => [
+    /["“”]/u.test(characters[index]) ? 'double' : 'single', anchors[at],
   ]);
   return [marks, wrapsWholeText(text)];
 }
@@ -131,7 +136,7 @@ export function validateCleanupOutput(
   if (!sameMultiset(protectedValues(rawText), protectedValues(cleaned))) return null;
   if (!preservesCapitalization(rawText, cleaned)) return null;
   if (JSON.stringify(symbols(rawText)) !== JSON.stringify(symbols(cleaned))) return null;
-  if (!preservesMarks(rawText, cleaned)) return null;
+  if (!preservesMarks(rawText, cleaned, dictionary)) return null;
   if (JSON.stringify(quotationShape(rawText, dictionary))
     !== JSON.stringify(quotationShape(cleaned, dictionary))) return null;
   if (!preservesContent(rawText, cleaned, dictionary)) return null;
