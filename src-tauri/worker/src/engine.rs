@@ -14,7 +14,7 @@ use llama_cpp_2::token::LlamaToken;
 use llama_cpp_2::{send_logs_to_tracing, LogOptions};
 
 use crate::error::WorkerError;
-use crate::template::{max_new_tokens, PREFIX, SUFFIX};
+use crate::template::{max_new_tokens, suffix, PREFIX};
 
 /// Prompt tokens fed per decode call.
 const BATCH: usize = 512;
@@ -99,7 +99,11 @@ fn chat_tokens(model: &LlamaModel, prompt: &str) -> Vec<LlamaToken> {
     let vocab = model.vocab();
     let mut tokens = vocab.tokenize(PREFIX.as_bytes(), false, true);
     tokens.extend(vocab.tokenize(prompt.as_bytes(), false, false));
-    tokens.extend(vocab.tokenize(SUFFIX.as_bytes(), false, true));
+    let template = model.chat_template(None).ok();
+    let template = template
+        .as_ref()
+        .and_then(|template| template.to_str().ok());
+    tokens.extend(vocab.tokenize(suffix(template).as_bytes(), false, true));
     tokens
 }
 
