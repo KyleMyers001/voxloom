@@ -1,0 +1,145 @@
+//! One admitted cleanup run: encode, spawn with the verified descriptor,
+//! exchange one frame under the deadline, and always settle the slot on drop.
+
+use std::fs::File;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use super::super::protocol::{encode_frame, WorkerRequest};
+use super::super::worker_process::{ProcessError, WorkerProcess};
+use super::{response, SharedState, SupervisorError, WorkerSupervisor};
+
+/// Reserves the native slot before verification/spawn. Cancellation is sticky
+/// throughout reserved/starting/running; dropping is the sole settlement path.
+pub struct WorkerReservation {
+    pub(super) shared: Arc<SharedState>,
+    pub(super) request_id: String,
+    pub(super) started: bool,
+    pub(super) timeout: Duration,
+    pub(super) worker_path: PathBuf,
+}
+
+impl WorkerReservation {
+    pub fn cancelled(&self) -> bool {
+        self.shared
+            .state
+            .lock()
+            .unwrap()
+            .active
+            .as_ref()
+            .unwrap()
+            .cancelled
+    }
+
+    pub fn run(
+        &mut self,
+        model: &File,
+        prompt: String,
+        on_started: impl FnOnce(),
+    ) -> Result<String, SupervisorError> {
+        let path = self.worker_path.clone();
+        self.run_with_spawn_and_started(prompt, || WorkerProcess::spawn(&path, model), on_started)
+    }
+
+    #[cfg(test)]
+    pub(super) fn run_with_spawn(
+        &mut self,
+        prompt: String,
+        spawn: impl FnOnce() -> Result<WorkerProcess, String>,
+    ) -> Result<String, SupervisorError> {
+        self.run_with_spawn_and_started(prompt, spawn, || {})
+    }
+
+    fn run_with_spawn_and_started(
+        &mut self,
+        prompt: String,
+        spawn: impl FnOnce() -> Result<WorkerProcess, String>,
+        on_started: impl FnOnce(),
+    ) -> Result<String, SupervisorError> {
+        if self.cancelled() {
+            return Err(WorkerSupervisor::cancelled_error());
+        }
+        if self.started {
+            return Err(SupervisorError::runtime(
+                "cleanup reservation already started",
+            ));
+        }
+        self.started = true;
+        let request_id = self.request_id.clone();
+        let frame = encode_frame(&WorkerRequest {
+            model_path: "/dev/fd/3".into(),
+            prompt,
+            request_id: request_id.clone(),
+        })
+        .map_err(|_| SupervisorError {
+            code: "context-overflow",
+            message: "cleanup serialized request exceeds 128 KiB".into(),
+        })?;
+        if !WorkerSupervisor::path_available(&self.worker_path) {
+            return Err(SupervisorError::runtime(
+                "cleanup worker is not installed or not executable in this build",
+            ));
+        }
+        let process = spawn().map_err(SupervisorError::runtime)?;
+        let handle = process.handle.clone();
+        let cancelled = {
+            let mut state = self.shared.state.lock().unwrap();
+            let active = state.active.as_mut().unwrap();
+            active.process = Some(handle.clone());
+            active.cancelled
+        };
+        // An actual child received the verified descriptor. Notify outside
+        // locks, even if cancellation raced spawn: this is attempt evidence.
+        on_started();
+        if cancelled {
+            handle.cancel();
+            return Err(WorkerSupervisor::cancelled_error());
+        }
+        let deadline = Instant::now() + self.timeout;
+        let response = process.exchange(frame, deadline);
+        handle.finish();
+        if self.cancelled() || handle.cancelled() {
+            return Err(WorkerSupervisor::cancelled_error());
+        }
+        let response = match response {
+            Ok(response) => response,
+            Err(ProcessError::Runtime(error)) => {
+                return Err(SupervisorError::runtime(error));
+            }
+            Err(ProcessError::Timeout) => {
+                return Err(SupervisorError {
+                    code: "timeout",
+                    message: format!(
+                        "cleanup worker timed out after {} seconds",
+                        self.timeout.as_secs_f64()
+                    ),
+                })
+            }
+        };
+        response::interpret(response, &request_id)
+    }
+
+    pub fn finish(&self) {
+        let process = self
+            .shared
+            .state
+            .lock()
+            .unwrap()
+            .active
+            .as_ref()
+            .and_then(|active| active.process.clone());
+        if let Some(process) = process {
+            process.finish();
+        }
+    }
+}
+
+impl Drop for WorkerReservation {
+    fn drop(&mut self) {
+        self.finish();
+        let mut state = self.shared.state.lock().unwrap();
+        state.active = None;
+        self.shared.settled.notify_all();
+    }
+}
