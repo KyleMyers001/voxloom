@@ -1,9 +1,9 @@
 /** BUS-91: an older capture's stop with audio during a re-hold or after Escape. */
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { HistoryRow } from '../../../src/features/history/HistoryRow';
 import { SUPERSEDED_DELIVERY_MESSAGE } from '../../../src/services/delivery';
 import { deferred, setup, tapAudio } from './dogfoodHarness';
+import { copyFromHistoryWithRetentionOff } from './historyInApp';
 
 afterEach(() => { vi.restoreAllMocks(); });
 
@@ -25,16 +25,14 @@ describe('superseded quick tap (BUS-91)', () => {
     const record = onHistoryRecord.mock.calls[0][0];
     expect(record).toMatchObject({ status: 'failed', text: 'tap words' });
     expect(insert).not.toHaveBeenCalled();
-    await waitFor(() => expect(onToast).toHaveBeenCalledWith(SUPERSEDED_DELIVERY_MESSAGE));
-    expect(onToast).not.toHaveBeenCalledWith(expect.stringContaining('superseded'));
-    // The History row copies the tap's text back.
-    const onCopy = vi.fn();
-    const row = render(<HistoryRow canStart currentTime={0} isNative onCopy={onCopy}
-      onDelete={vi.fn()} onRetry={vi.fn()} record={record} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Copy transcript' }));
-    expect(onCopy).toHaveBeenCalledExactlyOnceWith('tap words');
-    row.unmount();
+    // Held until the re-hold's "Listening…", so that cannot overwrite it.
+    expect(onToast).not.toHaveBeenCalledWith(SUPERSEDED_DELIVERY_MESSAGE);
+    // Real app state, retention off: the row is in History and Copy copies it.
+    expect(await copyFromHistoryWithRetentionOff(record)).toEqual(['tap words']);
     await act(async () => { release.settle(); await rehold; });
+    const shown = onToast.mock.calls.map(([text]) => text);
+    expect(shown.slice(-2)).toEqual(['Listening…', SUPERSEDED_DELIVERY_MESSAGE]);
+    expect(onToast).not.toHaveBeenCalledWith(expect.stringContaining('superseded'));
     expect(result.current.phase).toBe('recording');
     expect(scopes).toHaveLength(2);
     expect(scopes[1].finish).not.toHaveBeenCalled();

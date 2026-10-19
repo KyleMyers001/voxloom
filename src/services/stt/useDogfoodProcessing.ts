@@ -6,32 +6,19 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { createDogfoodRecord } from '../../domain/records';
 import type { CaptureState } from '../capture/types';
-import type { ClipboardAdapter } from '../clipboard';
 import type { CleanupEngine } from '../cleanup/contracts';
-import {
-  createStubDeliveryAdapter,
-  createTauriDeliveryAdapter,
-  supersededDeliveryMessage,
-  type DeliveryPlatformAdapter,
-} from '../delivery';
+import { supersededDeliveryMessage, type DeliveryPlatformAdapter } from '../delivery';
+import type { StoppedCapture } from '../capture/useCaptureState';
 import { prepareDogfoodCleanup } from './dogfoodCleanup';
 import { errorText } from './dogfoodModel';
-import { dogfoodTranscribeAndCopy, type CaptureAudioMeta } from './dogfoodPath';
+import {
+  dogfoodTranscribeAndCopy, resolvePlatform, type CaptureAudioMeta,
+} from './dogfoodPath';
 import { hudResultFor, type DogfoodViewActions } from './dogfoodPhase';
-import { isStaleCaptureEvent, type DogfoodLiveSession } from './dogfoodSessionState';
+import {
+  isStaleCaptureEvent, ownerOf, showNotice, type CaptureOwner, type DogfoodLiveSession,
+} from './dogfoodSessionState';
 import type { UseDogfoodCaptureOptions } from './useDogfoodCapture';
-
-function resolvePlatform(
-  clipboard: ClipboardAdapter,
-  injected?: DeliveryPlatformAdapter,
-): DeliveryPlatformAdapter {
-  if (injected) return injected;
-  try {
-    return createTauriDeliveryAdapter(clipboard);
-  } catch {
-    return createStubDeliveryAdapter({ clipboard });
-  }
-}
 
 export interface DogfoodProcessingInput {
   actions: DogfoodViewActions;
@@ -40,11 +27,13 @@ export interface DogfoodProcessingInput {
   /** Resolves the selected model id or throws `model-missing`. */
   ensureModel: () => Promise<string>;
   live: DogfoodLiveSession;
+  /** The capture API's synchronous stop subscription, when it has one. */
+  onCaptureStopped?: (listener: (stopped: StoppedCapture) => void) => () => void;
   options: UseDogfoodCaptureOptions;
 }
 
 export function useDogfoodProcessing({
-  actions, captureState, cleanupEngine, ensureModel, live, options,
+  actions, captureState, cleanupEngine, ensureModel, live, onCaptureStopped, options,
 }: DogfoodProcessingInput): void {
   // Latest render's options, read when each step of a run needs them.
   const optionsRef = useRef(options);
@@ -57,21 +46,21 @@ export function useDogfoodProcessing({
     options.deliveryPlatform,
   );
 
-  const runDogfood = useCallback(async (audio: CaptureAudioMeta) => {
+  const runDogfood = useCallback(async (audio: CaptureAudioMeta, owner: CaptureOwner) => {
     const {
       announce, announceError, errorToast, setHudResult, setIntendedTarget, setPhase,
       setTranscript, toast,
     } = actions;
     // The capture's own session: an older capture's stop must not finish or
     // end the newer session that is live now.
-    const session = live.captureSession ?? live.session;
-    const cancellation = live.captureCancellation ?? live.cancellation;
+    const { cancellation, session } = owner;
     const current = () => session === live.session && !cancellation.cancelled;
     const platform = platformRef.current;
     let settlement: Promise<void> | undefined;
     // Both STT success and failure must consult the native latch, whose
     // notification may still be queued. Share the barrier so it runs once.
     const settleCancellation = () => settlement ??= (async () => {
+      await cancellation.retired;
       if (cancellation.cancelled) return;
       const scope = cancellation.scope;
       if (scope) {
@@ -160,7 +149,7 @@ export function useDogfoodProcessing({
       // Superseded (a cancel returned above): evidence still surfaces as a
       // toast, phase untouched.
       if (current()) announce(result.delivery.message);
-      else toast(supersededDeliveryMessage(result.delivery));
+      else showNotice(live, supersededDeliveryMessage(result.delivery), toast);
     } catch (error: unknown) {
       await settleCancellation();
       if (cancellation.cancelled) return;
@@ -176,6 +165,16 @@ export function useDogfoodProcessing({
       await cancellation.scope?.dispose().catch(() => {});
     }
   }, [actions, cleanupEngine, ensureModel, live]);
+
+  // Bind a stop to the session that started its capture, as it arrives.
+  const handleStopped = useCallback((stopped: StoppedCapture) => {
+    const audio = stopped.audio;
+    if (!audio || live.handledAudioId === audio.id) return;
+    live.handledAudioId = audio.id;
+    const owner = ownerOf(stopped, live) ?? { cancellation: live.cancellation, session: live.session };
+    void runDogfood(audio, owner);
+  }, [live, runDogfood]);
+  useEffect(() => onCaptureStopped?.(handleStopped), [handleStopped, onCaptureStopped]);
 
   useEffect(() => {
     const { announceError, setMessage, setPhase } = actions;
@@ -197,8 +196,7 @@ export function useDogfoodProcessing({
       announceError('Capture stopped without audio — nothing to transcribe.');
       return;
     }
-    if (live.handledAudioId === audio.id) return;
-    live.handledAudioId = audio.id;
-    void runDogfood(audio);
-  }, [actions, captureState, live, runDogfood]);
+    // A subscribed stop was handled when it arrived.
+    if (!onCaptureStopped) handleStopped(captureState);
+  }, [actions, captureState, handleStopped, live, onCaptureStopped]);
 }

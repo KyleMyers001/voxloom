@@ -2,7 +2,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { vi, type Mock } from 'vitest';
 import type { CaptureState } from '../../../src/services/capture/types';
-import type { UseCaptureStateResult } from '../../../src/services/capture/useCaptureState';
+import type { StoppedCapture, UseCaptureStateResult } from '../../../src/services/capture/useCaptureState';
 import type { DictationRecord } from '../../../src/domain/types';
 import { createStubDeliveryAdapter, type TargetSnapshot } from '../../../src/services/delivery';
 import * as cancelScopeModule from '../../../src/services/shortcut/cancelScope';
@@ -13,9 +13,8 @@ import { useDogfoodCapture } from '../../../src/services/stt/useDogfoodCapture';
 export const EMPTY_STOP = 'Capture stopped without audio — nothing to transcribe.';
 export const emptyStop: CaptureState = { kind: 'stopped' };
 export const micLost: CaptureState = { category: 'busy', kind: 'error', message: 'mic lost' };
-export const tapAudio: CaptureState = {
-  audio: { duration_ms: 400, id: 'tap-audio', sample_rate_hz: 16_000 }, kind: 'stopped',
-};
+export const tapClip = { duration_ms: 400, id: 'tap-audio', sample_rate_hz: 16_000 };
+export const tapAudio: CaptureState = { audio: tapClip, kind: 'stopped' };
 const target: TargetSnapshot = {
   appName: 'Notes', appPid: 42, capturedAt: 1, elementId: 'C',
   elementRole: 'AXTextArea', insertable: true, kind: 'insertable', reason: null,
@@ -30,8 +29,14 @@ function nativeLikeScope() {
   };
 }
 
-function stubCapture(): UseCaptureStateResult {
+function stubCapture(listeners?: Set<(stopped: StoppedCapture) => void>): UseCaptureStateResult {
   return {
+    ...(listeners ? {
+      onCaptureStopped: (listener: (stopped: StoppedCapture) => void) => {
+        listeners.add(listener);
+        return () => { listeners.delete(listener); };
+      },
+    } : {}),
     cancelActiveCapture: vi.fn(), captureReady: true, captureState: { kind: 'idle' },
     deviceListError: null, devices: [], devicesLoading: false, permissionStatus: 'authorized',
     prepareDeviceChange: vi.fn().mockResolvedValue(true),
@@ -42,7 +47,15 @@ function stubCapture(): UseCaptureStateResult {
   };
 }
 
-export async function setup() {
+/**
+ * `subscribe`: like the real hook, stops reach a synchronous listener with
+ * their owner. `useCapture`: drive a real capture hook instead of the stub.
+ */
+export async function setup({ subscribe = false, useCapture }: {
+  subscribe?: boolean; useCapture?: () => UseCaptureStateResult;
+} = {}) {
+  const useApi = useCapture ?? (() => undefined);
+  const listeners = subscribe ? new Set<(stopped: StoppedCapture) => void>() : undefined;
   const scopes: ReturnType<typeof nativeLikeScope>[] = [];
   vi.spyOn(cancelScopeModule, 'beginCancelScope').mockImplementation(async () => {
     scopes.push(nativeLikeScope());
@@ -50,7 +63,7 @@ export async function setup() {
   });
   const store = createMockSttModelStore();
   await store.download('whisper-tiny.en');
-  const capture = stubCapture();
+  const capture = stubCapture(listeners);
   const onErrorToast: Mock<(message: string) => void> = vi.fn();
   const onHistoryRecord: Mock<(record: DictationRecord) => void> = vi.fn();
   const onToast: Mock<(message: string) => void> = vi.fn();
@@ -64,7 +77,7 @@ export async function setup() {
     ...options, createEngine: (modelId) => ({ ...createMockSttEngine({ modelId }), transcribe }),
   });
   const hook = renderHook(({ state }: { state: CaptureState }) => useDogfoodCapture({
-    captureApi: { ...capture, captureState: state }, clipboard, createModelStore: () => store,
+    captureApi: useApi() ?? { ...capture, captureState: state }, clipboard, createModelStore: () => store,
     deliveryPlatform, dogfood, modelId: 'whisper-tiny.en', onErrorToast, onHistoryRecord,
     onToast,
   }), { initialProps: { state: { kind: 'idle' } as CaptureState } });
@@ -73,8 +86,13 @@ export async function setup() {
     act(() => { document.dispatchEvent(event); });
     return event.defaultPrevented;
   };
+  /** The native stop of the `call`th capture, echoing that start's owner token. */
+  const emitStop = (audio: StoppedCapture['audio'], call = 0) => {
+    const owner = vi.mocked(capture.startFullCaptureSession).mock.calls[call]?.[1];
+    act(() => { for (const listener of [...listeners ?? []]) listener({ audio, kind: 'stopped', owner }); });
+  };
   return {
-    ...hook, capture, escape, insert, onErrorToast, onHistoryRecord, onToast, scopes, transcribe,
+    ...hook, capture, emitStop, escape, insert, onErrorToast, onHistoryRecord, onToast, scopes, transcribe,
   };
 }
 

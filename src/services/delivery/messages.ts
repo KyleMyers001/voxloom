@@ -48,8 +48,8 @@ export function restoreSkippedSuffix(reason: string | null): string {
 }
 
 export const MANUAL_RECOVERY_HINT =
-  'Text is available for manual Copy from the last transcript below'
-  + ' (History Copy works when retention is on).';
+  'Text is available for manual Copy from the last transcript below or from History'
+  + ' (with transcript retention off, History keeps it until you quit Voxloom).';
 
 /** `detail` of a delivery skipped because its session was no longer current. */
 export const STALE_DELIVERY_DETAIL = 'session cancelled or superseded; delivery skipped';
@@ -61,8 +61,10 @@ export const SUPERSEDED_DELIVERY_MESSAGE =
 /**
  * Toast for a run that a newer dictation superseded (never a user cancel,
  * which shows nothing): a delivery skipped for that reason says so plainly;
- * any other outcome keeps its own message.
+ * any other outcome keeps its own message, but never points at Home's last
+ * transcript, which now belongs to the newer dictation.
  */
 export function supersededDeliveryMessage(outcome: Pick<DeliveryOutcome, 'detail' | 'message'>): string {
-  return outcome.detail === STALE_DELIVERY_DETAIL ? SUPERSEDED_DELIVERY_MESSAGE : outcome.message;
+  if (outcome.detail === STALE_DELIVERY_DETAIL) return SUPERSEDED_DELIVERY_MESSAGE;
+  return outcome.message.replace(MANUAL_RECOVERY_HINT, 'Its text is in History.');
 }

@@ -109,6 +109,8 @@ export interface UseDogfoodCaptureResult {
   hudReady: boolean;
   start: (origin?: DogfoodOrigin) => Promise<void>;
   stop: () => Promise<void>;
+  /** The live session already asked its capture to stop (or was cancelled). */
+  stopRequested?: () => boolean;
   transcript: Transcript | null;
 }
 
@@ -135,7 +137,8 @@ export function useDogfoodCapture(
   );
 
   useDogfoodProcessing({
-    actions, captureState: capture.captureState, cleanupEngine, ensureModel, live, options,
+    actions, captureState: capture.captureState, cleanupEngine, ensureModel, live,
+    onCaptureStopped: capture.onCaptureStopped, options,
   });
   const { cancel, cancelUnavailable, start, stop } = useDogfoodSession({
     actions,
@@ -160,6 +163,7 @@ export function useDogfoodCapture(
     hudReady: state.hudReady && cancellablePhase(state.phase),
     start,
     stop,
+    stopRequested: () => live.stopRequested,
     transcript: state.transcript,
   };
 }

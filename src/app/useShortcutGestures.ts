@@ -58,6 +58,8 @@ export interface GestureDogfoodBridge {
   hudReady?: boolean;
   start: () => Promise<void>;
   stop: () => Promise<void>;
+  /** The recording session already asked to stop (its audio is on the way). */
+  stopRequested?: () => boolean;
 }
 
 interface GestureOptions {
@@ -361,11 +363,13 @@ function handleGesture(
   if (gesture === 'hold-start' || gesture === 'latch-start') {
     // Leftover overlay run (missed finish): clear it before the new run.
     tearDownOverlayDictation(options);
-    if (dogfood.phase === 'recording') {
+    if (dogfood.phase === 'recording' && !dogfood.stopRequested?.()) {
       // Prior capture never stopped (Home Start / missed hold-finish):
       // abandon it so the new hold can start — never silently ignore as busy.
       // Mark the resulting "cancelled" as handled: it commits in the same
       // React batch as the new listening run, which must survive.
+      // A capture already stopping (quick tap, then re-hold) is not
+      // cancelled: start() supersedes it and its text reaches History.
       dogfood.cancel();
       phaseGuard.seen = 'cancelled';
     }
@@ -409,5 +413,6 @@ export function toGestureDogfoodBridge(
     phase: dogfood.phase,
     start: () => dogfood.start('gesture'),
     stop: dogfood.stop,
+    stopRequested: dogfood.stopRequested,
   };
 }
