@@ -39,7 +39,7 @@ test('cleanup: a failed first status check offers Check again, which recovers', 
   await page.goto('/settings.html');
   await page.getByRole('tab', { name: /^Capture/ }).click();
   const note = page.locator('#settings-cleanup-model-note');
-  await expect(note).toHaveText('Couldn\'t check the cleanup model: model status task failed');
+  await expect(note).toHaveText('Couldn\'t check the cleanup model: model status task failed.');
   await page.getByRole('button', { name: 'Check again', exact: true }).click();
   await expect(note).toHaveText('Qwen3 0.6B is installed.');
   expect(statusCalls).toBe(2);

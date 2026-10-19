@@ -55,7 +55,7 @@ describe('first status read fails in a dev build (Codex 4315232707)', () => {
       .mockRejectedValueOnce(new Error('denied'))
       .mockImplementationOnce(() => new Promise<CleanupModelStatus>((resolve) => { answer = resolve; }));
     renderWithApp(<Harness modelStore={{ importModel: vi.fn(), status }} />);
-    await waitFor(() => expect(note()).toBe('Couldn\'t check the cleanup model: denied'));
+    await waitFor(() => expect(note()).toBe('Couldn\'t check the cleanup model: denied.'));
     const checkAgain = button('Check again');
     await user.click(checkAgain);
     expect(note()).toBe('Checking the cleanup model…');
@@ -86,12 +86,12 @@ describe('import failure before any status is known (BUS-112 item 4)', () => {
     await waitFor(() => expect(note()).toMatch(/Couldn't check/));
     await user.click(button('Import model…'));
     await waitFor(() => expect(note()).toBe(
-      'Couldn\'t check the cleanup model: denied Couldn\'t import that file: wrong file.',
+      'Couldn\'t check the cleanup model: denied. Couldn\'t import that file: wrong file.',
     ));
     await user.click(button('Import model…'));
-    expect(note()).toBe('Couldn\'t check the cleanup model: denied');
+    expect(note()).toBe('Couldn\'t check the cleanup model: denied.');
     await act(async () => { cancelPicker(null); });
-    expect(note()).toBe('Couldn\'t check the cleanup model: denied');
+    expect(note()).toBe('Couldn\'t check the cleanup model: denied.');
   });
 
   it('an import failure during the first check keeps that check and its result', async () => {
