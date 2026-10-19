@@ -9,7 +9,7 @@ import { beginCancelScope } from '../shortcut/cancelScope';
 import { useCancelUnavailable, type CancelUnavailable } from '../shortcut/cancelUnavailable';
 import { errorText } from './dogfoodModel';
 import type { DogfoodOrigin, DogfoodPhase, DogfoodViewActions } from './dogfoodPhase';
-import type { Cancellation, DogfoodLiveSession } from './dogfoodSessionState';
+import { retireScope, type Cancellation, type DogfoodLiveSession } from './dogfoodSessionState';
 
 export interface DogfoodSessionInput {
   actions: DogfoodViewActions;
@@ -51,7 +51,7 @@ export function useDogfoodSession({
     live.processing?.abort();
     const session = ++live.session;
     const previous = live.cancellation;
-    const retire = previous.settle?.() ?? previous.scope?.dispose().catch(() => {});
+    const retire = previous.settle?.() ?? retireScope(previous);
     const retirement = retire || live.retirement
       ? Promise.all([live.retirement, retire]).then(() => {})
       : undefined;
@@ -119,6 +119,7 @@ export function useDogfoodSession({
       await capture.waitForCaptureRelease();
       if (superseded()) return;
       live.captureSession = session;
+      live.captureCancellation = cancellation;
       const started = await capture.startFullCaptureSession(deviceId);
       if (superseded() || started === 'ended') return;
       if (started !== 'started') {
