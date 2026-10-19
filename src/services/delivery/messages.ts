@@ -2,7 +2,7 @@
  * Truthful Inserted / Copied / Failed messaging — only with completion evidence.
  */
 
-import type { DeliveryStatus, TargetKind } from './types';
+import type { DeliveryOutcome, DeliveryStatus, TargetKind } from './types';
 
 export function statusLabel(status: DeliveryStatus): 'Inserted' | 'Copied' | 'Failed' | 'Unverified' {
   if (status === 'unverified') return 'Unverified';
@@ -50,3 +50,19 @@ export function restoreSkippedSuffix(reason: string | null): string {
 export const MANUAL_RECOVERY_HINT =
   'Text is available for manual Copy from the last transcript below'
   + ' (History Copy works when retention is on).';
+
+/** `detail` of a delivery skipped because its session was no longer current. */
+export const STALE_DELIVERY_DETAIL = 'session cancelled or superseded; delivery skipped';
+
+/** Shown when a newer dictation replaced this one before it was delivered. */
+export const SUPERSEDED_DELIVERY_MESSAGE =
+  'Earlier dictation replaced by a new one. Its text is in History.';
+
+/**
+ * Toast for a run that a newer dictation superseded (never a user cancel,
+ * which shows nothing): a delivery skipped for that reason says so plainly;
+ * any other outcome keeps its own message.
+ */
+export function supersededDeliveryMessage(outcome: Pick<DeliveryOutcome, 'detail' | 'message'>): string {
+  return outcome.detail === STALE_DELIVERY_DETAIL ? SUPERSEDED_DELIVERY_MESSAGE : outcome.message;
+}

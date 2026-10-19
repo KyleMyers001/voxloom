@@ -2,29 +2,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { cleanupModelCache } from '../../src/features/settings/cleanupModelCache';
 import type { CleanupModelStore } from '../../src/services/cleanup/contracts';
-import { CLEANUP_MODEL_ID, CLEANUP_MODEL_SHA256, CleanupEngineError, type CleanupModelStatus } from '../../src/services/cleanup/types';
-
-const ready: CleanupModelStatus = {
-  available: true, id: CLEANUP_MODEL_ID, runtimeAvailable: true, sha256: CLEANUP_MODEL_SHA256,
-};
-const noWorker: CleanupModelStatus = { ...ready, runtimeAvailable: false };
-
-/** A store whose status calls each wait for the test to answer them. */
-function deferredStore() {
-  const answers: { reject: (error: Error) => void; resolve: (status: CleanupModelStatus) => void }[] = [];
-  const store: CleanupModelStore = {
-    importModel: vi.fn(),
-    status: vi.fn(() => new Promise<CleanupModelStatus>((resolve, reject) => { answers.push({ reject, resolve }); })),
-  };
-  cleanupModelCache.useStore(store);
-  return { answers, store };
-}
-
-const flush = () => new Promise((resolve) => { setTimeout(resolve, 0); });
-const view = () => cleanupModelCache.snapshot().view;
-const worker = () => cleanupModelCache.snapshot().workerAvailable;
-const importError = () => cleanupModelCache.snapshot().importError;
-
+import { CleanupEngineError, type CleanupModelStatus } from '../../src/services/cleanup/types';
+import {
+  deferredStore, flush, importError, noWorker, ready, view, worker,
+} from './cleanupModelCacheFixtures';
 describe('cleanupModelCache', () => {
   it('a failed first read is retried by the next consumer', async () => {
     const { answers, store } = deferredStore();
@@ -163,51 +144,41 @@ describe('cleanupModelCache', () => {
     expect(store.status).not.toHaveBeenCalled();
   });
 
-  it('a malformed apply before any load lets the next consumer retry (mutation :88)', async () => {
-    const { answers, store } = deferredStore();
-    cleanupModelCache.ensureLoaded();
-    expect(store.status).toHaveBeenCalledTimes(1);
-    cleanupModelCache.apply({ ...ready, id: 7 } as unknown as CleanupModelStatus);
-    expect(importError()).toBe('unexpected status from the app');
-    answers[0].resolve(ready); // stale in-flight read; generation already bumped
-    await flush();
-    cleanupModelCache.ensureLoaded();
-    expect(store.status).toHaveBeenCalledTimes(2);
-    answers[1].resolve(ready);
-    await flush();
-    expect(view()).toEqual({ kind: 'status', status: ready });
-  });
-
-  it('an import fail before any load lets the next consumer retry (mutation :94)', async () => {
-    const { answers, store } = deferredStore();
-    cleanupModelCache.ensureLoaded();
-    cleanupModelCache.fail(new Error('picker exploded'));
-    expect(importError()).toBe('picker exploded');
-    answers[0].resolve(ready);
-    await flush();
-    cleanupModelCache.ensureLoaded();
-    expect(store.status).toHaveBeenCalledTimes(2);
-    answers[1].resolve(ready);
-    await flush();
-    expect(view()).toEqual({ kind: 'status', status: ready });
-  });
-
   // Codex 4316214003: apply/fail bump generation but must not leave refresh
   // reusing the cancelled in-flight read.
-  it('refresh after fail during an in-flight read starts a new status call', async () => {
+  it('refresh after fail (status known) during an in-flight read starts a new status call', async () => {
     const { answers, store } = deferredStore();
-    cleanupModelCache.ensureLoaded();
+    cleanupModelCache.apply(noWorker);
+    void cleanupModelCache.refresh();
     expect(store.status).toHaveBeenCalledTimes(1);
     cleanupModelCache.fail(new Error('picker cancelled'));
+    expect(view()).toEqual({ kind: 'status', status: noWorker });
     expect(importError()).toBe('picker cancelled');
     // Stale read still pending; Check again must not reuse it.
     void cleanupModelCache.refresh();
     expect(store.status).toHaveBeenCalledTimes(2);
-    answers[0].resolve(ready); // cancelled; ignored
+    answers[0].resolve(noWorker); // cancelled; ignored
     answers[1].resolve(ready);
     await flush();
     expect(view()).toEqual({ kind: 'status', status: ready });
     expect(importError()).toBeNull();
+  });
+
+  // BUS-112 item 1: a cancelled read finishing must not free the newer slot.
+  it('own-slot guard: a stale read settling leaves the newer read shared', async () => {
+    const { answers, store } = deferredStore();
+    const first = cleanupModelCache.refresh();
+    cleanupModelCache.apply(ready); // supersedes the first read
+    const second = cleanupModelCache.refresh();
+    expect(store.status).toHaveBeenCalledTimes(2);
+    answers[0].reject(new Error('io')); // stale; ignored
+    await first;
+    await flush();
+    expect(cleanupModelCache.refresh()).toBe(second);
+    expect(store.status).toHaveBeenCalledTimes(2);
+    answers[1].resolve(noWorker);
+    await second;
+    expect(view()).toEqual({ kind: 'status', status: noWorker });
   });
 
   it('refresh after apply during an in-flight read starts a new status call', async () => {
