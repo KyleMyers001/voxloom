@@ -38,7 +38,7 @@ function oneEditApart(left: string, right: string): boolean {
   return edits + Number(i < left.length || j < right.length) <= 1;
 }
 
-interface SourceWord extends Token {
+export interface SourceWord extends Token {
   /** The spoken word when `word` is its dictionary repair. */
   spoken?: string;
 }
@@ -53,7 +53,7 @@ interface SourceWord extends Token {
  * Skippable source words (fillers, articles outside quotations) may be
  * dropped, never swapped.
  */
-function contentWords(
+export function contentWords(
   text: string,
   dictionary: readonly string[],
   repair = false,
@@ -63,18 +63,20 @@ function contentWords(
     .filter((term) => /^[\p{L}\p{M}]{5,}$/u.test(term));
   const canonical: SourceWord[] = [];
   for (let i = 0; i < tokens.length; i++) {
-    const { end, skippable, word } = tokens[i];
+    const { end, skippable, start, word } = tokens[i];
     const joined = word + (tokens[i + 1]?.word ?? '');
     if (i + 1 < tokens.length && spellings.includes(joined)) {
-      canonical.push({ end: tokens[i + 1].end, skippable: false, word: joined });
+      canonical.push({
+        end: tokens[i + 1].end, skippable: false, start, word: joined,
+      });
       i++;
       continue;
     }
     const matches = repair && word.length >= 5
       ? spellings.filter((term) => oneEditApart(word, term)) : [];
     canonical.push(matches.length === 1 && matches[0] !== word
-      ? { end, skippable: false, spoken: word, word: matches[0] }
-      : { end, skippable, word });
+      ? { end, skippable: false, spoken: word, start, word: matches[0] }
+      : { end, skippable, start, word });
   }
   return canonical;
 }

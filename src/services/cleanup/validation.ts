@@ -1,10 +1,6 @@
-import {
-  anchorCounts,
-  preservesContent,
-  sameMultiset,
-} from './contentGuard';
+import { preservesContent, sameMultiset } from './contentGuard';
 import { preservesMarks } from './marks';
-import { isDroppableFiller, quoteMarkIndices, utf16Offsets } from './tokens';
+import { isDroppableFiller, quoteMarkIndices } from './tokens';
 
 export const CLEANUP_OUTPUT_MAX_BYTES = 32_000;
 export const CLEANUP_OUTPUT_EXTRA_CHARS = 256;
@@ -63,31 +59,6 @@ function symbols(text: string): string[] {
     .match(/\p{S}|\u200d|\ufe0e|\ufe0f|\u20e3|[\u{e0020}-\u{e007f}]/gu) ?? [];
 }
 
-type QuoteMark = ['double' | 'single', number];
-
-/**
- * Each quotation mark's kind and its position, counted in content words
- * before it, plus whether one pair wraps the whole text. Counting marks alone
- * let a moved quote pass ("Bob resigned" → Bob "resigned yesterday").
- * Straight and curly marks of one kind are interchangeable.
- */
-function quotationShape(
-  text: string,
-  dictionary: readonly string[],
-): [QuoteMark[], boolean] {
-  const normalized = text.trim().normalize('NFC');
-  const characters = Array.from(normalized);
-  const indices = quoteMarkIndices(characters);
-  const offsets = utf16Offsets(characters);
-  const anchors = anchorCounts(
-    normalized, indices.map((index) => offsets[index]), dictionary,
-  );
-  const marks: QuoteMark[] = indices.map((index, at) => [
-    /["“”]/u.test(characters[index]) ? 'double' : 'single', anchors[at],
-  ]);
-  return [marks, wrapsWholeText(text)];
-}
-
 /**
  * One quotation spans the whole text, ignoring trailing sentence punctuation
  * and dropped leading fillers: `um "hello there"` and `"Hello there."` match.
@@ -137,8 +108,7 @@ export function validateCleanupOutput(
   if (!preservesCapitalization(rawText, cleaned)) return null;
   if (JSON.stringify(symbols(rawText)) !== JSON.stringify(symbols(cleaned))) return null;
   if (!preservesMarks(rawText, cleaned, dictionary)) return null;
-  if (JSON.stringify(quotationShape(rawText, dictionary))
-    !== JSON.stringify(quotationShape(cleaned, dictionary))) return null;
+  if (wrapsWholeText(rawText) !== wrapsWholeText(cleaned)) return null;
   if (!preservesContent(rawText, cleaned, dictionary)) return null;
   return cleaned;
 }

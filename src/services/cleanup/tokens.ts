@@ -1,7 +1,7 @@
 // Word tokens for the cleanup guards, with the context that decides whether
-// a source word may be dropped: lowercase fillers, title-case fillers that
-// open a sentence (Whisper capitalizes "Um"), and articles, but never
-// inside a quotation, where the source is kept verbatim.
+// a source word may be dropped: lowercase fillers and articles, or title-case
+// ones that open a sentence (Whisper capitalizes "Um"), but never inside a
+// quotation, where the source is kept verbatim.
 
 export const FILLERS = new Set(['um', 'uh', 'erm', 'er', 'hmm']);
 export const ARTICLES = new Set(['a', 'an', 'the']);
@@ -11,7 +11,8 @@ export interface Token {
   word: string;
   /** The candidate may omit this source word. */
   skippable: boolean;
-  /** UTF-16 offset just past the source word in the NFC text. */
+  /** UTF-16 offsets of the source word in the NFC text (end exclusive). */
+  start: number;
   end: number;
 }
 
@@ -89,11 +90,19 @@ function opensSentence(text: string, start: number): boolean {
   return at < 0 || /[.!?。！？]/u.test(text[at]);
 }
 
-/** A filler the speaker can lose: "um", or "Um" opening a sentence; never "UM"/"ER". */
-export function isDroppableFiller(word: string, sentenceStart: boolean): boolean {
+/**
+ * A filler or article the speaker can lose: lowercase, or title case opening
+ * a sentence (Whisper writes "Um", "The"); never "UM", "ER", "THE" or a
+ * mid-sentence "A", which are content.
+ */
+function isDroppable(words: Set<string>, word: string, sentenceStart: boolean): boolean {
   const lower = word.toLowerCase();
-  if (!FILLERS.has(lower)) return false;
-  return word === lower || (sentenceStart && /^\p{Lu}\p{Ll}+$/u.test(word));
+  if (!words.has(lower)) return false;
+  return word === lower || (sentenceStart && /^\p{Lu}\p{Ll}*$/u.test(word));
+}
+
+export function isDroppableFiller(word: string, sentenceStart: boolean): boolean {
+  return isDroppable(FILLERS, word, sentenceStart);
 }
 
 /**
@@ -114,10 +123,10 @@ export function tokenize(text: string): Token[] {
     const quoted = quotesBefore % 2 === 1;
     const end = start + match[0].length;
     expand(match[0]).split(' ').filter(Boolean).forEach((word, part) => {
-      const lower = word.toLowerCase();
-      const skippable = !quoted && (ARTICLES.has(lower)
-        || isDroppableFiller(word, part === 0 && opensSentence(normalized, start)));
-      tokens.push({ end, skippable, word: lower });
+      const sentenceStart = part === 0 && opensSentence(normalized, start);
+      const skippable = !quoted && (isDroppable(ARTICLES, word, sentenceStart)
+        || isDroppable(FILLERS, word, sentenceStart));
+      tokens.push({ end, skippable, start, word: word.toLowerCase() });
     });
   }
   return tokens;

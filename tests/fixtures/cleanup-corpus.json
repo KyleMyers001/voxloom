@@ -554,7 +554,8 @@
       "rawText": "use C# and F", "dictionary": [],
       "candidates": [
         {"text": "Use C# and F.", "acceptWhen": ["off", "on"]},
-        {"text": "Use C and F#.", "acceptWhen": []}
+        {"text": "Use C and F#.", "acceptWhen": []},
+        {"text": "Use C #and F.", "acceptWhen": []}
       ]
     },
     {
@@ -627,6 +628,122 @@
         {"text": "Wow！ Great！ Go。", "acceptWhen": ["off", "on"]},
         {"text": "Wow. Great. Go.", "acceptWhen": []},
         {"text": "Wow！ Great. Go.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "mark-shift-hashtag", "categories": ["special-characters"],
+      "rawText": "fix #TODO here", "dictionary": [],
+      "candidates": [
+        {"text": "Fix #TODO here.", "acceptWhen": ["off", "on"]},
+        {"text": "Fix# TODO here.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "mark-shift-dollar", "categories": ["special-characters", "commands"],
+      "rawText": "echo $HOME now", "dictionary": [],
+      "candidates": [
+        {"text": "Echo $HOME now.", "acceptWhen": ["off", "on"]},
+        {"text": "Echo$ HOME now.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "mark-shift-paren", "categories": ["special-characters"],
+      "rawText": "call f(x) now", "dictionary": [],
+      "candidates": [
+        {"text": "Call f(x) now.", "acceptWhen": ["off", "on"]},
+        {"text": "Call f( x) now.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "mark-shift-emphasis", "categories": ["special-characters"],
+      "rawText": "the *big* dog", "dictionary": [],
+      "candidates": [
+        {"text": "The *big* dog.", "acceptWhen": ["off", "on"]},
+        {"text": "The* big *dog.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "quote-shift", "categories": ["quoted-instructions"],
+      "rawText": "say \"hi\" now", "dictionary": [],
+      "candidates": [
+        {"text": "Say \"hi\" now.", "acceptWhen": ["off", "on"]},
+        {"text": "Say \"hi,\" now.", "acceptWhen": ["off", "on"]},
+        {"text": "Say\" hi \"now.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "quote-mark-order", "categories": ["quoted-instructions", "special-characters"],
+      "rawText": "\"C#\"", "dictionary": [],
+      "candidates": [
+        {"text": "\"C#\"", "acceptWhen": ["off", "on"]},
+        {"text": "\"C\"#", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "mark-shift-article", "categories": ["special-characters", "articles"],
+      "rawText": "a #b", "dictionary": [],
+      "candidates": [
+        {"text": "A #b.", "acceptWhen": ["off", "on"]},
+        {"text": "#A b.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "mark-shift-filler", "categories": ["special-characters", "fillers"],
+      "rawText": "use um #x", "dictionary": [],
+      "candidates": [
+        {"text": "Use #x.", "acceptWhen": ["off", "on"]},
+        {"text": "Use #um x.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "mark-attached-to-dropped-filler", "categories": ["special-characters", "fillers"],
+      "rawText": "use um# x", "dictionary": [],
+      "candidates": [
+        {"text": "Use um# x.", "acceptWhen": ["off", "on"]},
+        {"text": "Use # x.", "acceptWhen": []},
+        {"text": "Use x#.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "uppercase-article-mid", "categories": ["articles", "names"],
+      "rawText": "Press A now", "dictionary": [],
+      "candidates": [
+        {"text": "Press A now.", "acceptWhen": ["off", "on"]},
+        {"text": "Press now.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "uppercase-article-caps", "categories": ["articles", "names"],
+      "rawText": "use THE library", "dictionary": [],
+      "candidates": [
+        {"text": "Use THE library.", "acceptWhen": ["off", "on"]},
+        {"text": "Use library.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "uppercase-article-final", "categories": ["articles", "names"],
+      "rawText": "plan AN", "dictionary": [],
+      "candidates": [
+        {"text": "Plan AN.", "acceptWhen": ["off", "on"]},
+        {"text": "Plan.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "title-case-article-first", "categories": ["articles"],
+      "rawText": "The plan works", "dictionary": [],
+      "candidates": [
+        {"text": "Plan works.", "acceptWhen": ["off", "on"]},
+        {"text": "The plan works.", "acceptWhen": ["off", "on"]},
+        {"text": "The works.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "dictionary-repair-attached-mark", "categories": ["dictionary", "special-characters"],
+      "rawText": "send it to (Voxlom) and (vox loom)", "dictionary": ["Voxloom"],
+      "candidates": [
+        {"text": "Send it to (Voxlom) and (vox loom).", "acceptWhen": ["off", "on"]},
+        {"text": "Send it to (Voxloom) and (Voxloom).", "acceptWhen": ["on"]},
+        {"text": "Send it to (Voxloom and) Voxloom.", "acceptWhen": []}
       ]
     },
     {
