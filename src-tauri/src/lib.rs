@@ -145,7 +145,17 @@ pub fn run() {
             let cleanup =
                 cleanup::CleanupState::from_app(app.handle()).expect("initialize cleanup state");
             app.manage(cleanup);
-            app.manage(SttState::new(models, buffers));
+            let stt = SttState::new(models, buffers);
+            // One-time hash of unmarked model files, off the main thread. Each
+            // verdict (and an unreadable file opening again) re-lists Models.
+            let handle = app.handle().clone();
+            let models_changed: stt::store::ModelsChanged = Arc::new(move || {
+                let _ = handle.emit("stt:models-changed", ());
+            });
+            stt.models
+                .set_on_models_changed(Arc::clone(&models_changed));
+            stt.models.spawn_verify_existing(move || models_changed());
+            app.manage(stt);
             #[cfg(target_os = "macos")]
             app.set_menu(settings_window::app_menu(app.handle())?)?;
             Ok(())

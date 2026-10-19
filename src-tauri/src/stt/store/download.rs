@@ -114,6 +114,9 @@ impl ModelStore {
         }
 
         result.map_err(|e| fetch_error(spec, e))?;
+        // Bytes were just verified: record it so the file is never re-hashed.
+        super::existing::write_marker(spec, &dest);
+        self.set_verdict(spec, super::existing::Verdict::Verified);
 
         // Only after the verified destination file exists do we report completion.
         debug_assert!(dest.is_file());

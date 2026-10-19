@@ -20,7 +20,6 @@ use sha2::{Digest, Sha256};
 
 mod verify;
 
-#[allow(unused_imports)] // `verify_file` is for the planned LLM model store.
 pub use verify::{verify_file, FetchError, PinnedArtifact};
 
 #[cfg(test)]

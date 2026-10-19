@@ -1,13 +1,14 @@
 //! Shared fake-worker fixtures for supervisor tests (Python stub workers).
 
 use super::*;
+use crate::cleanup::test_support::{test_root, write_executable};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 use std::thread;
 
 fn fake_root(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("voxloom-supervisor-{}-{name}", std::process::id(),))
+    test_root().join(format!("supervisor-{name}"))
 }
 
 fn fake_worker(name: &str, body: &str) -> PathBuf {
@@ -15,16 +16,12 @@ fn fake_worker(name: &str, body: &str) -> PathBuf {
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
     let path = root.join("worker.py");
-    fs::write(&path, format!("#!/usr/bin/env python3\n{body}\n")).unwrap();
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+    write_executable(&path, &format!("#!/usr/bin/env python3\n{body}\n"));
     path
 }
 
 fn model_file(name: &str) -> File {
-    let path = std::env::temp_dir().join(format!(
-        "voxloom-supervisor-model-{}-{name}",
-        std::process::id(),
-    ));
+    let path = test_root().join(format!("supervisor-model-{name}"));
     fs::write(&path, b"GGUFtest").unwrap();
     File::open(path).unwrap()
 }
