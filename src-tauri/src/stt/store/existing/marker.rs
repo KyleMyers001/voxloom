@@ -1,5 +1,6 @@
 //! `<file>.verified` markers: `<sha256> <len> <mtime-ns>` next to a model that
-//! passed its size + SHA-256 check, so it is hashed at most once.
+//! passed its size + SHA-256 check, so it is hashed at most once across
+//! launches. Within a session the in-memory fingerprint is what counts.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,35 +14,45 @@ pub(in crate::stt::store) fn marker_path(model: &Path) -> PathBuf {
     model.with_file_name(name)
 }
 
-/// Length and mtime (ns since the epoch) that a marker records.
-fn fingerprint(model: &Path) -> Option<(u64, u128)> {
+/// Length and mtime (ns since the epoch) of a model file.
+pub(super) type Fingerprint = (u64, u128);
+
+/// The file's current fingerprint: a stat, no read.
+pub(super) fn fingerprint(model: &Path) -> Option<Fingerprint> {
     let meta = fs::metadata(model).ok()?;
     let mtime = meta.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
     Some((meta.len(), mtime.as_nanos()))
 }
 
-/// Marker is trusted only if it names the pinned hash and the current length
-/// and mtime. Older two-field markers are re-hashed once and rewritten.
-pub(super) fn marker_matches(spec: &ModelSpec, model: &Path) -> bool {
-    let Some((len, mtime)) = fingerprint(model) else {
-        return false;
-    };
-    let Ok(text) = fs::read_to_string(marker_path(model)) else {
-        return false;
-    };
+/// The file's fingerprint if the marker vouches for it: the pinned hash and
+/// the current length and mtime. Older two-field markers are re-hashed once
+/// and rewritten.
+pub(super) fn trusted_fingerprint(spec: &ModelSpec, model: &Path) -> Option<Fingerprint> {
+    let (len, mtime) = fingerprint(model)?;
+    let text = fs::read_to_string(marker_path(model)).ok()?;
     let mut parts = text.split_whitespace();
-    parts
+    let matches = parts
         .next()
         .is_some_and(|sha| sha.eq_ignore_ascii_case(spec.sha256))
         && parts.next().and_then(|n| n.parse::<u64>().ok()) == Some(len)
-        && parts.next().and_then(|n| n.parse::<u128>().ok()) == Some(mtime)
+        && parts.next().and_then(|n| n.parse::<u128>().ok()) == Some(mtime);
+    matches.then_some((len, mtime))
 }
 
+/// Record `at` (the fingerprint the hash saw) for the next launch. A failed
+/// write only costs a re-hash then; this session trusts its memory.
+pub(super) fn write(spec: &ModelSpec, model: &Path, at: Fingerprint) {
+    let (len, mtime) = at;
+    let text = format!("{} {len} {mtime}\n", spec.sha256);
+    if let Err(e) = fs::write(marker_path(model), text) {
+        eprintln!("[stt] couldn't save verified marker for {}: {e}", spec.id);
+    }
+}
+
+/// Marker for the file as it is now (tests seed markers with this).
+#[cfg(test)]
 pub(in crate::stt::store) fn write_marker(spec: &ModelSpec, model: &Path) {
-    if let Some((len, mtime)) = fingerprint(model) {
-        let _ = fs::write(
-            marker_path(model),
-            format!("{} {len} {mtime}\n", spec.sha256),
-        );
+    if let Some(at) = fingerprint(model) {
+        write(spec, model, at);
     }
 }

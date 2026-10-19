@@ -33,7 +33,7 @@ impl ModelStore {
     }
 
     /// Hash `spec` once more in the background (same rule as the startup
-    /// pass), then re-list. At most one re-check per model is pending or
+    /// pass), then re-list if the verdict changed. At most one re-check per model is pending or
     /// running; a store whose startup pass never ran (unit tests) skips it.
     pub(in crate::stt::store) fn queue_reverify(&self, model_id: &str) {
         let Some(spec) = catalog::find(model_id) else {
@@ -45,10 +45,13 @@ impl ModelStore {
         if !self.reverifying.lock().unwrap().insert(spec.id) {
             return;
         }
+        // Re-list only if the row can change: a re-check that lands on the
+        // verdict already shown (e.g. still Verified) stays quiet.
+        let shown = self.cached_verdict(spec.id);
         std::thread::spawn(move || {
-            let checked = store.verify_existing(spec).is_some();
+            let verdict = store.verify_existing(spec);
             store.reverifying.lock().unwrap().remove(spec.id);
-            if checked {
+            if verdict.is_some() && verdict != shown {
                 store.notify_models_changed();
             }
         });
