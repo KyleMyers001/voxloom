@@ -41,6 +41,19 @@ export function cleanupShown(
   return model.workerAvailable || active || import.meta.env.DEV;
 }
 
+/**
+ * The Local cleanup block itself also shows after a failed status read: the
+ * worker is unknown then, and the error and Check again must stay reachable
+ * (Codex 4315232707). The captions keep `cleanupShown`, so nothing mentions
+ * cleanup on the strength of an error alone.
+ */
+export function cleanupBlockShown(
+  model: Pick<CleanupModel, 'view' | 'workerAvailable'>,
+  active: boolean,
+): boolean {
+  return cleanupShown(model, active) || model.view.kind === 'error';
+}
+
 const BROWSER: CleanupModelView = { kind: 'browser' };
 const noop = () => {};
 

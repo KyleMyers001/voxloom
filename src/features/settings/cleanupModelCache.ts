@@ -55,15 +55,20 @@ function publish(next: Partial<CleanupModelSnapshot>) {
   for (const listener of listeners) listener();
 }
 
-/** Keep a known status on import failure; otherwise show an error view. */
+/**
+ * An import failure never replaces what the view says with a check failure
+ * (BUS-112 item 4). With a known status: restore it, and drop a pending read
+ * so it can't clear the import line. Nothing known yet: keep the view; a
+ * first read still in flight stays valid and lands normally.
+ */
 function publishImportFailure(reason: unknown) {
   const text = message(reason);
   if (lastStatus) {
+    generation++;
     publish({ view: { kind: 'status', status: lastStatus }, importError: text });
     return;
   }
-  if (!loaded) requested = false;
-  publish({ view: { kind: 'error', message: text }, importError: text });
+  publish({ importError: text });
 }
 
 export const cleanupModelCache = {
@@ -103,28 +108,21 @@ export const cleanupModelCache = {
     readingGeneration = request;
     void (async () => {
       try {
-        let statusPromise: Promise<CleanupModelStatus>;
-        try {
-          // Call status() now (overlapping Check again / tests expect it), but
-          // turn a sync throw into a rejection so the reserved slot clears.
-          statusPromise = Promise.resolve(cleanupModelCache.store().status());
-        } catch (reason: unknown) {
-          statusPromise = Promise.reject(reason);
-        }
-        const status = checkedStatus(await statusPromise);
+        // status() runs synchronously here (before the first await), so
+        // overlapping Check again sees the reserved slot; a sync throw lands
+        // in the catch below and the finally still clears the slot.
+        const status = checkedStatus(await cleanupModelCache.store().status());
         if (request !== generation) return;
         loaded = true;
         lastStatus = status;
-        publish({
-          view: { kind: 'status', status },
-          workerAvailable: status.runtimeAvailable,
-          importError: null,
-        });
+        // importError was cleared when this read started; a newer import
+        // failure set during the read is kept.
+        publish({ view: { kind: 'status', status }, workerAvailable: status.runtimeAvailable });
       } catch (reason: unknown) {
         if (request !== generation) return;
         // Nothing known yet: let the next consumer (e.g. reopening Capture) retry.
         if (!loaded) requested = false;
-        publish({ view: { kind: 'error', message: message(reason) }, importError: null });
+        publish({ view: { kind: 'error', message: message(reason) } });
       } finally {
         // Clear only this slot; a newer refresh may already own `reading`.
         if (reading === pending) reading = null;
@@ -139,9 +137,9 @@ export const cleanupModelCache = {
   },
   /** A status from somewhere else (the import result); supersedes pending reads. */
   apply(status: CleanupModelStatus) {
-    generation++;
     try {
       const checked = checkedStatus(status);
+      generation++;
       loaded = true;
       requested = true;
       lastStatus = checked;
@@ -155,7 +153,6 @@ export const cleanupModelCache = {
     }
   },
   fail(reason: unknown) {
-    generation++;
     publishImportFailure(reason);
   },
 };

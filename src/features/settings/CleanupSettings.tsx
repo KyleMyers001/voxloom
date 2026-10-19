@@ -7,7 +7,7 @@ import {
   CLEANUP_MODEL_LABEL, CLEANUP_REFRESH, CLEANUP_SWITCH, CLEANUP_TAG,
   cleanupImportNote, cleanupModelNote, cleanupReady,
 } from './cleanupCopy';
-import { cleanupShown, type CleanupModel } from './useCleanupModel';
+import { cleanupBlockShown, type CleanupModel } from './useCleanupModel';
 
 const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex="0"]';
 
@@ -19,7 +19,7 @@ function focusableIn(row: Element | null | undefined): HTMLElement | null {
  * Local cleanup rows (BUS-16 PR 2c). Turning cleanup on is the only place
  * that writes the explicit `cleanupOptIn` key; it needs a verified model and
  * a bundled worker. Turning it off is always allowed. Rendered only when
- * `cleanupShown` says so, the same gate as the writing-style captions.
+ * `cleanupBlockShown` says so: the captions' gate, plus a failed status read.
  */
 export function CleanupSettings({ isNative, model }: { isNative: boolean; model: CleanupModel }) {
   const { settings, state } = useApp();
@@ -27,7 +27,7 @@ export function CleanupSettings({ isNative, model }: { isNative: boolean; model:
   const active = isCleanupActive(state.settings);
   const { apply, clearImportError, fail, importError, refresh, store, view } = model;
   const [importing, setImporting] = useState(false);
-  const shown = cleanupShown(model, active);
+  const shown = cleanupBlockShown(model, active);
   const firstRow = useRef<HTMLDivElement>(null);
   const lastRow = useRef<HTMLDivElement>(null);
   const focusAfterHide = useRef<HTMLElement | null>(null);
@@ -62,7 +62,7 @@ export function CleanupSettings({ isNative, model }: { isNative: boolean; model:
       if (!cleanupReady(view)) return;
       update({ key: 'cleanupModelId', value: view.status.id });
     }
-    if (!on && !cleanupShown(model, false)) {
+    if (!on && !cleanupBlockShown(model, false)) {
       focusAfterHide.current = focusableIn(lastRow.current?.nextElementSibling)
         ?? focusableIn(firstRow.current?.previousElementSibling);
     }
@@ -74,9 +74,8 @@ export function CleanupSettings({ isNative, model }: { isNative: boolean; model:
   if (!shown) return null;
 
   const modelInstalled = view.kind === 'status' && view.status.available;
-  // Import failures use their own line (BUS-101); hide the check-error note
-  // when that line is the only thing we know.
-  const statusNote = view.kind === 'error' && importError ? null : cleanupModelNote(view);
+  // Import failures use their own line (BUS-101), next to the status note.
+  const statusNote = cleanupModelNote(view);
   const importNote = importError ? cleanupImportNote(importError, modelInstalled) : null;
   const noteId = 'settings-cleanup-model-note';
   return <>

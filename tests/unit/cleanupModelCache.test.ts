@@ -163,51 +163,84 @@ describe('cleanupModelCache', () => {
     expect(store.status).not.toHaveBeenCalled();
   });
 
-  it('a malformed apply before any load lets the next consumer retry (mutation :88)', async () => {
+  // BUS-112 item 4: before any status is known, an import failure leaves the
+  // view alone; the first read still in flight lands and keeps the import line.
+  it('a malformed apply during the first read keeps that read', async () => {
     const { answers, store } = deferredStore();
     cleanupModelCache.ensureLoaded();
     expect(store.status).toHaveBeenCalledTimes(1);
     cleanupModelCache.apply({ ...ready, id: 7 } as unknown as CleanupModelStatus);
+    expect(view()).toEqual({ kind: 'checking' });
     expect(importError()).toBe('unexpected status from the app');
-    answers[0].resolve(ready); // stale in-flight read; generation already bumped
-    await flush();
-    cleanupModelCache.ensureLoaded();
-    expect(store.status).toHaveBeenCalledTimes(2);
-    answers[1].resolve(ready);
+    answers[0].resolve(ready);
     await flush();
     expect(view()).toEqual({ kind: 'status', status: ready });
+    expect(importError()).toBe('unexpected status from the app');
+    cleanupModelCache.ensureLoaded();
+    expect(store.status).toHaveBeenCalledTimes(1);
   });
 
-  it('an import fail before any load lets the next consumer retry (mutation :94)', async () => {
+  it('an import fail during the first read keeps that read and the import line', async () => {
     const { answers, store } = deferredStore();
     cleanupModelCache.ensureLoaded();
     cleanupModelCache.fail(new Error('picker exploded'));
+    expect(view()).toEqual({ kind: 'checking' });
     expect(importError()).toBe('picker exploded');
     answers[0].resolve(ready);
     await flush();
+    expect(view()).toEqual({ kind: 'status', status: ready });
+    expect(importError()).toBe('picker exploded');
+    expect(store.status).toHaveBeenCalledTimes(1);
+  });
+
+  it('an import fail after a failed first read keeps the read error', async () => {
+    const { answers, store } = deferredStore();
+    cleanupModelCache.ensureLoaded();
+    answers[0].reject(new Error('denied'));
+    await flush();
+    cleanupModelCache.fail(new Error('wrong file'));
+    expect(view()).toEqual({ kind: 'error', message: 'denied' });
+    expect(importError()).toBe('wrong file');
+    // The failed read still lets the next consumer retry.
     cleanupModelCache.ensureLoaded();
     expect(store.status).toHaveBeenCalledTimes(2);
-    answers[1].resolve(ready);
-    await flush();
-    expect(view()).toEqual({ kind: 'status', status: ready });
   });
 
   // Codex 4316214003: apply/fail bump generation but must not leave refresh
   // reusing the cancelled in-flight read.
-  it('refresh after fail during an in-flight read starts a new status call', async () => {
+  it('refresh after fail (status known) during an in-flight read starts a new status call', async () => {
     const { answers, store } = deferredStore();
-    cleanupModelCache.ensureLoaded();
+    cleanupModelCache.apply(noWorker);
+    void cleanupModelCache.refresh();
     expect(store.status).toHaveBeenCalledTimes(1);
     cleanupModelCache.fail(new Error('picker cancelled'));
+    expect(view()).toEqual({ kind: 'status', status: noWorker });
     expect(importError()).toBe('picker cancelled');
     // Stale read still pending; Check again must not reuse it.
     void cleanupModelCache.refresh();
     expect(store.status).toHaveBeenCalledTimes(2);
-    answers[0].resolve(ready); // cancelled; ignored
+    answers[0].resolve(noWorker); // cancelled; ignored
     answers[1].resolve(ready);
     await flush();
     expect(view()).toEqual({ kind: 'status', status: ready });
     expect(importError()).toBeNull();
+  });
+
+  // BUS-112 item 1: a cancelled read finishing must not free the newer slot.
+  it('own-slot guard: a stale read settling leaves the newer read shared', async () => {
+    const { answers, store } = deferredStore();
+    const first = cleanupModelCache.refresh();
+    cleanupModelCache.apply(ready); // supersedes the first read
+    const second = cleanupModelCache.refresh();
+    expect(store.status).toHaveBeenCalledTimes(2);
+    answers[0].reject(new Error('io')); // stale; ignored
+    await first;
+    await flush();
+    expect(cleanupModelCache.refresh()).toBe(second);
+    expect(store.status).toHaveBeenCalledTimes(2);
+    answers[1].resolve(noWorker);
+    await second;
+    expect(view()).toEqual({ kind: 'status', status: noWorker });
   });
 
   it('refresh after apply during an in-flight read starts a new status call', async () => {
