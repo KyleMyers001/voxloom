@@ -45,8 +45,10 @@ describe('useSttModels after remount (BUS-56)', () => {
     const list = vi.spyOn(store, 'list');
     const { result } = renderHook(() => useSttModels({ onSelect: vi.fn(), selectedModelId: 'whisper-tiny.en', store }));
     await waitFor(() => expect(result.current.loading).toBe(false));
+    // BUS-85.2: mount reload + one refresh after the models-changed listener registers.
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
     await act(async () => { await vi.advanceTimersByTimeAsync(DOWNLOAD_POLL_MS * 5); });
-    expect(list).toHaveBeenCalledTimes(1);
+    expect(list).toHaveBeenCalledTimes(2);
   });
 
   it('stops polling on unmount', async () => {
