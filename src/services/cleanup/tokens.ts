@@ -11,9 +11,14 @@ export interface Token {
   word: string;
   /** The candidate may omit this source word. */
   skippable: boolean;
-  /** UTF-16 offsets of the source word in the NFC text (end exclusive). */
+  /**
+   * UTF-16 offsets in the NFC text (end exclusive) of this word's own part
+   * of the source word: voxlom'll → voxlom [0, 6), will [6, 9).
+   */
   start: number;
   end: number;
+  /** This word continues the previous one's source word (do|n't, can|not). */
+  continuesWord: boolean;
 }
 
 /** Expand supported contractions, keeping case and quote characters. */
@@ -121,13 +126,47 @@ export function tokenize(text: string): Token[] {
     const start = match.index;
     while (quotesBefore < quotes.length && quotes[quotesBefore] < start) quotesBefore++;
     const quoted = quotesBefore % 2 === 1;
-    const end = start + match[0].length;
-    expand(match[0]).split(' ').filter(Boolean).forEach((word, part) => {
+    const parts = expand(match[0]).split(' ').filter(Boolean);
+    const spans = partSpans(match[0], parts, start);
+    parts.forEach((word, part) => {
       const sentenceStart = part === 0 && opensSentence(normalized, start);
       const skippable = !quoted && (isDroppable(ARTICLES, word, sentenceStart)
         || isDroppable(FILLERS, word, sentenceStart));
-      tokens.push({ end, skippable, start, word: word.toLowerCase() });
+      const [partStart, partEnd] = spans[part];
+      tokens.push({
+        continuesWord: part > 0, end: partEnd, skippable, start: partStart,
+        word: word.toLowerCase(),
+      });
     });
   }
   return tokens;
+}
+
+/**
+ * Where each expanded part of `source` (at offset `start`) sits, so a
+ * dictionary repair inside a contraction is checked on its own spelling.
+ * Parts spelled out in order take their own span (voxlom|'ll, do|n't,
+ * can|not), a last part may be a suffix (n'|aime), and the rest, ends
+ * ascending, share what remains (won't → will, not).
+ */
+function partSpans(source: string, parts: readonly string[], start: number) {
+  // Compare slice by slice: lowercasing the whole word can change its length.
+  const spelled = source.replaceAll('’', '\'');
+  const spells = (part: string, at: number) =>
+    spelled.slice(at, at + part.length).toLowerCase() === part.toLowerCase();
+  const end = start + source.length;
+  let cursor = 0;
+  let inOrder = true;
+  return parts.map((part, index): [number, number] => {
+    if (inOrder && spells(part, cursor)) {
+      cursor += part.length;
+      return [start + cursor - part.length, start + cursor];
+    }
+    inOrder = false;
+    const suffix = source.length - part.length;
+    if (index === parts.length - 1 && suffix >= cursor && spells(part, suffix)) {
+      return [end - part.length, end];
+    }
+    return [start + cursor, end];
+  });
 }
