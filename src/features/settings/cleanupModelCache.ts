@@ -41,6 +41,8 @@ let loaded = false;
 let lastStatus: CleanupModelStatus | null = null;
 /** BUS-106: one in-flight status read; overlapping Check again reuses it. */
 let reading: Promise<void> | null = null;
+/** Generation that owns `reading`; apply/fail bump generation so refresh starts fresh. */
+let readingGeneration = 0;
 let modelStore: CleanupModelStore | null = null;
 const listeners = new Set<() => void>();
 
@@ -77,15 +79,35 @@ export const cleanupModelCache = {
     requested = true;
     void cleanupModelCache.refresh();
   },
-  /** Explicit re-read (Check again). Overlapping calls share one status(). */
+  /**
+   * Explicit re-read (Check again). Overlapping calls share one status() only
+   * when that read still belongs to the current generation. apply()/fail()
+   * bump generation so a cancelled in-flight read is not reused (Codex
+   * 4316214003).
+   */
   refresh(): Promise<void> {
-    if (reading) return reading;
+    if (reading !== null && readingGeneration === generation) return reading;
     requested = true;
     const request = ++generation;
     publish({ view: { kind: 'checking' }, importError: null });
-    reading = (async () => {
+    // Reserve the slot before calling status(), so a sync throw's finally can
+    // clear the same promise we return (finally would otherwise run before a
+    // direct `reading = (async () => …)()` assignment).
+    let settle!: () => void;
+    const pending = new Promise<void>((resolve) => { settle = resolve; });
+    reading = pending;
+    readingGeneration = request;
+    void (async () => {
       try {
-        const status = checkedStatus(await cleanupModelCache.store().status());
+        let statusPromise: Promise<CleanupModelStatus>;
+        try {
+          // Call status() now (overlapping Check again / tests expect it), but
+          // turn a sync throw into a rejection so the reserved slot clears.
+          statusPromise = Promise.resolve(cleanupModelCache.store().status());
+        } catch (reason: unknown) {
+          statusPromise = Promise.reject(reason);
+        }
+        const status = checkedStatus(await statusPromise);
         if (request !== generation) return;
         loaded = true;
         lastStatus = status;
@@ -100,10 +122,12 @@ export const cleanupModelCache = {
         if (!loaded) requested = false;
         publish({ view: { kind: 'error', message: message(reason) }, importError: null });
       } finally {
-        reading = null;
+        // Clear only this slot; a newer refresh may already own `reading`.
+        if (reading === pending) reading = null;
+        settle();
       }
     })();
-    return reading;
+    return pending;
   },
   /** Clears the import-failure line (start of a new import attempt). */
   clearImportError() {
@@ -140,6 +164,7 @@ export function resetCleanupModelCacheForTests() {
   loaded = false;
   lastStatus = null;
   reading = null;
+  readingGeneration = 0;
   modelStore = null;
   listeners.clear();
 }

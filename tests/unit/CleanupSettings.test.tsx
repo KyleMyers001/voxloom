@@ -277,6 +277,23 @@ describe('CleanupSettings in a production build, after the worker is known', () 
     expect(models.status).toHaveBeenCalledOnce();
   });
 
+  // CR Low #4: clearImportError on import click; cancelling the picker must clear the line.
+  it('cancelling the picker clears a previous import-error line', async () => {
+    vi.stubEnv('DEV', false);
+    const user = userEvent.setup();
+    const models = store(ready);
+    vi.mocked(models.importModel)
+      .mockRejectedValueOnce(new Error('wrong file'))
+      .mockResolvedValueOnce(null);
+    renderCleanup(models);
+    await waitFor(() => expect(toggle()).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Import model…' }));
+    await waitFor(() => expect(screen.getByText(/Couldn't import that file: wrong file/)).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Import model…' }));
+    await waitFor(() => expect(screen.queryByText(/Couldn't import that file/)).not.toBeInTheDocument());
+    expect(screen.getByText('Qwen3 0.6B is installed.')).toBeInTheDocument();
+  });
+
   it('Check again keeps the block and focus while it checks, and through an error', async () => {
     vi.stubEnv('DEV', false);
     const user = userEvent.setup();

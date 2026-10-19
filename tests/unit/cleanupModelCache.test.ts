@@ -184,4 +184,71 @@ describe('cleanupModelCache', () => {
     await flush();
     expect(view()).toEqual({ kind: 'status', status: ready });
   });
+
+  // Codex 4316214003: apply/fail bump generation but must not leave refresh
+  // reusing the cancelled in-flight read.
+  it('refresh after fail during an in-flight read starts a new status call', async () => {
+    const { answers, store } = deferredStore();
+    cleanupModelCache.ensureLoaded();
+    expect(store.status).toHaveBeenCalledTimes(1);
+    cleanupModelCache.fail(new Error('picker cancelled'));
+    expect(importError()).toBe('picker cancelled');
+    // Stale read still pending; Check again must not reuse it.
+    void cleanupModelCache.refresh();
+    expect(store.status).toHaveBeenCalledTimes(2);
+    answers[0].resolve(ready); // cancelled; ignored
+    answers[1].resolve(ready);
+    await flush();
+    expect(view()).toEqual({ kind: 'status', status: ready });
+    expect(importError()).toBeNull();
+  });
+
+  it('refresh after apply during an in-flight read starts a new status call', async () => {
+    const { answers, store } = deferredStore();
+    cleanupModelCache.ensureLoaded();
+    expect(store.status).toHaveBeenCalledTimes(1);
+    cleanupModelCache.apply(noWorker);
+    expect(view()).toEqual({ kind: 'status', status: noWorker });
+    void cleanupModelCache.refresh();
+    expect(store.status).toHaveBeenCalledTimes(2);
+    answers[0].resolve(ready); // cancelled; ignored
+    answers[1].resolve(ready);
+    await flush();
+    expect(view()).toEqual({ kind: 'status', status: ready });
+    expect(worker()).toBe(true);
+  });
+
+  // CR Low #3: status() throwing sync must not stick a settled promise in `reading`.
+  it('a sync throw from status() still lets the next refresh call status again', async () => {
+    const store: CleanupModelStore = {
+      importModel: vi.fn(),
+      status: vi.fn()
+        .mockImplementationOnce(() => { throw new Error('sync boom'); })
+        .mockResolvedValueOnce(ready),
+    };
+    cleanupModelCache.useStore(store);
+    await cleanupModelCache.refresh();
+    expect(view()).toEqual({ kind: 'error', message: 'sync boom' });
+    await cleanupModelCache.refresh();
+    expect(store.status).toHaveBeenCalledTimes(2);
+    expect(view()).toEqual({ kind: 'status', status: ready });
+  });
+
+  // CR Low #4 mutant: apply() must update lastStatus so a later fail keeps it.
+  it('a later import failure keeps the status from a successful apply', async () => {
+    cleanupModelCache.useStore({
+      importModel: vi.fn(),
+      status: vi.fn(),
+    });
+    cleanupModelCache.apply(ready);
+    expect(view()).toEqual({ kind: 'status', status: ready });
+    cleanupModelCache.apply(noWorker);
+    expect(view()).toEqual({ kind: 'status', status: noWorker });
+    cleanupModelCache.fail(new Error('second import bad'));
+    // If apply skipped lastStatus = checked, fail would restore the first ready.
+    expect(view()).toEqual({ kind: 'status', status: noWorker });
+    expect(importError()).toBe('second import bad');
+    expect(worker()).toBe(false);
+  });
+
 });
