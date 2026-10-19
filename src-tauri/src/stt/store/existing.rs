@@ -4,11 +4,12 @@
 //! matched the catalog pin once (`model_fetch::verify_file`, the same size +
 //! SHA rule downloads use). The result is persisted as a marker next to the model
 //! (`<file>.verified`: `<sha256> <len>`), so each file is hashed at most once.
-//! Hashing runs on a background thread at startup (never on the UI/IPC thread)
-//! or, if transcription needs the model first, on its blocking worker.
+//! Hashing runs only on a background thread at startup, never on the UI/IPC
+//! thread or the transcription path: a model still being checked stays usable.
 //!
 //! A mismatched file is not deleted: it is reported as `failed` so the Models
-//! tab shows "Model file is damaged" with Retry, and transcription refuses it.
+//! tab shows "Model file is damaged" with a one-click Retry download, and
+//! transcription refuses it.
 
 use std::collections::HashMap;
 use std::fs;

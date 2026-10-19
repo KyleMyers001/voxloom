@@ -106,16 +106,45 @@ fn existing_file_with_right_size_but_wrong_hash_is_corrupt() {
 }
 
 #[test]
-fn resolved_path_verifies_unmarked_file_before_use() {
-    let (store, dir) = temp_store("existing-resolve");
+fn model_still_being_checked_stays_usable_for_transcription() {
+    let (store, dir) = temp_store("existing-pending");
+    fs::create_dir_all(&dir).unwrap();
+    let spec = catalog::find("whisper-base.en").unwrap();
+    fs::write(store.model_path(spec), b"not yet checked").unwrap();
+    let store = std::sync::Arc::new(store);
+
+    // Simulate the startup hash in progress: it holds the hashing lock.
+    let hashing = store.hashing.lock().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let worker = std::sync::Arc::clone(&store);
+    std::thread::spawn(move || {
+        let _ = tx.send(worker.resolved_path(spec.id).map(|_| ()));
+    });
+    let resolved = rx
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .expect("resolved_path must not wait for the background hash");
+    drop(hashing);
+
+    assert!(resolved.is_ok(), "unchecked model is usable: {resolved:?}");
+    assert_eq!(store.status(spec.id).unwrap().status, "available");
+    assert_eq!(
+        store.known_verdict(spec),
+        None,
+        "resolved_path never hashes"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn model_found_damaged_by_the_check_is_refused() {
+    let (store, dir) = temp_store("existing-refused");
     fs::create_dir_all(&dir).unwrap();
     let spec = catalog::find("whisper-base.en").unwrap();
     fs::write(store.model_path(spec), b"tampered").unwrap();
-    // Status is optimistic until the background hash finishes...
-    assert_eq!(store.status(spec.id).unwrap().status, "available");
-    // ...but transcription hashes first and refuses the file.
-    assert!(store.resolved_path(spec.id).is_err());
-    assert_eq!(store.status(spec.id).unwrap().status, "failed");
+    assert_eq!(store.verify_existing(spec), Some(Verdict::Corrupt));
+    let err = store.resolved_path(spec.id).unwrap_err();
+    assert_eq!(err.code, "model-missing");
+    assert!(err.message.contains("damaged"), "{}", err.message);
     let _ = fs::remove_dir_all(&dir);
 }
 

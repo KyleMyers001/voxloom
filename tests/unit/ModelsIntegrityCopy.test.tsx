@@ -1,6 +1,7 @@
 /// BUS-35: damaged existing-model copy; no double period in other failures.
 /// (The damaged-download copy is covered by ModelsDownloadDamaged.test.tsx.)
 import { act, renderHook, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ModelsTab } from '../../src/features/settings/ModelsTab';
 import { createMockSttModelStore } from '../../src/services/stt/mockStt';
@@ -35,6 +36,28 @@ describe('BUS-35 integrity copy', () => {
     const row = (await screen.findByText('whisper-base.en')).closest('li')!;
     expect(within(row).getByRole('alert')).toHaveTextContent('Model file is damaged. Download it again.');
     expect(within(row).getByRole('button', { name: 'Retry download' })).toBeInTheDocument();
+    factory.store = null;
+  });
+
+  it('re-downloads a damaged existing file in one click', async () => {
+    const store = createMockSttModelStore({ downloadSteps: 1 });
+    const realList = store.list.bind(store);
+    // Native reports the damaged file as failed until a new download replaces it.
+    vi.spyOn(store, 'list').mockImplementation(async () =>
+      (await realList()).map((m) =>
+        m.id === 'whisper-base.en' && m.status === 'missing' ? { ...m, status: 'failed' as const } : m,
+      ),
+    );
+    const download = vi.spyOn(store, 'download');
+    factory.store = store;
+    const user = userEvent.setup();
+    renderWithApp(<ModelsTab />);
+    const row = (await screen.findByText('whisper-base.en')).closest('li')!;
+    await user.click(await within(row).findByRole('button', { name: 'Retry download' }));
+    expect(download).toHaveBeenCalledTimes(1);
+    expect(download.mock.calls[0][0]).toBe('whisper-base.en');
+    expect(await within(row).findByText('On disk')).toBeInTheDocument();
+    expect(within(row).queryByRole('alert')).toBeNull();
     factory.store = null;
   });
 });

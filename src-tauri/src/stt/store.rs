@@ -92,8 +92,8 @@ impl ModelStore {
         let status = if self.is_downloading(spec.id) {
             "downloading"
         } else if path.is_file() {
-            // Not yet verified (startup hash still running) reads as available;
-            // transcription verifies synchronously before use (resolved_path).
+            // Not yet verified (startup hash still running) reads as available
+            // and stays usable; only a file the check found damaged is failed.
             match self.known_verdict(spec) {
                 Some(existing::Verdict::Corrupt) => "failed",
                 _ => "available",
@@ -126,11 +126,9 @@ impl ModelStore {
                 ),
             ));
         }
-        let verdict = match self.known_verdict(spec) {
-            Some(v) => Some(v),
-            None => self.verify_existing(spec),
-        };
-        if verdict != Some(existing::Verdict::Verified) {
+        // Never hash here: a model still being checked by the background
+        // startup pass stays usable, so dictation never waits on it.
+        if self.known_verdict(spec) == Some(existing::Verdict::Corrupt) {
             return Err(SttErrorDto::new(
                 "model-missing",
                 "Model file is damaged. Download it again in Settings → Models.",
