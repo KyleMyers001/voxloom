@@ -16,7 +16,8 @@ The desktop app keeps its data as **unencrypted JSON** in its app data folder:
 ├── *.json.unreadable-*.bak  backups of a store file Voxloom couldn't read (see below)
 ├── dictionary.json   your custom words
 ├── settings.json     preferences
-└── models/           downloaded Whisper model files (*.bin)
+└── models/           downloaded Whisper model files (*.bin), and *.bin.verified
+                      markers (pinned SHA-256, size, modified time; no user data)
 ```
 
 `history.json` is not encrypted. Any process running as your macOS user, and

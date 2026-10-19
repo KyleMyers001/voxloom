@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SttModelStore } from './contracts';
 import { createSttModelStore } from './factory';
 import { resolveTranscriptionModelId } from './resolveModelId';
+import { listenModelsChanged } from './modelsChanged';
 import { useDownloadPoll } from './useDownloadPoll';
 import { SttError, type SttDownloadProgress, type SttModelInfo } from './types';
 
@@ -85,6 +86,18 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
       aliveRef.current = false;
     };
   }, [reload]);
+
+  // Re-list when the startup check finishes a model file (damaged → Retry).
+  useEffect(() => {
+    let stop: (() => void) | null = null;
+    let live = true;
+    void listenModelsChanged(() => { void refresh().catch(() => undefined); })
+      .then((un) => { if (live) stop = un; else un(); }, () => undefined);
+    return () => {
+      live = false;
+      stop?.();
+    };
+  }, [refresh]);
 
   // Also the Retry action: it clears the row's failure as the new attempt starts.
   const downloadModel = useCallback(async (modelId: string) => {

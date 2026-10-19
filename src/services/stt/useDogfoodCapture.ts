@@ -110,9 +110,16 @@ export function hudResultFor(
   return null; // inserted, unverified, or may-have-inserted: silent dismiss
 }
 
-function errorText(error: unknown): string {
+/** Same wording as the Models row (ModelCard), plus where to fix it. */
+export const MODEL_DAMAGED_MESSAGE = 'Model file is damaged. Download it again in Settings.';
+
+/** Model-file messages (here and native resolved_path) that already say what to do. */
+const MODEL_FILE_PREFIXES = ['Model file is damaged.', 'Couldn\'t open the model file.'];
+
+export function errorText(error: unknown): string {
   if (error instanceof SttError) {
     if (error.code === 'model-missing') {
+      if (MODEL_FILE_PREFIXES.some((p) => error.message.startsWith(p))) return error.message;
       // Settings guidance lives here once; missingModelMessage is the fact only.
       return `${error.message} Download the selected model in Settings first.`;
     }
@@ -213,6 +220,9 @@ export function useDogfoodCapture(
   const ensureModelAvailable = useCallback(async (rawModelId: string) => {
     const modelId = resolveTranscriptionModelId(rawModelId);
     const info = await storeRef.current.status(modelId);
+    if (info?.status === 'failed') {
+      throw new SttError('model-missing', MODEL_DAMAGED_MESSAGE);
+    }
     if (!info || info.status !== 'available') {
       throw new SttError(
         'model-missing',
