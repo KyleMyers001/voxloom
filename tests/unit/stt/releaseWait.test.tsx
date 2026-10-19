@@ -10,6 +10,7 @@ vi.unmock('../../../src/services/capture/useCaptureState');
 vi.mock('../../../src/services/capture/captureService', () => mocks);
 
 import { useCaptureState } from '../../../src/services/capture/useCaptureState';
+import { SUPERSEDED_DELIVERY_MESSAGE } from '../../../src/services/delivery';
 import { installCaptureBus, type CaptureMocks } from './captureBus';
 import { EMPTY_STOP, setup } from './dogfoodHarness';
 
@@ -31,7 +32,7 @@ async function tapThenRehold() {
 
 describe('re-hold waiting for a stopping tap (BUS-91)', () => {
   it.each(['Escape', 'Home Cancel'])('%s during the wait keeps the tap and cancels only the re-hold', async (how) => {
-    const { escape, onHistoryRecord, rehold, result, scopes } = await tapThenRehold();
+    const { escape, onHistoryRecord, onToast, rehold, result, scopes } = await tapThenRehold();
     expect(scopes).toHaveLength(1); // the re-hold arms Escape only after the release
     expect(result.current.hudReady).toBe(false);
     if (how === 'Escape') expect(escape()).toBe(true);
@@ -44,12 +45,14 @@ describe('re-hold waiting for a stopping tap (BUS-91)', () => {
     expect(onHistoryRecord.mock.calls[0][0]).toMatchObject({ status: 'failed', text: 'tap words' });
     expect(mocks.startFullCapture).toHaveBeenCalledOnce(); // the mic never reopened
     expect(result.current.phase).toBe('cancelled');
+    // The user cancelled: no "replaced" toast even though the stop won.
+    expect(onToast).not.toHaveBeenCalledWith(expect.stringContaining(SUPERSEDED_DELIVERY_MESSAGE));
     await act(async () => { await result.current.start(); }); // the mic is free
     expect(result.current.phase).toBe('recording');
   });
 
   it('releasing during the wait cancels without opening the mic', async () => {
-    const { onErrorToast, onHistoryRecord, rehold, result } = await tapThenRehold();
+    const { onErrorToast, onHistoryRecord, onToast, rehold, result } = await tapThenRehold();
     await act(async () => { await result.current.stop(); });
     expect(mocks.stopCapture).toHaveBeenCalledOnce(); // the tap's stop is not repeated
     act(() => bus.emit(bus.stopOf(0, 'tap')));
@@ -58,6 +61,8 @@ describe('re-hold waiting for a stopping tap (BUS-91)', () => {
     expect(result.current.phase).toBe('cancelled');
     expect(onErrorToast).not.toHaveBeenCalledWith(EMPTY_STOP);
     await waitFor(() => expect(onHistoryRecord).toHaveBeenCalledOnce());
+    expect(onHistoryRecord.mock.calls[0][0]).toMatchObject({ status: 'failed', text: 'tap words' });
+    expect(onToast).toHaveBeenLastCalledWith(SUPERSEDED_DELIVERY_MESSAGE); // a release, not a cancel
   });
 });
 
@@ -68,13 +73,15 @@ describe('release timeout (BUS-91)', () => {
     await act(async () => { await result.current.startFullCaptureSession(undefined, 'tap'); });
     await act(async () => { await result.current.stopFullCapture(); });
     vi.useFakeTimers();
-    let released = false;
-    const wait = result.current.waitForCaptureRelease().then(() => { released = true; });
+    let released: boolean | null = null;
+    const wait = result.current.waitForCaptureRelease().then((value) => { released = value; });
     await act(async () => { await vi.advanceTimersByTimeAsync(4_999); });
-    expect(released).toBe(false);
+    expect(released).toBeNull();
     expect(mocks.cancelCapture).not.toHaveBeenCalled();
     await act(async () => { await vi.advanceTimersByTimeAsync(1); await wait; });
+    expect(released).toBe(false); // timed out
     expect(mocks.cancelCapture).toHaveBeenCalledExactlyOnceWith(bus.requestOf(0));
+    expect(result.current.captureState).toEqual({ kind: 'idle' }); // the UI shows no live capture
     await act(async () => {
       expect(await result.current.startFullCaptureSession(undefined, 'hold')).toBe('started');
     });

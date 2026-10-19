@@ -15,7 +15,7 @@ function stubCapture(state: CaptureState = { kind: 'idle' }): UseCaptureStateRes
     refreshDevices: vi.fn().mockResolvedValue(undefined), requestMicPermission: vi.fn(),
     runMicTest: vi.fn(), startFullCaptureSession: vi.fn().mockResolvedValue('started'),
     stopFullCapture: vi.fn(), stopMicTest: vi.fn(),
-    waitForCaptureRelease: vi.fn().mockResolvedValue(undefined),
+    waitForCaptureRelease: vi.fn().mockResolvedValue(true),
   };
 }
 
@@ -85,30 +85,30 @@ describe('Escape-cancel follow-ups (BUS-91)', () => {
 
   it('restart after cancel waits for owner release instead of reporting busy', async () => {
     vi.spyOn(cancelScopeModule, 'beginCancelScope').mockResolvedValue(fakeScope());
-    let release!: () => void;
+    let release!: (released: boolean) => void;
     const capture = stubCapture();
-    capture.waitForCaptureRelease = vi.fn(() => new Promise<void>((done) => { release = done; }));
+    capture.waitForCaptureRelease = vi.fn(() => new Promise<boolean>((done) => { release = done; }));
     const { result } = await setup(capture);
     let start!: Promise<void>;
     act(() => { start = result.current.start(); });
     await waitFor(() => expect(capture.waitForCaptureRelease).toHaveBeenCalledOnce());
     expect(capture.startFullCaptureSession).not.toHaveBeenCalled();
-    await act(async () => { release(); await start; });
+    await act(async () => { release(true); await start; });
     expect(capture.startFullCaptureSession).toHaveBeenCalledOnce();
     expect(result.current.phase).toBe('recording');
   });
 
   it('does not start capture when cancelled while waiting for release', async () => {
     vi.spyOn(cancelScopeModule, 'beginCancelScope').mockResolvedValue(fakeScope());
-    let release!: () => void;
+    let release!: (released: boolean) => void;
     const capture = stubCapture();
-    capture.waitForCaptureRelease = vi.fn(() => new Promise<void>((done) => { release = done; }));
+    capture.waitForCaptureRelease = vi.fn(() => new Promise<boolean>((done) => { release = done; }));
     const { result } = await setup(capture);
     let start!: Promise<void>;
     act(() => { start = result.current.start(); });
     await waitFor(() => expect(capture.waitForCaptureRelease).toHaveBeenCalledOnce());
     act(() => result.current.cancel());
-    await act(async () => { release(); await start; });
+    await act(async () => { release(true); await start; });
     expect(capture.startFullCaptureSession).not.toHaveBeenCalled();
     expect(result.current.phase).toBe('cancelled');
   });
@@ -135,15 +135,15 @@ describe('Escape-cancel follow-ups (BUS-91)', () => {
     };
     expect(escape()).toBe(true);
     rerender({ state: { kind: 'cancelled' } });
-    let release!: () => void;
+    let release!: (released: boolean) => void;
     vi.mocked(capture.waitForCaptureRelease)
-      .mockImplementationOnce(() => new Promise<void>((done) => { release = done; }));
+      .mockImplementationOnce(() => new Promise<boolean>((done) => { release = done; }));
     let restart!: Promise<void>;
     act(() => { restart = result.current.start(); });
     await waitFor(() => expect(capture.waitForCaptureRelease).toHaveBeenCalledTimes(2));
     // The old capture's terminal event lands; it is also what releases the mic.
     rerender({ state: stale });
-    await act(async () => { release(); await restart; });
+    await act(async () => { release(true); await restart; });
     expect(capture.startFullCaptureSession).toHaveBeenCalledTimes(2);
     expect(result.current.phase).toBe('recording');
     expect(scope.dispose).not.toHaveBeenCalled();

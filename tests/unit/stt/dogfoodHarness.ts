@@ -43,7 +43,7 @@ function stubCapture(listeners?: Set<(stopped: StoppedCapture) => void>): UseCap
     refreshDevices: vi.fn().mockResolvedValue(undefined), requestMicPermission: vi.fn(),
     runMicTest: vi.fn(), startFullCaptureSession: vi.fn().mockResolvedValue('started'),
     stopFullCapture: vi.fn().mockResolvedValue(undefined), stopMicTest: vi.fn(),
-    waitForCaptureRelease: vi.fn().mockResolvedValue(undefined),
+    waitForCaptureRelease: vi.fn().mockResolvedValue(true),
   };
 }
 

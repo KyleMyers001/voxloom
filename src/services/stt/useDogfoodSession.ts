@@ -9,9 +9,11 @@ import { beginCancelScope } from '../shortcut/cancelScope';
 import { useCancelUnavailable, type CancelUnavailable } from '../shortcut/cancelUnavailable';
 import { errorText } from './dogfoodModel';
 import type { DogfoodOrigin, DogfoodPhase, DogfoodViewActions } from './dogfoodPhase';
-import {
-  afterListening, beginSession, ownedBy, withNotice, type DogfoodLiveSession,
-} from './dogfoodSessionState';
+import { afterListening, endWithoutListening } from './dogfoodNotice';
+import { beginSession, ownedBy, type DogfoodLiveSession } from './dogfoodSessionState';
+
+/** The older capture never released the mic; it was cancelled instead. */
+export const RELEASE_TIMEOUT = 'The previous dictation did not stop in time. Try again.';
 
 export interface DogfoodSessionInput {
   actions: DogfoodViewActions;
@@ -46,12 +48,11 @@ export function useDogfoodSession({
     notice: cancelNotice, report: reportCancelUnavailable, takeHint: takeCancelHint,
   } = useCancelUnavailable();
 
-  /** End as cancelled; a held notice still shows. */
-  const endCancelled = useCallback(() => {
+  /** End as cancelled: by the user (drops a held notice) or by a release. */
+  const endCancelled = useCallback((how: 'cancelled' | 'released') => {
     setPhase('cancelled');
     setMessage('Capture cancelled — nothing transcribed.');
-    const held = withNotice(live, null);
-    if (held) toast(held);
+    endWithoutListening(live, how, actions);
   }, [actions, live]);
 
   const start = useCallback(async (source: DogfoodOrigin = 'home') => {
@@ -68,9 +69,9 @@ export function useDogfoodSession({
     setHudResult(null);
     setMessage(null);
     setIntendedTarget(null);
-    const fail = (text: string) => {
+    const fail = (error: string) => {
       setPhase('error');
-      announceError(withNotice(live, text));
+      endWithoutListening(live, { error }, actions);
     };
 
     try {
@@ -78,7 +79,7 @@ export function useDogfoodSession({
       if (superseded()) return;
       // An older capture (a quick tap still stopping) owns the mic until its
       // terminal event. Wait before arming Escape so no cancel can reach it.
-      await capture.waitForCaptureRelease();
+      if (await capture.waitForCaptureRelease() === false) throw new Error(RELEASE_TIMEOUT);
       if (superseded()) return;
       try {
         cancellation.scope = await beginCancelScope(() => {
@@ -105,7 +106,7 @@ export function useDogfoodSession({
     if (superseded()) return;
 
     // Released during the wait or model validation: never open the mic.
-    if (live.stopRequested) return endCancelled();
+    if (live.stopRequested) return endCancelled('released');
     const deviceId = preferredDeviceId === SYSTEM_DEFAULT_DEVICE_ID ? undefined : preferredDeviceId || undefined;
 
     try {
@@ -159,7 +160,7 @@ export function useDogfoodSession({
       // Only its own capture: an older one still stopping keeps its audio.
       capture.cancelActiveCapture(ownedBy(live.cancellation));
     } finally {
-      endCancelled();
+      endCancelled('cancelled');
     }
   }, [actions, capture, endCancelled, live]);
 

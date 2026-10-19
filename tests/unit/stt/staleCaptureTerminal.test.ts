@@ -11,7 +11,7 @@ describe('capture terminal events and the live session (BUS-91)', () => {
     const { capture, escape, onErrorToast, rerender, result } = await setup();
     await act(async () => { await result.current.start(); });
     await act(async () => { await result.current.stop(); });
-    const release = deferred<void>();
+    const release = deferred<boolean>();
     vi.mocked(capture.waitForCaptureRelease).mockReturnValueOnce(release.promise);
     let rehold!: Promise<void>;
     act(() => { rehold = result.current.start(); });
@@ -19,7 +19,7 @@ describe('capture terminal events and the live session (BUS-91)', () => {
     // The tap's capture ends with nothing recorded while the re-hold waits.
     rerender({ state: emptyStop });
     expect(result.current.phase).not.toBe('error');
-    await act(async () => { release.settle(); await rehold; });
+    await act(async () => { release.settle(true); await rehold; });
     expect(result.current.phase).toBe('recording');
     expect(onErrorToast).not.toHaveBeenCalledWith(EMPTY_STOP);
     expect(escape()).toBe(true);

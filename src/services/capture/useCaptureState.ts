@@ -81,9 +81,9 @@ export interface UseCaptureStateResult {
    * Resolve once a cancelled or stopping capture's terminal event releases
    * ownership (bounded), so a fast restart is not refused as busy.
    * Resolves at once when no cancelled or stopping owner is pending. On
-   * timeout it cancels that capture and drops its ownership.
+   * timeout it cancels that capture, drops its ownership and resolves false.
    */
-  waitForCaptureRelease: () => Promise<void>;
+  waitForCaptureRelease: () => Promise<boolean>;
 }
 
 /** Bound on waiting for a cancelled capture's terminal event. */
@@ -620,14 +620,16 @@ export function useCaptureState(): UseCaptureStateResult {
     const owner = ownerRef.current;
     const waiter = terminalWaiterRef.current;
     if (!owner || waiter?.requestId !== owner.requestId
-        || !waiter.cancelSent) return;
-    if (await raceTimeout(waiter.promise, RELEASE_TIMEOUT_MS)) return;
-    if (!mountedRef.current || ownerRef.current !== owner) return;
+        || !waiter.cancelSent) return true;
+    if (await raceTimeout(waiter.promise, RELEASE_TIMEOUT_MS)) return true;
+    if (!mountedRef.current || ownerRef.current !== owner) return true;
     // The terminal never came: cancel that capture and drop its ownership,
     // so this and every later start is not refused as busy.
     void cancelCapture(owner.requestId).catch(() => {});
     ownerRef.current = null;
     if (terminalWaiterRef.current === waiter) terminalWaiterRef.current = null;
+    setCaptureState({ kind: 'idle' }); // no capture is live any more
+    return false;
   }, []);
 
   const stopMicTest = useCallback(() => {
