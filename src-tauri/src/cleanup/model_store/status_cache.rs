@@ -13,8 +13,11 @@ pub(super) struct FileFingerprint {
     pub(super) ino: u64,
     pub(super) len: u64,
     pub(super) modified: SystemTime,
-    /// Change-time (content or metadata). Catches in-place rewrites that
-    /// restore mtime; userspace cannot forge it back on unix.
+    /// Change-time (content or metadata). Userspace cannot set it back, so it
+    /// usually catches an in-place rewrite that restores mtime. It is only as
+    /// fine as the filesystem clock tick, though: a rewrite in the same tick
+    /// keeps the fingerprint. Status is a hint; the lease re-hash
+    /// (ModelLease::verify) is the real guard and drops this cache on failure.
     #[cfg(unix)]
     pub(super) ctime_secs: i64,
     #[cfg(unix)]

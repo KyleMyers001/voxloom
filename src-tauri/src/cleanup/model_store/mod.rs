@@ -230,6 +230,12 @@ impl CleanupModelStore {
     /// Cheap status path: skip a full re-hash when the fingerprint matches.
     /// Hashing runs without the store lock so lease/import are not blocked.
     fn available_for(&self, artifact: ArtifactSpec) -> bool {
+        self.available_with(|path| validate_artifact(path, artifact).is_ok())
+    }
+
+    /// `available_for` with the hash step injected, so tests can act inside
+    /// the unlocked hash window.
+    fn available_with(&self, hash: impl FnOnce(&Path) -> bool) -> bool {
         let path = self.model_path();
         let to_hash = {
             let mut inner = self.inner.lock().unwrap();
@@ -243,7 +249,7 @@ impl CleanupModelStore {
             }
         };
 
-        let hash_ok = validate_artifact(&path, artifact).is_ok();
+        let hash_ok = hash(&path);
 
         let mut inner = self.inner.lock().unwrap();
         match fingerprint(&path) {
@@ -271,5 +277,7 @@ impl CleanupModelStore {
     }
 }
 
+#[cfg(test)]
+mod status_tests;
 #[cfg(test)]
 mod tests;

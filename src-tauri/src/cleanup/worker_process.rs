@@ -196,18 +196,63 @@ mod tests {
         );
     }
 
-    /// The child must see the model on fd 3 via the relocated descriptor,
-    /// not the original (which may be 0/1 when stdio was closed).
+    /// The child must see the model on fd 3 via the relocated descriptor.
     #[cfg(unix)]
     #[test]
     fn spawn_passes_relocated_model_on_fd_three() {
-        use crate::cleanup::test_support::{test_root, wait_until, write_executable};
-        use std::fs;
+        let root = spawn_root("spawn-fd3");
+        let model = std::fs::File::open(root.join("model.gguf")).unwrap();
+        assert_child_reads_model_on_fd_three(&root, &model);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A model opened while stdin was closed lands on fd 0, which the child's
+    /// stdin pipe replaces. Only the relocated descriptor still names the
+    /// model, so spawning from the original fd would hand the pipe to fd 3.
+    #[cfg(unix)]
+    #[test]
+    fn spawn_uses_relocated_fd_when_model_sits_on_stdin() {
+        use std::fs::File;
+        use std::mem::ManuallyDrop;
+        use std::os::fd::{AsRawFd, FromRawFd};
+
+        let root = spawn_root("spawn-fd0");
+        let model = File::open(root.join("model.gguf")).unwrap();
+        // Borrow fd 0 for the spawn, then restore the test process's stdin.
+        // Nothing in the test harness reads stdin meanwhile.
+        // SAFETY: dup/dup2/close on fds this test owns; fd 0 is wrapped in
+        // ManuallyDrop so it is never closed by the File.
+        let saved = unsafe { libc::dup(0) };
+        assert!(saved >= 0, "save stdin");
+        assert_eq!(unsafe { libc::dup2(model.as_raw_fd(), 0) }, 0);
+        let on_stdin = ManuallyDrop::new(unsafe { File::from_raw_fd(0) });
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            assert_child_reads_model_on_fd_three(&root, &on_stdin)
+        }));
+        unsafe {
+            libc::dup2(saved, 0);
+            libc::close(saved);
+        }
+        let _ = std::fs::remove_dir_all(&root);
+        if let Err(panic) = result {
+            std::panic::resume_unwind(panic);
+        }
+    }
+
+    #[cfg(unix)]
+    fn spawn_root(label: &str) -> std::path::PathBuf {
+        let root = crate::cleanup::test_support::test_root().join(label);
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("model.gguf"), b"GGUFtest").unwrap();
+        root
+    }
+
+    #[cfg(unix)]
+    fn assert_child_reads_model_on_fd_three(root: &std::path::Path, model: &std::fs::File) {
+        use crate::cleanup::test_support::{wait_until, write_executable};
         use std::time::Duration;
 
-        let root = test_root().join("spawn-fd3");
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
         let marker = root.join("fd3-bytes");
         let worker = root.join("worker.py");
         write_executable(
@@ -217,18 +262,12 @@ mod tests {
                 marker.display()
             ),
         );
-        let model_path = root.join("model.gguf");
-        fs::write(&model_path, b"GGUFtest").unwrap();
-        let model = fs::File::open(&model_path).unwrap();
-        let process = super::WorkerProcess::spawn(&worker, &model).unwrap();
-        assert!(
-            wait_until(Duration::from_secs(2), || {
-                fs::read(&marker).ok().as_deref() == Some(b"GGUFtest".as_slice())
-            }),
-            "spawn must inherit the relocated model on fd 3"
-        );
+        let process = super::WorkerProcess::spawn(&worker, model).unwrap();
+        let seen = wait_until(Duration::from_secs(2), || {
+            std::fs::read(&marker).ok().as_deref() == Some(b"GGUFtest".as_slice())
+        });
         process.handle.finish();
-        let _ = fs::remove_dir_all(&root);
+        assert!(seen, "spawn must inherit the relocated model on fd 3");
     }
 
     #[cfg(unix)]
