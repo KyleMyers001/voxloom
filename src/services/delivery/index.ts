@@ -8,7 +8,10 @@ export {
   MANUAL_RECOVERY_HINT,
   reasonForKind,
   restoreSkippedSuffix,
+  STALE_DELIVERY_DETAIL,
   statusLabel,
+  SUPERSEDED_DELIVERY_MESSAGE,
+  supersededDeliveryMessage,
 } from './messages';
 export {
   mayInsert,

@@ -11,6 +11,7 @@ import type { CleanupEngine } from '../cleanup/contracts';
 import {
   createStubDeliveryAdapter,
   createTauriDeliveryAdapter,
+  supersededDeliveryMessage,
   type DeliveryPlatformAdapter,
 } from '../delivery';
 import { prepareDogfoodCleanup } from './dogfoodCleanup';
@@ -156,9 +157,10 @@ export function useDogfoodProcessing({
       if (record) {
         optionsRef.current.onHistoryRecord?.(record);
       }
-      // Stale session: evidence still surfaces as a toast, phase untouched.
+      // Superseded (a cancel returned above): evidence still surfaces as a
+      // toast, phase untouched.
       if (current()) announce(result.delivery.message);
-      else toast(result.delivery.message);
+      else toast(supersededDeliveryMessage(result.delivery));
     } catch (error: unknown) {
       await settleCancellation();
       if (cancellation.cancelled) return;
