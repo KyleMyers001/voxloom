@@ -9,6 +9,8 @@ pub mod model_store;
 mod ownership;
 mod picker;
 pub mod protocol;
+#[cfg(all(test, unix))]
+mod state_tests;
 pub mod supervisor;
 #[cfg(all(test, unix))]
 mod test_support;
@@ -67,6 +69,15 @@ impl CleanupState {
             CleanupModelStore::new(std::env::temp_dir().join("voxloom-cleanup-models")),
             PathBuf::new(),
         )
+    }
+
+    /// Startup: the `from_app` result, or (after logging why setup failed)
+    /// the disposable fallback, so app-data resolution never crashes startup.
+    pub fn or_fallback(result: Result<Self, String>) -> Self {
+        result.unwrap_or_else(|error| {
+            eprintln!("[cleanup] setup failed, using disposable fallback: {error}");
+            Self::fallback()
+        })
     }
 
     fn with_parts(models: CleanupModelStore, worker_path: PathBuf) -> Self {
