@@ -63,7 +63,7 @@ function symbols(text: string): string[] {
  * One quotation spans the whole text, ignoring trailing sentence punctuation
  * and dropped leading fillers: `um "hello there"` and `"Hello there."` match.
  */
-function wrapsWholeText(text: string): boolean {
+export function wrapsWholeText(text: string): boolean {
   let core = text.trim().normalize('NFC');
   for (;;) {
     const lead = /^([\p{L}]+)[\s,.…]+/u.exec(core);
@@ -75,6 +75,14 @@ function wrapsWholeText(text: string): boolean {
   const indices = quoteMarkIndices(characters);
   return indices.length >= 2
     && indices[0] === 0 && indices.at(-1) === characters.length - 1;
+}
+
+/**
+ * Leaked model reasoning (`<think>`, `reasoning:`). Only markers the speaker
+ * did not dictate count, so `my reasoning: it is cheap` can still be cleaned.
+ */
+function reasoningMarkers(text: string): number {
+  return text.normalize('NFC').match(/<\/?think>|reasoning:/giu)?.length ?? 0;
 }
 
 function hasUnsafeEncoding(text: string): boolean {
@@ -103,7 +111,7 @@ export function validateCleanupOutput(
   const maxChars = rawText.length * CLEANUP_OUTPUT_EXPANSION
     + CLEANUP_OUTPUT_EXTRA_CHARS;
   if (cleaned.length > maxChars) return null;
-  if (/<\/?think>|reasoning:/iu.test(cleaned)) return null;
+  if (reasoningMarkers(cleaned) > reasoningMarkers(rawText)) return null;
   if (!sameMultiset(protectedValues(rawText), protectedValues(cleaned))) return null;
   if (!preservesCapitalization(rawText, cleaned)) return null;
   if (JSON.stringify(symbols(rawText)) !== JSON.stringify(symbols(cleaned))) return null;
