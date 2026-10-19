@@ -177,8 +177,10 @@ time limit. Model files already on disk (including ones downloaded before
 pinning) are checked once against the same size and SHA-256 in the background
 after launch; dictation keeps working while that runs. A passing file gets a
 `<file>.verified` marker (hash, size and modified time) so it isn't hashed
-again. A file that fails or can't be read is kept, shows as damaged in the
-Models tab with Retry, and isn't used for transcription.
+again. A file that fails is kept, shows as damaged in the Models tab with
+Retry, and isn't used for transcription. A file that can't be opened shows
+"Couldn't open the model file" with Retry; dictation tries to open it again
+each time and uses it once it opens.
 
 Real whisper.cpp linkage is **opt-in** on macOS:
 

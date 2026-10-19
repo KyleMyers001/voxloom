@@ -13,6 +13,10 @@ import { SttError, type SttDownloadProgress, type SttModelInfo } from './types';
 /** BUS-35 checksum failure copy (hashes are only in the native log). */
 export const DOWNLOAD_DAMAGED = 'Download was damaged. Nothing was saved.';
 
+/** A model file on disk that couldn't be opened (row and dictation copy). */
+export const MODEL_UNREADABLE =
+  'Couldn\'t open the model file. Try again, or download it again if this keeps happening.';
+
 export interface UseSttModelsOptions {
   /** Persist selection (Settings `transcriptionModel`). */
   onSelect: (modelId: string) => void;

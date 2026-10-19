@@ -1,7 +1,7 @@
 import { useApp } from '../../app/AppContext';
 import { Banner } from '../../components/Banner';
 import { EmptyState } from '../../components/EmptyState';
-import { useSttModels } from '../../services/stt/useSttModels';
+import { MODEL_UNREADABLE, useSttModels } from '../../services/stt/useSttModels';
 import { ModelCard } from './ModelCard';
 
 /** Models tab (M1–M7, UI PR 7): model cards, progress, Retry download, list-error Try again. */
@@ -35,7 +35,7 @@ export function ModelsTab() {
       <ul className="stt-model-list">
         {stt.models.map((model) => (
           <ModelCard
-            failure={stt.failures[model.id]}
+            failure={stt.failures[model.id] ?? (model.failureReason === 'unreadable' ? MODEL_UNREADABLE : undefined)}
             key={model.id}
             model={model}
             onCancel={() => { void stt.cancelDownload(model.id).catch(() => {}); }}

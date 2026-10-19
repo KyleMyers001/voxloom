@@ -35,6 +35,7 @@ import {
 import { createSttModelStore } from './factory';
 import { resolveTranscriptionModelId } from './resolveModelId';
 import { SttError, type Transcript } from './types';
+import { MODEL_UNREADABLE } from './useSttModels';
 
 export type DogfoodPhase =
   | 'idle'
@@ -221,7 +222,10 @@ export function useDogfoodCapture(
     const modelId = resolveTranscriptionModelId(rawModelId);
     const info = await storeRef.current.status(modelId);
     if (info?.status === 'failed') {
-      throw new SttError('model-missing', MODEL_DAMAGED_MESSAGE);
+      throw new SttError(
+        'model-missing',
+        info.failureReason === 'unreadable' ? MODEL_UNREADABLE : MODEL_DAMAGED_MESSAGE,
+      );
     }
     if (!info || info.status !== 'available') {
       throw new SttError(

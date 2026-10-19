@@ -147,11 +147,14 @@ pub fn run() {
             app.manage(cleanup);
             let stt = SttState::new(models, buffers);
             // One-time hash of unmarked model files, off the main thread. Each
-            // verdict tells Settings → Models to re-list.
+            // verdict (and an unreadable file opening again) re-lists Models.
             let handle = app.handle().clone();
-            stt.models.spawn_verify_existing(move || {
+            let models_changed: stt::store::ModelsChanged = Arc::new(move || {
                 let _ = handle.emit("stt:models-changed", ());
             });
+            stt.models
+                .set_on_models_changed(Arc::clone(&models_changed));
+            stt.models.spawn_verify_existing(move || models_changed());
             app.manage(stt);
             #[cfg(target_os = "macos")]
             app.set_menu(settings_window::app_menu(app.handle())?)?;

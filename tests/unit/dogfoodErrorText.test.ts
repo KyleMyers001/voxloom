@@ -11,7 +11,7 @@ describe('errorText', () => {
     expect(errorText(err(MODEL_DAMAGED_MESSAGE))).toBe(MODEL_DAMAGED_MESSAGE);
   });
   it('shows the unreadable copy as is', () => {
-    const m = 'Couldn\'t open the model file. Download it again in Settings.';
+    const m = 'Couldn\'t open the model file. Try again, or download it again if this keeps happening.';
     expect(errorText(err(m))).toBe(m);
   });
   it('adds one short Settings hint to a missing model', () => {

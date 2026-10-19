@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ModelsTab } from '../../src/features/settings/ModelsTab';
 import { createMockSttModelStore } from '../../src/services/stt/mockStt';
 import { SttError } from '../../src/services/stt/types';
-import { useSttModels } from '../../src/services/stt/useSttModels';
+import { MODEL_UNREADABLE, useSttModels } from '../../src/services/stt/useSttModels';
 import { renderWithApp } from './testUtils';
 
 const factory = vi.hoisted(() => ({ store: null as unknown }));
@@ -36,6 +36,23 @@ describe('BUS-35 integrity copy', () => {
     const row = (await screen.findByText('whisper-base.en')).closest('li')!;
     expect(within(row).getByRole('alert')).toHaveTextContent('Model file is damaged. Download it again.');
     expect(within(row).getByRole('button', { name: 'Retry download' })).toBeInTheDocument();
+    factory.store = null;
+  });
+
+  it.each([
+    ['unreadable', MODEL_UNREADABLE],
+    ['damaged', 'Model file is damaged. Download it again.'],
+  ] as const)('shows the %s copy with Retry download on the row', async (reason, copy) => {
+    const store = createMockSttModelStore();
+    const models = await store.list();
+    vi.spyOn(store, 'list').mockResolvedValue(
+      models.map((m) => (m.id === 'whisper-base.en' ? { ...m, status: 'failed' as const, failureReason: reason } : m)),
+    );
+    factory.store = store;
+    renderWithApp(<ModelsTab />);
+    const row = (await screen.findByText('whisper-base.en')).closest('li')!;
+    expect(within(row).getByRole('alert').textContent).toBe(copy);
+    expect(within(row).getByRole('button', { name: 'Retry download' })).toHaveClass('primary');
     factory.store = null;
   });
 

@@ -26,6 +26,9 @@ pub struct ModelInfoDto {
     pub label: String,
     pub size_bytes: u64,
     pub status: String,
+    /// Why a `failed` model failed its on-disk check: `damaged` or `unreadable`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -48,7 +51,18 @@ pub struct ModelStore {
     verdicts: Mutex<existing::VerdictMap>,
     /// Serializes hashing so a file is never hashed twice concurrently.
     hashing: Mutex<()>,
+    /// Tells Settings → Models to re-list (`stt:models-changed`); set by lib.rs.
+    on_models_changed: Mutex<Option<ModelsChanged>>,
 }
+
+/// Callback that asks the UI to re-list models.
+pub type ModelsChanged = Arc<dyn Fn() + Send + Sync>;
+
+/// Shown when a model file failed its SHA-256 / size check.
+const DAMAGED_MESSAGE: &str = "Model file is damaged. Download it again in Settings.";
+/// Shown when a model file can't be opened (e.g. permissions).
+const UNREADABLE_MESSAGE: &str =
+    "Couldn't open the model file. Try again, or download it again if this keeps happening.";
 
 impl ModelStore {
     /// Create a store rooted at `app_data_dir/models`. Does **not** download.
@@ -58,6 +72,19 @@ impl ModelStore {
             inflight: Mutex::new(None),
             verdicts: Mutex::new(Default::default()),
             hashing: Mutex::new(()),
+            on_models_changed: Mutex::new(None),
+        }
+    }
+
+    /// Register the "models changed" notifier (lib.rs emits the Tauri event).
+    pub fn set_on_models_changed(&self, notify: ModelsChanged) {
+        *self.on_models_changed.lock().unwrap() = Some(notify);
+    }
+
+    fn notify_models_changed(&self) {
+        let notify = self.on_models_changed.lock().unwrap().clone();
+        if let Some(notify) = notify {
+            notify();
         }
     }
 
@@ -89,15 +116,22 @@ impl ModelStore {
 
     fn info_for(&self, spec: &ModelSpec) -> ModelInfoDto {
         let path = self.model_path(spec);
+        let mut failure_reason = None;
         let status = if self.is_downloading(spec.id) {
             "downloading"
         } else if path.is_file() {
             // Not yet verified (startup hash still running) reads as available
-            // and stays usable; only a file the check found damaged or unreadable
-            // is failed.
-            match self.known_verdict(spec) {
-                Some(existing::Verdict::Corrupt | existing::Verdict::Unreadable) => "failed",
-                _ => "available",
+            // and stays usable; only a file the check found damaged or
+            // unreadable is failed.
+            failure_reason = match self.current_verdict(spec) {
+                Some(existing::Verdict::Corrupt) => Some("damaged"),
+                Some(existing::Verdict::Unreadable) => Some("unreadable"),
+                _ => None,
+            };
+            if failure_reason.is_some() {
+                "failed"
+            } else {
+                "available"
             }
         } else {
             "missing"
@@ -107,6 +141,7 @@ impl ModelStore {
             label: spec.label.to_owned(),
             size_bytes: spec.size_bytes,
             status: status.to_owned(),
+            failure_reason: failure_reason.map(str::to_owned),
         }
     }
 
@@ -128,16 +163,15 @@ impl ModelStore {
             ));
         }
         // Never hash here: a model still being checked by the background
-        // startup pass stays usable, so dictation never waits on it.
-        match self.known_verdict(spec) {
-            Some(existing::Verdict::Corrupt) => Err(SttErrorDto::new(
-                "model-missing",
-                "Model file is damaged. Download it again in Settings.",
-            )),
-            Some(existing::Verdict::Unreadable) => Err(SttErrorDto::new(
-                "model-missing",
-                "Couldn't open the model file. Download it again in Settings.",
-            )),
+        // startup pass stays usable, so dictation never waits on it. A cached
+        // Unreadable verdict gets a cheap re-open first (current_verdict).
+        match self.current_verdict(spec) {
+            Some(existing::Verdict::Corrupt) => {
+                Err(SttErrorDto::new("model-missing", DAMAGED_MESSAGE))
+            }
+            Some(existing::Verdict::Unreadable) => {
+                Err(SttErrorDto::new("model-missing", UNREADABLE_MESSAGE))
+            }
             _ => Ok(path),
         }
     }

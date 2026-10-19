@@ -10,11 +10,13 @@
 //!
 //! A mismatched file is not deleted: it is reported as `failed` so the Models
 //! tab shows "Model file is damaged" with a one-click Retry download, and
-//! transcription refuses it. A file that cannot be read is reported the same
-//! way (`Unreadable`), so the user is never left with a dead "available" row.
+//! transcription refuses it. A file that cannot be read is reported as failed
+//! too (`Unreadable`), so the user is never left with a dead "available" row;
+//! unlike `Corrupt`, it is re-opened (cheaply, no hash) on each use and
+//! cleared once it opens again (`current_verdict`).
 
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -73,6 +75,10 @@ pub(super) fn write_marker(spec: &ModelSpec, model: &Path) {
     }
 }
 
+fn opens(model: &Path) -> bool {
+    File::open(model).and_then(|f| f.metadata()).is_ok()
+}
+
 impl ModelStore {
     /// Cached verdict, or the marker's, without hashing. `None` = not yet known.
     pub(super) fn known_verdict(&self, spec: &ModelSpec) -> Option<Verdict> {
@@ -84,6 +90,22 @@ impl ModelStore {
             return Some(Verdict::Verified);
         }
         None
+    }
+
+    /// Verdict to act on now. A cached `Unreadable` gets a cheap re-open
+    /// (open + metadata; no hashing, no hashing lock). If the file opens again,
+    /// the verdict is cleared back to not-yet-checked (never to verified: it
+    /// was not hashed; the next launch's background pass hashes it) and
+    /// Settings is told to re-list. `Corrupt` stays cached.
+    pub(super) fn current_verdict(&self, spec: &ModelSpec) -> Option<Verdict> {
+        let verdict = self.known_verdict(spec);
+        if verdict != Some(Verdict::Unreadable) || !opens(&self.model_path(spec)) {
+            return verdict;
+        }
+        self.verdicts.lock().unwrap().remove(spec.id);
+        self.notify_models_changed();
+        // A marker from an earlier hash may still vouch for the file.
+        self.known_verdict(spec)
     }
 
     pub(super) fn set_verdict(&self, spec: &ModelSpec, verdict: Verdict) {
