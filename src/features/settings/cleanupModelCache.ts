@@ -17,7 +17,14 @@ export interface CleanupModelSnapshot {
   workerAvailable: boolean;
 }
 
-const message = (reason: unknown) => reason instanceof Error ? reason.message : String(reason);
+const message = (reason: unknown): string => {
+  if (reason instanceof Error) return reason.message;
+  if (reason && typeof reason === 'object' && 'message' in reason
+    && typeof (reason as { message: unknown }).message === 'string') {
+    return (reason as { message: string }).message;
+  }
+  return String(reason);
+};
 
 function checkedStatus(status: CleanupModelStatus | undefined): CleanupModelStatus {
   // Native IPC result: check its shape before trusting it.

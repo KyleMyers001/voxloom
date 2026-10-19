@@ -42,18 +42,22 @@ pub async fn cleanup_pick_and_import_model<R: Runtime>(
     app: AppHandle<R>,
     webview: Webview<R>,
     state: State<'_, CleanupState>,
-) -> Result<Option<ModelStatus>, String> {
-    authorize_model_manager(webview.label(), webview.window().label())
-        .map_err(|error| error.message)?;
+) -> Result<Option<ModelStatus>, CleanupCommandError> {
+    authorize_model_manager(webview.label(), webview.window().label())?;
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
     app.run_on_main_thread(move || {
         let _ = sender.send(picker::pick_model_path());
     })
-    .map_err(|error| format!("open cleanup model picker: {error}"))?;
+    .map_err(|error| CleanupCommandError::runtime(format!("open cleanup model picker: {error}")))?;
     let source = tauri::async_runtime::spawn_blocking(move || receiver.recv())
         .await
-        .map_err(|error| format!("model picker task failed: {error}"))?
-        .map_err(|error| format!("model picker closed unexpectedly: {error}"))??;
+        .map_err(|error| {
+            CleanupCommandError::runtime(format!("model picker task failed: {error}"))
+        })?
+        .map_err(|error| {
+            CleanupCommandError::runtime(format!("model picker closed unexpectedly: {error}"))
+        })?
+        .map_err(CleanupCommandError::runtime)?;
     let Some(source_path) = source else {
         return Ok(None);
     };
@@ -62,7 +66,8 @@ pub async fn cleanup_pick_and_import_model<R: Runtime>(
         models.import(PathBuf::from(source_path).as_path())
     })
     .await
-    .map_err(|error| format!("model import task failed: {error}"))??;
+    .map_err(|error| CleanupCommandError::runtime(format!("model import task failed: {error}")))?
+    .map_err(CleanupCommandError::model)?;
     status.runtime_available = state.supervisor.available();
     Ok(Some(status))
 }
@@ -71,13 +76,14 @@ pub async fn cleanup_pick_and_import_model<R: Runtime>(
 pub async fn cleanup_model_status<R: Runtime>(
     webview: Webview<R>,
     state: State<'_, CleanupState>,
-) -> Result<ModelStatus, String> {
-    authorize_model_manager(webview.label(), webview.window().label())
-        .map_err(|error| error.message)?;
+) -> Result<ModelStatus, CleanupCommandError> {
+    authorize_model_manager(webview.label(), webview.window().label())?;
     let models = Arc::clone(&state.models);
     let mut status = tauri::async_runtime::spawn_blocking(move || models.status())
         .await
-        .map_err(|error| format!("model status task failed: {error}"))?;
+        .map_err(|error| {
+            CleanupCommandError::runtime(format!("model status task failed: {error}"))
+        })?;
     status.runtime_available = state.supervisor.available();
     Ok(status)
 }
@@ -113,6 +119,8 @@ pub async fn cleanup_run<R: Runtime>(
 ) -> Result<CleanupRunOutput, CleanupCommandError> {
     require_main(&webview)?;
     validate_request_id(&request.request_id)?;
+    // raw_text is the transcript bound (not forwarded to the worker). The
+    // renderer also checks this; keep the native guard for defense in depth.
     if request.raw_text.len() > 16_000 {
         return Err(CleanupCommandError {
             code: "context-overflow",

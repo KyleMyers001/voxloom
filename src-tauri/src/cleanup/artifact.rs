@@ -130,12 +130,21 @@ mod tests {
         }
     }
 
+    fn scratch(name: &str) -> std::path::PathBuf {
+        #[cfg(unix)]
+        let root = crate::cleanup::test_support::test_root().join(format!("artifact-{name}"));
+        #[cfg(not(unix))]
+        let root =
+            std::env::temp_dir().join(format!("voxloom-artifact-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
     #[test]
     fn validates_header_size_and_digest() {
-        let path = std::env::temp_dir().join(format!(
-            "voxloom-artifact-valid-{}.gguf",
-            std::process::id(),
-        ));
+        let root = scratch("valid");
+        let path = root.join("sample.gguf");
         fs::write(&path, b"GGUFtest").unwrap();
         assert!(validate(&path, spec(b"GGUFtest")).is_ok());
         assert!(validate(
@@ -147,7 +156,7 @@ mod tests {
         )
         .unwrap_err()
         .contains("size mismatch"));
-        let _ = fs::remove_file(path);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[cfg(unix)]
@@ -165,20 +174,17 @@ mod tests {
                 Ok(0)
             }
         }
-        let root =
-            std::env::temp_dir().join(format!("voxloom-partial-private-{}", std::process::id()));
-        fs::create_dir_all(&root).unwrap();
+        let root = scratch("partial-private");
         let destination = root.join("new.partial");
         copy_private_from(&mut Inspect(&destination), &destination).unwrap();
+        let _ = fs::remove_dir_all(root);
     }
 
     #[cfg(unix)]
     #[test]
     fn copying_rejects_symlink_sources_and_existing_destinations() {
         use std::os::unix::fs::symlink;
-        let root =
-            std::env::temp_dir().join(format!("voxloom-copy-private-{}", std::process::id()));
-        fs::create_dir_all(&root).unwrap();
+        let root = scratch("copy-private");
         let source = root.join("source");
         let link = root.join("link");
         let destination = root.join("partial");
@@ -188,17 +194,15 @@ mod tests {
         assert!(!destination.exists());
         fs::write(&destination, b"keep existing").unwrap();
         assert!(copy_private(&source, &destination).is_err());
-        assert_eq!(fs::read(destination).unwrap(), b"keep existing");
+        assert_eq!(fs::read(&destination).unwrap(), b"keep existing");
+        let _ = fs::remove_dir_all(root);
     }
 
     #[cfg(unix)]
     #[test]
     fn rejects_symlinks() {
         use std::os::unix::fs::symlink;
-        let root =
-            std::env::temp_dir().join(format!("voxloom-artifact-symlink-{}", std::process::id(),));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
+        let root = scratch("symlink");
         let real = root.join("real.gguf");
         let link = root.join("link.gguf");
         fs::write(&real, b"GGUFtest").unwrap();

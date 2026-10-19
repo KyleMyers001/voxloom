@@ -8,6 +8,9 @@ use super::artifact::{
     copy_private, open_regular, validate as validate_artifact, validate_file, ArtifactSpec,
 };
 
+mod status_cache;
+use status_cache::{available_cached, fingerprint, FileFingerprint};
+
 pub const MODEL_ID: &str = "qwen3-0.6b-q4-k-m";
 const MODEL_FILE: &str = "qwen3-0.6b-q4-k-m.gguf";
 const MODEL_SHA256: &str = "ac2d97712095a558e31573f62f466a3f9d93990898b0ec79d7c974c1780d524a";
@@ -31,6 +34,8 @@ pub struct ModelStatus {
 struct StoreInner {
     importing: bool,
     leases: usize,
+    /// Last successful status() hash, keyed by inode/size/mtime.
+    verified: Option<FileFingerprint>,
 }
 
 pub struct CleanupModelStore {
@@ -91,6 +96,7 @@ impl CleanupModelStore {
             inner: Arc::new(Mutex::new(StoreInner {
                 importing: false,
                 leases: 0,
+                verified: None,
             })),
             root,
         }
@@ -98,11 +104,16 @@ impl CleanupModelStore {
 
     pub fn status(&self) -> ModelStatus {
         ModelStatus {
-            available: validate_artifact(&self.model_path(), ARTIFACT).is_ok(),
+            available: self.available_for(ARTIFACT),
             id: MODEL_ID,
             runtime_available: false,
             sha256: MODEL_SHA256,
         }
+    }
+
+    #[cfg(test)]
+    fn status_available_for(&self, artifact: ArtifactSpec) -> bool {
+        self.available_for(artifact)
     }
 
     pub fn import(&self, source: &Path) -> Result<ModelStatus, String> {
@@ -135,7 +146,9 @@ impl CleanupModelStore {
         let destination = self.model_path();
         if validate_artifact(&destination, artifact).is_ok() {
             // Also retry durability after a prior post-rename sync failure.
-            return sync_parent(&self.root);
+            sync_parent(&self.root)?;
+            self.remember_verified(&destination);
+            return Ok(());
         }
         let temporary = self.root.join(format!("{MODEL_FILE}.partial"));
         if temporary.exists() {
@@ -151,6 +164,9 @@ impl CleanupModelStore {
             });
         if result.is_err() {
             let _ = fs::remove_file(&temporary);
+            self.clear_verified();
+        } else {
+            self.remember_verified(&destination);
         }
         result
     }
@@ -196,9 +212,28 @@ impl CleanupModelStore {
             return Err("cleanup model import is already running".into());
         }
         inner.importing = true;
+        // Import replaces the on-disk bytes; drop any stale status cache.
+        inner.verified = None;
         Ok(ImportGuard {
             inner: Arc::clone(&self.inner),
         })
+    }
+
+    /// Cheap status path: skip a full re-hash when inode/size/mtime match.
+    fn available_for(&self, artifact: ArtifactSpec) -> bool {
+        let path = self.model_path();
+        let mut inner = self.inner.lock().unwrap();
+        available_cached(&path, artifact, &mut inner.verified)
+    }
+
+    fn remember_verified(&self, path: &Path) {
+        if let Ok(fp) = fingerprint(path) {
+            self.inner.lock().unwrap().verified = Some(fp);
+        }
+    }
+
+    fn clear_verified(&self) {
+        self.inner.lock().unwrap().verified = None;
     }
 }
 

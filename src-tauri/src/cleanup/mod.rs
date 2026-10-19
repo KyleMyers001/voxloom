@@ -44,12 +44,26 @@ impl CleanupState {
         } else {
             development_worker_path()
         };
+        Ok(Self::with_parts(models, worker_path))
+    }
+
+    /// Same shape as a normal store, pointed at a disposable temp root and an
+    /// empty worker path so status reports unavailable instead of crashing
+    /// startup when app-data resolution fails (off-by-default feature).
+    pub fn fallback() -> Self {
+        Self::with_parts(
+            CleanupModelStore::new(std::env::temp_dir().join("voxloom-cleanup-models")),
+            PathBuf::new(),
+        )
+    }
+
+    fn with_parts(models: CleanupModelStore, worker_path: PathBuf) -> Self {
         let supervisor = Arc::new(WorkerSupervisor::new(worker_path));
-        Ok(Self {
+        Self {
             requests: RequestRegistry::new(Arc::clone(&supervisor)),
             models: Arc::new(models),
             supervisor,
-        })
+        }
     }
 
     /// Invalidate immediately on the native lifecycle thread. Reaping belongs

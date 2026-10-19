@@ -142,8 +142,10 @@ pub fn run() {
                 .unwrap_or_else(|_| ModelStore::new(std::env::temp_dir().join("voxloom-models")));
             let coordinator = CaptureCoordinator::with_pcm_store(Arc::clone(&buffers));
             app.manage(coordinator);
-            let cleanup =
-                cleanup::CleanupState::from_app(app.handle()).expect("initialize cleanup state");
+            // Off-by-default: never crash startup if app-data resolution fails.
+            // Mirror ModelStore — fall back to a disposable temp root.
+            let cleanup = cleanup::CleanupState::from_app(app.handle())
+                .unwrap_or_else(|_| cleanup::CleanupState::fallback());
             app.manage(cleanup);
             let stt = SttState::new(models, buffers);
             // One-time hash of unmarked model files, off the main thread. Each

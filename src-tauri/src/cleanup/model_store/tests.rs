@@ -69,6 +69,7 @@ fn sync_failure_is_reported_after_rename_and_retry_syncs_existing_model() {
         .unwrap();
     assert!(synced);
     assert!(store.lease_artifact(MODEL_ID, spec).is_ok());
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -93,7 +94,7 @@ fn refuses_import_while_a_model_is_leased() {
 fn admission_opens_without_hashing_the_model() {
     let root = temp_root("cheap-admission");
     fs::create_dir_all(&root).unwrap();
-    let store = CleanupModelStore::new(root);
+    let store = CleanupModelStore::new(root.clone());
     fs::write(store.model_path(), b"GGUFevil").unwrap();
     // Admission is only a reservation. Full verification belongs immediately
     // before inference, on this same descriptor, not on the microphone path.
@@ -105,6 +106,7 @@ fn admission_opens_without_hashing_the_model() {
         },
     );
     assert!(lease.is_ok(), "admission must not hash: {lease:?}");
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -137,7 +139,7 @@ fn lease_rejects_same_size_tampering() {
 fn bounds_descriptors_even_while_retired_acquisitions_are_finishing() {
     let root = temp_root("descriptor-capacity");
     fs::create_dir_all(&root).unwrap();
-    let store = CleanupModelStore::new(root);
+    let store = CleanupModelStore::new(root.clone());
     fs::write(store.model_path(), b"GGUFtest").unwrap();
     let first = store.lease(MODEL_ID).unwrap();
     let second = store.lease(MODEL_ID).unwrap();
@@ -145,6 +147,7 @@ fn bounds_descriptors_even_while_retired_acquisitions_are_finishing() {
     drop(first);
     assert!(store.lease(MODEL_ID).is_ok());
     drop(second);
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -209,5 +212,53 @@ fn verified_lease_blocks_concurrent_import_until_drop() {
         .contains("in use"));
     drop(queued);
     assert!(store.import_artifact(&store.model_path(), artifact).is_ok());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn status_reuses_fingerprint_until_the_file_changes() {
+    let root = temp_root("status-cache");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let bytes = b"GGUFtest";
+    let digest = Box::leak(format!("{:x}", Sha256::digest(bytes)).into_boxed_str());
+    let artifact = ArtifactSpec {
+        sha256: digest,
+        size: bytes.len() as u64,
+    };
+    let store = CleanupModelStore::new(root.clone());
+    fs::write(store.model_path(), bytes).unwrap();
+    assert!(store.status_available_for(artifact));
+    assert!(
+        store.inner.lock().unwrap().verified.is_some(),
+        "successful status must remember the fingerprint"
+    );
+    // Unchanged inode/size/mtime: second call must not clear the cache.
+    assert!(store.status_available_for(artifact));
+    assert!(store.inner.lock().unwrap().verified.is_some());
+    // Same length, different bytes + new mtime → re-hash and miss.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    fs::write(store.model_path(), b"GGUFevil").unwrap();
+    assert!(!store.status_available_for(artifact));
+    assert!(store.inner.lock().unwrap().verified.is_none());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn missing_model_clears_stale_status_cache() {
+    let root = temp_root("status-missing");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let store = CleanupModelStore::new(root.clone());
+    store.inner.lock().unwrap().verified = Some(super::FileFingerprint {
+        #[cfg(unix)]
+        dev: 0,
+        #[cfg(unix)]
+        ino: 0,
+        len: 8,
+        modified: std::time::SystemTime::UNIX_EPOCH,
+    });
+    assert!(!store.status().available);
+    assert!(store.inner.lock().unwrap().verified.is_none());
     let _ = fs::remove_dir_all(root);
 }

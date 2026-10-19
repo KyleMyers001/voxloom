@@ -41,15 +41,25 @@ impl ProcessHandle {
 
 impl WorkerProcess {
     pub fn spawn(worker: &Path, model: &File) -> Result<Self, String> {
+        // Relocate before Command wires piped stdio. If stdin/stdout were
+        // closed, open(model) can return fd 0/1; those get replaced by the
+        // pipes and pre_exec would then dup2 a pipe onto fd 3.
+        #[cfg(unix)]
+        let model_fd = relocate_above_stdio(model)?;
         let mut command = Command::new(worker);
         command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
-        inherit_model(model, &mut command);
+        #[cfg(unix)]
+        inherit_model(model_fd.as_raw_fd(), &mut command);
+        #[cfg(not(unix))]
+        let _ = model;
         let mut child = command
             .spawn()
             .map_err(|error| format!("start cleanup worker: {error}"))?;
+        #[cfg(unix)]
+        drop(model_fd);
         let stdin = child.stdin.take().ok_or_else(|| {
             let _ = child.kill();
             let _ = child.wait();
@@ -131,13 +141,31 @@ fn remaining(deadline: Instant) -> Duration {
 }
 
 #[cfg(unix)]
-fn inherit_model(model: &File, command: &mut Command) {
-    use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+
+/// Duplicate `model` onto an fd ≥ 3 so Command's piped stdio cannot clobber it.
+#[cfg(unix)]
+fn relocate_above_stdio(model: &File) -> Result<OwnedFd, String> {
+    let source = model.as_raw_fd();
+    // SAFETY: F_DUPFD_CLOEXEC only allocates a new descriptor; the caller owns it.
+    let duplicated = unsafe { libc::fcntl(source, libc::F_DUPFD_CLOEXEC, 3) };
+    if duplicated < 0 {
+        return Err(format!(
+            "relocate model fd: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    // SAFETY: duplicated is an open fd we just allocated and uniquely own.
+    Ok(unsafe { OwnedFd::from_raw_fd(duplicated) })
+}
+
+#[cfg(unix)]
+fn inherit_model(source: RawFd, command: &mut Command) {
     use std::os::unix::process::CommandExt;
 
-    let source = model.as_raw_fd();
     // SAFETY: dup2/fcntl are async-signal-safe and this closure performs no
-    // allocation between fork and exec.
+    // allocation between fork and exec. `source` is ≥ 3 (relocated) so stdio
+    // pipe setup cannot have replaced it.
     unsafe {
         command.pre_exec(move || {
             if source != 3 && libc::dup2(source, 3) == -1 {
@@ -151,5 +179,28 @@ fn inherit_model(model: &File, command: &mut Command) {
     }
 }
 
-#[cfg(not(unix))]
-fn inherit_model(_model: &File, _command: &mut Command) {}
+#[cfg(test)]
+mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn relocate_puts_model_fd_at_or_above_three() {
+        use super::relocate_above_stdio;
+        use std::os::fd::AsRawFd;
+
+        let file = tempfile_model();
+        let relocated = relocate_above_stdio(&file).unwrap();
+        assert!(
+            relocated.as_raw_fd() >= 3,
+            "relocated fd must stay above stdio, got {}",
+            relocated.as_raw_fd()
+        );
+    }
+
+    #[cfg(unix)]
+    fn tempfile_model() -> std::fs::File {
+        let path = crate::cleanup::test_support::test_root()
+            .join(format!("worker-fd-{}.gguf", std::process::id()));
+        std::fs::write(&path, b"GGUFtest").unwrap();
+        std::fs::File::open(path).unwrap()
+    }
+}
