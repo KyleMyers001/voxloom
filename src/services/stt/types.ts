@@ -42,6 +42,11 @@ export interface SttModelInfo {
   readonly sizeBytes: number;
   readonly status: SttModelStatus;
   /**
+   * BUS-76: UI-only. Shown as downloading because a mount started it, but the
+   * backend has not registered it yet, so it cannot be canceled.
+   */
+  readonly pending?: boolean;
+  /**
    * Native on-disk check result when `status` is `failed` (BUS-35):
    * `unreadable` = couldn't open, `read-failed` = opened but couldn't read.
    */
