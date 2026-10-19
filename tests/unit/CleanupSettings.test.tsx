@@ -45,16 +45,21 @@ function renderCleanup(modelStore: CleanupModelStore | undefined, isNative = tru
 const toggle = () => screen.getByRole('switch', { name: 'Clean up transcripts locally' });
 
 describe('CleanupSettings', () => {
-  it('turning cleanup on writes cleanupEnabled, the opt-in and the model', async () => {
+  it('turning cleanup on writes only the opt-in and the model; the legacy key is untouched', async () => {
     const user = userEvent.setup();
     renderCleanup(store(ready));
     await waitFor(() => expect(toggle()).toBeEnabled());
     expect(toggle()).toHaveAttribute('aria-checked', 'false');
     await user.click(toggle());
-    expect(latest).toMatchObject({ cleanupEnabled: true, cleanupModelId: CLEANUP_MODEL_ID, cleanupOptIn: true });
+    expect(latest).toMatchObject({ cleanupEnabled: false, cleanupModelId: CLEANUP_MODEL_ID, cleanupOptIn: true });
     expect(toggle()).toHaveAttribute('aria-checked', 'true');
     await user.click(toggle());
     expect(latest).toMatchObject({ cleanupEnabled: false, cleanupOptIn: false });
+  });
+
+  it('shows the opt-in alone as on, whatever the legacy cleanupEnabled says', async () => {
+    renderCleanup(store(ready), true, { cleanupEnabled: false, cleanupModelId: CLEANUP_MODEL_ID, cleanupOptIn: true });
+    await waitFor(() => expect(toggle()).toHaveAttribute('aria-checked', 'true'));
   });
 
   it('shows a #24-era file (cleanupEnabled, no opt-in) as off', async () => {
@@ -81,7 +86,7 @@ describe('CleanupSettings', () => {
     await waitFor(() => expect(toggle()).toHaveAttribute('aria-checked', 'true'));
     expect(toggle()).toBeEnabled();
     await user.click(toggle());
-    expect(latest).toMatchObject({ cleanupEnabled: false, cleanupOptIn: false });
+    expect(latest).toMatchObject({ cleanupEnabled: true, cleanupOptIn: false });
   });
 
   it('imports a model, then rechecks its status', async () => {
@@ -107,8 +112,12 @@ describe('CleanupSettings', () => {
     expect(toggle()).toBeDisabled();
   });
 
-  it('rejects a malformed native status', async () => {
-    renderCleanup({ importModel: vi.fn(), status: vi.fn().mockResolvedValue(undefined) });
+  it.each([
+    ['no status', undefined],
+    ['a non-string id', { ...ready, id: 42 }],
+    ['a missing id', { available: true, runtimeAvailable: true, sha256: CLEANUP_MODEL_SHA256 }],
+  ])('rejects a malformed native status (%s)', async (_label, status) => {
+    renderCleanup({ importModel: vi.fn(), status: vi.fn().mockResolvedValue(status) });
     await waitFor(() => expect(screen.getByText(/unexpected status/)).toBeInTheDocument());
     expect(toggle()).toBeDisabled();
   });
@@ -170,7 +179,111 @@ describe('CleanupSettings in a production build', () => {
     });
     await waitFor(() => expect(toggle()).toHaveAttribute('aria-checked', 'true'));
     await user.click(toggle());
-    expect(latest).toMatchObject({ cleanupEnabled: false, cleanupOptIn: false });
+    expect(latest).toMatchObject({ cleanupEnabled: true, cleanupOptIn: false });
+  });
+});
+
+describe('CleanupSettings in a production build, after the worker is known', () => {
+  afterEach(() => { vi.unstubAllEnvs(); });
+  const missingModel = { ...ready, available: false };
+
+  it('an import failure keeps the block and shows the error', async () => {
+    vi.stubEnv('DEV', false);
+    const user = userEvent.setup();
+    const models = store(missingModel);
+    vi.mocked(models.importModel).mockRejectedValue(new Error('picker exploded'));
+    renderCleanup(models);
+    const button = await screen.findByRole('button', { name: 'Import model…' });
+    await user.click(button);
+    await waitFor(() => expect(screen.getByText(/picker exploded/)).toBeInTheDocument());
+    expect(screen.getByText('Local cleanup')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import model…' })).toBe(button);
+    expect(button).toHaveFocus();
+  });
+
+  it('Check again keeps the block and focus while it checks, and through an error', async () => {
+    vi.stubEnv('DEV', false);
+    const user = userEvent.setup();
+    let fail!: (reason: Error) => void;
+    let hold = false;
+    const models: CleanupModelStore = {
+      importModel: vi.fn(),
+      status: vi.fn(() => hold
+        ? new Promise<never>((_resolve, reject) => { fail = reject; })
+        : Promise.resolve(missingModel)),
+    };
+    renderCleanup(models);
+    const button = await screen.findByRole('button', { name: 'Check again' });
+    await waitFor(() => expect(screen.getByText(/Not installed/)).toBeInTheDocument());
+    hold = true;
+    await user.click(button);
+    expect(screen.getByText('Checking the cleanup model…')).toBeInTheDocument();
+    expect(screen.getByText('Local cleanup')).toBeInTheDocument();
+    expect(button).toHaveFocus();
+    await act(async () => { fail(new Error('denied')); });
+    expect(screen.getByText(/denied/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Check again' })).toBe(button);
+    expect(button).toHaveFocus();
+  });
+
+  it('a successful import refresh keeps the block mounted', async () => {
+    vi.stubEnv('DEV', false);
+    const user = userEvent.setup();
+    renderCleanup(store(missingModel, ready));
+    const button = await screen.findByRole('button', { name: 'Import model…' });
+    await user.click(button);
+    await waitFor(() => expect(toggle()).toBeEnabled());
+    expect(screen.getByRole('button', { name: 'Import model…' })).toBe(button);
+  });
+
+  it('hides again once a check reports the worker gone', async () => {
+    vi.stubEnv('DEV', false);
+    const user = userEvent.setup();
+    const { container } = renderCleanup(store(ready, { ...ready, runtimeAvailable: false }));
+    await user.click(await screen.findByRole('button', { name: 'Check again' }));
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
+  });
+});
+
+describe('focus when turning cleanup off hides the block', () => {
+  afterEach(() => { vi.unstubAllEnvs(); });
+  const activeStart = { cleanupModelId: CLEANUP_MODEL_ID, cleanupOptIn: true };
+  function renderBetween(models: CleanupModelStore, after: boolean) {
+    return renderWithApp(<div className="settings-rows">
+      <Probe start={activeStart} />
+      <div className="frow"><button type="button">Before</button></div>
+      <Harness isNative modelStore={models} />
+      {after && <div className="frow"><button type="button">After</button></div>}
+    </div>);
+  }
+
+  it('moves focus to the next control, not the page body', async () => {
+    vi.stubEnv('DEV', false);
+    const user = userEvent.setup();
+    renderBetween(store({ ...ready, runtimeAvailable: false }), true);
+    await waitFor(() => expect(toggle()).toHaveAttribute('aria-checked', 'true'));
+    await user.click(toggle());
+    expect(screen.queryByText('Local cleanup')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'After' })).toHaveFocus();
+  });
+
+  it('falls back to the previous control when nothing follows', async () => {
+    vi.stubEnv('DEV', false);
+    const user = userEvent.setup();
+    renderBetween(store({ ...ready, runtimeAvailable: false }), false);
+    await waitFor(() => expect(toggle()).toHaveAttribute('aria-checked', 'true'));
+    await user.click(toggle());
+    expect(screen.getByRole('button', { name: 'Before' })).toHaveFocus();
+  });
+
+  it('leaves focus on the switch when the block stays (worker present)', async () => {
+    vi.stubEnv('DEV', false);
+    const user = userEvent.setup();
+    renderBetween(store(ready), true);
+    await waitFor(() => expect(toggle()).toHaveAttribute('aria-checked', 'true'));
+    await user.click(toggle());
+    expect(toggle()).toHaveFocus();
+    expect(toggle()).toHaveAttribute('aria-checked', 'false');
   });
 });
 

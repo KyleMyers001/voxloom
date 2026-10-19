@@ -25,7 +25,7 @@ export function HomeHero({ cleanupModelStore, isNative }: {
   const active = useShortcutActive();
   const cleanupActive = isCleanupActive(state.settings);
   // Same gate as the Local cleanup block in Settings.
-  const shown = cleanupShown(useCleanupModel(isNative, cleanupModelStore).view, cleanupActive);
+  const shown = cleanupShown(useCleanupModel(isNative, cleanupModelStore), cleanupActive);
   return (
     <section aria-labelledby="home-title" className="home-hero">
       <span className="home-hero__orb"><AppTile size="lg" /></span>

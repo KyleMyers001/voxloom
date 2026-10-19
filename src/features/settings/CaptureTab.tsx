@@ -29,7 +29,7 @@ export function CaptureTab({ cleanupModelStore, onSetup }: {
   const update = settings.update;
   const cleanupModel = useCleanupModel(isNative, cleanupModelStore);
   // Same gate as the Local cleanup block: no cleanup wording while it's hidden.
-  const mentionCleanup = isNative && cleanupShown(cleanupModel.view, isCleanupActive(state.settings));
+  const mentionCleanup = isNative && cleanupShown(cleanupModel, isCleanupActive(state.settings));
   return (
     <div className="settings-rows">
       <div className="frow frow--recorder">

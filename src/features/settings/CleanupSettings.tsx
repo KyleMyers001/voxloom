@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { useApp } from '../../app/AppContext';
 import { Switch } from '../../components/Switch';
 import { isCleanupActive } from '../../domain/cleanup';
@@ -8,6 +8,12 @@ import {
   cleanupModelNote, cleanupReady,
 } from './cleanupCopy';
 import { cleanupShown, type CleanupModel } from './useCleanupModel';
+
+const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex="0"]';
+
+function focusableIn(row: Element | null | undefined): HTMLElement | null {
+  return row?.querySelector<HTMLElement>(FOCUSABLE) ?? null;
+}
 
 /**
  * Local cleanup rows (BUS-16 PR 2c). Turning cleanup on is the only place
@@ -21,6 +27,18 @@ export function CleanupSettings({ isNative, model }: { isNative: boolean; model:
   const active = isCleanupActive(state.settings);
   const { fail, refresh, store, view } = model;
   const [importing, setImporting] = useState(false);
+  const shown = cleanupShown(model, active);
+  const firstRow = useRef<HTMLDivElement>(null);
+  const lastRow = useRef<HTMLDivElement>(null);
+  const focusAfterHide = useRef<HTMLElement | null>(null);
+
+  // Turning cleanup off can close the gate and remove the focused switch:
+  // hand focus to the next control (or the previous one), not the page body.
+  useLayoutEffect(() => {
+    if (shown || !focusAfterHide.current) return;
+    focusAfterHide.current.focus();
+    focusAfterHide.current = null;
+  }, [shown]);
 
   const importModel = async () => {
     setImporting(true);
@@ -42,16 +60,20 @@ export function CleanupSettings({ isNative, model }: { isNative: boolean; model:
       if (!cleanupReady(view)) return;
       update({ key: 'cleanupModelId', value: view.status.id });
     }
-    // One render batch, so this is one settings.json save.
+    if (!on && !cleanupShown(model, false)) {
+      focusAfterHide.current = focusableIn(lastRow.current?.nextElementSibling)
+        ?? focusableIn(firstRow.current?.previousElementSibling);
+    }
+    // Sophie's single-key call: only the opt-in is written. The legacy
+    // `cleanupEnabled` is left as loaded (one render batch, one save).
     update({ key: 'cleanupOptIn', value: on });
-    update({ key: 'cleanupEnabled', value: on });
   };
 
-  if (!cleanupShown(view, active)) return null;
+  if (!shown) return null;
 
   const noteId = 'settings-cleanup-model-note';
   return <>
-    <div className="frow">
+    <div className="frow" ref={firstRow}>
       <span className="frow__label">
         <span>{CLEANUP_LABEL}</span>
         <span className="tag">{CLEANUP_TAG}</span>
@@ -66,7 +88,7 @@ export function CleanupSettings({ isNative, model }: { isNative: boolean; model:
         onChange={setActive}
       />
     </div>
-    <div className="frow">
+    <div className="frow" ref={lastRow}>
       <span className="frow__label">
         <span>{CLEANUP_MODEL_LABEL}</span>
         <small className="frow__help" id={noteId} role="status">{cleanupModelNote(view)}</small>

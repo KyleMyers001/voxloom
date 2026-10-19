@@ -6,7 +6,14 @@ import type { CleanupModelView } from './cleanupCopy';
 const message = (reason: unknown) => reason instanceof Error ? reason.message : String(reason);
 
 export interface CleanupModel {
+  /** Transient: checking, an error, or the latest status. */
   view: CleanupModelView;
+  /**
+   * Last known `runtimeAvailable`. Unknown (never read) counts as false. A
+   * later check or error keeps the last known value, so Check again, the
+   * post-import refresh or an import error never hide the block mid-use.
+   */
+  workerAvailable: boolean;
   /** Re-reads `cleanup_model_status`. */
   refresh: () => Promise<void>;
   /** Shows an error from outside the status read (a failed import). */
@@ -22,9 +29,11 @@ export interface CleanupModel {
  * active (so it can be turned off), or in dev builds. Production builds
  * without a worker show none of it; PR 3's worker lights it up, no flag.
  */
-export function cleanupShown(view: CleanupModelView, active: boolean): boolean {
-  const workerAvailable = view.kind === 'status' && view.status.runtimeAvailable;
-  return workerAvailable || active || import.meta.env.DEV;
+export function cleanupShown(
+  model: Pick<CleanupModel, 'workerAvailable'>,
+  active: boolean,
+): boolean {
+  return model.workerAvailable || active || import.meta.env.DEV;
 }
 
 /** Cleanup model status from the native side; `modelStore` is a test seam. */
@@ -35,6 +44,7 @@ export function useCleanupModel(isNative: boolean, modelStore?: CleanupModelStor
   const storeRef = useRef<CleanupModelStore | null>(modelStore ?? null);
   if (modelStore) storeRef.current = modelStore;
   const generation = useRef(0);
+  const [workerAvailable, setWorkerAvailable] = useState(false);
   const store = useCallback(() => storeRef.current ??= createTauriCleanupModelStore(), []);
 
   const refresh = useCallback(async () => {
@@ -44,10 +54,14 @@ export function useCleanupModel(isNative: boolean, modelStore?: CleanupModelStor
     try {
       const status = await store().status();
       // Native IPC result: check its shape before trusting it.
-      if (typeof status?.available !== 'boolean' || typeof status.runtimeAvailable !== 'boolean') {
+      if (typeof status?.available !== 'boolean' || typeof status.runtimeAvailable !== 'boolean'
+        || typeof status.id !== 'string') {
         throw new Error('unexpected status from the app');
       }
-      if (request === generation.current) setView({ kind: 'status', status });
+      if (request === generation.current) {
+        setView({ kind: 'status', status });
+        setWorkerAvailable(status.runtimeAvailable);
+      }
     } catch (reason: unknown) {
       if (request === generation.current) setView({ kind: 'error', message: message(reason) });
     }
@@ -63,5 +77,5 @@ export function useCleanupModel(isNative: boolean, modelStore?: CleanupModelStor
     setView({ kind: 'error', message: message(reason) });
   }, []);
 
-  return { fail, refresh, store, view };
+  return { fail, refresh, store, view, workerAvailable };
 }

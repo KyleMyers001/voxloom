@@ -61,6 +61,11 @@ describe('History cleanup provenance', () => {
     ['context-overflow', 'too long to clean up'],
     ['cancelled', 'cleanup was interrupted'],
     ['something-new', 'cleanup failed'],
+    // Object.prototype names must not leak through as labels.
+    ['constructor', 'cleanup failed'],
+    ['toString', 'cleanup failed'],
+    ['__proto__', 'cleanup failed'],
+    ['hasOwnProperty', 'cleanup failed'],
     [null, 'cleanup failed'],
   ])('labels fallback reason %s', (reason, label) => {
     expect(cleanupLabel(provenance({ reason, status: 'fallback' }))).toBe(`Original kept · ${label}`);
