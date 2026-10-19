@@ -11,12 +11,12 @@ use std::time::Duration;
 use sha2::{Digest, Sha256};
 
 /// Loopback (plain http) agent; production uses `model_fetch::shared_agent`.
-fn test_agent() -> ureq::Agent {
+pub(super) fn test_agent() -> ureq::Agent {
     crate::model_fetch::loopback_test_agent(Duration::from_secs(10))
 }
 
 /// A catalog entry re-pinned to `body`, so loopback tests can pass verification.
-fn spec_for(model_id: &str, body: &[u8]) -> ModelSpec {
+pub(super) fn spec_for(model_id: &str, body: &[u8]) -> ModelSpec {
     let base = *catalog::find(model_id).unwrap();
     ModelSpec {
         size_bytes: body.len() as u64,
@@ -25,7 +25,7 @@ fn spec_for(model_id: &str, body: &[u8]) -> ModelSpec {
     }
 }
 
-fn temp_store(label: &str) -> (ModelStore, PathBuf) {
+pub(super) fn temp_store(label: &str) -> (ModelStore, PathBuf) {
     let dir = env::temp_dir().join(format!(
         "voxloom-stt-{}-{}-{}",
         label,
@@ -41,7 +41,7 @@ fn temp_store(label: &str) -> (ModelStore, PathBuf) {
 
 /// Serve `body` over HTTP/1.1 on a random localhost port. Optional delay
 /// before each chunk so cancel races can observe inflight state.
-fn serve_bytes(body: Vec<u8>, chunk_delay: Option<Duration>) -> String {
+pub(super) fn serve_bytes(body: Vec<u8>, chunk_delay: Option<Duration>) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().unwrap().port();
     thread::spawn(move || {
@@ -286,18 +286,6 @@ fn size_mismatch_is_download_corrupted_and_saves_nothing() {
     assert!(!dir.join("ggml-tiny.en.bin").exists());
     assert!(!dir.join("ggml-tiny.en.bin.partial").exists());
     assert!(store.inflight.lock().unwrap().is_none());
-    let _ = fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn existing_unverified_model_stays_available_without_rehash() {
-    // Backward compatibility: files downloaded before pinning are not
-    // re-hashed or rejected; only new downloads are verified.
-    let (store, dir) = temp_store("legacy-file");
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("ggml-base.en.bin"), b"pre-pinning download").unwrap();
-    assert_eq!(store.status("whisper-base.en").unwrap().status, "available");
-    assert!(store.resolved_path("whisper-base.en").is_ok());
     let _ = fs::remove_dir_all(&dir);
 }
 

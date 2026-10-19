@@ -173,8 +173,17 @@ damaged. Nothing was saved." with Retry; sizes and hashes go only to the
 native log. Downloads use one shared HTTPS-only client (an
 https→http redirect is refused) with a 30 s connect timeout and a 30 s read
 timeout, so a stalled transfer fails instead of hanging; there is no overall
-time limit. Model files downloaded before pinning keep working
-and are not re-hashed; verification applies to new downloads and re-downloads.
+time limit. Model files already on disk (including ones downloaded before
+pinning) are checked once against the same size and SHA-256 in the background
+after launch; dictation keeps working while that runs. A passing file gets a
+`<file>.verified` marker (hash, size and modified time) so it isn't hashed
+again. A file that fails is kept, shows as damaged in the Models tab with
+Retry, and isn't used for transcription. A file that can't be opened (for
+example after its permissions change, even if it was verified before) shows
+"Couldn't open the model file" with Retry; dictation tries to open it again
+each time and uses it once it opens, and that file is then checked once more
+in the background. A file that opens but can't be read during the check stays
+failed until Retry download or the next launch.
 
 Real whisper.cpp linkage is **opt-in** on macOS:
 
