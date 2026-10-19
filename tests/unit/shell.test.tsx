@@ -161,6 +161,12 @@ describe('Home (UI PR 3)', () => {
     expect(screen.getByText('Transcribing…')).toHaveAttribute('role', 'status');
     expect(screen.queryByRole('button', { name: 'Start capture' })).not.toBeInTheDocument();
   });
+
+  it('shows Cleaning up… while local cleanup runs (BUS-16)', () => {
+    renderWithApp(<Home dogfood={dogfood({ phase: 'cleaning' })} onToast={vi.fn()} />);
+    expect(screen.getByText('Cleaning up…')).toHaveAttribute('role', 'status');
+    expect(screen.queryByRole('button', { name: 'Start capture' })).not.toBeInTheDocument();
+  });
 });
 
 describe('Title bar (designer: standard macOS title bar)', () => {

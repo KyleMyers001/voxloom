@@ -1,0 +1,20 @@
+{
+  "onboardingComplete": true,
+  "settings": {
+    "appearance": "system",
+    "audioRetention": "off",
+    "cleanupEnabled": true,
+    "cleanupModelId": "qwen3-0.6b-q4-k-m",
+    "clipboardFallback": true,
+    "language": "English (US)",
+    "languageModel": "Alder Text Small · local",
+    "microphone": "system-default",
+    "shortcut": "Ctrl + Shift + Space",
+    "startAtLogin": false,
+    "style": "casual",
+    "textSize": "default",
+    "transcriptRetention": "30-days",
+    "transcriptionModel": "whisper-tiny.en"
+  },
+  "version": 2
+}

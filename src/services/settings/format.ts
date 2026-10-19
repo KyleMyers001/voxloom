@@ -76,6 +76,9 @@ export function coerceSettings(raw: unknown): Settings {
     ),
     cleanupEnabled: asBoolean(raw.cleanupEnabled, base.cleanupEnabled),
     cleanupModelId: asNullableString(raw.cleanupModelId),
+    // Added in BUS-16 PR 2c: files without it, including #24-era v2 files
+    // with `cleanupEnabled: true`, load with cleanup off.
+    cleanupOptIn: asBoolean(raw.cleanupOptIn, base.cleanupOptIn),
     clipboardFallback: asBoolean(raw.clipboardFallback, base.clipboardFallback),
     language: asString(raw.language, base.language),
     languageModel: asString(raw.languageModel, base.languageModel),
@@ -127,9 +130,11 @@ export function parseSettingsJson(raw: string): ParseSettingsResult {
   const coerced = coerceSettings(parsed.settings);
   // v1 never had a cleanup opt-in. A #24-era v1 file may carry
   // `cleanupEnabled: true` as an extra key; it must not turn cleanup on
-  // (BUS-16: off until verified on macOS). Only a v2 file can opt in.
+  // (BUS-16: off until verified on macOS). Only a v2 file can opt in, so a
+  // stray `cleanupOptIn` in a v1 file is forced off too; that override is
+  // what keeps v1 off now that the opt-in alone gates cleanup.
   const settings = parsed.version === 1
-    ? { ...coerced, cleanupEnabled: false }
+    ? { ...coerced, cleanupEnabled: false, cleanupOptIn: false }
     : coerced;
   return {
     file: {
