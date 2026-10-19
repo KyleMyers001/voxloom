@@ -6,6 +6,7 @@
 /// Never silent-downloads missing models — surfaces a clear UI error instead.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { beginCancelScope, type CancelScope } from '../shortcut/cancelScope';
 import type { DeliveryOutcome } from '../delivery/types';
 import type { OverlayResult } from '../shortcut/overlayVisibility';
 
@@ -33,10 +34,12 @@ import {
 } from './dogfoodPath';
 import { createSttModelStore } from './factory';
 import { resolveTranscriptionModelId } from './resolveModelId';
-import { SttError, type Transcript } from './types';
+import { SttError, type SttModelInfo, type Transcript } from './types';
+import { MODEL_UNREADABLE } from './useSttModels';
 
 export type DogfoodPhase =
   | 'idle'
+  | 'starting'
   | 'recording'
   | 'transcribing'
   | 'success'
@@ -82,6 +85,13 @@ export interface UseDogfoodCaptureResult {
   message: string | null;
   origin: 'home' | 'gesture' | null;
   phase: DogfoodPhase;
+  /** Current session has acquired its Escape cancellation scope. */
+  scopeReady: boolean;
+  /**
+   * The Escape arm attempt has settled (armed or unavailable), so the HUD may
+   * show. A failed arm shows a plain, non-cancellable HUD; it never hides it.
+   */
+  hudReady: boolean;
   start: (origin?: 'home' | 'gesture') => Promise<void>;
   stop: () => Promise<void>;
   transcript: Transcript | null;
@@ -101,13 +111,31 @@ export function hudResultFor(
   return null; // inserted, unverified, or may-have-inserted: silent dismiss
 }
 
-function errorText(error: unknown): string {
+/** Same wording as the Models row (ModelCard), plus where to fix it. */
+export const MODEL_DAMAGED_MESSAGE = 'Model file is damaged. Download it again in Settings.';
+
+/** Opened but couldn't be read: the row's copy plus where to fix it. */
+export const MODEL_READ_FAILED_MESSAGE = 'Couldn\'t read the model file. Download it again in Settings.';
+
+/** Model-file messages (here and native resolved_path) that already say what to do. */
+const MODEL_FILE_PREFIXES = [
+  'Model file is damaged.',
+  'Couldn\'t open the model file.',
+  'Couldn\'t read the model file.',
+];
+
+function failedModelMessage(reason: SttModelInfo['failureReason']): string {
+  if (reason === 'unreadable') return MODEL_UNREADABLE;
+  if (reason === 'read-failed') return MODEL_READ_FAILED_MESSAGE;
+  return MODEL_DAMAGED_MESSAGE;
+}
+
+export function errorText(error: unknown): string {
   if (error instanceof SttError) {
     if (error.code === 'model-missing') {
-      return (
-        `${error.message} Open Settings → Speech-to-text models and `
-        + 'Download the selected model first.'
-      );
+      if (MODEL_FILE_PREFIXES.some((p) => error.message.startsWith(p))) return error.message;
+      // Settings guidance lives here once; missingModelMessage is the fact only.
+      return `${error.message} Download the selected model in Settings first.`;
     }
     return error.message;
   }
@@ -117,11 +145,8 @@ function errorText(error: unknown): string {
 
 function missingModelMessage(modelId: string, status: string | null): string {
   const detail = status ? ` (status: ${status})` : '';
-  return (
-    `Model “${modelId}” is not downloaded${detail}. `
-    + 'Open Settings → Speech-to-text models and Download it first '
-    + '(no silent download).'
-  );
+  // Fact only — errorText appends the short Settings suffix once.
+  return `Model “${modelId}” is not downloaded${detail}.`;
 }
 
 function resolvePlatform(
@@ -141,8 +166,12 @@ export function useDogfoodCapture(
 ): UseDogfoodCaptureResult {
   const liveCapture = useCaptureState();
   const capture = options.captureApi ?? liveCapture;
+  const captureRef = useRef(capture);
+  captureRef.current = capture;
 
   const [phase, setPhase] = useState<DogfoodPhase>('idle');
+  const [scopeReady, setScopeReady] = useState(false);
+  const [hudReady, setHudReady] = useState(false);
   const [hudResult, setHudResult] = useState<OverlayResult | null>(null);
   const [origin, setOrigin] = useState<'home' | 'gesture' | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -188,6 +217,14 @@ export function useDogfoodCapture(
    * suppress new delivery side effects and preserve the newer session's phase.
    */
   const sessionRef = useRef(0);
+  const activeRef = useRef(false);
+  // Per-session lease: cancellation discards results, unlike supersession.
+  type Cancellation = { cancelled: boolean; scope?: CancelScope; settle?: () => Promise<void> };
+  const cancellationRef = useRef<Cancellation>({ cancelled: false });
+  // A replacement must not destroy the native latch before its result is saved.
+  // Carry the retirement barrier through even a second pending restart.
+  const retirementRef = useRef<Promise<void> | undefined>(undefined);
+  const cancelActionRef = useRef<() => void>(() => {});
 
   const announce = useCallback((text: string) => {
     setMessage(text);
@@ -197,6 +234,9 @@ export function useDogfoodCapture(
   const ensureModelAvailable = useCallback(async (rawModelId: string) => {
     const modelId = resolveTranscriptionModelId(rawModelId);
     const info = await storeRef.current.status(modelId);
+    if (info?.status === 'failed') {
+      throw new SttError('model-missing', failedModelMessage(info.failureReason));
+    }
     if (!info || info.status !== 'available') {
       throw new SttError(
         'model-missing',
@@ -208,18 +248,39 @@ export function useDogfoodCapture(
 
   const runDogfood = useCallback(async (audio: CaptureAudioMeta) => {
     const session = sessionRef.current;
-    const current = () => session === sessionRef.current;
+    const cancellation = cancellationRef.current;
+    const current = () => session === sessionRef.current && !cancellation.cancelled;
     const platform = platformRef.current;
+    let settlement: Promise<void> | undefined;
+    // Both STT success and failure must consult the native latch, whose
+    // notification may still be queued. Share the barrier so it runs once.
+    const settleCancellation = () => settlement ??= (async () => {
+      if (cancellation.cancelled) return;
+      const scope = cancellation.scope;
+      if (scope) {
+        let accepted = false;
+        try { accepted = await scope.finish(); } catch { /* fail closed */ }
+        if (!accepted) {
+          cancellation.cancelled = true;
+          if (session === sessionRef.current) cancelActionRef.current();
+          return;
+        }
+      }
+      if (current()) activeRef.current = false;
+    })();
+    cancellation.settle = settleCancellation;
     setPhase('transcribing');
     announce('Transcribing…');
     try {
       const modelId = await ensureModelAvailable(modelIdRef.current);
+      if (cancellation.cancelled) return;
       const result = await dogfoodRef.current({
         audio,
         clipboard: clipboardRef.current,
         clipboardFallback: clipboardFallbackRef.current,
         deliveryPlatform: platform,
         isCurrent: current,
+        beforeDelivery: settleCancellation,
         snapshotTarget: async () => {
           const target = await platform.snapshotTarget();
           if (current()) setIntendedTarget(target);
@@ -227,6 +288,10 @@ export function useDogfoodCapture(
         },
         modelId,
       });
+      // A stale successful path skips beforeDelivery, but still needs the
+      // saved cancellation decision before publishing History or a toast.
+      await settleCancellation();
+      if (cancellation.cancelled) return;
       if (current()) {
         setTranscript(result.transcript);
         setHudResult(hudResultFor(result.delivery));
@@ -250,6 +315,8 @@ export function useDogfoodCapture(
       if (current()) announce(result.delivery.message);
       else toastRef.current?.(result.delivery.message);
     } catch (error: unknown) {
+      await settleCancellation();
+      if (cancellation.cancelled) return;
       if (current()) {
         setHudResult('transcribe-failed');
         setPhase('error');
@@ -257,6 +324,8 @@ export function useDogfoodCapture(
       } else {
         toastRef.current?.(errorText(error));
       }
+    } finally {
+      await cancellation.scope?.dispose().catch(() => {});
     }
   }, [announce, ensureModelAvailable]);
 
@@ -288,6 +357,18 @@ export function useDogfoodCapture(
 
   const start = useCallback(async (source: 'home' | 'gesture' = 'home') => {
     const session = ++sessionRef.current;
+    const previous = cancellationRef.current;
+    const retire = previous.settle?.() ?? previous.scope?.dispose().catch(() => {});
+    const retirement = retire || retirementRef.current
+      ? Promise.all([retirementRef.current, retire]).then(() => {})
+      : undefined;
+    retirementRef.current = retirement;
+    const cancellation: Cancellation = { cancelled: false };
+    cancellationRef.current = cancellation;
+    activeRef.current = true;
+    setScopeReady(false);
+    setHudReady(false);
+    setPhase('starting');
     setOrigin(source);
     const superseded = () => session !== sessionRef.current;
     setTranscript(null);
@@ -298,6 +379,24 @@ export function useDogfoodCapture(
     setIntendedTarget(null);
 
     try {
+      if (retirement) await retirement;
+      if (superseded()) return;
+      try {
+        cancellation.scope = await beginCancelScope(() => {
+          cancellation.cancelled = true;
+          if (session === sessionRef.current) cancelActionRef.current();
+        }, () => !superseded() && !cancellation.cancelled);
+      } catch (error: unknown) {
+        // Escape-cancel is optional: a tap failure must never block dictation.
+        console.warn('Escape cancellation unavailable; dictating without it.', error);
+      }
+      if (superseded()) {
+        await cancellation.scope?.dispose();
+        return;
+      }
+      if (cancellation.scope) setScopeReady(true);
+      // Show the HUD (waveform) even when Escape-cancel could not arm.
+      setHudReady(true);
       await ensureModelAvailable(modelIdRef.current);
     } catch (error: unknown) {
       if (superseded()) return;
@@ -357,6 +456,11 @@ export function useDogfoodCapture(
   }, [announce, capture]);
 
   const cancel = useCallback(() => {
+    activeRef.current = false;
+    setScopeReady(false);
+    setHudReady(false);
+    cancellationRef.current.cancelled = true;
+    void cancellationRef.current.scope?.dispose().catch(() => {});
     sessionRef.current += 1;
     stopRequestedRef.current = true;
     handledAudioIdRef.current = null;
@@ -369,6 +473,34 @@ export function useDogfoodCapture(
     }
   }, [capture]);
 
+  cancelActionRef.current = cancel;
+
+  useEffect(() => () => {
+    activeRef.current = false;
+    cancellationRef.current.cancelled = true;
+    sessionRef.current += 1;
+    void cancellationRef.current.scope?.dispose().catch(() => {});
+    captureRef.current.cancelActiveCapture();
+  }, []);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || !activeRef.current) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      cancel();
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [cancel]);
+
+  useEffect(() => {
+    if (phase === 'success' || phase === 'error' || phase === 'cancelled') {
+      activeRef.current = false;
+      void cancellationRef.current.scope?.dispose().catch(() => {});
+    }
+  }, [phase]);
+
   return {
     cancel,
     captureState: capture.captureState,
@@ -377,6 +509,8 @@ export function useDogfoodCapture(
     origin,
     hudResult,
     phase,
+    scopeReady: scopeReady && (phase === 'starting' || phase === 'recording' || phase === 'transcribing'),
+    hudReady: hudReady && (phase === 'starting' || phase === 'recording' || phase === 'transcribing'),
     start,
     stop,
     transcript,

@@ -6,8 +6,26 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SttModelStore } from './contracts';
 import { createSttModelStore } from './factory';
 import { resolveTranscriptionModelId } from './resolveModelId';
+import { listenModelsChanged } from './modelsChanged';
 import { pendingDownload, useDownloadPoll, withPending } from './useDownloadPoll';
 import { SttError, type SttDownloadProgress, type SttModelInfo } from './types';
+
+/** BUS-35 checksum failure copy (hashes are only in the native log). */
+export const DOWNLOAD_DAMAGED = 'Download was damaged. Nothing was saved.';
+
+/** A model file on disk that couldn't be opened (row and dictation copy). */
+export const MODEL_UNREADABLE =
+  'Couldn\'t open the model file. Try again, or download it again if this keeps happening.';
+
+/** Row copy for a model file that opened but couldn't be read (Retry download is next to it). */
+export const MODEL_READ_FAILED = 'Couldn\'t read the model file. Download it again.';
+
+/** Row copy for a native `failureReason`; damaged uses ModelCard's default. */
+export function failureRowCopy(reason: SttModelInfo['failureReason']): string | undefined {
+  if (reason === 'unreadable') return MODEL_UNREADABLE;
+  if (reason === 'read-failed') return MODEL_READ_FAILED;
+  return undefined;
+}
 
 export interface UseSttModelsOptions {
   /** Persist selection (Settings `transcriptionModel`). */
@@ -90,6 +108,18 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
     };
   }, [reload]);
 
+  // Re-list when the startup check finishes a model file (damaged → Retry).
+  useEffect(() => {
+    let stop: (() => void) | null = null;
+    let live = true;
+    void listenModelsChanged(() => { void refresh().catch(() => undefined); })
+      .then((un) => { if (live) stop = un; else un(); }, () => undefined);
+    return () => {
+      live = false;
+      stop?.();
+    };
+  }, [refresh]);
+
   // Also the Retry action: it clears the row's failure as the new attempt starts.
   const downloadModel = useCallback(async (modelId: string) => {
     // BUS-52: never two downloads at once, even if a stale button fires.
@@ -122,7 +152,10 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
       if (!cancelled) {
         setFailures((prev) => ({
           ...prev,
-          [modelId]: busyMessage(err) ?? `Download failed: ${errorMessage(err)}. Nothing was saved.`,
+          [modelId]: busyMessage(err)
+            ?? (err instanceof SttError && err.code === 'download-corrupted'
+              ? DOWNLOAD_DAMAGED
+              : `Download failed: ${errorMessage(err).replace(/\.+$/, '')}. Nothing was saved.`),
         }));
       }
       try {

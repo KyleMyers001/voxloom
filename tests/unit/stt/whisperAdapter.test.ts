@@ -137,6 +137,17 @@ describe('createWhisperSttModelStore', () => {
     expect(mockInvoke).not.toHaveBeenCalled();
   });
 
+  it('keeps the native download-corrupted code (BUS-35 copy) instead of transcribe-failed', async () => {
+    mockInvoke.mockRejectedValue({
+      code: 'download-corrupted',
+      message: 'Download was damaged. Nothing was saved.',
+    });
+    const store = createWhisperSttModelStore();
+    await expect(store.download('whisper-tiny.en')).rejects.toMatchObject({
+      code: 'download-corrupted',
+    });
+  });
+
   it('download invokes explicit user-triggered command', async () => {
     mockInvoke.mockResolvedValue(undefined);
     const store = createWhisperSttModelStore();

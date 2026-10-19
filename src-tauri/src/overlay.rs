@@ -135,18 +135,24 @@ pub fn overlay_show(
     width: u32,
     height: u32,
     margin_bottom: i32,
+    cancellable: bool,
 ) -> Result<(), String> {
+    if cancellable && !crate::cancel_scope::can_show() {
+        return Err("Dictation cancellation scope is no longer active".into());
+    }
     let window = get_or_create(&app, &label, width, height)?;
     position_bottom_center(&window, width, height, margin_bottom)?;
     let _ = window.set_focusable(false);
     let _ = window.set_always_on_top(true);
     // Show without taking focus — never call set_focus(true).
     window.show().map_err(|e| e.to_string())?;
+    crate::cancel_scope::visible(cancellable);
     Ok(())
 }
 
 #[tauri::command]
 pub fn overlay_hide(app: AppHandle, label: String) -> Result<(), String> {
+    crate::cancel_scope::visible(false);
     if let Some(window) = app.get_webview_window(&label) {
         window.hide().map_err(|e| e.to_string())?;
     }

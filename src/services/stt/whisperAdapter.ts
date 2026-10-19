@@ -50,6 +50,7 @@ function normalizeCode(code: string | undefined): SttErrorCode {
   switch (code) {
     case 'cancelled':
     case 'download-failed':
+    case 'download-corrupted':
     case 'model-missing':
     case 'transcribe-failed':
     case 'unsupported-audio':

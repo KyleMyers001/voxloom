@@ -3,6 +3,9 @@
 // main: everything; settings: settings + model management + the mic test;
 // overlay: none.
 const COMMANDS: &[&str] = &[
+    "dictation_cancel_arm",
+    "dictation_cancel_finish",
+    "dictation_cancel_end",
     "capture_cancel",
     "capture_list_devices",
     "capture_query_permission",
@@ -10,6 +13,14 @@ const COMMANDS: &[&str] = &[
     "capture_start",
     "capture_status",
     "capture_stop",
+    "cleanup_session_open",
+    "cleanup_session_dispose",
+    "cleanup_acquire",
+    "cleanup_cancel",
+    "cleanup_release",
+    "cleanup_run",
+    "cleanup_model_status",
+    "cleanup_pick_and_import_model",
     "delivery_insert_text",
     "delivery_snapshot_target",
     "delivery_validate_target",

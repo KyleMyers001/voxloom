@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { CLEANUP_PROMPT_VERSION } from '../../src/domain/cleanup';
 import {
   canRetry,
   createDogfoodRecord,
@@ -39,10 +40,20 @@ describe('createDogfoodRecord', () => {
       text: '  hello world  ',
     });
     expect(record).toEqual({
+      cleanup: {
+        dictionaryDigest: null,
+        dictionaryVersion: 1,
+        modelDigest: null,
+        modelId: null,
+        promptVersion: CLEANUP_PROMPT_VERSION,
+        reason: null,
+        status: 'skipped',
+      },
       createdAt: 1_000,
       durationSeconds: 2,
       id: 'dogfood-pcm-1',
       model: null,
+      rawText: 'hello world',
       recoveryExpiresAt: null,
       status: 'copied',
       style: 'casual',
@@ -132,9 +143,9 @@ describe('createDogfoodRecord rawText (BUS-23)', () => {
     expect(record?.rawText).toBe('[Music] hello world');
   });
 
-  it('omits rawText when it equals the cleaned text', () => {
+  it('retains rawText when it equals the cleaned text for cleanup provenance', () => {
     const record = createDogfoodRecord({ ...base, rawText: 'hello', text: 'hello' });
-    expect(record).not.toHaveProperty('rawText');
+    expect(record?.rawText).toBe(record?.text);
   });
 
   it('still skips rows whose cleaned text is empty', () => {

@@ -200,4 +200,14 @@ describe('ShortcutRecorder waits for native registration', () => {
     await report({ ok: true, shortcut: 'Ctrl + Alt + K' });
     expect(status()).toHaveTextContent('Shortcut set to ⌃⌥K.');
   });
+
+  it('BUS-74: a failed re-bind after re-recording the same combo replaces "Shortcut set to"', async () => {
+    render(<Harness onChange={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.click(field());
+    await user.keyboard('{Control>}{Shift>} {/Shift}{/Control}');
+    expect(status()).toHaveTextContent('Shortcut set to ⌃⇧Space.');
+    await report({ active: null, message: 'taken', ok: false, previous: DEFAULT, shortcut: DEFAULT });
+    expect(status()).toHaveTextContent('Couldn\'t set ⌃⇧Space. No shortcut is active. Record one.');
+  });
 });

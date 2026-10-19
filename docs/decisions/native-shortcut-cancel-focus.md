@@ -8,6 +8,14 @@
 
 ## Current implementation note
 
+**BUS-43 update:** Escape now cancels only while a session-owned listening or
+transcription popup is visible; cancelled runs are omitted from History. The
+popup closes before the native delivery barrier commits, after which Escape is
+not owned by Voxloom. This supersedes the blanket rejection of cross-app Escape
+below, not the rejection of a permanent global Escape shortcut. See
+[`escape-cancellation.md`](escape-cancellation.md) for permission/failure policy,
+late-result guards and the remaining native acceptance checks.
+
 The original planning context and feasibility notes below are historical. Native
 capture, global gestures and insertion are now implemented. The current focus
 policy is **completion-time selection** (§4), superseding invocation/release-time

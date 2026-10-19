@@ -42,6 +42,11 @@ function clearPending() {
   s.timer = null;
 }
 
+/** The status still claims `combo` was set (a same-combo save shows it at once). */
+function sameComboSaved(combo: string): boolean {
+  return s.pending === null && s.status?.tone === 'ok' && s.status.text === successText(combo);
+}
+
 function onBound({ active, ok, previous, replay, shortcut }: ShortcutBoundPayload) {
   // Track what the OS holds from every result, even superseded ones, so a
   // late ok for A still makes A the revert target when B is refused.
@@ -49,6 +54,12 @@ function onBound({ active, ok, previous, replay, shortcut }: ShortcutBoundPayloa
   if (ok) s.confirmed = shortcut;
   else if (active !== undefined) s.confirmed = active;
   setActiveShortcut(ok && active === undefined ? shortcut : active);
+  if (!replay && !ok && active === null && sameComboSaved(shortcut)) {
+    // BUS-74: re-recording the current combo skips "Setting…", so a failed
+    // re-bind afterwards must replace its "Shortcut set to …" line.
+    setRecorderStatus({ text: noneActiveText(shortcut, null), tone: 'error' });
+    return;
+  }
   if (replay || (s.pending !== shortcut && s.late !== shortcut)) return;
   clearPending();
   s.late = null;

@@ -2,6 +2,9 @@
 # Validate Apple signing/notarization env vars. Prints "true" (sign) or
 # "false" (unsigned) on stdout; exits non-zero with a clear error on
 # partial configuration. Usage: SIGNED="$(scripts/release/signing-env.sh)"
+# APPLE_TEAM_ID is not secret and may be set on its own (BUS-96). It never
+# makes a build signed by itself, but every signed build requires it so the
+# TeamIdentifier check always runs (and Apple ID notarization needs it).
 set -euo pipefail
 
 has() { [[ -n "${!1:-}" ]]; }
@@ -15,7 +18,7 @@ need() { # need <reason> <var>...
 }
 
 cert_vars=(APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY)
-id_vars=(APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID)
+id_vars=(APPLE_ID APPLE_PASSWORD)
 api_vars=(APPLE_API_KEY APPLE_API_ISSUER APPLE_API_PRIVATE_KEY)
 
 any() { local v; for v in "$@"; do has "$v" && return 0; done; return 1; }
@@ -30,7 +33,7 @@ if ! $any_cert && ! $any_id && ! $any_api; then
 fi
 
 if $any_cert; then
-  need "any Developer ID certificate secret is set" "${cert_vars[@]}"
+  need "any Developer ID certificate secret is set" "${cert_vars[@]}" APPLE_TEAM_ID
 else
   errors+=("notarization secrets are set but the Developer ID certificate secrets (${cert_vars[*]}) are missing")
 fi

@@ -74,7 +74,7 @@ Open `http://localhost:1420`.
 **Minimum macOS: 13.1 (Ventura).** The UI runs in the system WKWebView, so it
 needs the WebKit that ships with Safari 16.2: `color-mix()` (Safari 16.2),
 `:has()` (15.4), `Array.prototype.at()` (15.4) and `inert` (15.5). Declared in
-`src-tauri/tauri.conf.json` → `bundle.macOS.minimumSystemVersion`
+`src-tauri/tauri.conf.json` → `bundle.macOS.minimumSystemVersion`.
 
 With the Rust and macOS build toolchains installed:
 
@@ -121,6 +121,10 @@ does not embed `src-tauri/Entitlements.plist`. Tauri runs `codesign` only when
 a signing identity resolves; `bundle.macOS.signingIdentity` is `"-"` (ad-hoc)
 for that reason. `npm run macos:assert-entitlements -- --repair` re-signs it.
 
+To sign with a Developer ID instead, so permissions survive rebuilds, export
+`APPLE_SIGNING_IDENTITY` (and `APPLE_TEAM_ID`) before building. See
+[docs/macos-signing.md](docs/macos-signing.md).
+
 ## Releases
 
 macOS builds are published as **draft** GitHub Releases by
@@ -140,12 +144,15 @@ publish it. The workflow fails if the tag and manifest versions differ
 (`npm run release:check-version -- v0.2.0`).
 
 **Signing:** builds are ad-hoc signed and labeled **UNSIGNED** until these
-repository secrets exist, after which they are Developer ID signed,
-notarized and stapled automatically: `APPLE_CERTIFICATE` (base64 `.p12`),
-`APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, plus either
-`APPLE_ID` + `APPLE_PASSWORD` (app-specific) + `APPLE_TEAM_ID`, or
-`APPLE_API_KEY` + `APPLE_API_ISSUER` + `APPLE_API_PRIVATE_KEY` (`.p8`
-contents).
+secrets exist in the protected `release` Environment, after which tag pushes
+are Developer ID signed, notarized and stapled automatically:
+`APPLE_CERTIFICATE` (base64 `.p12`), `APPLE_CERTIFICATE_PASSWORD`,
+`APPLE_SIGNING_IDENTITY`, `APPLE_TEAM_ID` (required for every signed build),
+plus either `APPLE_API_KEY` + `APPLE_API_ISSUER` + `APPLE_API_PRIVATE_KEY`
+(`.p8` contents, preferred) or `APPLE_ID` + `APPLE_PASSWORD` (app-specific).
+Manual workflow runs never receive these secrets and always build ad-hoc.
+Setup steps:
+[docs/macos-signing.md](docs/macos-signing.md).
 
 **Test build without releasing:** run the *Release* workflow manually
 (Actions → Release → Run workflow). It uploads the build as a workflow
@@ -157,6 +164,26 @@ Speech-to-text is local-first (see `docs/decisions/local-stt-whisper.md`).
 The TypeScript layer talks to `SttEngine` / `SttModelStore`; a mock adapter
 backs UI tests. The Tauri shell exposes `stt_*` commands for model
 download (explicit user action only) and transcription.
+
+Model downloads are pinned: `stt/catalog.rs` lists a fixed Hugging Face
+revision plus each file's exact size and SHA-256, and `src-tauri/src/model_fetch`
+verifies both before the atomic rename. A mismatch deletes the partial file and
+reports `download-corrupted`, which the Models tab shows as "Download was
+damaged. Nothing was saved." with Retry; sizes and hashes go only to the
+native log. Downloads use one shared HTTPS-only client (an
+https→http redirect is refused) with a 30 s connect timeout and a 30 s read
+timeout, so a stalled transfer fails instead of hanging; there is no overall
+time limit. Model files already on disk (including ones downloaded before
+pinning) are checked once against the same size and SHA-256 in the background
+after launch; dictation keeps working while that runs. A passing file gets a
+`<file>.verified` marker (hash, size and modified time) so it isn't hashed
+again. A file that fails is kept, shows as damaged in the Models tab with
+Retry, and isn't used for transcription. A file that can't be opened (for
+example after its permissions change, even if it was verified before) shows
+"Couldn't open the model file" with Retry; dictation tries to open it again
+each time and uses it once it opens, and that file is then checked once more
+in the background. A file that opens but can't be read during the check stays
+failed until Retry download or the next launch.
 
 Real whisper.cpp linkage is **opt-in** on macOS:
 
