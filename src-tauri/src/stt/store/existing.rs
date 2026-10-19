@@ -4,9 +4,11 @@
 //! matched the catalog pin once (`model_fetch::verify_file`, the same size +
 //! SHA rule downloads use). The result is persisted as a marker next to the
 //! model (`marker.rs`), so each file is hashed at most once. A changed length
-//! or mtime, or a different pin, invalidates it. Hashing runs only on
-//! background threads (`background.rs`), never on the UI/IPC thread or the
-//! transcription path: a model still being checked stays usable.
+//! or mtime, or a different pin, invalidates it, including mid-session: a
+//! cached `Verified` is re-checked against the marker (a stat and a small
+//! read, no hash) on each use. Hashing runs only on background threads
+//! (`background.rs`), never on the UI/IPC thread or the transcription path:
+//! a model still being checked stays usable.
 //!
 //! A mismatched file (`Corrupt`) is not deleted: it is reported as `failed`
 //! so the Models tab shows "Model file is damaged" with a one-click Retry
@@ -99,8 +101,11 @@ pub(super) fn classify(result: Result<(), FetchError>, opens_now: bool) -> Verdi
 impl ModelStore {
     /// Cached verdict, or the marker's, without hashing. `None` = not yet known.
     pub(super) fn known_verdict(&self, spec: &ModelSpec) -> Option<Verdict> {
-        if let Some(v) = self.verdicts.lock().unwrap().get(spec.id) {
-            return Some(*v);
+        let cached = self.verdicts.lock().unwrap().get(spec.id).copied();
+        match cached {
+            Some(Verdict::Verified) => return self.recheck_verified(spec),
+            Some(v) => return Some(v),
+            None => {}
         }
         if marker::marker_matches(spec, &self.model_path(spec)) {
             self.set_verdict(spec, Verdict::Verified);
@@ -125,6 +130,18 @@ impl ModelStore {
             Some(Verdict::Verified) | None if !opens(&path) => Some(Verdict::OpenFailed),
             verdict => verdict,
         }
+    }
+
+    /// A cached `Verified` holds only while the marker still matches the
+    /// file's length and mtime (no hash). A file changed mid-session
+    /// reads as not-yet-checked and gets one background re-check, whose
+    /// verdict replaces the cached one.
+    fn recheck_verified(&self, spec: &ModelSpec) -> Option<Verdict> {
+        if marker::marker_matches(spec, &self.model_path(spec)) {
+            return Some(Verdict::Verified);
+        }
+        self.queue_reverify(spec.id);
+        None
     }
 
     /// Remove the cached verdict only if it is still `OpenFailed` (checked

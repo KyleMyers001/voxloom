@@ -5,10 +5,11 @@
 use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
-use super::existing::{marker_path, Verdict};
+use super::existing::{marker_path, write_marker, Verdict};
 use super::tests::{serve_bytes, spec_for, temp_store, test_agent};
+use super::ModelStore;
 use crate::stt::catalog;
 
 fn set_mtime(path: &std::path::Path, at: SystemTime) {
@@ -290,5 +291,86 @@ fn startup_pass_checks_every_present_file_and_reports_each_verdict() {
         .join()
         .unwrap();
     assert_eq!(again.load(Ordering::SeqCst), 0);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// A store whose startup pass ran (so re-checks can queue) with a file at
+/// `spec`'s path, marked verified and cached as `Verified`. Real pin, so a
+/// re-hash of the file finds it damaged. Returns a refresh counter.
+fn marked_store(
+    label: &str,
+    spec: &'static catalog::ModelSpec,
+) -> (Arc<ModelStore>, std::path::PathBuf, Arc<AtomicUsize>) {
+    let (store, dir) = temp_store(label);
+    fs::create_dir_all(&dir).unwrap();
+    let path = store.model_path(spec);
+    fs::write(&path, b"good").unwrap();
+    write_marker(spec, &path);
+    let store = Arc::new(store);
+    store.spawn_verify_existing(|| {}).join().unwrap();
+    assert_eq!(store.known_verdict(spec), Some(Verdict::Verified));
+    let refreshes = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&refreshes);
+    store.set_on_models_changed(Arc::new(move || {
+        counter.fetch_add(1, Ordering::SeqCst);
+    }));
+    (store, dir, refreshes)
+}
+
+/// The re-check notifies after it leaves `reverifying`, so wait on both.
+fn wait_for_recheck(store: &ModelStore, refreshes: &AtomicUsize) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while refreshes.load(Ordering::SeqCst) == 0 || !store.reverifying.lock().unwrap().is_empty() {
+        assert!(Instant::now() < deadline, "re-check never finished");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn file_rewritten_mid_session_drops_verified_and_is_rechecked() {
+    let spec = catalog::find("whisper-base.en").unwrap();
+    let (store, dir, refreshes) = marked_store("mid-session", spec);
+    let path = store.model_path(spec);
+
+    // Hold the hashing lock: dictation must not wait on the re-check.
+    let hashing = store.hashing.lock().unwrap();
+    fs::write(&path, b"damaged mid-session").unwrap();
+    assert_eq!(store.resolved_path(spec.id).unwrap(), path);
+    assert_eq!(store.known_verdict(spec), None, "cached Verified dropped");
+    assert_eq!(store.reverifying.lock().unwrap().len(), 1, "one re-check");
+    drop(hashing);
+
+    wait_for_recheck(&store, &refreshes);
+    assert_eq!(store.known_verdict(spec), Some(Verdict::Corrupt));
+    let info = store.status(spec.id).unwrap();
+    assert_eq!(info.status, "failed", "no longer available");
+    assert_eq!(info.failure_reason.as_deref(), Some("damaged"));
+    assert!(store.resolved_path(spec.id).is_err());
+    assert_eq!(refreshes.load(Ordering::SeqCst), 1, "re-list once");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn untouched_verified_file_is_not_rehashed() {
+    let spec = catalog::find("whisper-base.en").unwrap();
+    let (store, dir, refreshes) = marked_store("untouched", spec);
+    let path = store.model_path(spec);
+
+    // Proof of no hash: these bytes fail the real pin, but length and mtime
+    // still match the marker, so only a re-hash would notice them.
+    let mtime = fs::metadata(&path).unwrap().modified().unwrap();
+    fs::write(&path, b"bad!").unwrap();
+    set_mtime(&path, mtime);
+    for _ in 0..3 {
+        assert_eq!(store.resolved_path(spec.id).unwrap(), path);
+        assert_eq!(store.status(spec.id).unwrap().status, "available");
+    }
+    assert!(
+        store.reverifying.lock().unwrap().is_empty(),
+        "nothing queued"
+    );
+    std::thread::sleep(Duration::from_millis(50));
+    assert_eq!(store.known_verdict(spec), Some(Verdict::Verified));
+    assert_eq!(refreshes.load(Ordering::SeqCst), 0);
     let _ = fs::remove_dir_all(&dir);
 }
