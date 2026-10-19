@@ -13,6 +13,12 @@ export interface GestureMachine {
   handle(edge: KeyEdge): void;
   /** Clear hold/latch timers and tap memory without changing context. */
   resetPartial(): void;
+  /**
+   * End an active hold or latch with its normal finish gesture (so the
+   * dictation stops cleanly), then reset partial state. Returns the
+   * gesture emitted, or null when nothing was active.
+   */
+  finishActive(): ShortcutGesture | null;
   setContext(context: ShortcutContext): void;
 }
 
@@ -106,7 +112,17 @@ export function createGestureMachine({
     downAt = null;
   }
 
+  function finishActive(): ShortcutGesture | null {
+    const gesture: ShortcutGesture | null = holding
+      ? 'hold-finish'
+      : latched ? 'latch-finish' : null;
+    resetPartial();
+    if (gesture && !disposed) onGesture(gesture);
+    return gesture;
+  }
+
   return {
+    finishActive,
     dispose() {
       disposed = true;
       resetPartial();

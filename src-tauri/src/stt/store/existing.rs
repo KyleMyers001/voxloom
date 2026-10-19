@@ -1,7 +1,8 @@
 //! Verification of model files already on disk (BUS-35, Codex P1).
 //!
-//! A file at the model path is trusted only after its SHA-256 matched the
-//! catalog pin once. The result is persisted as a marker next to the model
+//! A file at the model path is trusted only after its exact size and SHA-256
+//! matched the catalog pin once (`model_fetch::verify_file`, the same size +
+//! SHA rule downloads use). The result is persisted as a marker next to the model
 //! (`<file>.verified`: `<sha256> <len>`), so each file is hashed at most once.
 //! Hashing runs on a background thread at startup (never on the UI/IPC thread)
 //! or, if transcription needs the model first, on its blocking worker.
@@ -10,13 +11,12 @@
 //! tab shows "Model file is damaged" with Retry, and transcription refuses it.
 
 use std::collections::HashMap;
-use std::fs::{self, File};
-use std::io::Read;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::verify::Integrity;
 use super::ModelStore;
+use crate::model_fetch::{self, FetchError};
 use crate::stt::catalog::{self, ModelSpec};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,20 +57,6 @@ pub(super) fn write_marker(spec: &ModelSpec, model: &Path) {
     }
 }
 
-fn hash_file(model: &Path) -> std::io::Result<String> {
-    let mut file = File::open(model)?;
-    let mut integrity = Integrity::default();
-    let mut buf = vec![0u8; 256 * 1024];
-    loop {
-        let n = file.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        integrity.update(&buf[..n]);
-    }
-    Ok(integrity.hex_digest())
-}
-
 impl ModelStore {
     /// Cached verdict, or the marker's, without hashing. `None` = not yet known.
     pub(super) fn known_verdict(&self, spec: &ModelSpec) -> Option<Verdict> {
@@ -99,16 +85,14 @@ impl ModelStore {
         if let Some(v) = self.known_verdict(spec) {
             return Some(v);
         }
-        let verdict = match hash_file(&path) {
-            Ok(actual) if actual.eq_ignore_ascii_case(spec.sha256) => {
+        let verdict = match model_fetch::verify_file(&path, &spec.artifact()) {
+            Ok(()) => {
                 write_marker(spec, &path);
                 Verdict::Verified
             }
-            Ok(actual) => {
-                eprintln!(
-                    "[stt] existing model {} failed verification: expected sha256 {}, got {actual}",
-                    spec.id, spec.sha256
-                );
+            Err(e @ (FetchError::SizeMismatch { .. } | FetchError::HashMismatch { .. })) => {
+                // Sizes and hashes go to the log, not the UI.
+                eprintln!("[stt] existing model {} failed verification: {e}", spec.id);
                 Verdict::Corrupt
             }
             Err(e) => {

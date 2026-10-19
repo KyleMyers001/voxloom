@@ -122,5 +122,5 @@ mod tests {
         assert_eq!(p, q);
     }
     // query() and request() require a foreground TCC context.
-    // Manual tests documented in docs/review/BUS-9-implementation.md.
+    // Covered by manual on-device tests.
 }

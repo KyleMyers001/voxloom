@@ -1,4 +1,5 @@
-/// BUS-35: damaged-model and damaged-download copy; no double period in other failures.
+/// BUS-35: damaged existing-model copy; no double period in other failures.
+/// (The damaged-download copy is covered by ModelsDownloadDamaged.test.tsx.)
 import { act, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { ModelsTab } from '../../src/features/settings/ModelsTab';
@@ -14,15 +15,6 @@ vi.mock('../../src/services/stt/factory', async (importActual) => {
 });
 
 describe('BUS-35 integrity copy', () => {
-  it('shows the checksum failure exactly, with no wrapper and no hashes', async () => {
-    const store = createMockSttModelStore();
-    vi.spyOn(store, 'download').mockRejectedValueOnce(new SttError('download-corrupted', 'anything from native'));
-    const { result } = renderHook(() => useSttModels({ onSelect: vi.fn(), selectedModelId: 'whisper-tiny.en', store }));
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    await act(async () => { await result.current.downloadModel('whisper-base.en').catch(() => {}); });
-    expect(result.current.failures['whisper-base.en']).toBe('Download was damaged. Nothing was saved.');
-  });
-
   it('does not double the period after another failure message that ends in one', async () => {
     const store = createMockSttModelStore();
     vi.spyOn(store, 'download').mockRejectedValueOnce(new SttError('download-failed', 'Disk is full.'));

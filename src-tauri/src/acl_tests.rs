@@ -13,7 +13,25 @@ fn store_backup(store: String) -> Result<Option<String>, String> {
     Ok(Some(format!("stub-{store}")))
 }
 
+#[tauri::command]
+fn cleanup_run() {}
+
+#[tauri::command]
+fn cleanup_model_status() {}
+
+#[tauri::command]
+fn cleanup_pick_and_import_model() {}
+
 fn invoke_from(app: &tauri::App<MockRuntime>, label: &str, page: &str) -> Result<(), String> {
+    invoke_command(app, label, page, "store_backup")
+}
+
+fn invoke_command(
+    app: &tauri::App<MockRuntime>,
+    label: &str,
+    page: &str,
+    command: &str,
+) -> Result<(), String> {
     let window = WebviewWindowBuilder::new(app, label, WebviewUrl::App(page.into()))
         .build()
         .expect("window");
@@ -21,7 +39,7 @@ fn invoke_from(app: &tauri::App<MockRuntime>, label: &str, page: &str) -> Result
     get_ipc_response(
         &window,
         InvokeRequest {
-            cmd: "store_backup".into(),
+            cmd: command.into(),
             callback: CallbackFn(0),
             error: CallbackFn(1),
             url,
@@ -32,6 +50,34 @@ fn invoke_from(app: &tauri::App<MockRuntime>, label: &str, page: &str) -> Result
     )
     .map(|_| ())
     .map_err(|e| format!("{e:?}"))
+}
+
+#[test]
+fn cleanup_models_are_available_in_settings_but_worker_execution_is_main_only() {
+    for command in [
+        "cleanup_run",
+        "cleanup_model_status",
+        "cleanup_pick_and_import_model",
+    ] {
+        let app = mock_builder()
+            .invoke_handler(tauri::generate_handler![
+                cleanup_run,
+                cleanup_model_status,
+                cleanup_pick_and_import_model
+            ])
+            .build(crate::app_context())
+            .expect("mock app");
+        assert_eq!(invoke_command(&app, "main", "index.html", command), Ok(()));
+        let settings = invoke_command(&app, "settings", "settings.html", command);
+        if command == "cleanup_run" {
+            assert!(settings.unwrap_err().contains("not allowed"));
+        } else {
+            assert_eq!(settings, Ok(()));
+        }
+        assert!(invoke_command(&app, "overlay", "overlay.html", command)
+            .unwrap_err()
+            .contains("not allowed"));
+    }
 }
 
 #[test]

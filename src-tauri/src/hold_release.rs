@@ -10,7 +10,7 @@
 //! Tear-down on disarm / cancel / error / latch paths. Does **not** grab Escape.
 //! Non-macOS builds expose no-op commands so Linux `cargo check` stays green.
 //!
-//! ## Poll / tap signal rules (Clara Mac false-fire)
+//! ## Poll / tap signal rules (Mac false-fire)
 //!
 //! Under `RegisterEventHotKey`, `CGEventSourceKeyState` for the letter key can
 //! read **false** while the key is still physically held. Treat **required

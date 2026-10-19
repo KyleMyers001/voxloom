@@ -24,7 +24,7 @@ describe('entitlements codesign config', () => {
     };
 
     // Without signingIdentity, tauri-bundler skips codesign entirely and the
-    // Mach-O stays linker-signed with no embedded entitlements (Clara smoke).
+    // Mach-O stays linker-signed with no embedded entitlements (Mac smoke).
     // Pseudo-identity "-" triggers codesign -s - with --entitlements.
     expect(conf.bundle.macOS.signingIdentity).toBe('-');
     expect(conf.bundle.macOS.entitlements).toBe('Entitlements.plist');

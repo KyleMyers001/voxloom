@@ -29,6 +29,12 @@ env:
 jobs:
   build-macos:
     runs-on: macos-latest
+    # BUS-59/BUS-96: signing and notarization secrets live only in the
+    # protected 'release' Environment, so tag pushes must enter it to sign.
+    # Same condition as the publish job: manual runs (even on a tag ref) use
+    # no environment, need no approval and build ad-hoc. The step env below
+    # also blanks every APPLE_* secret outside tag pushes.
+    environment: ${{ github.event_name == 'push' && github.ref_type == 'tag' && 'release' || '' }}
     timeout-minutes: 60
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -58,26 +64,36 @@ jobs:
             npm run release:check-version
           fi
           echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      # With the secrets present, Tauri imports APPLE_CERTIFICATE into a
+      # temporary keychain (random password, deleted when the build exits),
+      # signs the .app and .dmg, then notarizes and staples the .app.
+      # With none present, build-macos.sh builds today's ad-hoc app.
+      # Every APPLE_* value is '' unless this is a tag push, so manual runs
+      # stay ad-hoc even if same-named repository-level secrets exist.
       - name: Build app and dmg
         env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          APPLE_CERTIFICATE: ${{ (github.event_name == 'push' && github.ref_type == 'tag') && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ (github.event_name == 'push' && github.ref_type == 'tag') && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ (github.event_name == 'push' && github.ref_type == 'tag') && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          APPLE_ID: ${{ (github.event_name == 'push' && github.ref_type == 'tag') && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ (github.event_name == 'push' && github.ref_type == 'tag') && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ (github.event_name == 'push' && github.ref_type == 'tag') && secrets.APPLE_TEAM_ID || '' }}
+          APPLE_API_KEY: ${{ (github.event_name == 'push' && github.ref_type == 'tag') && secrets.APPLE_API_KEY || '' }}
+          APPLE_API_ISSUER: ${{ (github.event_name == 'push' && github.ref_type == 'tag') && secrets.APPLE_API_ISSUER || '' }}
+          APPLE_API_PRIVATE_KEY: ${{ (github.event_name == 'push' && github.ref_type == 'tag') && secrets.APPLE_API_PRIVATE_KEY || '' }}
         run: bash scripts/release/build-macos.sh "$TARGET"
+      # Signed builds: notarytool submit --wait + stapler staple on the .dmg,
+      # then spctl. The entitlements check also asserts the Developer ID
+      # signature and TeamIdentifier (APPLE_TEAM_ID is required when signed).
       - name: Package, verify and checksum
         id: package
         env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_SIGNING_IDENTITY: ${{ (github.event_name == 'push' && github.ref_type == 'tag') && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          APPLE_ID: ${{ (github.event_name == 'push' && github.ref_type == 'tag') && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ (github.event_name == 'push' && github.ref_type == 'tag') && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ (github.event_name == 'push' && github.ref_type == 'tag') && secrets.APPLE_TEAM_ID || '' }}
+          APPLE_API_KEY: ${{ (github.event_name == 'push' && github.ref_type == 'tag') && secrets.APPLE_API_KEY || '' }}
+          APPLE_API_ISSUER: ${{ (github.event_name == 'push' && github.ref_type == 'tag') && secrets.APPLE_API_ISSUER || '' }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           bash scripts/release/package-macos.sh "$TARGET" "$VERSION" "$SIGNED"
@@ -98,6 +114,8 @@ jobs:
     if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: build-macos
     runs-on: ubuntu-latest
+    # BUS-59: publishing needs approval from a required reviewer on the 'release' Environment.
+    environment: release
     permissions:
       contents: write
     steps:

@@ -1,42 +1,37 @@
 //! English-first whisper.cpp model catalog (ADR local-stt-whisper).
 //!
-//! URLs are pinned to a Hugging Face commit of `ggerganov/whisper.cpp` so the
-//! bytes behind each URL cannot change under the pinned `sha256`. Hashes are the
-//! Git LFS object ids (SHA-256 of the file) published by Hugging Face for that
-//! revision:
-//! `https://huggingface.co/api/models/ggerganov/whisper.cpp/tree/<REVISION>`
-//! (also returned as `X-Linked-ETag` on the `resolve` URL).
+//! Every entry is pinned to an immutable Hugging Face revision of
+//! `ggerganov/whisper.cpp` with its exact byte size and SHA-256 (the file's
+//! LFS oid at that revision). Downloads are verified against both before the
+//! file is renamed into place (`crate::model_fetch`).
 
-/// Hugging Face commit of `ggerganov/whisper.cpp` the catalog is pinned to.
-/// A macro so `concat!` can build the URLs from it at compile time.
-macro_rules! hf_revision {
-    () => {
-        "5359861c739e955e79d9a303bcbc70fb988958b1"
-    };
-}
-macro_rules! hf_url {
-    ($file:literal) => {
-        concat!(
-            "https://huggingface.co/ggerganov/whisper.cpp/resolve/",
-            hf_revision!(),
-            "/",
-            $file
-        )
-    };
-}
+use crate::model_fetch::PinnedArtifact;
 
-#[cfg(test)]
-pub const HF_REVISION: &str = hf_revision!();
+/// Pinned `ggerganov/whisper.cpp` commit. Changing it requires updating every
+/// size and SHA-256 below from the same revision (the catalog test enforces it).
+#[allow(dead_code)]
+pub const WHISPER_REVISION: &str = "5359861c739e955e79d9a303bcbc70fb988958b1";
 
 #[derive(Debug, Clone, Copy)]
 pub struct ModelSpec {
     pub id: &'static str,
     pub label: &'static str,
     pub filename: &'static str,
+    /// Exact byte size of the pinned file.
     pub size_bytes: u64,
-    pub url: &'static str,
-    /// Expected SHA-256 of the complete file, lowercase hex.
+    /// Lowercase hex SHA-256 of the pinned file.
     pub sha256: &'static str,
+    /// Revision-pinned download URL (never a moving branch like `main`).
+    pub url: &'static str,
+}
+
+impl ModelSpec {
+    pub fn artifact(&self) -> PinnedArtifact {
+        PinnedArtifact {
+            size_bytes: self.size_bytes,
+            sha256: self.sha256,
+        }
+    }
 }
 
 /// Suggested first download — tiny English.
@@ -48,19 +43,17 @@ pub const CATALOG: &[ModelSpec] = &[
         id: "whisper-tiny.en",
         label: "Whisper Tiny (English)",
         filename: "ggml-tiny.en.bin",
-        size_bytes: 77_700_000,
-        url: hf_url!("ggml-tiny.en.bin"),
-        // LFS oid, 77_704_715 bytes.
+        size_bytes: 77_704_715,
         sha256: "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.en.bin",
     },
     ModelSpec {
         id: "whisper-base.en",
         label: "Whisper Base (English)",
         filename: "ggml-base.en.bin",
-        size_bytes: 148_000_000,
-        url: hf_url!("ggml-base.en.bin"),
-        // LFS oid, 147_964_211 bytes.
+        size_bytes: 147_964_211,
         sha256: "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.en.bin",
     },
 ];
 
@@ -73,19 +66,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_model_pins_a_sha256_and_revision() {
-        for m in CATALOG {
-            assert_eq!(m.sha256.len(), 64, "{}", m.id);
-            assert!(m
-                .sha256
-                .bytes()
-                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
-            assert!(
-                m.url.contains(HF_REVISION),
-                "{} url must pin the revision",
-                m.id
+    fn every_entry_is_pinned_to_the_revision_with_exact_identity() {
+        for spec in CATALOG {
+            let expected = format!(
+                "https://huggingface.co/ggerganov/whisper.cpp/resolve/{WHISPER_REVISION}/{}",
+                spec.filename
             );
-            assert!(m.url.ends_with(m.filename));
+            assert_eq!(
+                spec.url, expected,
+                "{} must use the pinned revision",
+                spec.id
+            );
+            assert!(!spec.url.contains("/resolve/main/"));
+            assert_eq!(spec.sha256.len(), 64, "{} sha256 length", spec.id);
+            assert!(spec
+                .sha256
+                .chars()
+                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)));
+            assert!(spec.size_bytes > 1_000_000);
+            assert_eq!(spec.artifact().size_bytes, spec.size_bytes);
+        }
+    }
+
+    #[test]
+    fn ids_and_filenames_are_unique() {
+        for (i, a) in CATALOG.iter().enumerate() {
+            for b in &CATALOG[i + 1..] {
+                assert_ne!(a.id, b.id);
+                assert_ne!(a.filename, b.filename);
+            }
         }
     }
 }
