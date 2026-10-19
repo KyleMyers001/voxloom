@@ -13,6 +13,7 @@ mod error;
 mod output;
 mod parent;
 mod request;
+mod sizing;
 mod template;
 #[cfg(debug_assertions)]
 mod test_hook;
