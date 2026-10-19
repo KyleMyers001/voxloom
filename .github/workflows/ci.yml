@@ -85,6 +85,31 @@ jobs:
       - run: cargo clippy --all-targets
       - run: cargo test
 
+  cleanup-worker:
+    # BUS-16 PR 3c-1: the llama.cpp cleanup worker crate (src-tauri/worker,
+    # own Cargo.lock) and its contract test. Separate cache key: llama.cpp's
+    # cmake objects live in its target dir. macOS builds the Metal backend.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: src-tauri/worker
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri/worker
+          shared-key: cleanup-worker
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets
+      - run: cargo test --locked
+
   rust-whisper:
     # Builds and tests with the opt-in `whisper` feature (whisper-rs ->
     # whisper.cpp via cmake + bindgen/libclang), which the other Rust jobs
