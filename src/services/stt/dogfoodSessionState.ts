@@ -19,6 +19,11 @@ export interface DogfoodLiveSession {
    * suppress new delivery side effects and preserve the newer session's phase.
    */
   session: number;
+  /**
+   * The session whose start requested the current capture. Its terminal
+   * capture state must not end a newer session that is still live.
+   */
+  captureSession: number | null;
   /** Escape cancels only while a session is active. */
   active: boolean;
   cancellation: Cancellation;
@@ -43,6 +48,7 @@ export function useDogfoodLiveSession(): DogfoodLiveSession {
     active: false,
     cancelAction: () => {},
     cancellation: { cancelled: false },
+    captureSession: null,
     handledAudioId: null,
     processing: null,
     retirement: undefined,

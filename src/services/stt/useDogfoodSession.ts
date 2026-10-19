@@ -114,6 +114,7 @@ export function useDogfoodSession({
       // A just-cancelled capture still owns the mic until its terminal event.
       await capture.waitForCaptureRelease();
       if (superseded()) return;
+      live.captureSession = session;
       const started = await capture.startFullCaptureSession(deviceId);
       if (superseded() || started === 'ended') return;
       if (started !== 'started') {
