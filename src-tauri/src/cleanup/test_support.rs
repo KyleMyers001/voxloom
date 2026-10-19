@@ -63,6 +63,32 @@ pub fn wait_until(timeout: Duration, mut condition: impl FnMut() -> bool) -> boo
     }
 }
 
+const ENV_PYTHON: &str = "#!/usr/bin/env python3\n";
+
+/// Workers start with an empty environment (env_clear), so `/usr/bin/env`
+/// would search its built-in default path instead of this process's PATH.
+/// On macOS that finds the /usr/bin/python3 Xcode shim, which is slow to
+/// start without HOME/TMPDIR and trips the short test timeouts. Pin the
+/// interpreter this test process would run instead.
+fn with_python_path(contents: &str) -> String {
+    let Some(body) = contents.strip_prefix(ENV_PYTHON) else {
+        return contents.to_owned();
+    };
+    format!("#!{}\n{body}", python3().display())
+}
+
+fn python3() -> &'static Path {
+    static PYTHON: OnceLock<PathBuf> = OnceLock::new();
+    PYTHON.get_or_init(|| {
+        std::env::var_os("PATH")
+            .iter()
+            .flat_map(std::env::split_paths)
+            .map(|dir| dir.join("python3"))
+            .find(|candidate| candidate.is_file())
+            .expect("python3 on PATH for the cleanup worker tests")
+    })
+}
+
 /// Installs an executable script without this process ever holding it open
 /// for writing. A write descriptor opened by one test thread is inherited by
 /// a child another thread is forking (until that child execs), and exec of a
@@ -72,7 +98,7 @@ pub fn wait_until(timeout: Duration, mut condition: impl FnMut() -> bool) -> boo
 pub fn write_executable(path: &Path, contents: &str) {
     let source = path.with_extension("source");
     let staged = path.with_extension("staged");
-    fs::write(&source, contents).unwrap();
+    fs::write(&source, with_python_path(contents)).unwrap();
     let status = Command::new("cp")
         .arg(&source)
         .arg(&staged)
