@@ -1,6 +1,7 @@
 // Conservative lexical checks, not a semantic-equivalence guarantee.
 // Require all normalized content, in order, at every length. Discount only
-// enumerated fillers/articles and narrowly marked source corrections.
+// lowercase fillers, removed (never swapped) articles and narrowly marked
+// source corrections.
 export const CLEANUP_MIN_CONTENT_RETENTION = 1;
 export const CLEANUP_MIN_CANDIDATE_COVERAGE = 1;
 
@@ -15,19 +16,25 @@ const PRONOUNS = new Set([
   'theirs', 'je', 'tu', 'nous', 'vous', 'il', 'elle', 'ils', 'elles',
 ]);
 
-function words(text: string): string[] {
-  const expanded = text.normalize('NFC').toLowerCase()
+// Expand supported contractions without lowercasing, so callers can still
+// see each source token's case (ER is not the filler "er").
+function casedWords(text: string): string[] {
+  const expanded = text.normalize('NFC')
     .replaceAll('’', '\'')
-    .replace(/\bcan't\b/gu, 'can not')
-    .replace(/\bwon't\b/gu, 'will not')
-    .replace(/n't\b/gu, ' not')
-    .replace(/\bcannot\b/gu, 'can not')
-    .replace(/\bi'm\b/gu, 'i am')
-    .replace(/'re\b/gu, ' are')
-    .replace(/'ve\b/gu, ' have')
-    .replace(/'ll\b/gu, ' will')
-    .replace(/\bn'/gu, 'ne ');
+    .replace(/\bcan't\b/giu, 'can not')
+    .replace(/\bwon't\b/giu, 'will not')
+    .replace(/n't\b/giu, ' not')
+    .replace(/\bcannot\b/giu, 'can not')
+    .replace(/\bi'm\b/giu, 'i am')
+    .replace(/'re\b/giu, ' are')
+    .replace(/'ve\b/giu, ' have')
+    .replace(/'ll\b/giu, ' will')
+    .replace(/\bn'/giu, 'ne ');
   return expanded.match(/[\p{L}\p{M}\p{N}]+(?:'[\p{L}\p{M}]+)*/gu) ?? [];
+}
+
+function words(text: string): string[] {
+  return casedWords(text).map((word) => word.toLowerCase());
 }
 
 export function sameMultiset(left: readonly string[], right: readonly string[]): boolean {
@@ -48,8 +55,18 @@ function oneEditApart(left: string, right: string): boolean {
   return edits + Number(i < left.length || j < right.length) <= 1;
 }
 
+/** True for a lowercase source filler; "ER" or "Er" stays content. */
+function isFiller(token: string): boolean {
+  return FILLERS.has(token) && token === token.toLowerCase();
+}
+
+/**
+ * Lowercased, dictionary-canonicalized words with lowercase fillers removed.
+ * Articles are kept: callers may drop them from the source, never swap them.
+ */
 function contentWords(text: string, dictionary: readonly string[]): string[] {
-  const tokens = words(text);
+  const tokens = casedWords(text).filter((token) => !isFiller(token))
+    .map((token) => token.toLowerCase());
   const spellings = dictionary.map((term) => term.normalize('NFC').toLowerCase())
     .filter((term) => /^[\p{L}\p{M}]{5,}$/u.test(term));
   const canonical: string[] = [];
@@ -65,7 +82,12 @@ function contentWords(text: string, dictionary: readonly string[]): string[] {
       ? spellings.filter((term) => oneEditApart(word, term)) : [];
     canonical.push(matches.length === 1 ? matches[0] : word);
   }
-  return canonical.filter((word) => !FILLERS.has(word) && !ARTICLES.has(word));
+  return canonical;
+}
+
+/** Content words (no fillers or articles) in `text`; anchors quote marks. */
+export function anchorWordCount(text: string, dictionary: readonly string[]): number {
+  return contentWords(text, dictionary).filter((word) => !ARTICLES.has(word)).length;
 }
 
 export function preservesContent(
@@ -95,12 +117,21 @@ export function preservesContent(
       && coveredInOrder(contentWords(correctedRaw, dictionary), output));
 }
 
+// The output must be the source in order, minus only source articles: an
+// article may be removed, but a swapped or inserted one is unmatched.
 function coveredInOrder(source: string[], output: string[]): boolean {
-  if (!source.length) return false;
+  const required = source.filter((word) => !ARTICLES.has(word)).length;
+  if (!required) return false;
   let matched = 0;
+  let kept = 0;
   for (const word of source) {
-    if (word === output[matched]) matched++;
+    if (word === output[matched]) {
+      matched++;
+      if (!ARTICLES.has(word)) kept++;
+    } else if (!ARTICLES.has(word)) {
+      return false;
+    }
   }
-  return matched / source.length >= CLEANUP_MIN_CONTENT_RETENTION
+  return kept / required >= CLEANUP_MIN_CONTENT_RETENTION
     && matched / output.length >= CLEANUP_MIN_CANDIDATE_COVERAGE;
 }

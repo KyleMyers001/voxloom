@@ -124,7 +124,13 @@ export function parseSettingsJson(raw: string): ParseSettingsResult {
     };
   }
   const onboardingComplete = asBoolean(parsed.onboardingComplete, false);
-  const settings = coerceSettings(parsed.settings);
+  const coerced = coerceSettings(parsed.settings);
+  // v1 never had a cleanup opt-in. A #24-era v1 file may carry
+  // `cleanupEnabled: true` as an extra key; it must not turn cleanup on
+  // (BUS-16: off until verified on macOS). Only a v2 file can opt in.
+  const settings = parsed.version === 1
+    ? { ...coerced, cleanupEnabled: false }
+    : coerced;
   return {
     file: {
       onboardingComplete,

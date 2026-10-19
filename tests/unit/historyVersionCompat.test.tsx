@@ -25,7 +25,10 @@ import {
 } from '../../src/services/settings';
 
 const V2 = readFileSync(join(__dirname, '../fixtures/history-v2.json'), 'utf8');
-const V1 = JSON.stringify({ ...JSON.parse(V2), version: 1 });
+// Written by main 7fd142b's own v1 writer (createDogfoodRecord +
+// serializeHistoryFile), not a v2 file with its version flipped.
+const V1 = readFileSync(join(__dirname, '../fixtures/history-v1.json'), 'utf8');
+const V1_IDS = ['v1-inserted', 'v1-raw-differs', 'v1-unverified', 'v1-failed'];
 const NOW = 1_800_000_000_000;
 
 const newRow: DictationRecord = {
@@ -103,7 +106,7 @@ describe('BUS-42 history file version compatibility', () => {
     await waitFor(() => expect(api?.bootReady).toBe(true));
     await settle();
     expect(api!.state.historyError).toBeNull();
-    expect(api!.state.records.map((r) => r.id)).toEqual(['v2-cleaned', 'v2-legacy']);
+    expect(api!.state.records.map((r) => r.id)).toEqual(V1_IDS);
     expect(io.backups()).toEqual([V1]);
 
     act(() => api!.dispatch({ record: newRow, type: 'append-record' }));
@@ -111,8 +114,35 @@ describe('BUS-42 history file version compatibility', () => {
     const disk = JSON.parse(io.snapshot()!) as { records: { id: string }[]; version: number };
     expect(disk.version).toBe(2);
     expect(disk.records.map((r) => r.id).sort()).toEqual(
-      ['new-after-boot', 'v2-cleaned', 'v2-legacy'],
+      ['new-after-boot', ...V1_IDS].sort(),
     );
+  });
+
+  it('migrates main\'s real v1 rows as skipped legacy-v1, keeping their text', () => {
+    const parsed = parseHistoryJson(V1);
+    expect(parsed).toMatchObject({ ok: true, sourceVersion: 1 });
+    if (!parsed.ok) return;
+    const original = (JSON.parse(V1) as { records: DictationRecord[] }).records;
+    expect(parsed.file.records.map((r) => r.id)).toEqual(V1_IDS);
+    parsed.file.records.forEach((record, index) => {
+      const source = original[index];
+      expect(record.cleanup).toEqual({
+        dictionaryDigest: null,
+        dictionaryVersion: 1,
+        modelDigest: null,
+        modelId: null,
+        promptVersion: 'legacy-v1',
+        reason: 'migrated from history v1',
+        status: 'skipped',
+      });
+      expect(record.text).toBe(source.text);
+      // v1 stored rawText only when it differed (BUS-23); otherwise raw = final.
+      expect(record.rawText).toBe(source.rawText ?? source.text);
+      if (source.rawText === undefined) expect(record.rawText).toBe(record.text);
+      expect(record.status).toBe(source.status);
+    });
+    expect(parsed.file.records[1].rawText).toBe('[Music] hello world');
+    expect(parsed.file.records[2].mayHaveInserted).toEqual({ copied: true });
   });
 
   it('an unknown future version is surfaced, backed up, and never clobbered', async () => {

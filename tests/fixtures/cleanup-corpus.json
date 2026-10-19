@@ -193,6 +193,61 @@
       ]
     },
     {
+      "id": "quote-position", "categories": ["quoted-instructions", "punctuation"],
+      "rawText": "Alice said \"Bob resigned\" yesterday", "dictionary": [],
+      "candidates": [
+        {"text": "Alice said \"Bob resigned\" yesterday.", "acceptWhen": ["off", "on"]},
+        {"text": "Alice said “Bob resigned” yesterday.", "acceptWhen": ["off", "on"]},
+        {"text": "Alice said Bob \"resigned yesterday\".", "acceptWhen": []},
+        {"text": "Alice said \"Bob resigned yesterday\".", "acceptWhen": []},
+        {"text": "\"Alice said Bob resigned\" yesterday.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "single-quote-position", "categories": ["quoted-instructions"],
+      "rawText": "call it 'safe mode' now", "dictionary": [],
+      "candidates": [
+        {"text": "Call it 'safe mode' now.", "acceptWhen": ["off", "on"]},
+        {"text": "Call it ‘safe mode’ now.", "acceptWhen": ["off", "on"]},
+        {"text": "Call it safe 'mode now'.", "acceptWhen": []},
+        {"text": "Call it \"safe mode\" now.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "uppercase-filler-lookalike", "categories": ["fillers", "names"],
+      "rawText": "um go to ER", "dictionary": [],
+      "candidates": [
+        {"text": "Go to ER.", "acceptWhen": ["off", "on"]},
+        {"text": "Go to.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "article-swap", "categories": ["articles"],
+      "rawText": "ask for a raise", "dictionary": [],
+      "candidates": [
+        {"text": "Ask for a raise.", "acceptWhen": ["off", "on"]},
+        {"text": "Ask for raise.", "acceptWhen": ["off", "on"]},
+        {"text": "Ask for the raise.", "acceptWhen": []},
+        {"text": "Ask for an raise.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "negation-correction", "categories": ["negation", "corrections"],
+      "rawText": "I will not, sorry, now go", "dictionary": [],
+      "candidates": [
+        {"text": "I will not, sorry, now go.", "acceptWhen": ["off", "on"]},
+        {"text": "I will now go.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "pronoun-correction", "categories": ["pronouns", "corrections"],
+      "rawText": "call him, sorry, her tomorrow", "dictionary": [],
+      "candidates": [
+        {"text": "Call him, sorry, her tomorrow.", "acceptWhen": ["off", "on"]},
+        {"text": "Call her tomorrow.", "acceptWhen": []}
+      ]
+    },
+    {
       "id": "input-byte-limit", "categories": ["long-inputs"],
       "lengthClass": "length-limit", "repeat": 8001, "promptReason": "context-overflow",
       "rawText": "é", "dictionary": [], "candidates": []

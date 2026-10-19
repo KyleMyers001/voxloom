@@ -1,3 +1,4 @@
+import { CLEANUP_PROMPT_VERSION } from '../../domain/cleanup';
 import type { CleanupProvenance } from '../../domain/types';
 import { digestDictionary } from './prompt';
 import {
@@ -5,7 +6,7 @@ import {
   type CleanupSnapshot,
 } from './types';
 
-export const CLEANUP_PROMPT_VERSION = 'cleanup-v2';
+export { CLEANUP_PROMPT_VERSION };
 
 export async function createCleanupProvenance(
   snapshot: CleanupSnapshot,

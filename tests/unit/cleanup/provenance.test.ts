@@ -1,4 +1,9 @@
 import { webcrypto } from 'node:crypto';
+import {
+  CLEANUP_PROMPT_VERSION,
+  skippedCleanupProvenance,
+} from '../../../src/domain/cleanup';
+import { CLEANUP_PROMPT_VERSION as SERVICE_PROMPT_VERSION } from '../../../src/services/cleanup/provenance';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   CLEANUP_MODEL_SHA256,
@@ -62,5 +67,12 @@ describe('createCleanupProvenance', () => {
     expect(provenance.modelId).toBe('qwen3-0.6b-q4-k-m');
     expect(provenance.reason).toBe('timeout');
     expect(provenance.status).toBe('fallback');
+  });
+});
+
+describe('shared cleanup prompt version', () => {
+  it('skipped dogfood rows record the same prompt version as the service', () => {
+    expect(skippedCleanupProvenance().promptVersion).toBe(CLEANUP_PROMPT_VERSION);
+    expect(SERVICE_PROMPT_VERSION).toBe(CLEANUP_PROMPT_VERSION);
   });
 });

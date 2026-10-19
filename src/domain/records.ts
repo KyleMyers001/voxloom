@@ -1,3 +1,4 @@
+import { skippedCleanupProvenance } from './cleanup';
 import type {
   CleanupProvenance,
   DictationRecord,
@@ -106,15 +107,7 @@ export function createDogfoodRecord(
   const rawText = input.rawText?.trim();
 
   return {
-    cleanup: input.cleanup ?? {
-      dictionaryDigest: null,
-      dictionaryVersion: 1,
-      modelDigest: null,
-      modelId: null,
-      promptVersion: 'cleanup-v1',
-      reason: null,
-      status: 'skipped',
-    },
+    cleanup: input.cleanup ?? skippedCleanupProvenance(),
     createdAt: input.now,
     durationSeconds,
     id: input.id,

@@ -10,8 +10,10 @@ The desktop app keeps its data as **unencrypted JSON** in its app data folder:
 
 ```text
 ~/Library/Application Support/com.voxloom.prototype/
-├── history.json      transcript text, status, duration, model, timestamp, delivery outcome
-├── *.json.unreadable-*.bak  backups of a store file Voxloom couldn't read (see below)
+├── history.json      final transcript text, raw transcript, cleanup metadata,
+│                     status, duration, model, timestamp, delivery outcome
+├── *.json.unreadable-*.bak  backups of a store file before an upgrade, or one
+│                     Voxloom couldn't read (see below)
 ├── dictionary.json   your custom words
 ├── settings.json     preferences
 └── models/           downloaded Whisper model files (*.bin)
@@ -22,6 +24,13 @@ anything that copies your home folder (Time Machine, other backup or sync
 tools), can read your transcripts. FileVault protects it only while the Mac is
 shut down; once you've logged in, a locked screen doesn't keep it from other
 processes running as you. Recorded audio is never saved.
+
+Each history row stores the **raw transcript** as well as the final text, even
+when they are identical, plus **cleanup metadata**: whether optional local
+cleanup ran (cleaned, fallback, skipped or unavailable), the cleanup model's
+ID and digest, the prompt version, and a digest of your dictionary words.
+The raw transcript is covered by the same retention and delete controls as
+the final text.
 
 ## Deleting transcripts
 
@@ -37,17 +46,20 @@ processes running as you. Recorded audio is never saved.
 - **Everything, manually:** quit Voxloom and delete the folder above, or at
   least these files in it:
   - `history.json`
-  - `*.unreadable-*.bak` (see below)
+  - `*.unreadable-*.bak` (upgrade and unreadable-file backups, see below)
   - `history.json.tmp`, a temporary file a crash during save can leave behind.
     Nothing cleans it up automatically, and it may hold transcripts.
 
   A missing `history.json` is treated as empty history on next launch.
-- **Unreadable-file backups:** if Voxloom can't read `history.json` (corrupt,
-  or from a different version), it first copies it to
-  `history.json.unreadable-<timestamp>.bak` in the same folder. The same applies
-  to `dictionary.json` and `settings.json`. These copies may hold old
-  transcripts in plain text, and **retention never deletes them**. To remove
-  them, quit Voxloom and delete them by hand, for example:
+- **Upgrade and unreadable-file backups:** before Voxloom rewrites
+  `history.json` or `settings.json` in a newer format, it copies the original
+  to `<file>.unreadable-<timestamp>.bak` in the same folder. The first launch
+  of a build with optional cleanup makes this **one-time upgrade backup** of
+  both files. The same copy is made when a store file can't be read (corrupt,
+  or from a different version), and that also applies to `dictionary.json`.
+  These copies may hold old transcripts in plain text, and **retention never
+  deletes them**. To remove them, quit Voxloom and delete them by hand, for
+  example:
   `rm ~/Library/Application\ Support/com.voxloom.prototype/*.unreadable-*.bak`
 
 Deleting a file does not remove copies already captured by backups.

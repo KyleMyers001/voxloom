@@ -1,4 +1,8 @@
-import { preservesContent, sameMultiset } from './contentGuard';
+import {
+  anchorWordCount,
+  preservesContent,
+  sameMultiset,
+} from './contentGuard';
 
 export const CLEANUP_OUTPUT_MAX_BYTES = 32_000;
 export const CLEANUP_OUTPUT_EXTRA_CHARS = 256;
@@ -47,9 +51,21 @@ function symbols(text: string): string[] {
     .match(/\p{S}|\u200d|\ufe0e|\ufe0f|\u20e3|[\u{e0020}-\u{e007f}]/gu) ?? [];
 }
 
-function quotationShape(text: string): [number, boolean] {
+type QuoteMark = ['double' | 'single', number];
+
+/**
+ * Each quotation mark's kind and its position, counted in content words
+ * before it, plus whether one pair wraps the whole text. Counting marks alone
+ * let a moved quote pass ("Bob resigned" → Bob "resigned yesterday").
+ * Straight and curly marks of one kind are interchangeable.
+ */
+function quotationShape(
+  text: string,
+  dictionary: readonly string[],
+): [QuoteMark[], boolean] {
   const characters = Array.from(text.trim().normalize('NFC'));
-  const markers: number[] = [];
+  const marks: QuoteMark[] = [];
+  const indices: number[] = [];
   characters.forEach((character, index) => {
     if (!/["'“”‘’]/u.test(character)) return;
     // Apostrophes inside words are not quotation boundaries. Keep supported
@@ -57,10 +73,12 @@ function quotationShape(text: string): [number, boolean] {
     if (/['‘’]/u.test(character)
       && /[\p{L}\p{M}\p{N}]/u.test(characters[index - 1] ?? '')
       && /[\p{L}\p{M}\p{N}]/u.test(characters[index + 1] ?? '')) return;
-    markers.push(index);
+    const kind = /["“”]/u.test(character) ? 'double' : 'single';
+    marks.push([kind, anchorWordCount(characters.slice(0, index).join(''), dictionary)]);
+    indices.push(index);
   });
-  return [markers.length, markers.length >= 2
-    && markers[0] === 0 && markers.at(-1) === characters.length - 1];
+  return [marks, indices.length >= 2
+    && indices[0] === 0 && indices.at(-1) === characters.length - 1];
 }
 
 function hasUnsafeEncoding(text: string): boolean {
@@ -93,7 +111,8 @@ export function validateCleanupOutput(
   if (!sameMultiset(protectedValues(rawText), protectedValues(cleaned))) return null;
   if (!preservesCapitalization(rawText, cleaned)) return null;
   if (JSON.stringify(symbols(rawText)) !== JSON.stringify(symbols(cleaned))) return null;
-  if (JSON.stringify(quotationShape(rawText)) !== JSON.stringify(quotationShape(cleaned))) return null;
+  if (JSON.stringify(quotationShape(rawText, dictionary))
+    !== JSON.stringify(quotationShape(cleaned, dictionary))) return null;
   if (!preservesContent(rawText, cleaned, dictionary)) return null;
   return cleaned;
 }

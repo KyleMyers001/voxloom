@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { CLEANUP_PROMPT_VERSION } from '../../src/domain/cleanup';
 import {
   canRetry,
   createDogfoodRecord,
@@ -44,7 +45,7 @@ describe('createDogfoodRecord', () => {
         dictionaryVersion: 1,
         modelDigest: null,
         modelId: null,
-        promptVersion: 'cleanup-v1',
+        promptVersion: CLEANUP_PROMPT_VERSION,
         reason: null,
         status: 'skipped',
       },
