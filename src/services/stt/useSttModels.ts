@@ -109,11 +109,20 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
   }, [reload]);
 
   // Re-list when the startup check finishes a model file (damaged → Retry).
+  // BUS-85.2: also refresh once after listen registers — models-changed can
+  // fire before the promise resolves, and that early event would be missed.
   useEffect(() => {
     let stop: (() => void) | null = null;
     let live = true;
     void listenModelsChanged(() => { void refresh().catch(() => undefined); })
-      .then((un) => { if (live) stop = un; else un(); }, () => undefined);
+      .then((un) => {
+        if (!live) {
+          un();
+          return;
+        }
+        stop = un;
+        void refresh().catch(() => undefined);
+      }, () => undefined);
     return () => {
       live = false;
       stop?.();
