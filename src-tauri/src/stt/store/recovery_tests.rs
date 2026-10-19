@@ -91,7 +91,7 @@ fn copy_matches_the_frontend() {
     let ts = |s: &str| s.replace('\'', "\\'");
     let models = include_str!("../../../../src/services/stt/useSttModels.ts");
     assert!(models.contains(&ts(UNREADABLE_MESSAGE)), "MODEL_UNREADABLE");
-    let dogfood = include_str!("../../../../src/services/stt/useDogfoodCapture.ts");
+    let dogfood = include_str!("../../../../src/services/stt/dogfoodModel.ts");
     assert!(
         dogfood.contains(&ts(DAMAGED_MESSAGE)),
         "MODEL_DAMAGED_MESSAGE"

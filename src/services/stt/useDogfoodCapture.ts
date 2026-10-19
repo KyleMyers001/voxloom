@@ -6,51 +6,44 @@
 /// Shared by Home Start and global hold/latch — start() must not activate
 /// Voxloom; gesture callers rely on the other app still being frontmost.
 /// Never silent-downloads missing models — surfaces a clear UI error instead.
+///
+/// Composes: session lifecycle (useDogfoodSession), post-stop processing
+/// (useDogfoodProcessing), the native cleanup engine (useCleanupEngine), and
+/// phase/HUD state (dogfoodPhase).
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { beginCancelScope, type CancelScope } from '../shortcut/cancelScope';
-import type { DeliveryOutcome } from '../delivery/types';
-import type { OverlayResult } from '../shortcut/overlayVisibility';
-
-import { createDogfoodRecord } from '../../domain/records';
+import { useCallback, useRef } from 'react';
 import type { DictationRecord, WritingStyle } from '../../domain/types';
-import type { ClipboardAdapter } from '../clipboard';
-import type { CleanupEngine } from '../cleanup/contracts';
-import { createTauriCleanupEngine } from '../cleanup/tauriAdapter';
-import {
-  createStubDeliveryAdapter,
-  createTauriDeliveryAdapter,
-  type DeliveryPlatformAdapter,
-  type TargetSnapshot,
-} from '../delivery';
-import {
-  SYSTEM_DEFAULT_DEVICE_ID,
-  type CaptureState,
-} from '../capture/types';
+import type { CaptureState } from '../capture/types';
 import {
   useCaptureState,
   type UseCaptureStateResult,
 } from '../capture/useCaptureState';
+import type { ClipboardAdapter } from '../clipboard';
+import type { CleanupEngine } from '../cleanup/contracts';
+import type { DeliveryPlatformAdapter, TargetSnapshot } from '../delivery';
+import type { OverlayResult } from '../shortcut/overlayVisibility';
 import type { SttModelStore } from './contracts';
+import { ensureModelAvailable } from './dogfoodModel';
+import type { dogfoodTranscribeAndCopy } from './dogfoodPath';
 import {
-  dogfoodTranscribeAndCopy,
-  type CaptureAudioMeta,
-} from './dogfoodPath';
-import { prepareDogfoodCleanup } from './dogfoodCleanup';
+  cancellablePhase,
+  useDogfoodView,
+  type DogfoodOrigin,
+  type DogfoodPhase,
+} from './dogfoodPhase';
+import { useDogfoodLiveSession } from './dogfoodSessionState';
 import { createSttModelStore } from './factory';
-import { resolveTranscriptionModelId } from './resolveModelId';
-import { SttError, type SttModelInfo, type Transcript } from './types';
-import { MODEL_UNREADABLE } from './useSttModels';
+import type { Transcript } from './types';
+import { useCleanupEngine } from './useCleanupEngine';
+import { useDogfoodProcessing } from './useDogfoodProcessing';
+import { useDogfoodSession } from './useDogfoodSession';
 
-export type DogfoodPhase =
-  | 'idle'
-  | 'starting'
-  | 'recording'
-  | 'transcribing'
-  | 'cleaning'
-  | 'success'
-  | 'error'
-  | 'cancelled';
+export {
+  errorText,
+  MODEL_DAMAGED_MESSAGE,
+  MODEL_READ_FAILED_MESSAGE,
+} from './dogfoodModel';
+export { hudResultFor, type DogfoodPhase } from './dogfoodPhase';
 
 export interface UseDogfoodCaptureOptions {
   clipboard: ClipboardAdapter;
@@ -100,7 +93,7 @@ export interface UseDogfoodCaptureResult {
   /** HUD result of the last run: Copied / Couldn't insert / Couldn't transcribe; null shows nothing. */
   hudResult: OverlayResult | null;
   message: string | null;
-  origin: 'home' | 'gesture' | null;
+  origin: DogfoodOrigin | null;
   phase: DogfoodPhase;
   /** Current session has acquired its Escape cancellation scope. */
   scopeReady: boolean;
@@ -109,79 +102,9 @@ export interface UseDogfoodCaptureResult {
    * show. A failed arm shows a plain, non-cancellable HUD; it never hides it.
    */
   hudReady: boolean;
-  start: (origin?: 'home' | 'gesture') => Promise<void>;
+  start: (origin?: DogfoodOrigin) => Promise<void>;
   stop: () => Promise<void>;
   transcript: Transcript | null;
-}
-
-/**
- * HUD rules 3–6: only Copied (or maybe-copied) and a definite failure show
- * anything after delivery. Unverified and "may have been inserted, nothing
- * copied" dismiss silently like a success; History keeps the
- * Unverified badge.
- */
-export function hudResultFor(
-  { mayHaveInserted = false, status }: Pick<DeliveryOutcome, 'mayHaveInserted' | 'status'>,
-): OverlayResult | null {
-  if (status === 'copied') return mayHaveInserted ? 'maybe-copied' : 'copied';
-  if (status === 'failed') return mayHaveInserted ? null : 'insert-failed';
-  return null; // inserted, unverified, or may-have-inserted: silent dismiss
-}
-
-/** Phases the HUD shows and Escape can cancel. */
-function cancellablePhase(phase: DogfoodPhase): boolean {
-  return phase === 'starting' || phase === 'recording'
-    || phase === 'transcribing' || phase === 'cleaning';
-}
-
-/** Same wording as the Models row (ModelCard), plus where to fix it. */
-export const MODEL_DAMAGED_MESSAGE = 'Model file is damaged. Download it again in Settings.';
-
-/** Opened but couldn't be read: the row's copy plus where to fix it. */
-export const MODEL_READ_FAILED_MESSAGE = 'Couldn\'t read the model file. Download it again in Settings.';
-
-/** Model-file messages (here and native resolved_path) that already say what to do. */
-const MODEL_FILE_PREFIXES = [
-  'Model file is damaged.',
-  'Couldn\'t open the model file.',
-  'Couldn\'t read the model file.',
-];
-
-function failedModelMessage(reason: SttModelInfo['failureReason']): string {
-  if (reason === 'unreadable') return MODEL_UNREADABLE;
-  if (reason === 'read-failed') return MODEL_READ_FAILED_MESSAGE;
-  return MODEL_DAMAGED_MESSAGE;
-}
-
-export function errorText(error: unknown): string {
-  if (error instanceof SttError) {
-    if (error.code === 'model-missing') {
-      if (MODEL_FILE_PREFIXES.some((p) => error.message.startsWith(p))) return error.message;
-      // Settings guidance lives here once; missingModelMessage is the fact only.
-      return `${error.message} Download the selected model in Settings first.`;
-    }
-    return error.message;
-  }
-  if (error instanceof Error) return error.message;
-  return String(error);
-}
-
-function missingModelMessage(modelId: string, status: string | null): string {
-  const detail = status ? ` (status: ${status})` : '';
-  // Fact only — errorText appends the short Settings suffix once.
-  return `Model “${modelId}” is not downloaded${detail}.`;
-}
-
-function resolvePlatform(
-  clipboard: ClipboardAdapter,
-  injected?: DeliveryPlatformAdapter,
-): DeliveryPlatformAdapter {
-  if (injected) return injected;
-  try {
-    return createTauriDeliveryAdapter(clipboard);
-  } catch {
-    return createStubDeliveryAdapter({ clipboard });
-  }
 }
 
 export function useDogfoodCapture(
@@ -189,403 +112,48 @@ export function useDogfoodCapture(
 ): UseDogfoodCaptureResult {
   const liveCapture = useCaptureState();
   const capture = options.captureApi ?? liveCapture;
-  const captureRef = useRef(capture);
-  captureRef.current = capture;
+  const { actions, state } = useDogfoodView(options.onToast);
+  const live = useDogfoodLiveSession();
+  const { cleanupEngine, disposeNativeEngine } = useCleanupEngine(options.cleanupEngine);
 
-  const [phase, setPhase] = useState<DogfoodPhase>('idle');
-  const [scopeReady, setScopeReady] = useState(false);
-  const [hudReady, setHudReady] = useState(false);
-  const [hudResult, setHudResult] = useState<OverlayResult | null>(null);
-  const [origin, setOrigin] = useState<'home' | 'gesture' | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const [transcript, setTranscript] = useState<Transcript | null>(null);
-  const [intendedTarget, setIntendedTarget] =
-    useState<TargetSnapshot | null>(null);
-
-  const dogfoodRef = useRef(options.dogfood ?? dogfoodTranscribeAndCopy);
-  dogfoodRef.current = options.dogfood ?? dogfoodTranscribeAndCopy;
   const storeRef = useRef(
     (options.createModelStore ?? createSttModelStore)(),
   );
   if (options.createModelStore) {
     storeRef.current = options.createModelStore();
   }
-
   const modelIdRef = useRef(options.modelId);
   modelIdRef.current = options.modelId;
-  const clipboardRef = useRef(options.clipboard);
-  clipboardRef.current = options.clipboard;
-  const clipboardFallbackRef = useRef(options.clipboardFallback !== false);
-  clipboardFallbackRef.current = options.clipboardFallback !== false;
-  const toastRef = useRef(options.onToast);
-  toastRef.current = options.onToast;
-  const historyRef = useRef(options.onHistoryRecord);
-  historyRef.current = options.onHistoryRecord;
-  const styleRef = useRef(options.style ?? 'formal');
-  styleRef.current = options.style ?? 'formal';
-  const nowRef = useRef(options.now ?? Date.now);
-  nowRef.current = options.now ?? Date.now;
-  const cleanupSettingsRef = useRef({
-    active: false, dictionary: [] as readonly string[], modelId: null as string | null,
+  const ensureModel = useCallback(
+    () => ensureModelAvailable(storeRef.current, modelIdRef.current),
+    [],
+  );
+
+  useDogfoodProcessing({
+    actions, captureState: capture.captureState, cleanupEngine, ensureModel, live, options,
   });
-  cleanupSettingsRef.current = {
-    active: options.cleanupActive === true,
-    dictionary: options.dictionary ?? [],
-    modelId: options.cleanupModelId ?? null,
-  };
-  const injectedEngineRef = useRef(options.cleanupEngine);
-  injectedEngineRef.current = options.cleanupEngine;
-  // Created on first use and disposed on unmount, so StrictMode and reloads
-  // never leave a native cleanup session open.
-  const nativeEngineRef = useRef<CleanupEngine | null>(null);
-  const cleanupEngine = useCallback((): CleanupEngine => injectedEngineRef.current
-    ?? (nativeEngineRef.current ??= createTauriCleanupEngine()), []);
-  /** Aborts the latest run's cleanup on cancel or when a new start supersedes it. */
-  const processingRef = useRef<AbortController | null>(null);
-  const platformRef = useRef<DeliveryPlatformAdapter>(
-    resolvePlatform(options.clipboard, options.deliveryPlatform),
-  );
-  platformRef.current = resolvePlatform(
-    options.clipboard,
-    options.deliveryPlatform,
-  );
-  /** Set by stop/cancel so a finish that races start still terminates. */
-  const stopRequestedRef = useRef(false);
-  /**
-   * Bumped by start/cancel. A prior session's STT/delivery may still be in
-   * flight when the next hold starts; retain its transcript in history but
-   * suppress new delivery side effects and preserve the newer session's phase.
-   */
-  const sessionRef = useRef(0);
-  const activeRef = useRef(false);
-  // Per-session lease: cancellation discards results, unlike supersession.
-  type Cancellation = { cancelled: boolean; scope?: CancelScope; settle?: () => Promise<void> };
-  const cancellationRef = useRef<Cancellation>({ cancelled: false });
-  // A replacement must not destroy the native latch before its result is saved.
-  // Carry the retirement barrier through even a second pending restart.
-  const retirementRef = useRef<Promise<void> | undefined>(undefined);
-  const cancelActionRef = useRef<() => void>(() => {});
-
-  const announce = useCallback((text: string) => {
-    setMessage(text);
-    toastRef.current?.(text);
-  }, []);
-
-  const ensureModelAvailable = useCallback(async (rawModelId: string) => {
-    const modelId = resolveTranscriptionModelId(rawModelId);
-    const info = await storeRef.current.status(modelId);
-    if (info?.status === 'failed') {
-      throw new SttError('model-missing', failedModelMessage(info.failureReason));
-    }
-    if (!info || info.status !== 'available') {
-      throw new SttError(
-        'model-missing',
-        missingModelMessage(modelId, info?.status ?? null),
-      );
-    }
-    return modelId;
-  }, []);
-
-  const runDogfood = useCallback(async (audio: CaptureAudioMeta) => {
-    const session = sessionRef.current;
-    const cancellation = cancellationRef.current;
-    const current = () => session === sessionRef.current && !cancellation.cancelled;
-    const platform = platformRef.current;
-    let settlement: Promise<void> | undefined;
-    // Both STT success and failure must consult the native latch, whose
-    // notification may still be queued. Share the barrier so it runs once.
-    const settleCancellation = () => settlement ??= (async () => {
-      if (cancellation.cancelled) return;
-      const scope = cancellation.scope;
-      if (scope) {
-        let accepted = false;
-        try { accepted = await scope.finish(); } catch { /* fail closed */ }
-        if (!accepted) {
-          cancellation.cancelled = true;
-          if (session === sessionRef.current) cancelActionRef.current();
-          return;
-        }
-      }
-      if (current()) activeRef.current = false;
-    })();
-    cancellation.settle = settleCancellation;
-    const processing = new AbortController();
-    processingRef.current = processing;
-    // Snapshot at stop: a settings change mid-dictation applies to the next
-    // one. The same style goes to cleanup and onto the History row.
-    const style = styleRef.current;
-    const cleanup = prepareDogfoodCleanup({
-      controller: processing,
-      engine: cleanupEngine,
-      onStart: () => {
-        if (!current()) return;
-        setPhase('cleaning');
-        announce('Cleaning up…');
-      },
-      requestId: `cleanup-${audio.id}`,
-      settings: { ...cleanupSettingsRef.current, style },
-      userCancelled: () => cancellation.cancelled,
-    });
-    setPhase('transcribing');
-    announce('Transcribing…');
-    try {
-      const modelId = await ensureModelAvailable(modelIdRef.current);
-      if (cancellation.cancelled) return;
-      const result = await dogfoodRef.current({
-        audio,
-        cleanup: cleanup.stage,
-        clipboard: clipboardRef.current,
-        clipboardFallback: clipboardFallbackRef.current,
-        deliveryPlatform: platform,
-        isCurrent: current,
-        beforeDelivery: settleCancellation,
-        snapshotTarget: async () => {
-          const target = await platform.snapshotTarget();
-          if (current()) setIntendedTarget(target);
-          return target;
-        },
-        modelId,
-      });
-      // A stale successful path skips beforeDelivery, but still needs the
-      // saved cancellation decision before publishing History or a toast.
-      await settleCancellation();
-      if (cancellation.cancelled) return;
-      if (current()) {
-        setTranscript(result.transcript);
-        setHudResult(hudResultFor(result.delivery));
-        setPhase('success');
-      }
-      const provenance = await cleanup.provenance(result.cleanup);
-      const record = createDogfoodRecord({
-        cleanup: provenance,
-        durationMs: audio.duration_ms,
-        id: `dogfood-${audio.id}`,
-        mayHaveInserted: result.delivery.mayHaveInserted,
-        model: modelId,
-        now: nowRef.current(),
-        rawText: result.transcript.rawText,
-        status: result.delivery.status,
-        style,
-        text: result.transcript.text,
-      });
-      if (record) {
-        historyRef.current?.(record);
-      }
-      // Stale session: evidence still surfaces as a toast, phase untouched.
-      if (current()) announce(result.delivery.message);
-      else toastRef.current?.(result.delivery.message);
-    } catch (error: unknown) {
-      await settleCancellation();
-      if (cancellation.cancelled) return;
-      if (current()) {
-        setHudResult('transcribe-failed');
-        setPhase('error');
-        announce(errorText(error));
-      } else {
-        toastRef.current?.(errorText(error));
-      }
-    } finally {
-      if (processingRef.current === processing) processingRef.current = null;
-      await cancellation.scope?.dispose().catch(() => {});
-    }
-  }, [announce, cleanupEngine, ensureModelAvailable]);
-
-  // Auto dogfood on clean stop (user stop or 120s/capacity bound).
-  // Automatic bounds use the same completion-time target policy.
-  const handledAudioIdRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (capture.captureState.kind === 'cancelled') {
-      setPhase('cancelled');
-      setMessage('Capture cancelled — nothing transcribed.');
-      return;
-    }
-    if (capture.captureState.kind === 'error') {
-      setPhase('error');
-      setMessage(capture.captureState.message);
-      return;
-    }
-    if (capture.captureState.kind !== 'stopped') return;
-    const audio = capture.captureState.audio;
-    if (!audio) {
-      setPhase('error');
-      announce('Capture stopped without audio — nothing to transcribe.');
-      return;
-    }
-    if (handledAudioIdRef.current === audio.id) return;
-    handledAudioIdRef.current = audio.id;
-    void runDogfood(audio);
-  }, [announce, capture.captureState, runDogfood]);
-
-  const start = useCallback(async (source: 'home' | 'gesture' = 'home') => {
-    // A superseded run is never delivered; stop its cleanup so the worker is
-    // free. It falls back to raw text and still reaches History.
-    processingRef.current?.abort();
-    const session = ++sessionRef.current;
-    const previous = cancellationRef.current;
-    const retire = previous.settle?.() ?? previous.scope?.dispose().catch(() => {});
-    const retirement = retire || retirementRef.current
-      ? Promise.all([retirementRef.current, retire]).then(() => {})
-      : undefined;
-    retirementRef.current = retirement;
-    const cancellation: Cancellation = { cancelled: false };
-    cancellationRef.current = cancellation;
-    activeRef.current = true;
-    setScopeReady(false);
-    setHudReady(false);
-    setPhase('starting');
-    setOrigin(source);
-    const superseded = () => session !== sessionRef.current;
-    setTranscript(null);
-    setHudResult(null);
-    setMessage(null);
-    handledAudioIdRef.current = null;
-    stopRequestedRef.current = false;
-    setIntendedTarget(null);
-
-    try {
-      if (retirement) await retirement;
-      if (superseded()) return;
-      try {
-        cancellation.scope = await beginCancelScope(() => {
-          cancellation.cancelled = true;
-          if (session === sessionRef.current) cancelActionRef.current();
-        }, () => !superseded() && !cancellation.cancelled);
-      } catch (error: unknown) {
-        // Escape-cancel is optional: a tap failure must never block dictation.
-        console.warn('Escape cancellation unavailable; dictating without it.', error);
-      }
-      if (superseded()) {
-        await cancellation.scope?.dispose();
-        return;
-      }
-      if (cancellation.scope) setScopeReady(true);
-      // Show the HUD (waveform) even when Escape-cancel could not arm.
-      setHudReady(true);
-      await ensureModelAvailable(modelIdRef.current);
-    } catch (error: unknown) {
-      if (superseded()) return;
-      setPhase('error');
-      announce(errorText(error));
-      return;
-    }
-    if (superseded()) return;
-
-    // Hold release may have already requested stop during model validation.
-    if (stopRequestedRef.current) {
-      setPhase('cancelled');
-      setMessage('Capture cancelled — nothing transcribed.');
-      return;
-    }
-
-    const deviceId = options.preferredDeviceId
-      && options.preferredDeviceId !== SYSTEM_DEFAULT_DEVICE_ID
-      ? options.preferredDeviceId
-      : undefined;
-
-    try {
-      const started = await capture.startFullCaptureSession(deviceId);
-      if (superseded() || started === 'ended') return;
-      if (started !== 'started') {
-        setPhase('error');
-        announce(started === 'busy'
-          ? 'A capture session is already active. Wait for it to finish.'
-          : 'Microphone capture could not start. Check permission and retry.');
-        return;
-      }
-      setPhase('recording');
-      announce('Listening…');
-      if (stopRequestedRef.current) await capture.stopFullCapture();
-    } catch (error: unknown) {
-      if (superseded()) return;
-      setPhase('error');
-      announce(errorText(error));
-    }
-  }, [
-    announce,
+  const { cancel, start, stop } = useDogfoodSession({
+    actions,
     capture,
-    ensureModelAvailable,
-    options.preferredDeviceId,
-  ]);
-
-  const stop = useCallback(async () => {
-    const session = sessionRef.current;
-    stopRequestedRef.current = true;
-    try {
-      await capture.stopFullCapture();
-    } catch (error: unknown) {
-      if (session !== sessionRef.current) return;
-      setPhase('error');
-      announce(errorText(error));
-    }
-  }, [announce, capture]);
-
-  const cancel = useCallback(() => {
-    activeRef.current = false;
-    setScopeReady(false);
-    setHudReady(false);
-    cancellationRef.current.cancelled = true;
-    // After `cancelled` is set, so the cleanup stage reports a user cancel.
-    processingRef.current?.abort();
-    void cancellationRef.current.scope?.dispose().catch(() => {});
-    sessionRef.current += 1;
-    stopRequestedRef.current = true;
-    handledAudioIdRef.current = null;
-    setIntendedTarget(null);
-    try {
-      capture.cancelActiveCapture();
-    } finally {
-      setPhase('cancelled');
-      setMessage('Capture cancelled — nothing transcribed.');
-    }
-  }, [capture]);
-
-  cancelActionRef.current = cancel;
-
-  useEffect(() => () => {
-    activeRef.current = false;
-    cancellationRef.current.cancelled = true;
-    processingRef.current?.abort();
-    const engine = nativeEngineRef.current;
-    nativeEngineRef.current = null;
-    void engine?.dispose?.().catch(() => {
-      console.warn('Cleanup session disposal failed; the native side reclaims it.');
-    });
-    sessionRef.current += 1;
-    void cancellationRef.current.scope?.dispose().catch(() => {});
-    captureRef.current.cancelActiveCapture();
-  }, []);
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || !activeRef.current) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      cancel();
-    };
-    document.addEventListener('keydown', onKey, true);
-    return () => document.removeEventListener('keydown', onKey, true);
-  }, [cancel]);
-
-  useEffect(() => {
-    if (phase === 'success' || phase === 'error' || phase === 'cancelled') {
-      activeRef.current = false;
-      void cancellationRef.current.scope?.dispose().catch(() => {});
-    }
-  }, [phase]);
+    disposeNativeEngine,
+    ensureModel,
+    live,
+    phase: state.phase,
+    preferredDeviceId: options.preferredDeviceId,
+  });
 
   return {
     cancel,
     captureState: capture.captureState,
-    intendedTarget,
-    message,
-    origin,
-    hudResult,
-    phase,
-    scopeReady: scopeReady && cancellablePhase(phase),
-    hudReady: hudReady && cancellablePhase(phase),
+    intendedTarget: state.intendedTarget,
+    message: state.message,
+    origin: state.origin,
+    hudResult: state.hudResult,
+    phase: state.phase,
+    scopeReady: state.scopeReady && cancellablePhase(state.phase),
+    hudReady: state.hudReady && cancellablePhase(state.phase),
     start,
     stop,
-    transcript,
+    transcript: state.transcript,
   };
 }
-
