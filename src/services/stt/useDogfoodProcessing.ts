@@ -174,9 +174,13 @@ export function useDogfoodProcessing({
   useEffect(() => {
     const { announceError, setMessage, setPhase } = actions;
     // An older capture's cancel/error (the event that released the mic for
-    // a restart) must not end the newer live session.
+    // a restart) must not end the newer live session. An older capture's
+    // stop without audio (quick tap, then re-hold or cancel) is never this
+    // session's, live or not.
+    const older = live.captureSession !== live.session;
     const terminal = captureState.kind === 'cancelled' || captureState.kind === 'error';
-    if (terminal && live.active && live.captureSession !== live.session) return;
+    const emptyStop = captureState.kind === 'stopped' && !captureState.audio;
+    if (older && ((terminal && live.active) || emptyStop)) return;
     if (captureState.kind === 'cancelled') {
       setPhase('cancelled');
       setMessage('Capture cancelled — nothing transcribed.');
