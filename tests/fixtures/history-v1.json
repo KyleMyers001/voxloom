@@ -1,0 +1,49 @@
+{
+  "records": [
+    {
+      "createdAt": 1799990000000,
+      "durationSeconds": 3,
+      "id": "v1-inserted",
+      "model": "whisper-tiny.en",
+      "recoveryExpiresAt": null,
+      "status": "inserted",
+      "style": "formal",
+      "text": "Send the report tomorrow."
+    },
+    {
+      "createdAt": 1799989999000,
+      "durationSeconds": 2,
+      "id": "v1-raw-differs",
+      "model": "whisper-tiny.en",
+      "rawText": "[Music] hello world",
+      "recoveryExpiresAt": null,
+      "status": "copied",
+      "style": "casual",
+      "text": "hello world"
+    },
+    {
+      "createdAt": 1799989998000,
+      "durationSeconds": 1,
+      "id": "v1-unverified",
+      "model": null,
+      "mayHaveInserted": {
+        "copied": true
+      },
+      "recoveryExpiresAt": null,
+      "status": "unverified",
+      "style": "very-casual",
+      "text": "see you soon"
+    },
+    {
+      "createdAt": 1799989997000,
+      "durationSeconds": 1,
+      "id": "v1-failed",
+      "model": null,
+      "recoveryExpiresAt": null,
+      "status": "failed",
+      "style": "formal",
+      "text": "Recovered transcript text."
+    }
+  ],
+  "version": 1
+}

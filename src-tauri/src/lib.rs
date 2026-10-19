@@ -2,10 +2,12 @@
 mod acl_tests;
 mod cancel_scope;
 mod capture;
+mod cleanup;
 mod delivery;
 mod dictionary;
 mod history;
 mod hold_release;
+mod model_fetch;
 mod overlay;
 mod settings;
 mod settings_window;
@@ -131,7 +133,7 @@ fn capture_list_devices(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
@@ -140,7 +142,20 @@ pub fn run() {
                 .unwrap_or_else(|_| ModelStore::new(std::env::temp_dir().join("voxloom-models")));
             let coordinator = CaptureCoordinator::with_pcm_store(Arc::clone(&buffers));
             app.manage(coordinator);
-            app.manage(SttState::new(models, buffers));
+            let cleanup =
+                cleanup::CleanupState::from_app(app.handle()).expect("initialize cleanup state");
+            app.manage(cleanup);
+            let stt = SttState::new(models, buffers);
+            // One-time hash of unmarked model files, off the main thread. Each
+            // verdict (and an unreadable file opening again) re-lists Models.
+            let handle = app.handle().clone();
+            let models_changed: stt::store::ModelsChanged = Arc::new(move || {
+                let _ = handle.emit("stt:models-changed", ());
+            });
+            stt.models
+                .set_on_models_changed(Arc::clone(&models_changed));
+            stt.models.spawn_verify_existing(move || models_changed());
+            app.manage(stt);
             #[cfg(target_os = "macos")]
             app.set_menu(settings_window::app_menu(app.handle())?)?;
             Ok(())
@@ -161,6 +176,14 @@ pub fn run() {
             capture_start,
             capture_status,
             capture_stop,
+            cleanup::commands::cleanup_acquire,
+            cleanup::commands::cleanup_cancel,
+            cleanup::commands::cleanup_pick_and_import_model,
+            cleanup::commands::cleanup_model_status,
+            cleanup::commands::cleanup_release,
+            cleanup::commands::cleanup_run,
+            cleanup::commands::cleanup_session_open,
+            cleanup::commands::cleanup_session_dispose,
             delivery::delivery_insert_text,
             delivery::delivery_snapshot_target,
             delivery::delivery_validate_target,
@@ -184,7 +207,19 @@ pub fn run() {
             stt::stt_model_status,
             stt::stt_transcribe,
         ])
+        .on_page_load(|webview, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Started {
+                if let Some(cleanup) = webview.try_state::<cleanup::CleanupState>() {
+                    cleanup.retire_main(webview.label());
+                }
+            }
+        })
         .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                if let Some(cleanup) = window.try_state::<cleanup::CleanupState>() {
+                    cleanup.retire_main(window.label());
+                }
+            }
             // Only closing main ends capture; closing Settings must not.
             if window.label() != settings_window::MAIN_LABEL {
                 return;
@@ -201,9 +236,14 @@ pub fn run() {
                     let _ = settings.close();
                 }
             }
-        })
-        .run(app_context())
-        .expect("failed to run Voxloom");
+        });
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    let builder = builder.on_web_content_process_terminate(|webview| {
+        if let Some(cleanup) = webview.try_state::<cleanup::CleanupState>() {
+            cleanup.retire_main(webview.label());
+        }
+    });
+    builder.run(app_context()).expect("failed to run Voxloom");
 }
 
 /// The single `generate_context!` expansion. Invoking the macro twice in one
