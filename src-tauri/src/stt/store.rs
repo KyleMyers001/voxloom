@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
@@ -51,18 +51,16 @@ pub struct ModelStore {
     verdicts: Mutex<existing::VerdictMap>,
     /// Serializes hashing so a file is never hashed twice concurrently.
     hashing: Mutex<()>,
+    /// Models with a background re-check pending or running.
+    reverifying: Mutex<existing::PendingSet>,
+    /// Self-reference for background re-checks; set by the startup pass.
+    this: OnceLock<Weak<ModelStore>>,
     /// Tells Settings → Models to re-list (`stt:models-changed`); set by lib.rs.
     on_models_changed: Mutex<Option<ModelsChanged>>,
 }
 
 /// Callback that asks the UI to re-list models.
 pub type ModelsChanged = Arc<dyn Fn() + Send + Sync>;
-
-/// Shown when a model file failed its SHA-256 / size check.
-const DAMAGED_MESSAGE: &str = "Model file is damaged. Download it again in Settings.";
-/// Shown when a model file can't be opened (e.g. permissions).
-const UNREADABLE_MESSAGE: &str =
-    "Couldn't open the model file. Try again, or download it again if this keeps happening.";
 
 impl ModelStore {
     /// Create a store rooted at `app_data_dir/models`. Does **not** download.
@@ -72,6 +70,8 @@ impl ModelStore {
             inflight: Mutex::new(None),
             verdicts: Mutex::new(Default::default()),
             hashing: Mutex::new(()),
+            reverifying: Mutex::new(Default::default()),
+            this: OnceLock::new(),
             on_models_changed: Mutex::new(None),
         }
     }
@@ -123,11 +123,9 @@ impl ModelStore {
             // Not yet verified (startup hash still running) reads as available
             // and stays usable; only a file the check found damaged or
             // unreadable is failed.
-            failure_reason = match self.current_verdict(spec) {
-                Some(existing::Verdict::Corrupt) => Some("damaged"),
-                Some(existing::Verdict::Unreadable) => Some("unreadable"),
-                _ => None,
-            };
+            failure_reason = self
+                .current_verdict(spec)
+                .and_then(existing::Verdict::failure_reason);
             if failure_reason.is_some() {
                 "failed"
             } else {
@@ -162,17 +160,15 @@ impl ModelStore {
                 ),
             ));
         }
-        // Never hash here: a model still being checked by the background
-        // startup pass stays usable, so dictation never waits on it. A cached
-        // Unreadable verdict gets a cheap re-open first (current_verdict).
-        match self.current_verdict(spec) {
-            Some(existing::Verdict::Corrupt) => {
-                Err(SttErrorDto::new("model-missing", DAMAGED_MESSAGE))
-            }
-            Some(existing::Verdict::Unreadable) => {
-                Err(SttErrorDto::new("model-missing", UNREADABLE_MESSAGE))
-            }
-            _ => Ok(path),
+        // Never hash here: a model still being checked in the background
+        // stays usable, so dictation never waits on it; the file is only
+        // re-opened cheaply (current_verdict).
+        match self
+            .current_verdict(spec)
+            .and_then(existing::Verdict::refusal)
+        {
+            Some(message) => Err(SttErrorDto::new("model-missing", message)),
+            None => Ok(path),
         }
     }
 
@@ -187,5 +183,7 @@ impl ModelStore {
 
 #[cfg(test)]
 mod integrity_tests;
+#[cfg(test)]
+mod recovery_tests;
 #[cfg(test)]
 mod tests;

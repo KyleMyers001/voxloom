@@ -230,59 +230,6 @@ fn legacy_two_field_marker_is_rehashed() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-#[cfg(unix)]
-#[test]
-fn unreadable_file_is_refused_until_it_opens_again() {
-    use std::os::unix::fs::PermissionsExt;
-    const UNREADABLE: &str =
-        "Couldn't open the model file. Try again, or download it again if this keeps happening.";
-    let (store, dir) = temp_store("unreadable");
-    fs::create_dir_all(&dir).unwrap();
-    let spec = catalog::find("whisper-base.en").unwrap();
-    let path = store.model_path(spec);
-    fs::write(&path, b"x").unwrap();
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
-    if fs::File::open(&path).is_ok() {
-        // Running as root: permissions can't make the file unreadable.
-        eprintln!("skipping unreadable_file test: running as root");
-        let _ = fs::remove_dir_all(&dir);
-        return;
-    }
-    let refreshes = Arc::new(AtomicUsize::new(0));
-    let counter = Arc::clone(&refreshes);
-    store.set_on_models_changed(Arc::new(move || {
-        counter.fetch_add(1, Ordering::SeqCst);
-    }));
-
-    assert_eq!(store.verify_existing(spec), Some(Verdict::Unreadable));
-    // Still unreadable: refused, verdict kept, row failed (unreadable) with Retry.
-    let err = store.resolved_path(spec.id).unwrap_err();
-    assert_eq!(err.code, "model-missing");
-    assert_eq!(err.message, UNREADABLE);
-    assert_eq!(store.known_verdict(spec), Some(Verdict::Unreadable));
-    let info = store.status(spec.id).unwrap();
-    assert_eq!(info.status, "failed");
-    assert_eq!(info.failure_reason.as_deref(), Some("unreadable"));
-    assert_eq!(refreshes.load(Ordering::SeqCst), 0);
-    assert!(path.is_file(), "never deleted");
-
-    // Readable again: the next resolve re-opens it (no hash), clears the
-    // verdict to not-yet-checked, allows transcription and asks for a re-list.
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
-    assert_eq!(store.resolved_path(spec.id).unwrap(), path);
-    assert_eq!(store.known_verdict(spec), None, "cleared, not verified");
-    assert_eq!(refreshes.load(Ordering::SeqCst), 1);
-    let info = store.status(spec.id).unwrap();
-    assert_eq!(info.status, "available");
-    assert_eq!(info.failure_reason, None);
-    assert_eq!(
-        refreshes.load(Ordering::SeqCst),
-        1,
-        "one refresh per recovery"
-    );
-    let _ = fs::remove_dir_all(&dir);
-}
-
 #[test]
 fn damaged_file_stays_refused_and_reports_its_reason() {
     let (store, dir) = temp_store("damaged-reason");
