@@ -1,4 +1,4 @@
-import type { CleanupProvenance } from './types';
+import type { CleanupProvenance, Settings } from './types';
 
 /**
  * Prompt contract version recorded on every new history row (BUS-16). The
@@ -18,4 +18,16 @@ export function skippedCleanupProvenance(): CleanupProvenance {
     reason: null,
     status: 'skipped',
   };
+}
+
+/**
+ * Cleanup runs only when it is enabled AND the explicit opt-in that the
+ * Settings UI writes is set. `cleanupEnabled` alone is not enough: a
+ * settings file from a #24 dev build can have it without the user ever
+ * opting in on this build.
+ */
+export function isCleanupActive(
+  settings: Pick<Settings, 'cleanupEnabled' | 'cleanupOptIn'>,
+): boolean {
+  return settings.cleanupEnabled === true && settings.cleanupOptIn === true;
 }

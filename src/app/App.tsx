@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Toast } from '../components/Toast';
+import { isCleanupActive } from '../domain/cleanup';
 import type { Screen } from '../domain/types';
 import { Dictionary } from '../features/dictionary/Dictionary';
 import { History } from '../features/history/History';
@@ -36,6 +37,10 @@ export function App() {
   const dogfood = useDogfoodCapture({
     clipboard,
     clipboardFallback: state.settings.clipboardFallback,
+    // BUS-16: cleanupEnabled alone (a #24-era file) never runs cleanup.
+    cleanupActive: isCleanupActive(state.settings),
+    cleanupModelId: state.settings.cleanupModelId,
+    dictionary: state.words,
     modelId: state.settings.transcriptionModel,
     now,
     onHistoryRecord: (record) => dispatch({ record, type: 'append-record' }),
@@ -93,7 +98,8 @@ export function App() {
   useEffect(() => subscribe(() => listenOnboardingOpen(() => openSetup(null))), [openSetup]);
 
   const status = dogfood.phase === 'recording' ? 'Listening'
-    : dogfood.phase === 'transcribing' ? 'Transcribing' : 'Ready';
+    : dogfood.phase === 'transcribing' ? 'Transcribing'
+    : dogfood.phase === 'cleaning' ? 'Cleaning up' : 'Ready';
   const gated = (title: string, screen: ReactNode) =>
     bootReady ? screen : <BootHydratePlaceholder title={title} />;
 

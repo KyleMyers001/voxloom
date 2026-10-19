@@ -81,7 +81,8 @@ const browserScheduler = {
 };
 
 function isDogfoodBusy(phase: DogfoodPhase): boolean {
-  return phase === 'recording' || phase === 'transcribing';
+  return phase === 'recording' || phase === 'transcribing'
+    || phase === 'cleaning';
 }
 
 function isDogfoodTerminal(phase: DogfoodPhase): boolean {
@@ -278,8 +279,9 @@ export function useShortcutGestures(options: GestureOptions) {
     const phase = options.dogfood.phase;
     const homeRecording = phase === 'starting'
       || (options.dogfood.origin === 'home' && phase === 'recording');
-    // The gesture state is cleared on release; STT still owns a cancellable HUD.
-    const visualState = phase === 'transcribing'
+    // The gesture state is cleared on release; STT and cleanup still own a
+    // cancellable HUD.
+    const visualState = phase === 'transcribing' || phase === 'cleaning'
       ? { kind: 'processing' as const, completion: 'held' as const, runId: -1 }
       : options.state.dictation;
     // Arming can lag the starting/listening render. Hide until the arm
@@ -360,7 +362,7 @@ function handleGesture(
       dogfood.cancel();
       phaseGuard.seen = 'cancelled';
     }
-    // "transcribing": prior utterance's STT/delivery keeps running in the
+    // "transcribing"/"cleaning": prior utterance's work keeps running in the
     // background; dogfood.start() supersedes its phase (session-guarded).
     pending?.resetForStart();
     // Overlay first (sync), then real capture. Target selection waits until

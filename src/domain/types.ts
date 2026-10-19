@@ -57,6 +57,12 @@ export interface Settings {
   audioRetention: 'off' | '24-hours' | '7-days';
   cleanupEnabled: boolean;
   cleanupModelId: string | null;
+  /**
+   * Explicit opt-in, written only when the user turns cleanup on in Settings
+   * (BUS-16 PR 2c). A #24-era file can carry `cleanupEnabled: true` without
+   * it; cleanup runs only when both are true (see `isCleanupActive`).
+   */
+  cleanupOptIn: boolean;
   clipboardFallback: boolean;
   language: string;
   languageModel: string;

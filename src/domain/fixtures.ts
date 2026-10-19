@@ -50,6 +50,7 @@ export const initialSettings: Settings = {
   audioRetention: 'off',
   cleanupEnabled: false,
   cleanupModelId: null,
+  cleanupOptIn: false,
   clipboardFallback: true,
   language: 'English (US)',
   languageModel: 'Alder Text Small · local',

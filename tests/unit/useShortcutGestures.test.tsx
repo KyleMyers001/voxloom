@@ -160,6 +160,9 @@ describe('useShortcutGestures', () => {
       await waitFor(() => expect(overlay.sync).toHaveBeenLastCalledWith(expect.anything(), true, true));
       rerender({ phase: 'transcribing' });
       expect(overlay.sync).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'processing' }), false, true);
+      // BUS-16: local cleanup keeps the same cancellable processing HUD.
+      rerender({ phase: 'cleaning' });
+      expect(overlay.sync).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'processing' }), false, true);
       rerender({ phase: 'cancelled' });
       expect(overlay.sync).toHaveBeenLastCalledWith({ kind: 'ready' });
     });

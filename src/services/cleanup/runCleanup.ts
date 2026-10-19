@@ -94,8 +94,10 @@ export async function runCleanup(input: {
       input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     );
   });
+  let stopListening = (): void => {};
   const abortResult = new Promise<RaceResult>((resolve) => {
-    input.signal.onAbort(() => resolve({ kind: 'abort' }));
+    stopListening = input.signal.onAbort(() => resolve({ kind: 'abort' }))
+      ?? stopListening;
   });
   const inference = (async () => input.engine.run({
     dictionary,
@@ -128,6 +130,7 @@ export async function runCleanup(input: {
   ]);
   listening = false;
   if (timeout !== undefined) clearTimeout(timeout);
+  stopListening();
 
   if (result.kind === 'abort' || input.signal.aborted) {
     await cancelSafely(input.engine, input.requestId);

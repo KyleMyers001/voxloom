@@ -1,5 +1,7 @@
 /// Wire full capture stop → dogfoodTranscribeAndCopy on the main UI.
-/// Automatic STT + delivery after a clean stop; cancel discards with no STT.
+/// Automatic STT + optional local cleanup (BUS-16) + delivery after a clean
+/// stop; cancel discards with no STT, and a cancel during cleanup delivers
+/// nothing either.
 /// Snapshots intended target after final transcription (ADR §4).
 /// Shared by Home Start and global hold/latch — start() must not activate
 /// Voxloom; gesture callers rely on the other app still being frontmost.
@@ -13,6 +15,8 @@ import type { OverlayResult } from '../shortcut/overlayVisibility';
 import { createDogfoodRecord } from '../../domain/records';
 import type { DictationRecord, WritingStyle } from '../../domain/types';
 import type { ClipboardAdapter } from '../clipboard';
+import type { CleanupEngine } from '../cleanup/contracts';
+import { createTauriCleanupEngine } from '../cleanup/tauriAdapter';
 import {
   createStubDeliveryAdapter,
   createTauriDeliveryAdapter,
@@ -32,6 +36,7 @@ import {
   dogfoodTranscribeAndCopy,
   type CaptureAudioMeta,
 } from './dogfoodPath';
+import { prepareDogfoodCleanup } from './dogfoodCleanup';
 import { createSttModelStore } from './factory';
 import { resolveTranscriptionModelId } from './resolveModelId';
 import { SttError, type Transcript } from './types';
@@ -41,6 +46,7 @@ export type DogfoodPhase =
   | 'starting'
   | 'recording'
   | 'transcribing'
+  | 'cleaning'
   | 'success'
   | 'error'
   | 'cancelled';
@@ -62,8 +68,19 @@ export interface UseDogfoodCaptureOptions {
   onToast?: (message: string) => void;
   /** Preferred mic id; system default means omit and let native pick. */
   preferredDeviceId?: string;
-  /** Writing style stamped onto the history row. */
+  /** Writing style stamped onto the history row and used by cleanup. */
   style?: WritingStyle;
+  /**
+   * Run local cleanup: `isCleanupActive(settings)`, never `cleanupEnabled`
+   * alone (BUS-16 opt-in). Default off.
+   */
+  cleanupActive?: boolean;
+  /** Settings `cleanupModelId`. */
+  cleanupModelId?: string | null;
+  /** Dictionary words sent to cleanup as canonical spellings. */
+  dictionary?: readonly string[];
+  /** Test seam: cleanup engine (defaults to the native worker). */
+  cleanupEngine?: CleanupEngine;
   /** Test seam: inject capture API instead of the live hook result. */
   captureApi?: UseCaptureStateResult;
   /** Test seam: model store (status checks; never download). */
@@ -108,6 +125,12 @@ export function hudResultFor(
   if (status === 'copied') return mayHaveInserted ? 'maybe-copied' : 'copied';
   if (status === 'failed') return mayHaveInserted ? null : 'insert-failed';
   return null; // inserted, unverified, or may-have-inserted: silent dismiss
+}
+
+/** Phases the HUD shows and Escape can cancel. */
+function cancellablePhase(phase: DogfoodPhase): boolean {
+  return phase === 'starting' || phase === 'recording'
+    || phase === 'transcribing' || phase === 'cleaning';
 }
 
 function errorText(error: unknown): string {
@@ -181,6 +204,23 @@ export function useDogfoodCapture(
   styleRef.current = options.style ?? 'formal';
   const nowRef = useRef(options.now ?? Date.now);
   nowRef.current = options.now ?? Date.now;
+  const cleanupSettingsRef = useRef({
+    active: false, dictionary: [] as readonly string[], modelId: null as string | null,
+  });
+  cleanupSettingsRef.current = {
+    active: options.cleanupActive === true,
+    dictionary: options.dictionary ?? [],
+    modelId: options.cleanupModelId ?? null,
+  };
+  const injectedEngineRef = useRef(options.cleanupEngine);
+  injectedEngineRef.current = options.cleanupEngine;
+  // Created on first use and disposed on unmount, so StrictMode and reloads
+  // never leave a native cleanup session open.
+  const nativeEngineRef = useRef<CleanupEngine | null>(null);
+  const cleanupEngine = useCallback((): CleanupEngine => injectedEngineRef.current
+    ?? (nativeEngineRef.current ??= createTauriCleanupEngine()), []);
+  /** Aborts the latest run's cleanup on cancel or when a new start supersedes it. */
+  const processingRef = useRef<AbortController | null>(null);
   const platformRef = useRef<DeliveryPlatformAdapter>(
     resolvePlatform(options.clipboard, options.deliveryPlatform),
   );
@@ -245,6 +285,21 @@ export function useDogfoodCapture(
       if (current()) activeRef.current = false;
     })();
     cancellation.settle = settleCancellation;
+    const processing = new AbortController();
+    processingRef.current = processing;
+    // Snapshot at stop: a settings change mid-dictation applies to the next one.
+    const cleanup = prepareDogfoodCleanup({
+      controller: processing,
+      engine: cleanupEngine,
+      onStart: () => {
+        if (!current()) return;
+        setPhase('cleaning');
+        announce('Cleaning up…');
+      },
+      requestId: `cleanup-${audio.id}`,
+      settings: { ...cleanupSettingsRef.current, style: styleRef.current },
+      userCancelled: () => cancellation.cancelled,
+    });
     setPhase('transcribing');
     announce('Transcribing…');
     try {
@@ -252,6 +307,7 @@ export function useDogfoodCapture(
       if (cancellation.cancelled) return;
       const result = await dogfoodRef.current({
         audio,
+        cleanup: cleanup.stage,
         clipboard: clipboardRef.current,
         clipboardFallback: clipboardFallbackRef.current,
         deliveryPlatform: platform,
@@ -273,7 +329,9 @@ export function useDogfoodCapture(
         setHudResult(hudResultFor(result.delivery));
         setPhase('success');
       }
+      const provenance = await cleanup.provenance(result.cleanup);
       const record = createDogfoodRecord({
+        cleanup: provenance,
         durationMs: audio.duration_ms,
         id: `dogfood-${audio.id}`,
         mayHaveInserted: result.delivery.mayHaveInserted,
@@ -301,9 +359,10 @@ export function useDogfoodCapture(
         toastRef.current?.(errorText(error));
       }
     } finally {
+      if (processingRef.current === processing) processingRef.current = null;
       await cancellation.scope?.dispose().catch(() => {});
     }
-  }, [announce, ensureModelAvailable]);
+  }, [announce, cleanupEngine, ensureModelAvailable]);
 
   // Auto dogfood on clean stop (user stop or 120s/capacity bound).
   // Automatic bounds use the same completion-time target policy.
@@ -332,6 +391,9 @@ export function useDogfoodCapture(
   }, [announce, capture.captureState, runDogfood]);
 
   const start = useCallback(async (source: 'home' | 'gesture' = 'home') => {
+    // A superseded run is never delivered; stop its cleanup so the worker is
+    // free. It falls back to raw text and still reaches History.
+    processingRef.current?.abort();
     const session = ++sessionRef.current;
     const previous = cancellationRef.current;
     const retire = previous.settle?.() ?? previous.scope?.dispose().catch(() => {});
@@ -436,6 +498,8 @@ export function useDogfoodCapture(
     setScopeReady(false);
     setHudReady(false);
     cancellationRef.current.cancelled = true;
+    // After `cancelled` is set, so the cleanup stage reports a user cancel.
+    processingRef.current?.abort();
     void cancellationRef.current.scope?.dispose().catch(() => {});
     sessionRef.current += 1;
     stopRequestedRef.current = true;
@@ -454,6 +518,12 @@ export function useDogfoodCapture(
   useEffect(() => () => {
     activeRef.current = false;
     cancellationRef.current.cancelled = true;
+    processingRef.current?.abort();
+    const engine = nativeEngineRef.current;
+    nativeEngineRef.current = null;
+    void engine?.dispose?.().catch(() => {
+      console.warn('Cleanup session disposal failed; the native side reclaims it.');
+    });
     sessionRef.current += 1;
     void cancellationRef.current.scope?.dispose().catch(() => {});
     captureRef.current.cancelActiveCapture();
@@ -485,8 +555,8 @@ export function useDogfoodCapture(
     origin,
     hudResult,
     phase,
-    scopeReady: scopeReady && (phase === 'starting' || phase === 'recording' || phase === 'transcribing'),
-    hudReady: hudReady && (phase === 'starting' || phase === 'recording' || phase === 'transcribing'),
+    scopeReady: scopeReady && cancellablePhase(phase),
+    hudReady: hudReady && cancellablePhase(phase),
     start,
     stop,
     transcript,
