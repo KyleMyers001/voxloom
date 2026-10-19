@@ -83,8 +83,10 @@ export function createTauriCleanupEngine(): CleanupEngine {
     if (session !== null && !disposed) {
       const running = runs.get(requestId);
       await ownedInvoke(command, { requestId });
-      // Native cancellation waits for reaping. Also drain the result so a
-      // timeout cannot persist history before final attempt evidence arrives.
+      // Native cancellation waits for reaping. Also drain the result so the
+      // final attempt evidence can arrive. This can hang with a wedged worker,
+      // so callers never await it unbounded: runCleanup waits at most
+      // CANCEL_GRACE_MS, and release is fire-and-forget.
       await running?.catch(() => {});
     }
   }

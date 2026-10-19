@@ -3,7 +3,7 @@
 // enabled AND explicitly opted in, and never loses a dictation.
 import { readFileSync } from 'node:fs';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isCleanupActive } from '../../../src/domain/cleanup';
 import type { CleanupEngine } from '../../../src/services/cleanup/contracts';
 import {
@@ -282,5 +282,50 @@ describe('useDogfoodCapture cleanup', () => {
     await waitFor(() => expect(onHistoryRecord).toHaveBeenCalledOnce());
     expect(engine.run.mock.calls[0][0]).toMatchObject({ style: 'casual' });
     expect(onHistoryRecord.mock.calls[0][0]).toMatchObject({ style: 'casual' });
+  });
+});
+
+describe('useDogfoodCapture with a hung cleanup worker', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it.each([
+    ['run AND cancel never settle', () => new Promise<void>(() => {})],
+    ['cancel replies but run never finishes', () => Promise.resolve()],
+  ])('%s: raw text and a History row at the deadline, then a new dictation works', async (_label, cancel) => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let calls = 0;
+    const engine = {
+      ...fakeEngine(async () => {
+        // The first run hangs forever; a later dictation cleans normally.
+        if (++calls === 1) return new Promise<never>(() => {});
+        return { attempt, text: 'Send to Voxloom.' };
+      }),
+      cancel: vi.fn(cancel),
+    };
+    const { copy, hook, onHistoryRecord } = await setup({ cleanupActive: true, cleanupEngine: engine });
+    await waitFor(() => expect(hook.result.current.phase).toBe('cleaning'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(29_000); });
+    expect(hook.result.current.phase).toBe('cleaning');
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_500); });
+    expect(hook.result.current.phase).toBe('success');
+    expect(engine.cancel).toHaveBeenCalledWith('cleanup-pcm-1');
+    expect(copy).toHaveBeenCalledExactlyOnceWith(RAW);
+    await waitFor(() => expect(onHistoryRecord).toHaveBeenCalledOnce());
+    expect(onHistoryRecord.mock.calls[0][0]).toMatchObject({
+      cleanup: { reason: 'timeout', status: 'fallback' }, rawText: RAW, text: RAW,
+    });
+    expect(engine.release).toHaveBeenCalledWith('cleanup-pcm-1');
+
+    // A later dictation still works while the old cancel may be pending.
+    hook.rerender({ capture: { kind: 'idle' } });
+    await act(async () => { await hook.result.current.start(); });
+    hook.rerender({ capture: stopped('pcm-2') });
+    await waitFor(() => expect(onHistoryRecord).toHaveBeenCalledTimes(2));
+    expect(onHistoryRecord.mock.calls[1][0]).toMatchObject({ cleanup: { status: 'cleaned' }, text: 'Send to Voxloom.' });
+    expect(copy).toHaveBeenLastCalledWith('Send to Voxloom.');
+    // Nothing from the hung run lands later.
+    await act(async () => { await vi.advanceTimersByTimeAsync(10 * 60_000); });
+    expect(onHistoryRecord).toHaveBeenCalledTimes(2);
+    expect(copy).toHaveBeenCalledTimes(2);
   });
 });
