@@ -38,9 +38,28 @@ function oneEditApart(left: string, right: string): boolean {
   return edits + Number(i < left.length || j < right.length) <= 1;
 }
 
+/** A final letter added or removed: notion ↔ notions is an inflection. */
+function differsByFinalLetter(left: string, right: string): boolean {
+  const [short, long] = left.length < right.length ? [left, right] : [right, left];
+  return long.length === short.length + 1 && long.startsWith(short);
+}
+
 export interface SourceWord extends Token {
+  /** The exact dictionary spelling when `word` is a repair or a join. */
+  canonical?: string;
   /** The spoken word when `word` is its dictionary repair. */
   spoken?: string;
+}
+
+/** Lowercased dictionary key → its first exact spelling, as the prompt sends it. */
+function dictionarySpellings(dictionary: readonly string[]): Map<string, string> {
+  const spellings = new Map<string, string>();
+  for (const term of dictionary) {
+    const exact = term.trim().normalize('NFC');
+    const key = exact.toLowerCase();
+    if (/^[\p{L}\p{M}]{5,}$/u.test(key) && !spellings.has(key)) spellings.set(key, exact);
+  }
+  return spellings;
 }
 
 /**
@@ -48,10 +67,10 @@ export interface SourceWord extends Token {
  * (source text only), a word of 5+ letters one edit from exactly one
  * dictionary spelling is that spelling: this is the dictionary repair feature
  * (motion → Notion), so the output may keep the spoken word or use the exact
- * spelling (keep this when PR 2c wires the dictionary settings). Output
- * words are never snapped, or `motion` → `nation` would pass.
- * Skippable source words (fillers, articles outside quotations) may be
- * dropped, never swapped.
+ * spelling. A final letter is an inflection, not a typo, so notions is never
+ * repaired to Notion. Output words are never snapped, or `motion` → `nation`
+ * would pass. Skippable source words (fillers, articles outside quotations)
+ * may be dropped, never swapped.
  */
 export function contentWords(
   text: string,
@@ -59,23 +78,28 @@ export function contentWords(
   repair = false,
 ): SourceWord[] {
   const tokens = tokenize(text);
-  const spellings = dictionary.map((term) => term.normalize('NFC').toLowerCase())
-    .filter((term) => /^[\p{L}\p{M}]{5,}$/u.test(term));
+  const spellings = dictionarySpellings(dictionary);
   const canonical: SourceWord[] = [];
   for (let i = 0; i < tokens.length; i++) {
     const { end, skippable, start, word } = tokens[i];
     const joined = word + (tokens[i + 1]?.word ?? '');
-    if (i + 1 < tokens.length && spellings.includes(joined)) {
+    if (i + 1 < tokens.length && spellings.has(joined)) {
       canonical.push({
-        end: tokens[i + 1].end, skippable: false, start, word: joined,
+        canonical: spellings.get(joined), end: tokens[i + 1].end,
+        skippable: false, start, word: joined,
       });
       i++;
       continue;
     }
     const matches = repair && word.length >= 5
-      ? spellings.filter((term) => oneEditApart(word, term)) : [];
+      ? [...spellings.keys()].filter((term) => oneEditApart(word, term)
+        && !differsByFinalLetter(word, term))
+      : [];
     canonical.push(matches.length === 1 && matches[0] !== word
-      ? { end, skippable: false, spoken: word, start, word: matches[0] }
+      ? {
+          canonical: spellings.get(matches[0]), end, skippable: false,
+          spoken: word, start, word: matches[0],
+        }
       : { end, skippable, start, word });
   }
   return canonical;
@@ -121,23 +145,44 @@ export function preservesContent(
     '$2',
   );
   // Every candidate word, fillers included, must map onto the source.
-  const output = contentWords(candidate, dictionary).map(({ word }) => word);
+  const normalized = candidate.normalize('NFC');
+  const output = contentWords(candidate, dictionary).map(({ end, start, word }) => ({
+    surface: normalized.slice(start, end), word,
+  }));
   if (!output.length) return sameMultiset(rawWords, candidateWords);
   return coveredInOrder(contentWords(raw, dictionary, true), output)
     || (correctedRaw !== raw
       && coveredInOrder(contentWords(correctedRaw, dictionary, true), output));
 }
 
+interface OutputWord {
+  /** The candidate's own text for this word, case kept. */
+  surface: string;
+  word: string;
+}
+
+/**
+ * A repaired or joined word written as one word must use the exact
+ * dictionary spelling (Voxloom, not voxloom). Keeping the spoken form
+ * (Voxlom, vox loom) is always allowed.
+ */
+function spelledAsDictionary(source: SourceWord, output: OutputWord): boolean {
+  if (!source.canonical || output.word !== source.word) return true;
+  return /\s/u.test(output.surface) || output.surface === source.canonical;
+}
+
 // The output must be the source in order, minus only skippable source words:
 // a filler or article may be removed, but a swapped or inserted one is unmatched.
-function coveredInOrder(source: SourceWord[], output: string[]): boolean {
+function coveredInOrder(source: SourceWord[], output: OutputWord[]): boolean {
   const required = source.filter(({ skippable }) => !skippable).length;
   if (!required) return false;
   let matched = 0;
   let kept = 0;
-  for (const { skippable, spoken, word } of source) {
+  for (const sourceWord of source) {
+    const { skippable, spoken, word } = sourceWord;
     const next = output[matched];
-    if (next !== undefined && (word === next || spoken === next)) {
+    if (next !== undefined && (word === next.word || spoken === next.word)) {
+      if (!spelledAsDictionary(sourceWord, next)) return false;
       matched++;
       if (!skippable) kept++;
     } else if (!skippable) {
