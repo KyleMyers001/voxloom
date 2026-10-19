@@ -12,13 +12,14 @@ const icons = { err: 'warn', ok: 'check', warn: 'info' } as const;
 /**
  * Infer severity from the app's real strings (SPEC: toast gets an icon by
  * severity). Errors: failures, in-use shortcuts, expired buffers, retry guard.
- * Warnings: copied fallback, unverified or uncertain inserts, Escape-cancel off.
+ * Warnings: copied fallback, unverified or uncertain inserts, Escape-cancel off,
+ * a dictation replaced by a newer one (info icon, never the error style).
  */
 export function toastTone(message: string): ToastTone {
   if (/fail|couldn|can’t|can't|error|expired|in use|finish the current|unable|denied|nothing transcribed/i.test(message)) {
     return 'err';
   }
-  if (/not verified|unverified|may have|also copied|^copied —|inspect|escape-cancel is off/i.test(message)) return 'warn';
+  if (/not verified|unverified|may have|also copied|^copied —|inspect|escape-cancel is off|replaced by a new one/i.test(message)) return 'warn';
   return 'ok';
 }
 

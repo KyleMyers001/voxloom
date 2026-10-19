@@ -6,6 +6,7 @@ import { ShortcutsDialog } from '../../src/app/AppDialogs';
 import { useToastMessages } from '../../src/app/useToastMessages';
 import { Toast, toastTone } from '../../src/components/Toast';
 import { StepDots } from '../../src/features/onboarding/StepDots';
+import { SUPERSEDED_DELIVERY_MESSAGE } from '../../src/services/delivery';
 
 describe('toastTone (toasts board strings)', () => {
   it.each([
@@ -19,6 +20,8 @@ describe('toastTone (toasts board strings)', () => {
     ['Recovery buffer expired', 'err'],
     ['Shortcut “Ctrl + Space” is in use; kept Ctrl + Shift + Space', 'err'],
     ['Escape-cancel is off: Voxloom does not have Accessibility permission. Dictation still works.', 'warn'],
+    // BUS-91: neutral info icon, never the error style.
+    [SUPERSEDED_DELIVERY_MESSAGE, 'warn'],
   ])('%s → %s', (message, tone) => expect(toastTone(message)).toBe(tone));
 
   it('renders an icon by severity and an explicit tone wins', () => {

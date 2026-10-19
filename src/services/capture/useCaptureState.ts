@@ -32,7 +32,11 @@ interface CaptureOwner {
   generation: number | null;
   mode: CaptureMode;
   requestId: string;
+  /** Caller token echoed on this capture's stopped state. */
+  tag?: unknown;
 }
+
+export type StoppedCapture = Extract<CaptureState, { kind: 'stopped' }>;
 
 type ListenerResult =
   | { ok: true; unlisten: () => void }
@@ -51,8 +55,17 @@ export interface UseCaptureStateResult {
   refreshDevices: () => Promise<void>;
   requestMicPermission: () => void;
   runMicTest: (deviceId?: string) => Promise<void>;
-  /** Start full-mode capture; never treat a silent busy return as success. */
-  startFullCaptureSession: (deviceId?: string) => Promise<
+  /**
+   * Called synchronously when a full capture stops, before any restart
+   * waiting on its release continues, so no stop is lost to batching.
+   * Returns an unsubscribe function.
+   */
+  onCaptureStopped?: (listener: (stopped: StoppedCapture) => void) => () => void;
+  /**
+   * Start full-mode capture; never treat a silent busy return as success.
+   * `owner` is echoed on this capture's stopped state.
+   */
+  startFullCaptureSession: (deviceId?: string, owner?: unknown) => Promise<
     'started' | 'ended' | 'busy' | 'error'
   >;
   /**
@@ -62,9 +75,9 @@ export interface UseCaptureStateResult {
   stopFullCapture: () => Promise<void>;
   stopMicTest: () => void;
   /**
-   * Resolve once a cancelled capture's terminal event releases ownership
-   * (bounded), so a fast restart after cancel is not refused as busy.
-   * Resolves at once when no cancelled owner is pending.
+   * Resolve once a cancelled or stopping capture's terminal event releases
+   * ownership (bounded), so a fast restart is not refused as busy.
+   * Resolves at once when no cancelled or stopping owner is pending.
    */
   waitForCaptureRelease: () => Promise<void>;
 }
@@ -198,6 +211,7 @@ export function useCaptureState(): UseCaptureStateResult {
   const switchSequenceRef = useRef(0);
   const terminalCacheOverflowRef = useRef(false);
   const terminalWaiterRef = useRef<TerminalWaiter | null>(null);
+  const stopListenersRef = useRef(new Set<(stopped: StoppedCapture) => void>());
   const terminalsRef = useRef<TerminalCorrelation[]>([]);
   const statusPendingRef = useRef(false);
 
@@ -281,10 +295,10 @@ export function useCaptureState(): UseCaptureStateResult {
           message: event.message,
         });
       } else if (event.kind === 'capture-stopped') {
-        setCaptureState({
-          audio: event.audio,
-          kind: 'stopped',
-        });
+        const stopped: StoppedCapture = { audio: event.audio, kind: 'stopped', owner: owner.tag };
+        // Synchronous: the released waiter's restart continues only later.
+        for (const listener of [...stopListenersRef.current]) listener(stopped);
+        setCaptureState(stopped);
       } else {
         setCaptureState({ kind: 'idle' });
       }
@@ -494,7 +508,7 @@ export function useCaptureState(): UseCaptureStateResult {
     return true;
   }, [captureReady]);
 
-  const startFullCaptureSession = useCallback(async (deviceId?: string) => {
+  const startFullCaptureSession = useCallback(async (deviceId?: string, owner?: unknown) => {
     if (ownerRef.current !== null) return 'busy' as const;
 
     const requestId = createCaptureRequestId();
@@ -502,6 +516,7 @@ export function useCaptureState(): UseCaptureStateResult {
       generation: null,
       mode: 'full',
       requestId,
+      tag: owner,
     };
     setCaptureState({
       device: 'Starting…',
@@ -557,9 +572,21 @@ export function useCaptureState(): UseCaptureStateResult {
     }
   }, []);
 
+  /** Track `requestId`'s terminal event so a restart can wait for release. */
+  const trackRelease = useCallback((requestId: string) => {
+    let waiter = terminalWaiterRef.current;
+    if (waiter?.requestId !== requestId) {
+      waiter = createTerminalWaiter(requestId);
+      terminalWaiterRef.current = waiter;
+    }
+    waiter.cancelSent = true;
+  }, []);
+
   const stopFullCapture = useCallback(async () => {
     const owner = ownerRef.current;
     if (!owner || owner.mode !== 'full') return;
+    // A stop releases the mic too: a quick re-hold waits for its stop.
+    trackRelease(owner.requestId);
     try {
       await stopCapture();
     } catch (error: unknown) {
@@ -567,22 +594,21 @@ export function useCaptureState(): UseCaptureStateResult {
         setCaptureState({ kind: 'error', ...normalizeError(error) });
       }
     }
-  }, []);
+  }, [trackRelease]);
 
   const cancelActiveCapture = useCallback(() => {
     const owner = ownerRef.current;
     if (owner) {
-      // Track the terminal event so a restart can wait for release.
-      let waiter = terminalWaiterRef.current;
-      if (waiter?.requestId !== owner.requestId) {
-        waiter = createTerminalWaiter(owner.requestId);
-        terminalWaiterRef.current = waiter;
-      }
-      waiter.cancelSent = true;
+      trackRelease(owner.requestId);
       void cancelCapture(owner.requestId).catch(() => {});
     }
     // Optimistic UX; terminal event still updates to cancelled/idle.
     setCaptureState({ kind: 'cancelled' });
+  }, [trackRelease]);
+
+  const onCaptureStopped = useCallback((listener: (stopped: StoppedCapture) => void) => {
+    stopListenersRef.current.add(listener);
+    return () => { stopListenersRef.current.delete(listener); };
   }, []);
 
   const waitForCaptureRelease = useCallback(async () => {
@@ -608,6 +634,7 @@ export function useCaptureState(): UseCaptureStateResult {
     deviceListError,
     devices,
     devicesLoading,
+    onCaptureStopped,
     permissionStatus,
     prepareDeviceChange,
     refreshDevices,

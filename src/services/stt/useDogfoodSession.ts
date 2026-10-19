@@ -9,7 +9,7 @@ import { beginCancelScope } from '../shortcut/cancelScope';
 import { useCancelUnavailable, type CancelUnavailable } from '../shortcut/cancelUnavailable';
 import { errorText } from './dogfoodModel';
 import type { DogfoodOrigin, DogfoodPhase, DogfoodViewActions } from './dogfoodPhase';
-import { retireScope, type Cancellation, type DogfoodLiveSession } from './dogfoodSessionState';
+import { afterListening, beginSession, type DogfoodLiveSession } from './dogfoodSessionState';
 
 export interface DogfoodSessionInput {
   actions: DogfoodViewActions;
@@ -48,16 +48,7 @@ export function useDogfoodSession({
     // A superseded run is never delivered; stop its cleanup so the worker is
     // free. It falls back to raw text and still reaches History.
     live.processing?.abort();
-    const session = ++live.session;
-    const previous = live.cancellation;
-    const retire = previous.settle?.() ?? retireScope(previous);
-    const retirement = retire || live.retirement
-      ? Promise.all([live.retirement, retire]).then(() => {})
-      : undefined;
-    live.retirement = retirement;
-    const cancellation: Cancellation = { cancelled: false };
-    live.cancellation = cancellation;
-    live.active = true;
+    const { cancellation, retirement, session } = beginSession(live);
     setScopeReady(false);
     setHudReady(false);
     setPhase('starting');
@@ -66,8 +57,6 @@ export function useDogfoodSession({
     setTranscript(null);
     setHudResult(null);
     setMessage(null);
-    live.handledAudioId = null;
-    live.stopRequested = false;
     setIntendedTarget(null);
 
     try {
@@ -114,9 +103,9 @@ export function useDogfoodSession({
       // A just-cancelled capture still owns the mic until its terminal event.
       await capture.waitForCaptureRelease();
       if (superseded()) return;
-      live.captureSession = session;
-      live.captureCancellation = cancellation;
-      const started = await capture.startFullCaptureSession(deviceId);
+      const owner = { cancellation, session };
+      live.captureOwner = owner;
+      const started = await capture.startFullCaptureSession(deviceId, owner);
       if (superseded() || started === 'ended') return;
       if (started !== 'started') {
         setPhase('error');
@@ -127,8 +116,7 @@ export function useDogfoodSession({
       }
       setPhase('recording');
       announce('Listening…');
-      const hint = takeCancelHint();
-      if (hint) toast(hint);
+      afterListening(live, takeCancelHint(), toast);
       if (live.stopRequested) await capture.stopFullCapture();
     } catch (error: unknown) {
       if (superseded()) return;

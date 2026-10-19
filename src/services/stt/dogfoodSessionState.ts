@@ -9,8 +9,16 @@ import type { CancelScope } from '../shortcut/cancelScope';
 /** Per-session lease: cancellation discards results, unlike supersession. */
 export interface Cancellation {
   cancelled: boolean;
+  /** Set while a replacement retires this scope; settling waits for it. */
+  retired?: Promise<void>;
   scope?: CancelScope;
   settle?: () => Promise<void>;
+}
+
+/** The session that requested a capture; echoed on its stopped state. */
+export interface CaptureOwner {
+  cancellation: Cancellation;
+  session: number;
 }
 
 export interface DogfoodLiveSession {
@@ -21,12 +29,10 @@ export interface DogfoodLiveSession {
    */
   session: number;
   /**
-   * The session whose start requested the current capture. Its terminal
+   * The session whose start requested the latest capture. Its terminal
    * capture state must not end a newer session that is still live.
    */
-  captureSession: number | null;
-  /** That session's cancellation: its late stop is processed under it. */
-  captureCancellation: Cancellation | null;
+  captureOwner: CaptureOwner | null;
   /** Escape cancels only while a session is active. */
   active: boolean;
   cancellation: Cancellation;
@@ -43,6 +49,10 @@ export interface DogfoodLiveSession {
   stopRequested: boolean;
   /** Stopped audio already handed to processing. */
   handledAudioId: string | null;
+  /** The live session has announced "Listening…". */
+  listening: boolean;
+  /** A notice held until the starting session's "Listening…" has shown. */
+  pendingNotice: string | null;
 }
 
 /** One stable object for the hook's lifetime. */
@@ -51,9 +61,10 @@ export function useDogfoodLiveSession(): DogfoodLiveSession {
     active: false,
     cancelAction: () => {},
     cancellation: { cancelled: false },
-    captureCancellation: null,
-    captureSession: null,
+    captureOwner: null,
     handledAudioId: null,
+    listening: false,
+    pendingNotice: null,
     processing: null,
     retirement: undefined,
     session: 0,
@@ -65,18 +76,45 @@ export function useDogfoodLiveSession(): DogfoodLiveSession {
  * Retire a replaced session's Escape scope before its stop reached
  * processing. A late stop is still processed under that session, so keep the
  * native latch's answer instead of discarding it: a queued Escape cancels the
- * session; otherwise it needs no scope. Undefined when there is no scope.
+ * session; otherwise it needs no scope. The scope is detached first and
+ * settling waits on `retired`, so it is never finished twice.
  */
 export function retireScope(cancellation: Cancellation): Promise<void> | undefined {
   const scope = cancellation.scope;
   if (!scope) return undefined;
   if (cancellation.cancelled) return scope.dispose().catch(() => {});
-  return (async () => {
+  cancellation.scope = undefined;
+  cancellation.retired = (async () => {
     let accepted = false;
     try { accepted = await scope.finish(); } catch { /* fail closed */ }
     if (!accepted) cancellation.cancelled = true;
-    if (cancellation.scope === scope) cancellation.scope = undefined;
   })();
+  return cancellation.retired;
+}
+
+/**
+ * Start a new session: retire the previous one's scope (or settle it) behind
+ * a barrier the new capture waits for, and reset per-session flags.
+ */
+export function beginSession(live: DogfoodLiveSession) {
+  const session = ++live.session;
+  const previous = live.cancellation;
+  const retire = previous.settle?.() ?? retireScope(previous);
+  const retirement = retire || live.retirement
+    ? Promise.all([live.retirement, retire]).then(() => {})
+    : undefined;
+  const cancellation: Cancellation = { cancelled: false };
+  Object.assign(live, {
+    active: true, cancellation, handledAudioId: null, listening: false, pendingNotice: null,
+    retirement, stopRequested: false,
+  });
+  return { cancellation, retirement, session };
+}
+
+/** The owner of a capture state: its echoed token, else the latest capture's. */
+export function ownerOf(state: CaptureState, live: DogfoodLiveSession): CaptureOwner | null {
+  const echoed = state.kind === 'stopped' ? state.owner as CaptureOwner | undefined : undefined;
+  return echoed ?? live.captureOwner;
 }
 
 /**
@@ -84,10 +122,24 @@ export function retireScope(cancellation: Cancellation): Promise<void> | undefin
  * cancel/error (the event that released the mic for a restart) must not end
  * a newer live session, and its stop without audio (quick tap, then re-hold
  * or cancel) is never the current session's. Its stop with audio is still
- * processed, under its own session (`captureSession`).
+ * processed, under its own session.
  */
 export function isStaleCaptureEvent(state: CaptureState, live: DogfoodLiveSession): boolean {
-  if (live.captureSession === live.session) return false;
+  if ((ownerOf(state, live)?.session ?? null) === live.session) return false;
   if (state.kind === 'cancelled' || state.kind === 'error') return live.active;
   return state.kind === 'stopped' && !state.audio;
+}
+
+/** Toast `text` now, or hold it until the starting session's "Listening…". */
+export function showNotice(live: DogfoodLiveSession, text: string, toast: (text: string) => void) {
+  if (live.active && !live.listening) live.pendingNotice = text;
+  else toast(text);
+}
+
+/** After "Listening…": show a held notice and/or the Escape-cancel hint. */
+export function afterListening(live: DogfoodLiveSession, hint: string | null, toast: (text: string) => void) {
+  live.listening = true;
+  const shown = [hint, live.pendingNotice].filter(Boolean).join(' ');
+  live.pendingNotice = null;
+  if (shown) toast(shown);
 }
