@@ -31,6 +31,8 @@ function checkedStatus(status: CleanupModelStatus | undefined): CleanupModelStat
 let snapshot: CleanupModelSnapshot = { view: { kind: 'checking' }, workerAvailable: false };
 let generation = 0;
 let requested = false;
+/** A status has been read or applied at least once in this window. */
+let loaded = false;
 let modelStore: CleanupModelStore | null = null;
 const listeners = new Set<() => void>();
 
@@ -63,9 +65,15 @@ export const cleanupModelCache = {
     publish({ view: { kind: 'checking' } });
     try {
       const status = checkedStatus(await cleanupModelCache.store().status());
-      if (request === generation) publish({ view: { kind: 'status', status }, workerAvailable: status.runtimeAvailable });
+      if (request === generation) {
+        loaded = true;
+        publish({ view: { kind: 'status', status }, workerAvailable: status.runtimeAvailable });
+      }
     } catch (reason: unknown) {
-      if (request === generation) publish({ view: { kind: 'error', message: message(reason) } });
+      if (request !== generation) return;
+      // Nothing known yet: let the next consumer (e.g. reopening Capture) retry.
+      if (!loaded) requested = false;
+      publish({ view: { kind: 'error', message: message(reason) } });
     }
   },
   /** A status from somewhere else (the import result); supersedes pending reads. */
@@ -73,13 +81,17 @@ export const cleanupModelCache = {
     generation++;
     try {
       const checked = checkedStatus(status);
+      loaded = true;
+      requested = true;
       publish({ view: { kind: 'status', status: checked }, workerAvailable: checked.runtimeAvailable });
     } catch (reason: unknown) {
+      if (!loaded) requested = false;
       publish({ view: { kind: 'error', message: message(reason) } });
     }
   },
   fail(reason: unknown) {
     generation++;
+    if (!loaded) requested = false;
     publish({ view: { kind: 'error', message: message(reason) } });
   },
 };
@@ -89,6 +101,7 @@ export function resetCleanupModelCacheForTests() {
   snapshot = { view: { kind: 'checking' }, workerAvailable: false };
   generation++;
   requested = false;
+  loaded = false;
   modelStore = null;
   listeners.clear();
 }
