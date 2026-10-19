@@ -33,25 +33,19 @@ export interface CleanupModel {
  * when the native status reports a bundled worker, when cleanup is already
  * active (so it can be turned off), or in dev builds. Production builds
  * without a worker show none of it; PR 3's worker lights it up, no flag.
+ *
+ * A failed status read leaves the worker unknown, so a production build
+ * keeps the block hidden then (Sophie's call, BUS-16 PR 3a): no build ships a
+ * worker yet, and the frontend has no bundled-worker signal before the read.
+ * Dev builds always show it, error and Check again included. PR 3c, which
+ * bundles the worker, must show the error block on worker-bundled builds
+ * (Codex 4315232707).
  */
 export function cleanupShown(
   model: Pick<CleanupModel, 'workerAvailable'>,
   active: boolean,
 ): boolean {
   return model.workerAvailable || active || import.meta.env.DEV;
-}
-
-/**
- * The Local cleanup block itself also shows after a failed status read: the
- * worker is unknown then, and the error and Check again must stay reachable
- * (Codex 4315232707). The captions keep `cleanupShown`, so nothing mentions
- * cleanup on the strength of an error alone.
- */
-export function cleanupBlockShown(
-  model: Pick<CleanupModel, 'view' | 'workerAvailable'>,
-  active: boolean,
-): boolean {
-  return cleanupShown(model, active) || model.view.kind === 'error';
 }
 
 const BROWSER: CleanupModelView = { kind: 'browser' };

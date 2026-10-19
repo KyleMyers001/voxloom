@@ -2,29 +2,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { cleanupModelCache } from '../../src/features/settings/cleanupModelCache';
 import type { CleanupModelStore } from '../../src/services/cleanup/contracts';
-import { CLEANUP_MODEL_ID, CLEANUP_MODEL_SHA256, CleanupEngineError, type CleanupModelStatus } from '../../src/services/cleanup/types';
-
-const ready: CleanupModelStatus = {
-  available: true, id: CLEANUP_MODEL_ID, runtimeAvailable: true, sha256: CLEANUP_MODEL_SHA256,
-};
-const noWorker: CleanupModelStatus = { ...ready, runtimeAvailable: false };
-
-/** A store whose status calls each wait for the test to answer them. */
-function deferredStore() {
-  const answers: { reject: (error: Error) => void; resolve: (status: CleanupModelStatus) => void }[] = [];
-  const store: CleanupModelStore = {
-    importModel: vi.fn(),
-    status: vi.fn(() => new Promise<CleanupModelStatus>((resolve, reject) => { answers.push({ reject, resolve }); })),
-  };
-  cleanupModelCache.useStore(store);
-  return { answers, store };
-}
-
-const flush = () => new Promise((resolve) => { setTimeout(resolve, 0); });
-const view = () => cleanupModelCache.snapshot().view;
-const worker = () => cleanupModelCache.snapshot().workerAvailable;
-const importError = () => cleanupModelCache.snapshot().importError;
-
+import { CleanupEngineError, type CleanupModelStatus } from '../../src/services/cleanup/types';
+import {
+  deferredStore, flush, importError, noWorker, ready, view, worker,
+} from './cleanupModelCacheFixtures';
 describe('cleanupModelCache', () => {
   it('a failed first read is retried by the next consumer', async () => {
     const { answers, store } = deferredStore();
@@ -161,49 +142,6 @@ describe('cleanupModelCache', () => {
     cleanupModelCache.ensureLoaded();
     // If apply skipped `requested = true`, ensureLoaded would hash again.
     expect(store.status).not.toHaveBeenCalled();
-  });
-
-  // BUS-112 item 4: before any status is known, an import failure leaves the
-  // view alone; the first read still in flight lands and keeps the import line.
-  it('a malformed apply during the first read keeps that read', async () => {
-    const { answers, store } = deferredStore();
-    cleanupModelCache.ensureLoaded();
-    expect(store.status).toHaveBeenCalledTimes(1);
-    cleanupModelCache.apply({ ...ready, id: 7 } as unknown as CleanupModelStatus);
-    expect(view()).toEqual({ kind: 'checking' });
-    expect(importError()).toBe('unexpected status from the app');
-    answers[0].resolve(ready);
-    await flush();
-    expect(view()).toEqual({ kind: 'status', status: ready });
-    expect(importError()).toBe('unexpected status from the app');
-    cleanupModelCache.ensureLoaded();
-    expect(store.status).toHaveBeenCalledTimes(1);
-  });
-
-  it('an import fail during the first read keeps that read and the import line', async () => {
-    const { answers, store } = deferredStore();
-    cleanupModelCache.ensureLoaded();
-    cleanupModelCache.fail(new Error('picker exploded'));
-    expect(view()).toEqual({ kind: 'checking' });
-    expect(importError()).toBe('picker exploded');
-    answers[0].resolve(ready);
-    await flush();
-    expect(view()).toEqual({ kind: 'status', status: ready });
-    expect(importError()).toBe('picker exploded');
-    expect(store.status).toHaveBeenCalledTimes(1);
-  });
-
-  it('an import fail after a failed first read keeps the read error', async () => {
-    const { answers, store } = deferredStore();
-    cleanupModelCache.ensureLoaded();
-    answers[0].reject(new Error('denied'));
-    await flush();
-    cleanupModelCache.fail(new Error('wrong file'));
-    expect(view()).toEqual({ kind: 'error', message: 'denied' });
-    expect(importError()).toBe('wrong file');
-    // The failed read still lets the next consumer retry.
-    cleanupModelCache.ensureLoaded();
-    expect(store.status).toHaveBeenCalledTimes(2);
   });
 
   // Codex 4316214003: apply/fail bump generation but must not leave refresh

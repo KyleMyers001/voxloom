@@ -1,6 +1,7 @@
-// BUS-16 PR 3a: a failed first status read keeps the Local cleanup block
-// reachable (Codex 4315232707), and an import failure is never shown as a
-// check failure (BUS-112 item 4). Production gate: DEV stubbed off.
+// BUS-16 PR 3a: a failed first status read shows the Local cleanup error
+// block only where the block is already shown (dev builds; worker-bundled
+// builds from PR 3c), and an import failure is never shown as a check failure
+// (BUS-112 item 4). Each describe stubs DEV to pick the build.
 import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useEffect } from 'react';
@@ -30,37 +31,48 @@ function Harness({ modelStore, start }: { modelStore: CleanupModelStore; start?:
 const note = () => document.getElementById('settings-cleanup-model-note')?.textContent;
 const button = (name: string) => screen.getByRole('button', { name });
 
-beforeEach(() => { vi.stubEnv('DEV', false); });
 afterEach(() => { vi.unstubAllEnvs(); });
 
-describe('first status read fails in a production build (Codex 4315232707)', () => {
-  it('shows the block with the error and Check again, and Check again recovers', async () => {
+describe('first status read fails in a production build', () => {
+  beforeEach(() => { vi.stubEnv('DEV', false); });
+
+  it('keeps the block hidden: no build bundles a worker before PR 3c', async () => {
+    const status = vi.fn().mockRejectedValue(new Error('denied'));
+    const { container } = renderWithApp(<Harness modelStore={{ importModel: vi.fn(), status }} />);
+    await waitFor(() => expect(status).toHaveBeenCalledOnce());
+    await act(async () => {});
+    expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe('first status read fails in a dev build (Codex 4315232707)', () => {
+  beforeEach(() => { vi.stubEnv('DEV', true); });
+
+  it('Check again keeps the error block and focus while it checks, then recovers', async () => {
     const user = userEvent.setup();
+    let answer!: (status: CleanupModelStatus) => void;
     const status = vi.fn()
       .mockRejectedValueOnce(new Error('denied'))
-      .mockResolvedValueOnce(ready);
+      .mockImplementationOnce(() => new Promise<CleanupModelStatus>((resolve) => { answer = resolve; }));
     renderWithApp(<Harness modelStore={{ importModel: vi.fn(), status }} />);
     await waitFor(() => expect(note()).toBe('Couldn\'t check the cleanup model: denied'));
+    const checkAgain = button('Check again');
+    await user.click(checkAgain);
+    expect(note()).toBe('Checking the cleanup model…');
     expect(screen.getByText('Local cleanup')).toBeInTheDocument();
-    await user.click(button('Check again'));
-    await waitFor(() => expect(note()).toBe('Qwen3 0.6B is installed.'));
+    expect(button('Check again')).toBe(checkAgain);
+    expect(checkAgain).toHaveFocus();
+    await act(async () => { answer(ready); });
+    expect(note()).toBe('Qwen3 0.6B is installed.');
+    expect(checkAgain).toHaveFocus();
     expect(status).toHaveBeenCalledTimes(2);
     expect(screen.getByRole('switch', { name: 'Clean up transcripts locally' })).toBeEnabled();
-  });
-
-  it('hides the block again when Check again reports no bundled worker', async () => {
-    const user = userEvent.setup();
-    const status = vi.fn()
-      .mockRejectedValueOnce(new Error('denied'))
-      .mockResolvedValueOnce({ ...ready, runtimeAvailable: false });
-    const { container } = renderWithApp(<Harness modelStore={{ importModel: vi.fn(), status }} />);
-    await waitFor(() => expect(note()).toMatch(/Couldn't check/));
-    await user.click(button('Check again'));
-    await waitFor(() => expect(container).toBeEmptyDOMElement());
   });
 });
 
 describe('import failure before any status is known (BUS-112 item 4)', () => {
+  beforeEach(() => { vi.stubEnv('DEV', false); });
+
   it('keeps the real check error and adds the import line; the next attempt shows only the check error', async () => {
     const user = userEvent.setup();
     let cancelPicker!: (value: null) => void;
@@ -68,7 +80,9 @@ describe('import failure before any status is known (BUS-112 item 4)', () => {
       .mockRejectedValueOnce(new Error('wrong file'))
       .mockImplementationOnce(() => new Promise<null>((resolve) => { cancelPicker = resolve; }));
     const status = vi.fn().mockRejectedValue(new Error('denied'));
-    renderWithApp(<Harness modelStore={{ importModel, status }} />);
+    // Active, so a production build shows the block after the failed read.
+    const start = { cleanupModelId: CLEANUP_MODEL_ID, cleanupOptIn: true };
+    renderWithApp(<Harness modelStore={{ importModel, status }} start={start} />);
     await waitFor(() => expect(note()).toMatch(/Couldn't check/));
     await user.click(button('Import model…'));
     await waitFor(() => expect(note()).toBe(
@@ -102,6 +116,8 @@ describe('import failure before any status is known (BUS-112 item 4)', () => {
 });
 
 describe('import line next to a known status (BUS-112 items 2-3)', () => {
+  beforeEach(() => { vi.stubEnv('DEV', false); });
+
   it('no "unchanged" suffix when not installed, and one space between the lines', async () => {
     const user = userEvent.setup();
     const importModel = vi.fn().mockRejectedValue(new Error('wrong file'));

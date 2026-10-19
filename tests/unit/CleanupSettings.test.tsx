@@ -192,13 +192,16 @@ describe('CleanupSettings in a production build', () => {
     expect(screen.queryByText(/doesn't include the cleanup worker/)).not.toBeInTheDocument();
   });
 
-  // A failed status read shows the block (Codex 4315232707): cleanupStatusError.test.tsx.
-  it('renders nothing while checking or in the browser', async () => {
+  it('renders nothing while checking, on a status error, or in the browser', async () => {
     prod();
     const pending = { importModel: vi.fn(), status: vi.fn(() => new Promise<never>(() => {})) };
     const checking = renderCleanup(pending);
     expect(checking.container).toBeEmptyDOMElement();
     checking.unmount();
+    const failing = renderCleanup({ importModel: vi.fn(), status: vi.fn().mockRejectedValue(new Error('denied')) });
+    await act(async () => { await Promise.resolve(); });
+    expect(failing.container).toBeEmptyDOMElement();
+    failing.unmount();
     expect(renderCleanup(store(ready), false).container).toBeEmptyDOMElement();
   });
 
@@ -222,7 +225,7 @@ describe('CleanupSettings in a production build', () => {
   });
 
   // BUS-101 item 2: when the block is shown (active), a first-read error keeps
-  // the error note and Check again. Inactive does too since Codex 4315232707.
+  // the error note and Check again. Production + inactive still hides (above).
   it('active cleanup: a first status error still shows the note and Check again', async () => {
     prod();
     renderCleanup(

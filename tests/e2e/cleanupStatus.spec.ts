@@ -3,7 +3,9 @@ import { expect, test } from '@playwright/test';
 /**
  * BUS-16 PR 3a (Codex 4315232707): the Settings window under a mocked Tauri
  * bridge. The first cleanup_model_status rejects; the block shows the error
- * and Check again, and Check again recovers.
+ * and Check again, and Check again recovers. This runs on the vite dev server
+ * (DEV), where the block always shows; production keeps it hidden after a
+ * failed read until PR 3c ships a worker (vitest covers that gate).
  */
 test('cleanup: a failed first status check offers Check again, which recovers', async ({ page }) => {
   let statusCalls = 0;
