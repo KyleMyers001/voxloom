@@ -146,8 +146,12 @@ pub fn run() {
                 cleanup::CleanupState::from_app(app.handle()).expect("initialize cleanup state");
             app.manage(cleanup);
             let stt = SttState::new(models, buffers);
-            // One-time hash of unmarked model files, off the main thread.
-            stt.models.spawn_verify_existing();
+            // One-time hash of unmarked model files, off the main thread. Each
+            // verdict tells Settings → Models to re-list.
+            let handle = app.handle().clone();
+            stt.models.spawn_verify_existing(move || {
+                let _ = handle.emit("stt:models-changed", ());
+            });
             app.manage(stt);
             #[cfg(target_os = "macos")]
             app.set_menu(settings_window::app_menu(app.handle())?)?;

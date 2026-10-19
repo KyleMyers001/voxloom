@@ -3,10 +3,22 @@
 //! download path, plus a late-cancel regression test.
 
 use std::fs;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 use super::existing::{marker_path, Verdict};
 use super::tests::{serve_bytes, spec_for, temp_store, test_agent};
 use crate::stt::catalog;
+
+fn set_mtime(path: &std::path::Path, at: SystemTime) {
+    fs::File::options()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_modified(at)
+        .unwrap();
+}
 
 #[test]
 fn cancel_after_rename_keeps_verified_model() {
@@ -50,14 +62,22 @@ fn existing_file_is_hashed_once_then_trusted_by_marker() {
     assert!(marker.starts_with(spec.sha256), "{marker}");
 
     // A fresh store (next launch) trusts the marker without hashing. Proof:
-    // same-length different bytes, which only a re-hash would catch.
+    // same-length different bytes with the original mtime restored.
+    let mtime = fs::metadata(&path).unwrap().modified().unwrap();
     fs::write(&path, vec![0x66u8; body.len()]).unwrap();
+    set_mtime(&path, mtime);
     let fresh = super::ModelStore::new(dir.clone());
     assert_eq!(
         fresh.known_verdict(&spec),
         Some(Verdict::Verified),
         "no re-hash once marked"
     );
+
+    // A file replaced at the same size (new mtime) is re-hashed.
+    set_mtime(&path, mtime + Duration::from_secs(5));
+    let fresh = super::ModelStore::new(dir.clone());
+    assert_eq!(fresh.known_verdict(&spec), None);
+    assert_eq!(fresh.verify_existing(&spec), Some(Verdict::Corrupt));
 
     // A length change invalidates the marker.
     fs::write(&path, b"short").unwrap();
@@ -165,5 +185,120 @@ fn download_writes_marker_and_replaces_a_corrupt_verdict() {
     assert!(marker_path(&store.model_path(&spec)).is_file());
     assert_eq!(store.known_verdict(&spec), Some(Verdict::Verified));
     assert_eq!(store.status(spec.id).unwrap().status, "available");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn stale_pin_marker_is_rehashed() {
+    // A marker from another pin (same length and mtime) is ignored.
+    let body = vec![0x88u8; 4 * 1024];
+    let spec = spec_for("whisper-tiny.en", &body);
+    let (store, dir) = temp_store("stale-pin");
+    fs::create_dir_all(&dir).unwrap();
+    let path = store.model_path(&spec);
+    fs::write(&path, &body).unwrap();
+    assert_eq!(store.verify_existing(&spec), Some(Verdict::Verified));
+    let marker = fs::read_to_string(marker_path(&path)).unwrap();
+    let stale = marker.replacen(spec.sha256, &"0".repeat(64), 1);
+    assert_ne!(stale, marker);
+    fs::write(marker_path(&path), stale).unwrap();
+
+    let fresh = super::ModelStore::new(dir.clone());
+    assert_eq!(fresh.known_verdict(&spec), None, "stale pin is not trusted");
+    assert_eq!(fresh.verify_existing(&spec), Some(Verdict::Verified));
+    assert_eq!(fs::read_to_string(marker_path(&path)).unwrap(), marker);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn legacy_two_field_marker_is_rehashed() {
+    let body = vec![0x99u8; 4 * 1024];
+    let spec = spec_for("whisper-tiny.en", &body);
+    let (store, dir) = temp_store("legacy-marker");
+    fs::create_dir_all(&dir).unwrap();
+    let path = store.model_path(&spec);
+    fs::write(&path, &body).unwrap();
+    fs::write(
+        marker_path(&path),
+        format!("{} {}\n", spec.sha256, body.len()),
+    )
+    .unwrap();
+    assert_eq!(store.known_verdict(&spec), None);
+    assert_eq!(store.verify_existing(&spec), Some(Verdict::Verified));
+    let marker = fs::read_to_string(marker_path(&path)).unwrap();
+    assert_eq!(marker.split_whitespace().count(), 3, "{marker}");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn unreadable_file_is_failed_with_retry_and_refused() {
+    use std::os::unix::fs::PermissionsExt;
+    let (store, dir) = temp_store("unreadable");
+    fs::create_dir_all(&dir).unwrap();
+    let spec = catalog::find("whisper-base.en").unwrap();
+    let path = store.model_path(spec);
+    fs::write(&path, b"x").unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+    if fs::File::open(&path).is_ok() {
+        // Running as root: permissions can't make the file unreadable.
+        eprintln!("skipping unreadable_file test: running as root");
+        let _ = fs::remove_dir_all(&dir);
+        return;
+    }
+    assert_eq!(store.verify_existing(spec), Some(Verdict::Unreadable));
+    // Cached: the row offers Retry instead of staying "available".
+    assert_eq!(store.known_verdict(spec), Some(Verdict::Unreadable));
+    assert_eq!(store.status(spec.id).unwrap().status, "failed");
+    let err = store.resolved_path(spec.id).unwrap_err();
+    assert_eq!(err.code, "model-missing");
+    assert_eq!(
+        err.message,
+        "Couldn't open the model file. Download it again in Settings."
+    );
+    assert!(path.is_file(), "never deleted");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn startup_pass_checks_every_present_file_and_reports_each_verdict() {
+    let good = vec![0x21u8; 4 * 1024];
+    let (store, dir) = temp_store("startup-pass");
+    fs::create_dir_all(&dir).unwrap();
+    // Real pins: one damaged file, one absent model.
+    let tiny = catalog::find("whisper-tiny.en").unwrap();
+    let base = catalog::find("whisper-base.en").unwrap();
+    fs::write(store.model_path(tiny), &good).unwrap();
+    let store = Arc::new(store);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&calls);
+
+    store
+        .spawn_verify_existing(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+        })
+        .join()
+        .unwrap();
+
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "one present file, one verdict"
+    );
+    assert_eq!(store.known_verdict(tiny), Some(Verdict::Corrupt));
+    assert_eq!(store.status(tiny.id).unwrap().status, "failed");
+    assert_eq!(store.status(base.id).unwrap().status, "missing");
+
+    // A second pass has nothing left to check.
+    let again = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&again);
+    store
+        .spawn_verify_existing(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+        })
+        .join()
+        .unwrap();
+    assert_eq!(again.load(Ordering::SeqCst), 0);
     let _ = fs::remove_dir_all(&dir);
 }

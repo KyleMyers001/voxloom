@@ -93,9 +93,10 @@ impl ModelStore {
             "downloading"
         } else if path.is_file() {
             // Not yet verified (startup hash still running) reads as available
-            // and stays usable; only a file the check found damaged is failed.
+            // and stays usable; only a file the check found damaged or unreadable
+            // is failed.
             match self.known_verdict(spec) {
-                Some(existing::Verdict::Corrupt) => "failed",
+                Some(existing::Verdict::Corrupt | existing::Verdict::Unreadable) => "failed",
                 _ => "available",
             }
         } else {
@@ -128,13 +129,17 @@ impl ModelStore {
         }
         // Never hash here: a model still being checked by the background
         // startup pass stays usable, so dictation never waits on it.
-        if self.known_verdict(spec) == Some(existing::Verdict::Corrupt) {
-            return Err(SttErrorDto::new(
+        match self.known_verdict(spec) {
+            Some(existing::Verdict::Corrupt) => Err(SttErrorDto::new(
                 "model-missing",
-                "Model file is damaged. Download it again in Settings → Models.",
-            ));
+                "Model file is damaged. Download it again in Settings.",
+            )),
+            Some(existing::Verdict::Unreadable) => Err(SttErrorDto::new(
+                "model-missing",
+                "Couldn't open the model file. Download it again in Settings.",
+            )),
+            _ => Ok(path),
         }
-        Ok(path)
     }
 
     fn is_downloading(&self, model_id: &str) -> bool {
