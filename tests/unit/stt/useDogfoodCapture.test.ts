@@ -499,6 +499,67 @@ describe('useDogfoodCapture', () => {
     expect(dogfood).not.toHaveBeenCalled();
   });
 
+  it('says the selected model is damaged, once, when its status is failed', async () => {
+    const store = createMockSttModelStore();
+    const real = store.status.bind(store);
+    vi.spyOn(store, 'status').mockImplementation(async (id) => {
+      const info = await real(id);
+      return info ? { ...info, status: 'failed' as const } : info;
+    });
+    const dogfood = vi.fn();
+    const toast = vi.fn();
+
+    const { result } = renderHook(() => useDogfoodCapture({
+      captureApi: stubCapture({ kind: 'idle' }),
+      clipboard: clipboard(),
+      createModelStore: () => store,
+      dogfood: dogfood as never,
+      modelId: 'whisper-tiny.en',
+      onToast: toast,
+    }));
+
+    await act(async () => {
+      await result.current.start();
+    });
+
+    expect(result.current.phase).toBe('error');
+    const expected = 'Model file is damaged. Download it again in Settings.';
+    expect(result.current.message).toBe(expected);
+    expect(toast).toHaveBeenCalledWith(expected);
+    expect(dogfood).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['unreadable', 'Couldn\'t open the model file. Try again, or download it again if this keeps happening.'],
+    ['read-failed', 'Couldn\'t read the model file. Download it again in Settings.'],
+  ] as const)('says why the model file failed when its status is failed (%s)', async (reason, expected) => {
+    const store = createMockSttModelStore();
+    const real = store.status.bind(store);
+    vi.spyOn(store, 'status').mockImplementation(async (id) => {
+      const info = await real(id);
+      return info ? { ...info, status: 'failed' as const, failureReason: reason } : info;
+    });
+    const dogfood = vi.fn();
+    const toast = vi.fn();
+
+    const { result } = renderHook(() => useDogfoodCapture({
+      captureApi: stubCapture({ kind: 'idle' }),
+      clipboard: clipboard(),
+      createModelStore: () => store,
+      dogfood: dogfood as never,
+      modelId: 'whisper-tiny.en',
+      onToast: toast,
+    }));
+
+    await act(async () => {
+      await result.current.start();
+    });
+
+    expect(result.current.message).toBe(expected);
+    expect(toast).toHaveBeenCalledWith(expected);
+    expect(dogfood).not.toHaveBeenCalled();
+  });
+
   it('stops audio without any target lookup', async () => {
     const store = createMockSttModelStore();
     await store.download('whisper-tiny.en');

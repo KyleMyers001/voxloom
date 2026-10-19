@@ -1,9 +1,11 @@
-/// Dogfood STT path: capture audio handle → selected model → delivery.
+/// Dogfood STT path: capture audio handle → selected model → optional local
+/// cleanup (BUS-16) → delivery.
 /// Prefer insert (BUS-14); Copy sink remains the reliable floor.
 /// No gestures. Model must already be selected; never starts a download.
 /// Delivery soft-fails: STT success still returns the transcript when
 /// insert/Copy cannot complete (manual recovery always available).
 
+import type { CleanupOutcome } from '../cleanup/types';
 import type { ClipboardAdapter } from '../clipboard';
 import {
   createStubDeliveryAdapter,
@@ -42,6 +44,12 @@ export interface DogfoodTranscribeOptions {
   snapshotTarget?: () => Promise<TargetSnapshot | null>;
   /** False after cancel/supersession: no new target lookup or delivery writes. */
   isCurrent?: () => boolean;
+  /**
+   * Optional local cleanup of the final transcript (BUS-16). Runs only for a
+   * current session with text. Must not throw; any failure must come back as
+   * a raw-text fallback. `cancelled` (the user's cancel) delivers nothing.
+   */
+  cleanup?: (text: string) => Promise<CleanupOutcome>;
   /** Close the native cancellation window before target lookup or delivery. */
   beforeDelivery?: () => Promise<void>;
   /**
@@ -56,6 +64,8 @@ export interface DogfoodTranscribeOptions {
 }
 
 export interface DogfoodResult {
+  /** Present when cleanup ran (never `cancelled`: that throws AbortError). */
+  cleanup?: CleanupOutcome;
   /**
    * True when Copy (clipboard write) completed successfully.
    * Kept for older callers; prefer `delivery.status`.
@@ -80,6 +90,20 @@ function resolvePlatform(
   }
 }
 
+async function cleanUp(
+  options: DogfoodTranscribeOptions,
+  transcript: Transcript,
+): Promise<CleanupOutcome | undefined> {
+  if (!options.cleanup || !transcript.text.trim()) return undefined;
+  if (!(options.isCurrent?.() ?? true)) return undefined;
+  try {
+    return await options.cleanup(transcript.text);
+  } catch {
+    // The stage must not throw; if it does, deliver the raw transcript.
+    return { finalText: transcript.text, reason: 'runtime-error', status: 'fallback' };
+  }
+}
+
 /**
  * Transcribe a deposited capture buffer with the **selected** model and
  * deliver via insert-preferring policy (Copy floor). Soft-fails delivery:
@@ -91,7 +115,19 @@ export async function dogfoodTranscribeAndCopy(
   const modelId = resolveTranscriptionModelId(options.modelId);
   const engine = (options.createEngine ?? createSttEngine)(modelId);
   const handle = audioHandleFromCapture(options.audio);
-  const transcript = await engine.transcribe(handle);
+  const sttTranscript = await engine.transcribe(handle);
+  const cleanup = await cleanUp(options, sttTranscript);
+  if (cleanup?.status === 'cancelled') {
+    throw new DOMException('Dictation cancelled', 'AbortError');
+  }
+  // History keeps the engine output; delivery uses the cleaned text.
+  const transcript: Transcript = cleanup?.status === 'cleaned'
+    ? {
+        ...sttTranscript,
+        rawText: sttTranscript.rawText ?? sttTranscript.text,
+        text: cleanup.finalText,
+      }
+    : sttTranscript;
   if (options.isCurrent?.() ?? true) await options.beforeDelivery?.();
 
   const platform = resolvePlatform(
@@ -120,6 +156,7 @@ export async function dogfoodTranscribeAndCopy(
       transcript,
     );
     return {
+      cleanup,
       copied: delivery.status === 'copied',
       copyWarning: delivery.status === 'failed'
         ? (delivery.detail ?? delivery.message)
@@ -139,6 +176,6 @@ export async function dogfoodTranscribeAndCopy(
       status: 'failed',
       text: transcript.text,
     };
-    return { copied: false, copyWarning, delivery, transcript };
+    return { cleanup, copied: false, copyWarning, delivery, transcript };
   }
 }

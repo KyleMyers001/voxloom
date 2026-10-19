@@ -97,7 +97,7 @@ export function createSettingsStore(io: SettingsFileIo): DurableSettingsStore {
         const backup = await runBackup(io.backup);
         // Future / unknown version from another build: never replace it.
         // Only truly corrupt JSON may be replaced, and only after a backup.
-        const unknownVersion = hasUnknownVersion(raw, [SETTINGS_FILE_VERSION, 2]);
+        const unknownVersion = hasUnknownVersion(raw, [1, SETTINGS_FILE_VERSION]);
         const corruptMessage = (): string => {
           if (unknownVersion) return `${parsed.error}${describeBackup(backup)}`;
           // Settings window: main migrates/resets the file, stay calm here.

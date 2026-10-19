@@ -69,7 +69,13 @@ vi.mock('../../src/services/capture/captureService', () => ({
   stopCapture: vi.fn().mockResolvedValue(undefined),
 }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  // The cleanup model status is cached per window (module); reset per test.
+  // Not imported here: importing it would load the Tauri adapter before the
+  // adapter tests install their own mocks.
+  (globalThis as { __voxloomResetCleanupModelCache?: () => void }).__voxloomResetCleanupModelCache?.();
+});
 
 beforeEach(() => {
   if (typeof navigator !== 'undefined') {
