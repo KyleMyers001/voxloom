@@ -88,4 +88,36 @@ describe('release timeout (BUS-91)', () => {
     act(() => bus.emit(bus.stopOf(0, 'late'))); // the lost stop is ignored
     expect(result.current.captureState).toMatchObject({ kind: 'active' });
   });
+
+  it('after a timeout, the next start waits for the cancelled capture to end (Codex 4319386390)', async () => {
+    const { result } = renderHook(() => useCaptureState());
+    await waitFor(() => expect(bus.listening()).toBe(true));
+    await act(async () => { await result.current.startFullCaptureSession(undefined, 'tap'); });
+    await act(async () => { await result.current.stopFullCapture(); });
+    vi.useFakeTimers();
+    const timedOut = result.current.waitForCaptureRelease();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(await timedOut).toBe(false);
+    let released: boolean | null = null;
+    const next = result.current.waitForCaptureRelease().then((value) => { released = value; });
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(released).toBeNull(); // native still holds the mic
+    act(() => bus.emit({ generation: 3, kind: 'capture-cancelled', request_id: bus.requestOf(0) } as never));
+    await act(async () => { await next; });
+    expect(released).toBe(true);
+  });
+
+  it('after a timeout, a cancel that never ends either is waited for once, then dropped', async () => {
+    const { result } = renderHook(() => useCaptureState());
+    await waitFor(() => expect(bus.listening()).toBe(true));
+    await act(async () => { await result.current.startFullCaptureSession(undefined, 'tap'); });
+    await act(async () => { await result.current.stopFullCapture(); });
+    vi.useFakeTimers();
+    const first = result.current.waitForCaptureRelease();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    const second = result.current.waitForCaptureRelease();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect([await first, await second]).toEqual([false, false]);
+    expect(await result.current.waitForCaptureRelease()).toBe(true);
+  });
 });

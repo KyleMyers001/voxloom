@@ -113,6 +113,8 @@ async function raceTimeout(promise: Promise<boolean>, ms: number) {
 
 interface TerminalWaiter {
   cancelSent: boolean;
+  /** Cancelled after a release timeout: no owner, but native holds the mic. */
+  orphaned?: boolean;
   promise: Promise<boolean>;
   requestId: string;
   resolve: (completed: boolean) => void;
@@ -257,6 +259,13 @@ export function useCaptureState(): UseCaptureStateResult {
       }
 
       const owner = ownerRef.current;
+      const orphan = terminalWaiterRef.current;
+      if (!owner && orphan?.orphaned && orphan.requestId === event.request_id
+          && !['capture-started', 'activity-detected', 'capture-level'].includes(event.kind)) {
+        terminalWaiterRef.current = null; // the timed-out capture released the mic
+        orphan.resolve(true);
+        return;
+      }
       if (!owner || event.request_id !== owner.requestId) return;
       if (owner.generation !== null
           && event.generation !== owner.generation) return;
@@ -619,15 +628,21 @@ export function useCaptureState(): UseCaptureStateResult {
   const waitForCaptureRelease = useCallback(async () => {
     const owner = ownerRef.current;
     const waiter = terminalWaiterRef.current;
-    if (!owner || waiter?.requestId !== owner.requestId
-        || !waiter.cancelSent) return true;
+    const tracked = owner ? waiter?.requestId === owner.requestId : waiter?.orphaned;
+    if (!waiter || !tracked || !waiter.cancelSent) return true;
     if (await raceTimeout(waiter.promise, RELEASE_TIMEOUT_MS)) return true;
     if (!mountedRef.current || ownerRef.current !== owner) return true;
-    // The terminal never came: cancel that capture and drop its ownership,
-    // so this and every later start is not refused as busy.
+    if (!owner) {
+      // Its cancel never ended either: stop waiting; the next start asks native.
+      if (terminalWaiterRef.current === waiter) terminalWaiterRef.current = null;
+      return false;
+    }
+    // The terminal never came: cancel that capture and drop its ownership.
+    // Native keeps the mic until the cancel's terminal, so the next start
+    // waits for that (Codex 4319386390) instead of failing as busy.
     void cancelCapture(owner.requestId).catch(() => {});
     ownerRef.current = null;
-    if (terminalWaiterRef.current === waiter) terminalWaiterRef.current = null;
+    waiter.orphaned = true;
     setCaptureState({ kind: 'idle' }); // no capture is live any more
     return false;
   }, []);
