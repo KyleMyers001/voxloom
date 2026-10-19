@@ -10,7 +10,7 @@ import {
 } from '../../src/services/settings';
 
 describe('parseSettingsJson', () => {
-  it('accepts a valid v1 document', () => {
+  it('accepts a valid v2 document', () => {
     const raw = serializeSettingsFile(
       { ...initialSettings, transcriptRetention: 'forever', style: 'casual' },
       true,
@@ -21,6 +21,45 @@ describe('parseSettingsJson', () => {
     expect(parsed.file.onboardingComplete).toBe(true);
     expect(parsed.file.settings.transcriptRetention).toBe('forever');
     expect(parsed.file.settings.style).toBe('casual');
+  });
+
+  it('preserves cleanup selection and opt-in across persistence', async () => {
+    const io = createMemorySettingsIo(null);
+    const settings = {
+      ...initialSettings,
+      cleanupEnabled: true,
+      cleanupModelId: 'qwen3-0.6b-q4-k-m',
+    };
+    await createSettingsStore(io).save(settings, true);
+    const loaded = await createSettingsStore(io).load();
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(loaded.file.settings.cleanupEnabled).toBe(true);
+    expect(loaded.file.settings.cleanupModelId).toBe(settings.cleanupModelId);
+  });
+
+  it('migrates v1 simulated Alder to disabled and unselected', () => {
+    const parsed = parseSettingsJson(JSON.stringify({
+      onboardingComplete: true,
+      settings: {
+        appearance: 'system',
+        audioRetention: 'off',
+        clipboardFallback: true,
+        language: 'English (US)',
+        languageModel: 'Alder Text Small · local',
+        microphone: 'system-default',
+        shortcut: 'Ctrl + Shift + Space',
+        startAtLogin: false,
+        style: 'formal',
+        transcriptRetention: '30-days',
+        transcriptionModel: 'whisper-tiny.en',
+      },
+      version: 1,
+    }));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.file.settings.cleanupEnabled).toBe(false);
+    expect(parsed.file.settings.cleanupModelId).toBeNull();
   });
 
   it('rejects corrupt JSON without inventing a silent wipe path', () => {
@@ -89,7 +128,7 @@ describe('createSettingsStore', () => {
     if (!loaded.ok) return;
     expect(loaded.file.settings).toEqual(next);
     expect(loaded.file.onboardingComplete).toBe(true);
-    expect(io.snapshot()).toContain('"version": 1');
+    expect(io.snapshot()).toContain('"version": 2');
     expect(io.snapshot()).toContain('"transcriptRetention": "off"');
   });
 
