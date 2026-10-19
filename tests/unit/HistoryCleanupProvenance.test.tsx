@@ -27,8 +27,12 @@ describe('History cleanup provenance', () => {
     const { onCopy } = row({ cleanup: provenance({ status: 'cleaned' }), rawText: 'um send it' });
     expect(screen.getByText('· Cleaned up locally')).toBeInTheDocument();
     expect(screen.getByText('um send it')).not.toBeVisible();
-    await user.click(screen.getByText('Show what you said'));
+    await user.click(screen.getByText('Show original'));
     expect(screen.getByText('um send it')).toBeVisible();
+    expect(screen.getByText('Hide original')).toBeInTheDocument();
+    await user.click(screen.getByText('Hide original'));
+    expect(screen.getByText('um send it')).not.toBeVisible();
+    expect(screen.getByText('Show original')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Copy transcript' }));
     expect(onCopy).toHaveBeenCalledWith('Send it.');
   });
@@ -36,7 +40,7 @@ describe('History cleanup provenance', () => {
   it('says the original was kept on fallback, with the reason', () => {
     row({ cleanup: provenance({ reason: 'invalid-output', status: 'fallback' }), rawText: 'Send it.' });
     expect(screen.getByText('· Original kept · cleanup changed your words')).toBeInTheDocument();
-    expect(screen.queryByText('Show what you said')).not.toBeInTheDocument();
+    expect(screen.queryByText('Show original')).not.toBeInTheDocument();
   });
 
   it.each([
@@ -47,7 +51,7 @@ describe('History cleanup provenance', () => {
   ])('shows nothing extra for a %s row, even when rawText differs', (_label, cleanup, rawText) => {
     row({ cleanup, rawText });
     expect(screen.queryByText(/Cleaned up locally|Original kept/)).not.toBeInTheDocument();
-    expect(screen.queryByText('Show what you said')).not.toBeInTheDocument();
+    expect(screen.queryByText('Show original')).not.toBeInTheDocument();
   });
 
   it.each([

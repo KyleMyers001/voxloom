@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Badge } from '../../components/Badge';
 import { Icon } from '../../components/Icon';
 import { IconButton } from '../../components/IconButton';
@@ -37,6 +38,7 @@ export function HistoryRow({ record, isNative, currentTime, canStart, onCopy, on
     ? 'Terminal input not verified. Inspect before copying or retrying.'
     : record.status === 'failed' ? failedNote : null;
 
+  const [originalOpen, setOriginalOpen] = useState(false);
   const hasText = Boolean(record.text.trim());
   const cleanup = cleanupLabel(record.cleanup);
   // Only a cleaned row has a different original worth showing; other rows'
@@ -54,8 +56,8 @@ export function HistoryRow({ record, isNative, currentTime, canStart, onCopy, on
           {cleanup && <span className="history-row__cleanup">· {cleanup}</span>}
         </p>
         {original && (
-          <details className="history-row__original">
-            <summary>Show what you said</summary>
+          <details className="history-row__original" onToggle={(event) => setOriginalOpen(event.currentTarget.open)}>
+            <summary>{originalOpen ? 'Hide original' : 'Show original'}</summary>
             <p>{original}</p>
           </details>
         )}

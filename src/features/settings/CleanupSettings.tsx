@@ -16,6 +16,11 @@ const message = (reason: unknown) => reason instanceof Error ? reason.message : 
  * Local cleanup rows (BUS-16 PR 2c). Turning cleanup on is the only place
  * that writes the explicit `cleanupOptIn` key; it needs a verified model and
  * a bundled worker. Turning it off is always allowed.
+ *
+ * Production builds render nothing until the native status reports a
+ * bundled worker (`runtimeAvailable`), so PR 3's worker lights this up with
+ * no flag. Dev builds always show the block, with a note when the worker is
+ * missing. An already active cleanup stays visible so it can be turned off.
  */
 export function CleanupSettings({ isNative, modelStore }: {
   isNative: boolean;
@@ -78,6 +83,9 @@ export function CleanupSettings({ isNative, modelStore }: {
     update({ key: 'cleanupOptIn', value: on });
     update({ key: 'cleanupEnabled', value: on });
   };
+
+  const workerAvailable = view.kind === 'status' && view.status.runtimeAvailable;
+  if (!workerAvailable && !active && !import.meta.env.DEV) return null;
 
   const noteId = 'settings-cleanup-model-note';
   return <>

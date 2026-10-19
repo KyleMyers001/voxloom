@@ -23,7 +23,10 @@ export function cleanupModelNote(view: CleanupModelView): string {
   if (view.kind === 'error') return `Couldn't check the cleanup model: ${view.message}`;
   const { status } = view;
   if (!status.available) return 'Not installed. Import the Qwen3 0.6B (Q4_K_M) GGUF file.';
-  if (!status.runtimeAvailable) return 'Model installed. This build doesn\'t include the cleanup worker yet.';
+  if (!status.runtimeAvailable) {
+    // Only reachable in dev builds: production hides the block without a worker.
+    return 'Model installed. This build doesn\'t include the cleanup worker yet.';
+  }
   return 'Qwen3 0.6B is installed.';
 }
 

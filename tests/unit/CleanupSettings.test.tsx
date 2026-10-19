@@ -3,7 +3,7 @@
 import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useEffect } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useApp } from '../../src/app/AppContext';
 import { initialSettings } from '../../src/domain/fixtures';
 import type { Settings } from '../../src/domain/types';
@@ -62,7 +62,7 @@ describe('CleanupSettings', () => {
   it.each([
     ['no model', { ...ready, available: false }, /Not installed/],
     ['no worker', { ...ready, runtimeAvailable: false }, /doesn't include the cleanup worker/],
-  ])('cannot turn on with %s', async (_label, status, note) => {
+  ])('dev build: cannot turn on with %s', async (_label, status, note) => {
     renderCleanup(store(status));
     await waitFor(() => expect(screen.getByText(note)).toBeInTheDocument());
     expect(toggle()).toBeDisabled();
@@ -116,5 +116,65 @@ describe('CleanupSettings', () => {
     expect(toggle()).toBeDisabled();
     expect(models.status).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: 'Import model…' })).not.toBeInTheDocument();
+  });
+});
+
+describe('CleanupSettings in a production build', () => {
+  afterEach(() => { vi.unstubAllEnvs(); });
+  const prod = () => vi.stubEnv('DEV', false);
+  const block = () => screen.queryByText('Local cleanup');
+
+  it('renders nothing without a bundled worker', async () => {
+    prod();
+    const models = store({ ...ready, runtimeAvailable: false });
+    const { container } = renderCleanup(models);
+    await waitFor(() => expect(models.status).toHaveBeenCalled());
+    await act(async () => { await Promise.resolve(); });
+    expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Import model…' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/doesn't include the cleanup worker/)).not.toBeInTheDocument();
+  });
+
+  it('renders nothing while checking, on a status error, or in the browser', async () => {
+    prod();
+    const pending = { importModel: vi.fn(), status: vi.fn(() => new Promise<never>(() => {})) };
+    const checking = renderCleanup(pending);
+    expect(checking.container).toBeEmptyDOMElement();
+    checking.unmount();
+    const failing = renderCleanup({ importModel: vi.fn(), status: vi.fn().mockRejectedValue(new Error('denied')) });
+    await act(async () => { await Promise.resolve(); });
+    expect(failing.container).toBeEmptyDOMElement();
+    failing.unmount();
+    expect(renderCleanup(store(ready), false).container).toBeEmptyDOMElement();
+  });
+
+  it('lights up once the worker is available, without a model shown as import', async () => {
+    prod();
+    renderCleanup(store({ ...ready, available: false }));
+    await waitFor(() => expect(block()).toBeInTheDocument());
+    expect(screen.getByText(/Not installed/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import model…' })).toBeEnabled();
+  });
+
+  it('keeps an already active cleanup visible so it can be turned off', async () => {
+    prod();
+    const user = userEvent.setup();
+    renderCleanup(store({ ...ready, runtimeAvailable: false }), true, {
+      cleanupEnabled: true, cleanupModelId: CLEANUP_MODEL_ID, cleanupOptIn: true,
+    });
+    await waitFor(() => expect(toggle()).toHaveAttribute('aria-checked', 'true'));
+    await user.click(toggle());
+    expect(latest).toMatchObject({ cleanupEnabled: false, cleanupOptIn: false });
+  });
+});
+
+describe('CleanupSettings in a dev build', () => {
+  it('shows the block with the missing-worker note', async () => {
+    expect(import.meta.env.DEV).toBe(true);
+    renderCleanup(store({ ...ready, runtimeAvailable: false }));
+    await waitFor(() => expect(screen.getByText(/doesn't include the cleanup worker yet/)).toBeInTheDocument());
+    expect(screen.getByText('Local cleanup')).toBeInTheDocument();
+    expect(toggle()).toBeDisabled();
   });
 });
