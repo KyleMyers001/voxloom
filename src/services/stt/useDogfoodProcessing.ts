@@ -17,7 +17,7 @@ import { prepareDogfoodCleanup } from './dogfoodCleanup';
 import { errorText } from './dogfoodModel';
 import { dogfoodTranscribeAndCopy, type CaptureAudioMeta } from './dogfoodPath';
 import { hudResultFor, type DogfoodViewActions } from './dogfoodPhase';
-import type { DogfoodLiveSession } from './dogfoodSessionState';
+import { isStaleCaptureEvent, type DogfoodLiveSession } from './dogfoodSessionState';
 import type { UseDogfoodCaptureOptions } from './useDogfoodCapture';
 
 function resolvePlatform(
@@ -61,8 +61,10 @@ export function useDogfoodProcessing({
       announce, announceError, errorToast, setHudResult, setIntendedTarget, setPhase,
       setTranscript, toast,
     } = actions;
-    const session = live.session;
-    const cancellation = live.cancellation;
+    // The capture's own session: an older capture's stop must not finish or
+    // end the newer session that is live now.
+    const session = live.captureSession ?? live.session;
+    const cancellation = live.captureCancellation ?? live.cancellation;
     const current = () => session === live.session && !cancellation.cancelled;
     const platform = platformRef.current;
     let settlement: Promise<void> | undefined;
@@ -106,8 +108,10 @@ export function useDogfoodProcessing({
       },
       userCancelled: () => cancellation.cancelled,
     });
-    setPhase('transcribing');
-    announce('Transcribing…');
+    if (current()) {
+      setPhase('transcribing');
+      announce('Transcribing…');
+    }
     try {
       const modelId = await ensureModel();
       if (cancellation.cancelled) return;
@@ -173,14 +177,7 @@ export function useDogfoodProcessing({
 
   useEffect(() => {
     const { announceError, setMessage, setPhase } = actions;
-    // An older capture's cancel/error (the event that released the mic for
-    // a restart) must not end the newer live session. An older capture's
-    // stop without audio (quick tap, then re-hold or cancel) is never this
-    // session's, live or not.
-    const older = live.captureSession !== live.session;
-    const terminal = captureState.kind === 'cancelled' || captureState.kind === 'error';
-    const emptyStop = captureState.kind === 'stopped' && !captureState.audio;
-    if (older && ((terminal && live.active) || emptyStop)) return;
+    if (isStaleCaptureEvent(captureState, live)) return;
     if (captureState.kind === 'cancelled') {
       setPhase('cancelled');
       setMessage('Capture cancelled — nothing transcribed.');
