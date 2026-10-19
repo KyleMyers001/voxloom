@@ -9,6 +9,9 @@ import { resolveTranscriptionModelId } from './resolveModelId';
 import { useDownloadPoll } from './useDownloadPoll';
 import { SttError, type SttDownloadProgress, type SttModelInfo } from './types';
 
+/** BUS-35 checksum failure copy (hashes are only in the native log). */
+export const DOWNLOAD_DAMAGED = 'Download was damaged. Nothing was saved.';
+
 export interface UseSttModelsOptions {
   /** Persist selection (Settings `transcriptionModel`). */
   onSelect: (modelId: string) => void;
@@ -111,7 +114,9 @@ export function useSttModels(options: UseSttModelsOptions): UseSttModelsResult {
       if (!cancelled) {
         setFailures((prev) => ({
           ...prev,
-          [modelId]: `Download failed: ${errorMessage(err)}. Nothing was saved.`,
+          [modelId]: err instanceof SttError && err.code === 'download-corrupted'
+            ? DOWNLOAD_DAMAGED
+            : `Download failed: ${errorMessage(err).replace(/\.+$/, '')}. Nothing was saved.`,
         }));
       }
       try {

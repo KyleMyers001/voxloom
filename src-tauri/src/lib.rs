@@ -7,6 +7,7 @@ mod delivery;
 mod dictionary;
 mod history;
 mod hold_release;
+mod model_fetch;
 mod overlay;
 mod settings;
 mod settings_window;

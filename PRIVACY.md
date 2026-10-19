@@ -3,6 +3,8 @@
 Voxloom transcribes on your Mac. Nothing you dictate is sent to a remote
 service. The only network traffic is a Whisper model download, and only when
 you start it (see `src-tauri/src/stt/catalog.rs` for the exact URLs).
+Each URL is pinned to one immutable Hugging Face revision, and the app checks
+the file's exact size and SHA-256 before saving it; a mismatch saves nothing.
 
 ## Transcripts are stored as plain text
 
