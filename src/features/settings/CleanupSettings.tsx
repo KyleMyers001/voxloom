@@ -1,70 +1,33 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useApp } from '../../app/AppContext';
 import { Switch } from '../../components/Switch';
 import { isCleanupActive } from '../../domain/cleanup';
-import type { CleanupModelStore } from '../../services/cleanup/contracts';
-import { createTauriCleanupModelStore } from '../../services/cleanup/tauriAdapter';
 import {
   CLEANUP_HELP, CLEANUP_IMPORT, CLEANUP_IMPORTING, CLEANUP_LABEL,
   CLEANUP_MODEL_LABEL, CLEANUP_REFRESH, CLEANUP_SWITCH, CLEANUP_TAG,
-  cleanupModelNote, cleanupReady, type CleanupModelView,
+  cleanupModelNote, cleanupReady,
 } from './cleanupCopy';
-
-const message = (reason: unknown) => reason instanceof Error ? reason.message : String(reason);
+import { cleanupShown, type CleanupModel } from './useCleanupModel';
 
 /**
  * Local cleanup rows (BUS-16 PR 2c). Turning cleanup on is the only place
  * that writes the explicit `cleanupOptIn` key; it needs a verified model and
- * a bundled worker. Turning it off is always allowed.
- *
- * Production builds render nothing until the native status reports a
- * bundled worker (`runtimeAvailable`), so PR 3's worker lights this up with
- * no flag. Dev builds always show the block, with a note when the worker is
- * missing. An already active cleanup stays visible so it can be turned off.
+ * a bundled worker. Turning it off is always allowed. Rendered only when
+ * `cleanupShown` says so, the same gate as the writing-style captions.
  */
-export function CleanupSettings({ isNative, modelStore }: {
-  isNative: boolean;
-  modelStore?: CleanupModelStore;
-}) {
+export function CleanupSettings({ isNative, model }: { isNative: boolean; model: CleanupModel }) {
   const { settings, state } = useApp();
   const update = settings.update;
   const active = isCleanupActive(state.settings);
-  const [view, setView] = useState<CleanupModelView>(
-    isNative ? { kind: 'checking' } : { kind: 'browser' },
-  );
+  const { fail, refresh, store, view } = model;
   const [importing, setImporting] = useState(false);
-  const storeRef = useRef<CleanupModelStore | null>(modelStore ?? null);
-  if (modelStore) storeRef.current = modelStore;
-  const generation = useRef(0);
-
-  const refresh = useCallback(async () => {
-    if (!isNative) return;
-    const request = ++generation.current;
-    setView({ kind: 'checking' });
-    try {
-      const store = storeRef.current ??= createTauriCleanupModelStore();
-      const status = await store.status();
-      // Native IPC result: check its shape before trusting it.
-      if (typeof status?.available !== 'boolean' || typeof status.runtimeAvailable !== 'boolean') {
-        throw new Error('unexpected status from the app');
-      }
-      if (request === generation.current) setView({ kind: 'status', status });
-    } catch (reason: unknown) {
-      if (request === generation.current) setView({ kind: 'error', message: message(reason) });
-    }
-  }, [isNative]);
-
-  useEffect(() => {
-    void refresh();
-    return () => { generation.current++; };
-  }, [refresh]);
 
   const importModel = async () => {
     setImporting(true);
     try {
-      await (storeRef.current ??= createTauriCleanupModelStore()).importModel();
+      await store().importModel();
     } catch (reason: unknown) {
-      setView({ kind: 'error', message: message(reason) });
+      fail(reason);
       setImporting(false);
       return;
     }
@@ -84,8 +47,7 @@ export function CleanupSettings({ isNative, modelStore }: {
     update({ key: 'cleanupEnabled', value: on });
   };
 
-  const workerAvailable = view.kind === 'status' && view.status.runtimeAvailable;
-  if (!workerAvailable && !active && !import.meta.env.DEV) return null;
+  if (!cleanupShown(view, active)) return null;
 
   const noteId = 'settings-cleanup-model-note';
   return <>

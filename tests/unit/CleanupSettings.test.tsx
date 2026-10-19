@@ -8,6 +8,7 @@ import { useApp } from '../../src/app/AppContext';
 import { initialSettings } from '../../src/domain/fixtures';
 import type { Settings } from '../../src/domain/types';
 import { CleanupSettings } from '../../src/features/settings/CleanupSettings';
+import { useCleanupModel } from '../../src/features/settings/useCleanupModel';
 import type { CleanupModelStore } from '../../src/services/cleanup/contracts';
 import { CLEANUP_MODEL_ID, CLEANUP_MODEL_SHA256, type CleanupModelStatus } from '../../src/services/cleanup/types';
 import { renderWithApp } from './testUtils';
@@ -33,8 +34,12 @@ function Probe({ start }: { start?: Partial<Settings> }) {
   return null;
 }
 
+function Harness({ isNative, modelStore }: { isNative: boolean; modelStore?: CleanupModelStore }) {
+  return <CleanupSettings isNative={isNative} model={useCleanupModel(isNative, modelStore)} />;
+}
+
 function renderCleanup(modelStore: CleanupModelStore | undefined, isNative = true, start?: Partial<Settings>) {
-  return renderWithApp(<><Probe start={start} /><CleanupSettings isNative={isNative} modelStore={modelStore} /></>);
+  return renderWithApp(<><Probe start={start} /><Harness isNative={isNative} modelStore={modelStore} /></>);
 }
 
 const toggle = () => screen.getByRole('switch', { name: 'Clean up transcripts locally' });
