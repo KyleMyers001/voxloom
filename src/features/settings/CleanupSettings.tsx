@@ -5,7 +5,7 @@ import { isCleanupActive } from '../../domain/cleanup';
 import {
   CLEANUP_HELP, CLEANUP_IMPORT, CLEANUP_IMPORTING, CLEANUP_LABEL,
   CLEANUP_MODEL_LABEL, CLEANUP_REFRESH, CLEANUP_SWITCH, CLEANUP_TAG,
-  cleanupModelNote, cleanupReady,
+  cleanupImportNote, cleanupModelNote, cleanupReady,
 } from './cleanupCopy';
 import { cleanupShown, type CleanupModel } from './useCleanupModel';
 
@@ -25,12 +25,13 @@ export function CleanupSettings({ isNative, model }: { isNative: boolean; model:
   const { settings, state } = useApp();
   const update = settings.update;
   const active = isCleanupActive(state.settings);
-  const { apply, fail, refresh, store, view } = model;
+  const { apply, clearImportError, fail, importError, refresh, store, view } = model;
   const [importing, setImporting] = useState(false);
   const shown = cleanupShown(model, active);
   const firstRow = useRef<HTMLDivElement>(null);
   const lastRow = useRef<HTMLDivElement>(null);
   const focusAfterHide = useRef<HTMLElement | null>(null);
+  const checking = view.kind === 'checking';
 
   // Turning cleanup off can close the gate and remove the focused switch:
   // hand focus to the next control (or the previous one), not the page body.
@@ -42,6 +43,7 @@ export function CleanupSettings({ isNative, model }: { isNative: boolean; model:
 
   const importModel = async () => {
     if (importing) return;
+    clearImportError();
     setImporting(true);
     try {
       // The import verifies the file and returns the new status, so there is
@@ -71,6 +73,11 @@ export function CleanupSettings({ isNative, model }: { isNative: boolean; model:
 
   if (!shown) return null;
 
+  const modelInstalled = view.kind === 'status' && view.status.available;
+  // Import failures use their own line (BUS-101); hide the check-error note
+  // when that line is the only thing we know.
+  const statusNote = view.kind === 'error' && importError ? null : cleanupModelNote(view);
+  const importNote = importError ? cleanupImportNote(importError, modelInstalled) : null;
   const noteId = 'settings-cleanup-model-note';
   return <>
     <div className="frow" ref={firstRow}>
@@ -91,7 +98,11 @@ export function CleanupSettings({ isNative, model }: { isNative: boolean; model:
     <div className="frow" ref={lastRow}>
       <span className="frow__label">
         <span>{CLEANUP_MODEL_LABEL}</span>
-        <small className="frow__help" id={noteId} role="status">{cleanupModelNote(view)}</small>
+        <small className="frow__help" id={noteId} role="status">
+          {statusNote}
+          {statusNote && importNote ? ' ' : null}
+          {importNote}
+        </small>
       </span>
       {isNative && (
         <span className="frow__control">
@@ -100,9 +111,9 @@ export function CleanupSettings({ isNative, model }: { isNative: boolean; model:
             {importing ? CLEANUP_IMPORTING : CLEANUP_IMPORT}
           </button>
           <button
-            aria-disabled={importing}
+            aria-disabled={importing || checking}
             className="btn"
-            onClick={() => { if (!importing) void refresh(); }}
+            onClick={() => { if (!importing && !checking) void refresh(); }}
             type="button"
           >
             {CLEANUP_REFRESH}

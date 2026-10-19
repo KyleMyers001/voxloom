@@ -149,7 +149,8 @@ describe('CleanupSettings', () => {
     renderCleanup(models);
     await waitFor(() => expect(screen.getByText(/Couldn't check the cleanup model: denied/)).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: 'Import model…' }));
-    await waitFor(() => expect(screen.getByText(/wrong file/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/Couldn't import that file: wrong file\./)).toBeInTheDocument());
+    expect(screen.queryByText(/Couldn't check the cleanup model: wrong file/)).not.toBeInTheDocument();
     expect(toggle()).toBeDisabled();
   });
 
@@ -222,13 +223,27 @@ describe('CleanupSettings in a production build', () => {
     await user.click(toggle());
     expect(latest).toMatchObject({ cleanupEnabled: true, cleanupOptIn: false });
   });
+
+  // BUS-101 item 2: when the block is shown (active), a first-read error keeps
+  // the error note and Check again. Production + inactive still hides (above).
+  it('active cleanup: a first status error still shows the note and Check again', async () => {
+    prod();
+    renderCleanup(
+      { importModel: vi.fn(), status: vi.fn().mockRejectedValue(new Error('denied')) },
+      true,
+      { cleanupModelId: CLEANUP_MODEL_ID, cleanupOptIn: true },
+    );
+    await waitFor(() => expect(screen.getByText(/Couldn't check the cleanup model: denied/)).toBeInTheDocument());
+    expect(screen.getByText('Local cleanup')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Check again' })).toBeInTheDocument();
+  });
 });
 
 describe('CleanupSettings in a production build, after the worker is known', () => {
   afterEach(() => { vi.unstubAllEnvs(); });
   const missingModel = { ...ready, available: false };
 
-  it('an import failure keeps the block and shows the error', async () => {
+  it('an import failure keeps the block and shows the import note', async () => {
     vi.stubEnv('DEV', false);
     const user = userEvent.setup();
     const models = store(missingModel);
@@ -236,10 +251,30 @@ describe('CleanupSettings in a production build, after the worker is known', () 
     renderCleanup(models);
     const button = await screen.findByRole('button', { name: 'Import model…' });
     await user.click(button);
-    await waitFor(() => expect(screen.getByText(/picker exploded/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/Couldn't import that file: picker exploded\./)).toBeInTheDocument());
+    // Known status is kept (Not installed), not replaced with a check-failure note.
+    expect(screen.getByText(/Not installed/)).toBeInTheDocument();
+    expect(screen.queryByText(/Couldn't check the cleanup model/)).not.toBeInTheDocument();
     expect(screen.getByText('Local cleanup')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Import model…' })).toBe(button);
     expect(button).toHaveFocus();
+  });
+
+  it('an import failure keeps a known-good status so the switch stays enabled (BUS-101)', async () => {
+    vi.stubEnv('DEV', false);
+    const user = userEvent.setup();
+    const models = store(ready);
+    vi.mocked(models.importModel).mockRejectedValue(new Error('wrong file'));
+    renderCleanup(models);
+    await waitFor(() => expect(toggle()).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Import model…' }));
+    const note = await screen.findByRole('status');
+    await waitFor(() => expect(note).toHaveTextContent(
+      /Couldn't import that file: wrong file\. Your current model is unchanged\./,
+    ));
+    expect(note).toHaveTextContent('Qwen3 0.6B is installed.');
+    expect(toggle()).toBeEnabled();
+    expect(models.status).toHaveBeenCalledOnce();
   });
 
   it('Check again keeps the block and focus while it checks, and through an error', async () => {
@@ -333,26 +368,47 @@ describe('focus when turning cleanup off hides the block', () => {
 describe('cleanup model status: one read per window', () => {
   afterEach(() => { vi.unstubAllEnvs(); });
 
-  it('a stale status response cannot update the worker flag', async () => {
+  it('two Check again clicks during a check produce one status call (BUS-106)', async () => {
     vi.stubEnv('DEV', false);
     const user = userEvent.setup();
-    const pending: ((status: CleanupModelStatus) => void)[] = [];
+    let finish!: (status: CleanupModelStatus) => void;
     let calls = 0;
     const models: CleanupModelStore = {
       importModel: vi.fn(),
       status: vi.fn(() => (++calls === 1
         ? Promise.resolve(ready)
-        : new Promise<CleanupModelStatus>((resolve) => { pending.push(resolve); }))),
+        : new Promise<CleanupModelStatus>((resolve) => { finish = resolve; }))),
+    };
+    renderCleanup(models);
+    const check = await screen.findByRole('button', { name: 'Check again' });
+    await waitFor(() => expect(screen.getByText('Qwen3 0.6B is installed.')).toBeInTheDocument());
+    await user.click(check);
+    expect(check).toHaveAttribute('aria-disabled', 'true');
+    await user.click(check);
+    await user.click(check);
+    expect(models.status).toHaveBeenCalledTimes(2); // boot + one Check again
+    await act(async () => { finish({ ...ready, available: false }); });
+    await waitFor(() => expect(screen.getByText(/Not installed/)).toBeInTheDocument());
+  });
+
+  it('an in-flight Check again superseded by import keeps the worker flag', async () => {
+    vi.stubEnv('DEV', false);
+    const user = userEvent.setup();
+    let finish!: (status: CleanupModelStatus) => void;
+    let calls = 0;
+    const models: CleanupModelStore = {
+      importModel: vi.fn().mockResolvedValue({ ...ready, available: false }),
+      status: vi.fn(() => (++calls === 1
+        ? Promise.resolve(ready)
+        : new Promise<CleanupModelStatus>((resolve) => { finish = resolve; }))),
     };
     const { container } = renderCleanup(models);
-    const check = await screen.findByRole('button', { name: 'Check again' });
-    await user.click(check); // request 2 (stale)
-    await user.click(check); // request 3 (latest)
-    expect(pending).toHaveLength(2);
-    await act(async () => { pending[1]({ ...ready, available: false }); });
-    expect(screen.getByText(/Not installed/)).toBeInTheDocument();
-    // The older request answers last, saying the worker is gone: ignored.
-    await act(async () => { pending[0]({ ...ready, runtimeAvailable: false }); });
+    await waitFor(() => expect(screen.getByText('Qwen3 0.6B is installed.')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Check again' }));
+    await user.click(screen.getByRole('button', { name: 'Import model…' }));
+    await waitFor(() => expect(screen.getByText(/Not installed/)).toBeInTheDocument());
+    // Stale Check again says the worker is gone: ignored (generation bumped by apply).
+    await act(async () => { finish({ ...ready, runtimeAvailable: false }); });
     expect(container).not.toBeEmptyDOMElement();
     expect(screen.getByText(/Not installed/)).toBeInTheDocument();
   });
