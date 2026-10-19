@@ -248,6 +248,123 @@
       ]
     },
     {
+      "id": "special-csharp", "categories": ["special-characters", "names"],
+      "rawText": "use C#", "dictionary": [],
+      "candidates": [
+        {"text": "Use C#.", "acceptWhen": ["off", "on"]},
+        {"text": "Use C.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "special-hashtag", "categories": ["special-characters"],
+      "rawText": "fix the #TODO now", "dictionary": [],
+      "candidates": [
+        {"text": "Fix the #TODO now.", "acceptWhen": ["off", "on"]},
+        {"text": "Fix the TODO now.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "special-fsharp", "categories": ["special-characters", "short"],
+      "rawText": "F#", "dictionary": [],
+      "candidates": [
+        {"text": "F#", "acceptWhen": ["off", "on"]},
+        {"text": "F", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "special-emphasis", "categories": ["special-characters"],
+      "rawText": "*bold*", "dictionary": [],
+      "candidates": [
+        {"text": "*bold*", "acceptWhen": ["off", "on"]},
+        {"text": "bold", "acceptWhen": []},
+        {"text": "**bold**", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "special-bang-bang", "categories": ["special-characters", "commands"],
+      "rawText": "run it with sudo !!", "dictionary": [],
+      "candidates": [
+        {"text": "Run it with sudo !!", "acceptWhen": ["off", "on"]},
+        {"text": "Run it with sudo.", "acceptWhen": []},
+        {"text": "Run it with sudo!", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "sentence-final-bang", "categories": ["special-characters", "punctuation"],
+      "rawText": "that is great", "dictionary": [],
+      "candidates": [
+        {"text": "That is great!", "acceptWhen": ["off", "on"]},
+        {"text": "That is great!!", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "title-case-filler-first", "categories": ["fillers"],
+      "rawText": "Uh so the meeting is at three", "dictionary": [],
+      "candidates": [
+        {"text": "So the meeting is at three.", "acceptWhen": ["off", "on"]},
+        {"text": "So the meeting is at four.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "title-case-filler-comma", "categories": ["fillers"],
+      "rawText": "Um, send the report", "dictionary": [],
+      "candidates": [
+        {"text": "Send the report.", "acceptWhen": ["off", "on"]},
+        {"text": "Send the um report.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "title-case-filler-after-period", "categories": ["fillers", "punctuation"],
+      "rawText": "okay. Um let us go", "dictionary": [],
+      "candidates": [
+        {"text": "Okay. Let us go.", "acceptWhen": ["off", "on"]},
+        {"text": "Okay. Let go.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "acronym-not-filler", "categories": ["fillers", "names"],
+      "rawText": "take him to the ER now", "dictionary": [],
+      "candidates": [
+        {"text": "Take him to the ER now.", "acceptWhen": ["off", "on"]},
+        {"text": "Take him to ER now.", "acceptWhen": ["off", "on"]},
+        {"text": "Take him to the now.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "quoted-whole-trailing-punctuation", "categories": ["quoted-instructions", "punctuation"],
+      "rawText": "\"done\".", "dictionary": [],
+      "candidates": [
+        {"text": "\"Done.\"", "acceptWhen": ["off", "on"]},
+        {"text": "Done.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "quoted-whole-after-filler", "categories": ["quoted-instructions", "fillers"],
+      "rawText": "um \"hello there\"", "dictionary": [],
+      "candidates": [
+        {"text": "\"Hello there.\"", "acceptWhen": ["off", "on"]},
+        {"text": "\"Hello\" there.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "inserted-filler", "categories": ["fillers"],
+      "rawText": "send the report", "dictionary": [],
+      "candidates": [
+        {"text": "Send the report.", "acceptWhen": ["off", "on"]},
+        {"text": "Send the um report.", "acceptWhen": []},
+        {"text": "Um, send the report.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "quoted-article", "categories": ["quoted-instructions", "articles"],
+      "rawText": "\"the plan works\"", "dictionary": [],
+      "candidates": [
+        {"text": "\"The plan works.\"", "acceptWhen": ["off", "on"]},
+        {"text": "\"plan works.\"", "acceptWhen": []},
+        {"text": "\"Plan works.\"", "acceptWhen": []}
+      ]
+    },
+    {
       "id": "input-byte-limit", "categories": ["long-inputs"],
       "lengthClass": "length-limit", "repeat": 8001, "promptReason": "context-overflow",
       "rawText": "é", "dictionary": [], "candidates": []

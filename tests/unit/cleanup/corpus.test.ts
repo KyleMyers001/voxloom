@@ -36,6 +36,7 @@ describe('synthetic cleanup corpus (not model quality evidence)', () => {
       'corrections', 'names', 'commands', 'flags', 'paths', 'urls',
       'numbers', 'quoted-instructions', 'unicode', 'long-inputs',
       'repetition', 'adversarial-answers', 'dictionary', 'articles',
+      'special-characters',
     ]) expect(categories.has(category), category).toBe(true);
   });
 

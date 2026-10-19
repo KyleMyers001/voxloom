@@ -3,6 +3,7 @@ import {
   preservesContent,
   sameMultiset,
 } from './contentGuard';
+import { isDroppableFiller, quoteMarkIndices } from './tokens';
 
 export const CLEANUP_OUTPUT_MAX_BYTES = 32_000;
 export const CLEANUP_OUTPUT_EXTRA_CHARS = 256;
@@ -64,21 +65,40 @@ function quotationShape(
   dictionary: readonly string[],
 ): [QuoteMark[], boolean] {
   const characters = Array.from(text.trim().normalize('NFC'));
-  const marks: QuoteMark[] = [];
-  const indices: number[] = [];
-  characters.forEach((character, index) => {
-    if (!/["'“”‘’]/u.test(character)) return;
-    // Apostrophes inside words are not quotation boundaries. Keep supported
-    // contraction expansion (don't → do not, I'm → I am) working.
-    if (/['‘’]/u.test(character)
-      && /[\p{L}\p{M}\p{N}]/u.test(characters[index - 1] ?? '')
-      && /[\p{L}\p{M}\p{N}]/u.test(characters[index + 1] ?? '')) return;
-    const kind = /["“”]/u.test(character) ? 'double' : 'single';
-    marks.push([kind, anchorWordCount(characters.slice(0, index).join(''), dictionary)]);
-    indices.push(index);
-  });
-  return [marks, indices.length >= 2
-    && indices[0] === 0 && indices.at(-1) === characters.length - 1];
+  const marks: QuoteMark[] = quoteMarkIndices(characters).map((index) => [
+    /["“”]/u.test(characters[index]) ? 'double' : 'single',
+    anchorWordCount(characters.slice(0, index).join(''), dictionary),
+  ]);
+  return [marks, wrapsWholeText(text)];
+}
+
+/**
+ * One quotation spans the whole text, ignoring trailing sentence punctuation
+ * and dropped leading fillers: `um "hello there"` and `"Hello there."` match.
+ */
+function wrapsWholeText(text: string): boolean {
+  let core = text.trim().normalize('NFC');
+  for (;;) {
+    const lead = /^([\p{L}]+)[\s,.…]+/u.exec(core);
+    if (!lead || !isDroppableFiller(lead[1], true)) break;
+    core = core.slice(lead[0].length);
+  }
+  core = core.replace(/[\s.,!?;:…。！？]+$/u, '');
+  const characters = Array.from(core);
+  const indices = quoteMarkIndices(characters);
+  return indices.length >= 2
+    && indices[0] === 0 && indices.at(-1) === characters.length - 1;
+}
+
+/**
+ * Markup, shell and identifier characters (`C#`, `#TODO`, `*bold*`,
+ * `sudo !!`, `$HOME`, `a|b`, `x^2`) must keep their exact counts. Only one
+ * sentence-final `!` after a word may be added or removed.
+ */
+function specialMarks(text: string): string[] {
+  const withoutFinalBang = text.normalize('NFC')
+    .replace(/(?<=[\p{L}\p{N}"'”’)\]])!(?=$|[\s"'”’)\]])/gu, '');
+  return withoutFinalBang.match(/[#*^|$!]/gu) ?? [];
 }
 
 function hasUnsafeEncoding(text: string): boolean {
@@ -111,6 +131,7 @@ export function validateCleanupOutput(
   if (!sameMultiset(protectedValues(rawText), protectedValues(cleaned))) return null;
   if (!preservesCapitalization(rawText, cleaned)) return null;
   if (JSON.stringify(symbols(rawText)) !== JSON.stringify(symbols(cleaned))) return null;
+  if (!sameMultiset(specialMarks(rawText), specialMarks(cleaned))) return null;
   if (JSON.stringify(quotationShape(rawText, dictionary))
     !== JSON.stringify(quotationShape(cleaned, dictionary))) return null;
   if (!preservesContent(rawText, cleaned, dictionary)) return null;
