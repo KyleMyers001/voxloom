@@ -14,14 +14,29 @@ import { validateCleanupOutput } from './validation';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+/**
+ * How long a timeout, abort or overflow waits for the engine's cancel before
+ * moving on. A healthy worker reaps within this and its final attempt
+ * evidence is kept; a hung one (cancel or run never settling) must not hold
+ * the dictation in `cleaning`, so its cancel keeps running in the background.
+ */
+export const CANCEL_GRACE_MS = 1_000;
+
 async function cancelSafely(
   engine: CleanupEngine,
   requestId: string,
 ): Promise<void> {
-  try {
-    await engine.cancel(requestId);
-  } catch {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cancelling = (async () => engine.cancel(requestId))().catch(() => {
     // Cancellation still forbids delivery if teardown reports an error.
+  });
+  try {
+    await Promise.race([
+      cancelling,
+      new Promise<void>((resolve) => { timer = setTimeout(resolve, CANCEL_GRACE_MS); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 

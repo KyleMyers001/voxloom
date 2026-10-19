@@ -198,4 +198,22 @@ describe('cleanTranscript', () => {
     await Promise.resolve();
     expect(live.release).toHaveBeenCalledWith('cleanup-a');
   });
+
+  it('a superseded run whose cancel hangs still returns raw text within the grace', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const hung = engine({
+      cancel: vi.fn(() => new Promise<void>(() => {})),
+      run: vi.fn(() => new Promise<never>(() => {})),
+    });
+    let settled: unknown = 'pending';
+    void cleanTranscript(input({ engine: hung, signal: signalFor(controller) }))
+      .then((outcome) => { settled = outcome; });
+    await vi.advanceTimersByTimeAsync(0);
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(999);
+    expect(settled).toBe('pending');
+    await vi.advanceTimersByTimeAsync(2);
+    expect(settled).toMatchObject({ finalText: 'um send to voxlom', reason: 'cancelled', status: 'fallback' });
+  });
 });
