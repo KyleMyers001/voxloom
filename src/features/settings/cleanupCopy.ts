@@ -11,6 +11,12 @@ export const CLEANUP_IMPORT = 'Import model…';
 export const CLEANUP_IMPORTING = 'Importing…';
 export const CLEANUP_REFRESH = 'Check again';
 
+/** Ends a reason with a period unless it already ends in . ! or ? (no ".."). */
+export function endSentence(reason: string): string {
+  const trimmed = reason.trimEnd();
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
 export type CleanupModelView =
   | { kind: 'browser' }
   | { kind: 'checking' }
@@ -20,7 +26,7 @@ export type CleanupModelView =
 export function cleanupModelNote(view: CleanupModelView): string {
   if (view.kind === 'browser') return 'Available in the desktop app.';
   if (view.kind === 'checking') return 'Checking the cleanup model…';
-  if (view.kind === 'error') return `Couldn't check the cleanup model: ${view.message}`;
+  if (view.kind === 'error') return `Couldn't check the cleanup model: ${endSentence(view.message)}`;
   const { status } = view;
   if (!status.available) return 'Not installed. Import the Qwen3 0.6B (Q4_K_M) GGUF file.';
   if (!status.runtimeAvailable) {
@@ -32,7 +38,7 @@ export function cleanupModelNote(view: CleanupModelView): string {
 
 /** BUS-101: import failures use their own line, not the check-failure note. */
 export function cleanupImportNote(reason: string, modelInstalled: boolean): string {
-  const base = `Couldn't import that file: ${reason}.`;
+  const base = `Couldn't import that file: ${endSentence(reason)}`;
   return modelInstalled ? `${base} Your current model is unchanged.` : base;
 }
 
