@@ -10,7 +10,7 @@ import { cleanTranscript } from '../dictation/cleanupStage';
 import { signalFor } from '../dictation/signal';
 
 export interface DogfoodCleanupSettings {
-  /** `isCleanupActive(settings)`: enabled AND explicitly opted in. */
+  /** `isCleanupActive(settings)`: the explicit `cleanupOptIn` alone. */
   active: boolean;
   dictionary: readonly string[];
   modelId: string | null;

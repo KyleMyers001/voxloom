@@ -71,8 +71,8 @@ export interface UseDogfoodCaptureOptions {
   /** Writing style stamped onto the history row and used by cleanup. */
   style?: WritingStyle;
   /**
-   * Run local cleanup: `isCleanupActive(settings)`, never `cleanupEnabled`
-   * alone (BUS-16 opt-in). Default off.
+   * Run local cleanup: `isCleanupActive(settings)`, i.e. `cleanupOptIn`;
+   * the legacy `cleanupEnabled` is ignored (BUS-16). Default off.
    */
   cleanupActive?: boolean;
   /** Settings `cleanupModelId`. */
@@ -287,7 +287,9 @@ export function useDogfoodCapture(
     cancellation.settle = settleCancellation;
     const processing = new AbortController();
     processingRef.current = processing;
-    // Snapshot at stop: a settings change mid-dictation applies to the next one.
+    // Snapshot at stop: a settings change mid-dictation applies to the next
+    // one. The same style goes to cleanup and onto the History row.
+    const style = styleRef.current;
     const cleanup = prepareDogfoodCleanup({
       controller: processing,
       engine: cleanupEngine,
@@ -297,7 +299,7 @@ export function useDogfoodCapture(
         announce('Cleaning up…');
       },
       requestId: `cleanup-${audio.id}`,
-      settings: { ...cleanupSettingsRef.current, style: styleRef.current },
+      settings: { ...cleanupSettingsRef.current, style },
       userCancelled: () => cancellation.cancelled,
     });
     setPhase('transcribing');
@@ -339,7 +341,7 @@ export function useDogfoodCapture(
         now: nowRef.current(),
         rawText: result.transcript.rawText,
         status: result.delivery.status,
-        style: styleRef.current,
+        style,
         text: result.transcript.text,
       });
       if (record) {
