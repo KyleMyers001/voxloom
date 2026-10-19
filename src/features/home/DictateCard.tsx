@@ -1,6 +1,6 @@
 import { useApp } from '../../app/AppContext';
 import { Icon } from '../../components/Icon';
-import { cancelUnavailableHint } from '../../services/shortcut/cancelUnavailable';
+import { CancelUnavailableNote } from './CancelUnavailableNote';
 import type { UseDogfoodCaptureResult } from '../../services/stt/useDogfoodCapture';
 
 type Props = {
@@ -72,14 +72,7 @@ export function DictateCard({ dogfood, isNative, onCopy }: Props) {
           <Icon name={failed ? 'warn' : 'check'} size={14} /> {dogfood.message}
         </p>
       )}
-      {notice && (
-        <div className="note" data-code={notice.code}>
-          <p><Icon name="info" size={14} /> {cancelUnavailableHint(notice.code)}</p>
-          <button className="btn" onClick={() => onCopy(notice.details)} type="button">
-            <Icon name="copy" /> Copy error details
-          </button>
-        </div>
-      )}
+      {notice && <CancelUnavailableNote notice={notice} onCopy={onCopy} />}
     </section>
   );
 }

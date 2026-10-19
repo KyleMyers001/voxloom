@@ -45,7 +45,8 @@ export function useDogfoodSession({
     setOrigin, setPhase, setScopeReady, setTranscript, toast,
   } = actions;
   const {
-    notice: cancelNotice, report: reportCancelUnavailable, takeHint: takeCancelHint,
+    clear: clearCancelUnavailable, notice: cancelNotice, report: reportCancelUnavailable,
+    takeHint: takeCancelHint,
   } = useCancelUnavailable();
 
   /** End as cancelled: by the user (drops a held notice) or by a release. */
@@ -95,7 +96,7 @@ export function useDogfoodSession({
         await cancellation.scope?.dispose();
         return;
       }
-      if (cancellation.scope) setScopeReady(true);
+      if (cancellation.scope) { clearCancelUnavailable(); setScopeReady(true); }
       // Show the HUD (waveform) even when Escape-cancel could not arm.
       setHudReady(true);
       await ensureModel();
@@ -127,8 +128,8 @@ export function useDogfoodSession({
       if (!superseded()) fail(errorText(error));
     }
   }, [
-    actions, capture, endCancelled, ensureModel, live, preferredDeviceId, reportCancelUnavailable,
-    takeCancelHint,
+    actions, capture, clearCancelUnavailable, endCancelled, ensureModel, live, preferredDeviceId,
+    reportCancelUnavailable, takeCancelHint,
   ]);
 
   const stop = useCallback(async () => {

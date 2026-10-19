@@ -33,6 +33,7 @@ const COMMANDS: &[&str] = &[
     "overlay_ensure",
     "overlay_hide",
     "overlay_show",
+    "privacy_pane_open",
     "settings_load",
     "settings_request_onboarding",
     "settings_save",

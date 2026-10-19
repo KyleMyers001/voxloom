@@ -19,7 +19,7 @@ describe('toastTone (toasts board strings)', () => {
     ['Finish the current dictation before retrying', 'err'],
     ['Recovery buffer expired', 'err'],
     ['Shortcut “Ctrl + Space” is in use; kept Ctrl + Shift + Space', 'err'],
-    ['Escape-cancel is off: Voxloom does not have Accessibility permission. Dictation still works.', 'warn'],
+    ['Escape-cancel is off: Voxloom doesn\'t have Accessibility permission. Dictation still works. After you allow it, quit and reopen Voxloom.', 'warn'],
     // BUS-91: neutral info icon, never the error style.
     [SUPERSEDED_DELIVERY_MESSAGE, 'warn'],
   ])('%s → %s', (message, tone) => expect(toastTone(message)).toBe(tone));
