@@ -1,13 +1,16 @@
 use super::*;
+use crate::cleanup::test_support::{process_exists, test_root, wait_until, write_executable};
 use crate::cleanup::{
     artifact::ArtifactSpec,
     model_store::{CleanupModelStore, MODEL_ID},
 };
 use sha2::{Digest, Sha256};
+use std::time::Duration;
 use std::{fs, path::PathBuf, sync::Arc};
 
 fn fixture(name: &str) -> (RequestRegistry, CleanupModelStore, PathBuf, ArtifactSpec) {
-    let root = std::env::temp_dir().join(format!("voxloom-owner-{name}-{}", std::process::id()));
+    let root = test_root().join(format!("owner-{name}"));
+    let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
     let source = root.join("source.gguf");
     fs::write(&source, b"GGUFtest").unwrap();
@@ -136,20 +139,17 @@ fn stale_owner_cannot_release_run_or_dispose_the_new_owner() {
 
 #[test]
 fn tampering_after_admission_is_rejected_before_worker_spawn() {
-    use std::os::unix::fs::PermissionsExt;
     let (_, store, source, spec) = fixture("tamper-before-run");
     let root = source.parent().unwrap();
     let marker = root.join("unexpected-spawn");
     let worker = root.join("worker.sh");
-    fs::write(
+    write_executable(
         &worker,
-        format!(
+        &format!(
             "#!/bin/sh\nprintf spawned > '{}'\nexit 7\n",
             marker.display()
         ),
-    )
-    .unwrap();
-    fs::set_permissions(&worker, fs::Permissions::from_mode(0o700)).unwrap();
+    );
     let registry = RequestRegistry::new(Arc::new(WorkerSupervisor::new(worker)));
     let (owner, _) = registry.open_session();
     acquire(&registry, &store, spec, owner, "tampered");
@@ -168,13 +168,16 @@ fn tampering_after_admission_is_rejected_before_worker_spawn() {
 
 #[test]
 fn retiring_an_actual_worker_reaps_it_then_new_generation_runs() {
-    use std::os::unix::fs::PermissionsExt;
-    use std::time::{Duration, Instant};
     let (_, store, source, spec) = fixture("worker-retirement");
     let root = source.parent().unwrap();
     let marker = root.join("started");
     let path = root.join("worker.py");
-    fs::write(&path, format!(r#"#!/usr/bin/env python3
+    // The marker is renamed into place, so once it exists it holds the pid:
+    // a worker killed mid-write cannot leave it empty.
+    write_executable(
+        &path,
+        &format!(
+            r#"#!/usr/bin/env python3
 import json, os, struct, sys, time
 from pathlib import Path
 size = struct.unpack('>I', sys.stdin.buffer.read(4))[0]
@@ -183,35 +186,42 @@ with open(request['modelPath'], 'rb') as model:
     assert model.read() == b'GGUFtest'
 marker = Path(r'{}')
 if not marker.exists():
-    marker.write_text(str(os.getpid()))
+    staged = marker.with_suffix('.tmp')
+    staged.write_text(str(os.getpid()))
+    os.replace(staged, marker)
     time.sleep(60)
 data = json.dumps({{'requestId': request['requestId'], 'status': 'ok', 'text': 'Recovered.'}}).encode()
 sys.stdout.buffer.write(struct.pack('>I', len(data)) + data)
 sys.stdout.buffer.flush()
-"#, marker.display())).unwrap();
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+"#,
+            marker.display()
+        ),
+    );
     let registry = RequestRegistry::new(Arc::new(WorkerSupervisor::new(path)));
     let (owner, _) = registry.open_session();
     acquire(&registry, &store, spec, owner, "active");
     acquire(&registry, &store, spec, owner, "queued");
     let run = registry.start_run(owner, "active", MODEL_ID).unwrap();
     let running = std::thread::spawn(move || run.run("synthetic prompt".into()));
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !marker.exists() && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    let started = marker.exists();
+    let mut pid = None;
+    let started = wait_until(Duration::from_secs(10), || {
+        pid = fs::read_to_string(&marker)
+            .ok()
+            .and_then(|text| text.trim().parse::<libc::pid_t>().ok());
+        pid.is_some()
+    });
     registry.retire(None).finish();
     let error = running.join().unwrap().unwrap_err();
     assert_eq!(error.code, "cancelled");
     assert_eq!(error.attempt.unwrap().model_digest, spec.sha256);
-    assert!(started, "fixture worker did not start within five seconds");
-    let pid: libc::pid_t = fs::read_to_string(&marker).unwrap().parse().unwrap();
-    // SAFETY: signal 0 only checks the fixture process; it does not signal it.
-    assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
-    assert_eq!(
-        std::io::Error::last_os_error().raw_os_error(),
-        Some(libc::ESRCH)
+    assert!(
+        started,
+        "fixture worker did not record its pid within ten seconds"
+    );
+    let pid = pid.unwrap();
+    assert!(
+        wait_until(Duration::from_secs(5), || !process_exists(pid)),
+        "retired worker {pid} still exists five seconds after retirement"
     );
     assert!(store.import_artifact(&source, spec).is_ok());
     let (next_owner, _) = registry.open_session();
@@ -232,7 +242,6 @@ sys.stdout.buffer.flush()
 
 #[test]
 fn attempt_identity_requires_verified_descriptor_and_successful_spawn() {
-    use std::os::unix::fs::PermissionsExt;
     let (_, store, source, spec) = fixture("attempt-evidence");
     let path = source.parent().unwrap().join("worker.sh");
     let registry = RequestRegistry::new(Arc::new(WorkerSupervisor::new(path.clone())));
@@ -251,8 +260,7 @@ fn attempt_identity_requires_verified_descriptor_and_successful_spawn() {
         assert!(error.attempt.is_none());
     }
     // Executable, but exec itself fails: still no attempt.
-    fs::write(&path, "#!/missing/interpreter\n").unwrap();
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+    write_executable(&path, "#!/missing/interpreter\n");
     acquire(&registry, &store, spec, owner, "spawn-failure");
     let error = registry
         .start_run(owner, "spawn-failure", MODEL_ID)
@@ -261,7 +269,7 @@ fn attempt_identity_requires_verified_descriptor_and_successful_spawn() {
         .unwrap_err();
     assert!(error.attempt.is_none());
     // A launched child that crashes is an actual attempt with verified identity.
-    fs::write(&path, "#!/bin/sh\nexit 7\n").unwrap();
+    write_executable(&path, "#!/bin/sh\nexit 7\n");
     acquire(&registry, &store, spec, owner, "crash");
     let mut emitted = None;
     let error = registry

@@ -10,6 +10,8 @@ mod ownership;
 mod picker;
 pub mod protocol;
 pub mod supervisor;
+#[cfg(all(test, unix))]
+mod test_support;
 mod worker_process;
 
 use std::path::PathBuf;

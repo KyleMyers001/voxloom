@@ -2,7 +2,7 @@ use super::*;
 use sha2::{Digest, Sha256};
 
 fn temp_root(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("voxloom-cleanup-{name}-{}", std::process::id(),))
+    crate::cleanup::test_support::test_root().join(format!("model-store-{name}"))
 }
 
 #[test]
