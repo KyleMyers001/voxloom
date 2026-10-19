@@ -29,16 +29,27 @@ function expand(text: string): string {
 }
 
 /**
- * Indices of quotation marks in `characters`. Apostrophes inside words are
- * not quotation boundaries (don't → do not, I'm → I am keep working).
+ * Indices of quotation marks in `characters`. Apostrophes are not quotation
+ * boundaries inside words (don't → do not, I'm → I am keep working), in a
+ * decade ('90s), or after a word-final s (boys') unless a single quotation is
+ * open, so a closing quote after an s (say 'yes' to it) is still anchored.
  */
 export function quoteMarkIndices(characters: readonly string[]): number[] {
   const indices: number[] = [];
+  const word = /[\p{L}\p{M}\p{N}]/u;
+  let singleOpen = false;
   characters.forEach((character, index) => {
     if (!/["'“”‘’]/u.test(character)) return;
-    if (/['‘’]/u.test(character)
-      && /[\p{L}\p{M}\p{N}]/u.test(characters[index - 1] ?? '')
-      && /[\p{L}\p{M}\p{N}]/u.test(characters[index + 1] ?? '')) return;
+    const before = characters[index - 1] ?? '';
+    const after = characters[index + 1] ?? '';
+    const single = /['‘’]/u.test(character);
+    if (single && word.test(before) && word.test(after)) return;
+    const straight = /['’]/u.test(character);
+    const possessive = /^s$/iu.test(before) && !word.test(after);
+    const decade = /^\p{N}{2}s(?![\p{L}\p{M}\p{N}])/u
+      .test(characters.slice(index + 1, index + 5).join(''));
+    if (straight && ((possessive && !singleOpen) || decade)) return;
+    if (single) singleOpen = !singleOpen;
     indices.push(index);
   });
   return indices;

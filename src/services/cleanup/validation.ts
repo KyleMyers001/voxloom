@@ -24,19 +24,25 @@ function preservesCapitalization(raw: string, candidate: string): boolean {
   const words = (text: string) => text.normalize('NFC').replaceAll('’', '\'')
     .match(/[\p{L}\p{M}]+(?:'[\p{L}\p{M}]+)*/gu) ?? [];
   const source = words(raw);
-  const capitalized = new Set(source.filter((word) => /^\p{Lu}/u.test(word))
-    .map((word) => word.toLowerCase()));
-  const lowercase = (tokens: string[]) => tokens.filter((word) =>
-    /^\p{Ll}/u.test(word) && capitalized.has(word.toLowerCase()));
-  // Only prohibit new lowercase occurrences of a source-capitalized word.
-  // This permits existing mixed-case repetitions, filler removal, contraction
-  // expansion and dictionary repairs while rejecting Émilie → émilie.
+  const keys = (pattern: RegExp) => new Set(source
+    .filter((word) => pattern.test(word)).map((word) => word.toLowerCase()));
+  const capitalized = keys(/^\p{Lu}/u);
+  const acronyms = keys(/^\p{Lu}{2,}$/u);
+  // Only prohibit new weakened occurrences of a source word: lowercase for a
+  // capitalized word (Émilie → émilie), anything but all caps for an acronym
+  // (MRI → Mri). This permits existing mixed-case repetitions, filler
+  // removal, contraction expansion and dictionary repairs.
+  const weakened = (tokens: string[]) => tokens.filter((word) => {
+    const key = word.toLowerCase();
+    return (/^\p{Ll}/u.test(word) && capitalized.has(key))
+      || (acronyms.has(key) && word !== word.toUpperCase());
+  });
   const available = new Map<string, number>();
-  for (const word of lowercase(source)) {
+  for (const word of weakened(source)) {
     const key = word.toLowerCase();
     available.set(key, (available.get(key) ?? 0) + 1);
   }
-  for (const word of lowercase(words(candidate))) {
+  for (const word of weakened(words(candidate))) {
     const key = word.toLowerCase();
     const remaining = available.get(key) ?? 0;
     if (remaining === 0) return false;
@@ -90,15 +96,21 @@ function wrapsWholeText(text: string): boolean {
     && indices[0] === 0 && indices.at(-1) === characters.length - 1;
 }
 
+// A `!` ending a word: sentence-final emphasis, not a shell or markup mark.
+const FINAL_BANG = /(?<=[\p{L}\p{N}"'”’)\]])!(?=$|[\s"'”’)\]])/gu;
+
 /**
  * Markup, shell and identifier characters (`C#`, `#TODO`, `*bold*`,
  * `sudo !!`, `$HOME`, `a|b`, `x^2`) must keep their exact counts. Only one
- * sentence-final `!` after a word may be added or removed.
+ * sentence-final `!` after a word may be added or removed overall.
  */
-function specialMarks(text: string): string[] {
-  const withoutFinalBang = text.normalize('NFC')
-    .replace(/(?<=[\p{L}\p{N}"'”’)\]])!(?=$|[\s"'”’)\]])/gu, '');
-  return withoutFinalBang.match(/[#*^|$!]/gu) ?? [];
+function preservesSpecialMarks(raw: string, candidate: string): boolean {
+  const marks = (text: string) => text.normalize('NFC').replace(FINAL_BANG, '')
+    .match(/[#*^|$!]/gu) ?? [];
+  const finalBangs = (text: string) =>
+    text.normalize('NFC').match(FINAL_BANG)?.length ?? 0;
+  return sameMultiset(marks(raw), marks(candidate))
+    && Math.abs(finalBangs(raw) - finalBangs(candidate)) <= 1;
 }
 
 function hasUnsafeEncoding(text: string): boolean {
@@ -131,7 +143,7 @@ export function validateCleanupOutput(
   if (!sameMultiset(protectedValues(rawText), protectedValues(cleaned))) return null;
   if (!preservesCapitalization(rawText, cleaned)) return null;
   if (JSON.stringify(symbols(rawText)) !== JSON.stringify(symbols(cleaned))) return null;
-  if (!sameMultiset(specialMarks(rawText), specialMarks(cleaned))) return null;
+  if (!preservesSpecialMarks(rawText, cleaned)) return null;
   if (JSON.stringify(quotationShape(rawText, dictionary))
     !== JSON.stringify(quotationShape(cleaned, dictionary))) return null;
   if (!preservesContent(rawText, cleaned, dictionary)) return null;

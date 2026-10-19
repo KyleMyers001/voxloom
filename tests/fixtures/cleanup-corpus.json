@@ -365,6 +365,78 @@
       ]
     },
     {
+      "id": "acronym-casing", "categories": ["names", "fillers"],
+      "rawText": "Go to ER", "dictionary": [],
+      "candidates": [
+        {"text": "Go to ER.", "acceptWhen": ["off", "on"]},
+        {"text": "Go to Er.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "acronym-casing-article", "categories": ["names", "articles"],
+      "rawText": "book an MRI", "dictionary": [],
+      "candidates": [
+        {"text": "Book an MRI.", "acceptWhen": ["off", "on"]},
+        {"text": "Book an Mri.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "acronym-casing-name", "categories": ["names"],
+      "rawText": "ask NASA", "dictionary": [],
+      "candidates": [
+        {"text": "Ask NASA.", "acceptWhen": ["off", "on"]},
+        {"text": "Ask Nasa.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "acronym-casing-first", "categories": ["names", "fillers"],
+      "rawText": "ER visit", "dictionary": [],
+      "candidates": [
+        {"text": "ER visit.", "acceptWhen": ["off", "on"]},
+        {"text": "Er visit.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "title-case-filler-mid-sentence", "categories": ["fillers"],
+      "rawText": "send Um the report", "dictionary": [],
+      "candidates": [
+        {"text": "Send Um the report.", "acceptWhen": ["off", "on"]},
+        {"text": "Send the report.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "sentence-final-bang-limit", "categories": ["special-characters", "punctuation"],
+      "rawText": "wow that is great let us go", "dictionary": [],
+      "candidates": [
+        {"text": "Wow, that is great! Let us go.", "acceptWhen": ["off", "on"]},
+        {"text": "Wow! That is great! Let us go.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "plural-possessive-apostrophe", "categories": ["punctuation", "fillers"],
+      "rawText": "the boys' toys are um great", "dictionary": [],
+      "candidates": [
+        {"text": "The boys' toys are great.", "acceptWhen": ["off", "on"]},
+        {"text": "The boys' toys are bad.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "single-quote-closing-after-s", "categories": ["quoted-instructions"],
+      "rawText": "say 'yes' to ideas", "dictionary": [],
+      "candidates": [
+        {"text": "Say 'yes' to ideas.", "acceptWhen": ["off", "on"]},
+        {"text": "Say 'yes to ideas'.", "acceptWhen": []}
+      ]
+    },
+    {
+      "id": "decade-apostrophe", "categories": ["punctuation", "fillers", "numbers"],
+      "rawText": "back in the '90s um it was fun", "dictionary": [],
+      "candidates": [
+        {"text": "Back in the '90s, it was fun.", "acceptWhen": ["off", "on"]},
+        {"text": "Back in the '80s, it was fun.", "acceptWhen": []}
+      ]
+    },
+    {
       "id": "input-byte-limit", "categories": ["long-inputs"],
       "lengthClass": "length-limit", "repeat": 8001, "promptReason": "context-overflow",
       "rawText": "é", "dictionary": [], "candidates": []
