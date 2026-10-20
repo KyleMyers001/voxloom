@@ -70,6 +70,17 @@ fn a_reply_that_cannot_fit_the_time_left_is_a_timeout() {
 
 #[cfg(debug_assertions)]
 #[test]
+fn the_cap_matches_the_time_left_it_was_sent() {
+    // 2000 ms - 300 ms margin at 22 tokens/s: 37 pieces, about 0.4 s. Twice
+    // the time left would run about 0.8 s, so it must stop well before that.
+    let (reply, _, elapsed) = run_slow(2_000);
+    assert_eq!(reply["errorCode"], "timeout", "{reply}");
+    assert!(elapsed >= Duration::from_millis(370), "{elapsed:?}");
+    assert!(elapsed < Duration::from_millis(700), "{elapsed:?}");
+}
+
+#[cfg(debug_assertions)]
+#[test]
 fn no_time_left_still_answers_at_once() {
     let (reply, _, elapsed) = run_slow(0);
     assert_eq!(reply["errorCode"], "timeout", "{reply}");
