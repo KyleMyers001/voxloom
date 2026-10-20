@@ -16,7 +16,7 @@ pub const CLEANUP_BUDGET: Duration = Duration::from_millis(10_000);
 /// first and reports `timeout`.
 pub const BACKSTOP_GRACE: Duration = Duration::from_secs(2);
 
-pub const WORKER_TIMEOUT: Duration = Duration::from_millis(12_000);
+pub const WORKER_TIMEOUT: Duration = CLEANUP_BUDGET.saturating_add(BACKSTOP_GRACE);
 
 /// When the run must be done, from the renderer's time left on arrival.
 /// Clamped to the budget, so a bad value cannot widen it.
