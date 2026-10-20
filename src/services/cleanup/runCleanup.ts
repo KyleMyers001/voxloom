@@ -1,4 +1,5 @@
 import type { ProcessingSignal } from '../dictation/signal';
+import { CLEANUP_BUDGET_MS } from './budget';
 import type { CleanupEngine } from './contracts';
 import {
   buildCleanupPrompt,
@@ -12,7 +13,6 @@ import type {
 import { CleanupEngineError } from './types';
 import { validateCleanupOutput } from './validation';
 
-const DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
  * How long a timeout, abort or overflow waits for the engine's cancel before
@@ -102,12 +102,10 @@ export async function runCleanup(input: {
     };
   }
 
+  const timeLeftMs = input.timeoutMs ?? CLEANUP_BUDGET_MS;
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const timeoutResult = new Promise<RaceResult>((resolve) => {
-    timeout = setTimeout(
-      () => resolve({ kind: 'timeout' }),
-      input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    );
+    timeout = setTimeout(() => resolve({ kind: 'timeout' }), timeLeftMs);
   });
   let stopListening = (): void => {};
   const abortResult = new Promise<RaceResult>((resolve) => {
@@ -121,6 +119,9 @@ export async function runCleanup(input: {
     rawText: input.rawText,
     requestId: input.requestId,
     style: input.snapshot.style,
+    // The worker caps its reply by this (BUS-16 3c-2c); this timer still
+    // decides, and the native side counts its re-hash against it too.
+    timeLeftMs,
   }, (evidence) => {
     if (!listening) return;
     attempt = evidence;

@@ -21,7 +21,8 @@ pub use reservation::WorkerReservation;
 #[cfg(test)]
 mod tests;
 
-const WORKER_TIMEOUT: Duration = Duration::from_secs(30);
+/// A backstop behind the renderer's budget (BUS-16 3c-2c, budget.rs).
+const WORKER_TIMEOUT: Duration = super::budget::WORKER_TIMEOUT;
 const CANCELLED_REQUEST_LIMIT: usize = 16;
 
 struct ActiveWorker {
@@ -115,6 +116,7 @@ impl WorkerSupervisor {
         Ok(WorkerReservation {
             shared: Arc::clone(&self.shared),
             request_id,
+            deadline: None,
             started: false,
             timeout: self.timeout,
             worker_path: self.worker_path.clone(),

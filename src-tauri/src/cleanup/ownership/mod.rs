@@ -11,6 +11,8 @@ use super::CleanupCommandError;
 mod admission;
 mod run;
 
+pub(super) use run::OwnedRun;
+
 #[cfg(test)]
 mod tests;
 

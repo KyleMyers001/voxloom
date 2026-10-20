@@ -7,6 +7,7 @@ use tauri::{AppHandle, Runtime, State, Webview};
 
 use super::auth::{authorize_model_manager, owner, require_main, validate_request_id};
 use super::model_store::{CleanupModelStore, ModelStatus};
+use super::ownership::{OwnedRun, RequestRegistry};
 use super::{
     picker, CleanupAttempt, CleanupCommandError, CleanupRequestDto, CleanupRunOutput, CleanupState,
 };
@@ -138,10 +139,7 @@ pub async fn cleanup_run<R: Runtime>(
             attempt: None,
         });
     }
-    let running =
-        state
-            .requests
-            .start_run(owner(&session_id)?, &request.request_id, &request.model_id)?;
+    let running = start_run(&state.requests, &session_id, &request)?;
     tauri::async_runtime::spawn_blocking(move || {
         running.run_with_attempt(request.prompt, |attempt| {
             // Failure to reach a retired renderer does not erase evidence in
@@ -151,6 +149,20 @@ pub async fn cleanup_run<R: Runtime>(
     })
     .await
     .map_err(|error| CleanupCommandError::runtime(format!("cleanup task failed: {error}")))?
+}
+
+/// Admit a run bounded by the renderer's time left. The deadline is taken
+/// here, before `run_with_attempt` re-hashes the model, so the re-hash is
+/// paid for out of the same budget.
+fn start_run(
+    requests: &RequestRegistry,
+    session_id: &str,
+    request: &CleanupRequestDto,
+) -> Result<OwnedRun, CleanupCommandError> {
+    let deadline = super::budget::run_deadline(request.time_left_ms, std::time::Instant::now());
+    Ok(requests
+        .start_run(owner(session_id)?, &request.request_id, &request.model_id)?
+        .with_deadline(deadline))
 }
 
 #[tauri::command]
@@ -180,6 +192,10 @@ pub async fn cleanup_release<R: Runtime>(
 ) -> Result<bool, CleanupCommandError> {
     cleanup_cancel(webview, state, session_id, request_id).await
 }
+
+#[cfg(all(test, unix))]
+#[path = "commands_tests.rs"]
+mod run_tests;
 
 #[cfg(all(test, unix))]
 mod tests {

@@ -5,6 +5,7 @@
 /// during transcription already does.
 
 import type { CleanupEngine } from '../cleanup/contracts';
+import { CLEANUP_BUDGET_MS, tooLongToClean } from '../cleanup/budget';
 import { runCleanup } from '../cleanup/runCleanup';
 import {
   CleanupEngineError,
@@ -13,8 +14,12 @@ import {
 } from '../cleanup/types';
 import type { ProcessingSignal } from './signal';
 
-/** Lease plus run, end to end. The lease may hash the model file first. */
-export const CLEANUP_STAGE_TIMEOUT_MS = 30_000;
+/**
+ * Lease plus run, end to end (BUS-16 3c-2c): the shared cleanup budget. The
+ * lease may hash the model file first, and the run re-hashes it before the
+ * worker starts; both come out of this one budget.
+ */
+export const CLEANUP_STAGE_TIMEOUT_MS = CLEANUP_BUDGET_MS;
 
 export interface CleanupStageInput {
   engine: CleanupEngine;
@@ -66,7 +71,7 @@ async function acquireLease(
 
 function fallback(
   rawText: string,
-  reason: 'cancelled' | 'runtime-error',
+  reason: 'cancelled' | 'context-overflow' | 'runtime-error',
   attempt?: CleanupOutcome['attempt'],
 ): CleanupOutcome {
   return { ...(attempt ? { attempt } : {}), finalText: rawText, reason, status: 'fallback' };
@@ -75,6 +80,9 @@ function fallback(
 export async function cleanTranscript(input: CleanupStageInput): Promise<CleanupOutcome> {
   const { engine, rawText, requestId, signal, snapshot } = input;
   if (!snapshot.enabled || !rawText.trim()) return { finalText: rawText, status: 'skipped' };
+  // Too long for the budget: raw at once, with no lease, hash or worker. The
+  // history row already says "too long to clean up" for this reason.
+  if (tooLongToClean(rawText)) return fallback(rawText, 'context-overflow');
   const budget = input.timeoutMs ?? CLEANUP_STAGE_TIMEOUT_MS;
   const deadline = Date.now() + budget;
   try {

@@ -70,4 +70,8 @@ pub struct CleanupRequestDto {
     pub(super) prompt: String,
     pub(super) raw_text: String,
     pub(super) request_id: String,
+    /// Run time left in the renderer's budget (BUS-16 3c-2c). Optional, so
+    /// a request without it keeps the backstop alone.
+    #[serde(default)]
+    pub(super) time_left_ms: Option<u64>,
 }

@@ -13,6 +13,8 @@ use super::{response, SharedState, SupervisorError, WorkerSupervisor};
 /// Reserves the native slot before verification/spawn. Cancellation is sticky
 /// throughout reserved/starting/running; dropping is the sole settlement path.
 pub struct WorkerReservation {
+    /// When the renderer's budget ends, if it said (BUS-16 3c-2c).
+    pub(super) deadline: Option<Instant>,
     pub(super) shared: Arc<SharedState>,
     pub(super) request_id: String,
     pub(super) started: bool,
@@ -30,6 +32,10 @@ impl WorkerReservation {
             .as_ref()
             .unwrap()
             .cancelled
+    }
+
+    pub fn set_deadline(&mut self, deadline: Option<Instant>) {
+        self.deadline = deadline;
     }
 
     pub fn run(
@@ -71,6 +77,8 @@ impl WorkerReservation {
             model_path: "/dev/fd/3".into(),
             prompt,
             request_id: request_id.clone(),
+            // Counted after the re-hash, just before the spawn.
+            time_left_ms: super::super::budget::time_left_ms(self.deadline, Instant::now()),
         })
         .map_err(|_| SupervisorError {
             code: "context-overflow",

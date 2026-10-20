@@ -3,6 +3,7 @@
 
 mod artifact;
 mod auth;
+mod budget;
 pub mod commands;
 mod error;
 pub mod model_store;
