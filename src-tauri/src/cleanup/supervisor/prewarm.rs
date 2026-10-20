@@ -111,22 +111,22 @@ impl PrewarmTicket {
         });
         drop(state);
         std::thread::spawn(move || {
-            self.watch(&process, stdout);
+            self.watch(stdout);
             process.finish();
             drop(model);
         });
         true
     }
 
-    fn watch(&self, process: &ProcessHandle, stdout: ChildStdout) {
+    /// Wait for the prewarm's reply and pass on a handed-over dictation's.
+    /// The caller then kills and reaps the worker: once warm with nobody
+    /// waiting, or stuck past the timeout, it has nothing left to do.
+    fn watch(&self, stdout: ChildStdout) {
         let replies = read_replies(stdout);
         // The prewarm's own reply first: warm, preempted, or a load error.
         let first = replies.recv_timeout(self.timeout);
         let timed_out = matches!(first, Err(RecvTimeoutError::Timeout));
         let Some(handoff) = self.settle() else {
-            if timed_out {
-                process.cancel();
-            }
             return;
         };
         // A dictation is waiting on this worker; its own deadline bounds it.
@@ -139,21 +139,17 @@ impl PrewarmTicket {
         let _ = handoff.send(reply);
     }
 
-    /// Under the lock: no handoff from here on, and without one, stdin
-    /// closes (which ends the worker). The handed-over dictation, if any.
+    /// Under the lock: no handoff from here on. The handed-over dictation,
+    /// if any.
     fn settle(&self) -> Option<Sender<Reply>> {
         let mut state = self.shared.state.lock().unwrap();
         let Some(Slot::Running {
-            stdin,
-            handoff,
-            warmed,
-            ..
+            handoff, warmed, ..
         }) = state.prewarm.as_mut()
         else {
             return None;
         };
         *warmed = true;
-        drop(stdin.take());
         handoff.take()
     }
 }

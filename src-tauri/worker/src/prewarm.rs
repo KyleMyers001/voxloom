@@ -7,7 +7,7 @@
 //! (never cancelled, never repeated) and takes priority over the warm-up
 //! decode, which stops at the next token. Every request frame gets exactly
 //! one reply, in order: the prewarm frame's first, then the dictation's.
-//! Without a dictation, the app closes stdin and the process ends.
+//! Without a dictation, the app ends the process after the first reply.
 
 use std::io::{self, Read};
 use std::process::ExitCode;
@@ -46,7 +46,7 @@ pub fn serve(prewarm: WorkerRequest) -> ExitCode {
         return ExitCode::from(3);
     }
     // At most one more request, the dictation handed over. Without one the
-    // app closes stdin, and listen() ends the process.
+    // app ends the process (killing it, or closing stdin for listen()).
     let Some((request, arrived)) = pending.or_else(|| frames.recv().ok()) else {
         return ExitCode::SUCCESS;
     };

@@ -140,6 +140,22 @@ fn the_backstop_can_run_out_during_the_load() {
 }
 
 #[test]
+fn a_handed_over_dictation_outlasts_the_prewarm_timeout() {
+    // The load runs past the prewarm's own timeout, but a dictation waits on
+    // it: the worker is kept, and the dictation gets its reply, not the
+    // prewarm's late one.
+    let (path, log) = prewarm_worker("prewarm-late", 0.8, 5.0);
+    let mut supervisor = WorkerSupervisor::new(path);
+    supervisor.prewarm_timeout = Duration::from_millis(300);
+    assert!(supervisor
+        .reserve_prewarm()
+        .unwrap()
+        .start(model_file("prewarm-late")));
+    assert_eq!(dictation(&supervisor, "late").unwrap(), "reused");
+    assert_eq!(spawns(&log), 1);
+}
+
+#[test]
 fn a_dictation_before_the_spawn_abandons_the_prewarm() {
     let (path, log) = prewarm_worker("prewarm-abandoned", 0.0, 0.0);
     let supervisor = WorkerSupervisor::new(path);
