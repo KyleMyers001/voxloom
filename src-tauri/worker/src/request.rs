@@ -29,6 +29,8 @@ fn run(model_path: &str, prompt: &str, deadline: Option<Instant>) -> Result<Stri
         return Err(WorkerError::runtime("empty prompt"));
     }
     #[cfg(debug_assertions)]
+    crate::test_hook::panic_if_asked(prompt);
+    #[cfg(debug_assertions)]
     if let Some(result) = crate::test_hook::slow_generation(deadline) {
         return result;
     }
