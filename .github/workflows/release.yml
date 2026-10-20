@@ -48,9 +48,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
+      # The cleanup worker (BUS-16 3c-2b) is its own crate with its own
+      # target dir; caching it saves the per-arch llama.cpp cmake build.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          workspaces: src-tauri
+          workspaces: |
+            src-tauri
+            src-tauri/worker
           key: ${{ env.TARGET }}
       - name: Install cmake
         run: command -v cmake || brew install cmake

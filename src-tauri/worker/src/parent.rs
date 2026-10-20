@@ -12,7 +12,11 @@
 use std::io::{self, Read};
 use std::thread;
 
-/// Exit status when the app went away mid-request. No reply is written.
+/// Exit status when stdin closed before `main` returned. Usually the app
+/// went away mid-request and no reply was written. It can also follow a
+/// complete, successful reply: the app closes stdin once it has read the
+/// reply, which may be before `main` gets to return 0. The app ignores the
+/// worker's exit status, so this is harmless; read the reply, not the code.
 pub const GONE_EXIT_CODE: i32 = 4;
 
 /// Watch stdin on a background thread, once the request frame has been

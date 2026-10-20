@@ -23,11 +23,10 @@ const EXIT_BOUND: Duration = Duration::from_secs(1);
 /// A worker still running this long after the app died fails the test.
 const GIVE_UP: Duration = Duration::from_secs(10);
 
+/// Debug builds only: release builds have no slow fake generation, and an
+/// `ignore` would still run under `--ignored` (CR 3c-2a Nit 2).
+#[cfg(debug_assertions)]
 #[test]
-#[cfg_attr(
-    not(debug_assertions),
-    ignore = "needs the debug build's slow fake generation"
-)]
 fn the_worker_exits_when_the_app_is_killed_mid_generation() {
     let mut running = start(None, "secret words", Duration::from_millis(500));
     running.assert_exits_after_app_death();

@@ -109,6 +109,14 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets
       - run: cargo test --locked
+      # The release sidecar build (BUS-16 3c-2b): the same script the
+      # release workflow runs, which also fails if the debug-only test hook
+      # reached the release binary.
+      - name: Build the release sidecar
+        working-directory: .
+        run: |
+          host="$(rustc -vV | sed -n 's/^host: //p')"
+          bash scripts/release/build-worker.sh "$host"
 
   rust-whisper:
     # Builds and tests with the opt-in `whisper` feature (whisper-rs ->
@@ -161,6 +169,10 @@ jobs:
             cargo install cargo-audit --locked --version 0.22.2
           fi
       - run: cargo audit -D warnings
+      # The cleanup worker's own lock (BUS-16 3c-2b). No ignore list: it
+      # runs in src-tauri/worker, away from src-tauri/.cargo/audit.toml.
+      - run: cargo audit -D warnings
+        working-directory: src-tauri/worker
 
   rust-macos:
     # Compiles the macOS-only code paths (AX / text insertion) that the

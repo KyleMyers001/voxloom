@@ -14,8 +14,9 @@ use llama_cpp_2::token::LlamaToken;
 use llama_cpp_2::{send_logs_to_tracing, LogOptions};
 
 use crate::error::WorkerError;
+use crate::sizing::{self, Sizing};
 use crate::template::{suffix, PREFIX};
-use crate::{output, sizing, user_tokens};
+use crate::{output, user_tokens};
 
 /// Prompt tokens fed per decode call.
 const BATCH: usize = 512;
@@ -41,13 +42,8 @@ pub fn generate(model_path: &str, prompt: &str) -> Result<String, WorkerError> {
     let tokens = chat_tokens(&model, prompt);
     let sizing = sizing::size(tokens.len(), model.n_ctx_train())?;
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get() as i32);
-    let ctx_params = LlamaContextParams::default()
-        .with_n_ctx(NonZeroU32::new(sizing.n_ctx))
-        .with_n_batch(BATCH as u32)
-        .with_n_threads(threads)
-        .with_n_threads_batch(threads);
     let mut ctx = model
-        .new_context(&backend, ctx_params)
+        .new_context(&backend, context_params(&sizing, threads))
         .map_err(|_| WorkerError::runtime("could not create a model context"))?;
 
     let mut batch = LlamaBatch::new(BATCH, 1);
@@ -85,6 +81,16 @@ pub fn generate(model_path: &str, prompt: &str) -> Result<String, WorkerError> {
     })
 }
 
+/// The context exactly as `sizing` asks (QA 3c-2a Low-1: an off-by-one
+/// here undoes Codex 4318723345 and no real-model test notices).
+fn context_params(sizing: &Sizing, threads: i32) -> LlamaContextParams {
+    LlamaContextParams::default()
+        .with_n_ctx(NonZeroU32::new(sizing.n_ctx))
+        .with_n_batch(BATCH as u32)
+        .with_n_threads(threads)
+        .with_n_threads_batch(threads)
+}
+
 /// Template parts parse special tokens. The prompt does not, which keeps
 /// CONTROL tokens such as "<|im_end|>" as plain text; USER_DEFINED ones
 /// (`<think>`, `<tool_call>` …) are split apart by `user_tokens` first.
@@ -98,4 +104,19 @@ pub(crate) fn chat_tokens(model: &LlamaModel, prompt: &str) -> Vec<LlamaToken> {
         .and_then(|template| template.to_str().ok());
     tokens.extend(vocab.tokenize(suffix(template).as_bytes(), false, true));
     tokens
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_context_is_sized_exactly_as_sizing_says() {
+        let sizing = sizing::size(160, 40_960).unwrap();
+        let params = context_params(&sizing, 3);
+        assert_eq!(params.n_ctx(), NonZeroU32::new(513));
+        assert_eq!(params.n_batch(), 512);
+        assert_eq!(params.n_threads(), 3);
+        assert_eq!(params.n_threads_batch(), 3);
+    }
 }

@@ -37,6 +37,9 @@ else
     bash "$ROOT/scripts/macos-assert-entitlements.sh" "$APP"
 fi
 
+# BUS-16 3c-2b: the bundled cleanup worker, signed like the app.
+bash "$ROOT/scripts/release/check-sidecar.sh" "$APP" "$TARGET"
+
 DMG="$(find "$BUNDLE/dmg" -maxdepth 1 -name '*.dmg' | head -n 1)"
 if [[ -z "$DMG" ]]; then
   echo "error: no .dmg found under $BUNDLE/dmg" >&2
