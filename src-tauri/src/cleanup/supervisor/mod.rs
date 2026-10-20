@@ -1,6 +1,6 @@
 //! Single-slot supervisor for the disposable cleanup worker. Admission and
 //! cancellation state live here; one reservation owns a run (`reservation`),
-//! and worker replies are validated in `response`.
+//! worker replies are validated in `response`, and `prewarm` warms the model.
 
 use std::collections::VecDeque;
 #[cfg(test)]
@@ -13,6 +13,8 @@ use super::worker_process::ProcessHandle;
 #[cfg(test)]
 use super::worker_process::WorkerProcess;
 
+mod handoff;
+mod prewarm;
 mod reservation;
 mod response;
 
@@ -35,6 +37,7 @@ struct ActiveWorker {
 struct SupervisorState {
     active: Option<ActiveWorker>,
     cancelled: VecDeque<String>,
+    prewarm: Option<prewarm::Slot>,
 }
 
 #[derive(Default)]
@@ -60,6 +63,7 @@ impl SupervisorError {
 
 pub struct WorkerSupervisor {
     shared: Arc<SharedState>,
+    prewarm_timeout: Duration,
     timeout: Duration,
     worker_path: PathBuf,
 }
@@ -72,6 +76,7 @@ impl WorkerSupervisor {
     fn with_timeout(worker_path: PathBuf, timeout: Duration) -> Self {
         Self {
             shared: Arc::new(SharedState::default()),
+            prewarm_timeout: prewarm::PREWARM_TIMEOUT,
             timeout,
             worker_path,
         }
@@ -108,6 +113,7 @@ impl WorkerSupervisor {
                 "cleanup worker is already processing",
             ));
         }
+        prewarm::on_reserve(&mut state.prewarm);
         state.active = Some(ActiveWorker {
             process: None,
             cancelled: false,
