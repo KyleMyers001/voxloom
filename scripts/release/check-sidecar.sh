@@ -15,8 +15,9 @@ fail() { echo "error: $*" >&2; exit 1; }
 
 [[ -x "$SIDECAR" ]] || fail "no executable sidecar at $SIDECAR"
 [[ -s "$NOTICES" ]] || fail "no worker notices at $NOTICES"
-if grep -q VOXLOOM_WORKER_TEST_SLOW_GENERATION "$SIDECAR"; then
-  fail "the sidecar contains the debug-only test hook"
+# The prefix of every debug-only test hook (SLOW_GENERATION, PANIC, FAKE_MODEL).
+if grep -q VOXLOOM_WORKER_TEST_ "$SIDECAR"; then
+  fail "the sidecar contains a debug-only test hook"
 fi
 
 case "$TARGET" in

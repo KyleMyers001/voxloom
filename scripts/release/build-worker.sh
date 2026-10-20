@@ -17,7 +17,9 @@ TARGET_DIR="${CARGO_TARGET_DIR:-$WORKER/target}"
 # cargo resolves a relative CARGO_TARGET_DIR against the directory it runs
 # in, which is $WORKER below, so the copy must look there too.
 [[ "$TARGET_DIR" = /* ]] || TARGET_DIR="$WORKER/$TARGET_DIR"
-HOOK="VOXLOOM_WORKER_TEST_SLOW_GENERATION"
+# Every debug-only test hook shares this prefix (SLOW_GENERATION, PANIC,
+# FAKE_MODEL); none may reach a release binary.
+HOOK="VOXLOOM_WORKER_TEST_"
 
 case "$TARGET" in
   universal-apple-darwin) ARCHES=(aarch64-apple-darwin x86_64-apple-darwin) ;;
@@ -42,7 +44,7 @@ fi
 
 for bin in "$OUT/$NAME-"*; do
   if grep -q "$HOOK" "$bin"; then
-    echo "error: $bin contains the debug-only test hook ($HOOK)" >&2
+    echo "error: $bin contains a debug-only test hook ($HOOK*)" >&2
     exit 1
   fi
   echo "$(basename "$bin"): $(wc -c < "$bin" | tr -d ' ') bytes"
