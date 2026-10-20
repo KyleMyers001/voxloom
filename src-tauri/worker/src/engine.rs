@@ -22,6 +22,11 @@ const BATCH: usize = 512;
 
 pub fn generate(model_path: &str, prompt: &str) -> Result<String, WorkerError> {
     // llama.cpp logs to stderr by default, including prompt-derived details.
+    // Mutant W10 (`with_logs_enabled(true)`) is equivalent today: the logs
+    // then go to `tracing`, and the worker installs no subscriber, so they
+    // are dropped either way. Only removing this call reaches stderr, which
+    // the contract tests catch. Keep it disabled in case a subscriber is
+    // ever added (BUS-16 10555 L2).
     send_logs_to_tracing(LogOptions::default().with_logs_enabled(false));
     // load_from_file debug-asserts the path exists; answer a closed fd 3 first.
     if !std::path::Path::new(model_path).exists() {
@@ -83,7 +88,7 @@ pub fn generate(model_path: &str, prompt: &str) -> Result<String, WorkerError> {
 /// Template parts parse special tokens. The prompt does not, which keeps
 /// CONTROL tokens such as "<|im_end|>" as plain text; USER_DEFINED ones
 /// (`<think>`, `<tool_call>` …) are split apart by `user_tokens` first.
-fn chat_tokens(model: &LlamaModel, prompt: &str) -> Vec<LlamaToken> {
+pub(crate) fn chat_tokens(model: &LlamaModel, prompt: &str) -> Vec<LlamaToken> {
     let vocab = model.vocab();
     let mut tokens = vocab.tokenize(PREFIX.as_bytes(), false, true);
     tokens.extend(user_tokens::tokenize(model, prompt));
