@@ -9,6 +9,8 @@ import { Onboarding } from '../features/onboarding/Onboarding';
 import { Settings } from '../features/settings/Settings';
 import { isTauriEnv } from '../services/capture/captureService';
 import { listenOnboardingOpen, openSettingsWindow, subscribe } from '../services/settingsWindow';
+import { prewarmCleanup } from '../services/cleanup/prewarm';
+import { useCleanupPrewarm } from '../services/stt/useCleanupPrewarm';
 import { useDogfoodCapture } from '../services/stt/useDogfoodCapture';
 import { ResetSessionDialog, ShortcutsDialog } from './AppDialogs';
 import { useApp } from './AppContext';
@@ -47,6 +49,13 @@ export function App() {
     onToast: announce,
     preferredDeviceId: state.settings.microphone,
     style: state.settings.style,
+  });
+
+  // Native: warm the cleanup model at launch and on switch-on (BUS-16 3c-2c).
+  useCleanupPrewarm({
+    active: isCleanupActive(state.settings),
+    prewarm: isTauriEnv() ? prewarmCleanup : undefined,
+    ready: bootReady,
   });
 
   // Close onboarding when durable settings hydrate with complete=true.
