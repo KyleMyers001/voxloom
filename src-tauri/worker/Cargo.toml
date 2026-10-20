@@ -17,14 +17,13 @@ path = "src/main.rs"
 # breaks the macOS link and `common` is unused. CPU-only off macOS.
 llama-cpp-2 = { version = "=0.1.160", default-features = false }
 llama-cpp-sys-2 = { version = "=0.1.160", default-features = false }
+# _exit when the app dies (src/parent.rs).
+libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.140"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 llama-cpp-2 = { version = "=0.1.160", default-features = false, features = ["metal"] }
-
-[dev-dependencies]
-libc = "0.2"
 
 [profile.release]
 codegen-units = 1

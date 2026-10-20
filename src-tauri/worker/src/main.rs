@@ -1,6 +1,7 @@
 //! Voxloom cleanup worker (BUS-16 PR 3c-1): one framed request on stdin, one
 //! framed reply on stdout, then exit. The model arrives on fd 3. Nothing about
-//! the request is ever written to stderr.
+//! the request is ever written to stderr. The app holds stdin open until the
+//! reply; if it closes first, the worker exits at once (see parent.rs).
 
 // The app's own protocol module, compiled into this crate from the same file
 // so the frame format and field names cannot drift.
@@ -10,8 +11,12 @@ mod protocol;
 mod engine;
 mod error;
 mod output;
+mod parent;
 mod request;
+mod sizing;
 mod template;
+#[cfg(debug_assertions)]
+mod test_hook;
 mod user_tokens;
 
 use std::io::{self, Write};
@@ -26,8 +31,14 @@ fn main() -> ExitCode {
     std::panic::set_hook(Box::new(|_| {
         let _ = io::stderr().write_all(PANIC_MESSAGE);
     }));
-    let response = match read_frame::<WorkerRequest>(&mut io::stdin().lock()) {
-        Ok(request) => request::handle(request),
+    // A statement of its own, so the stdin lock is released before the
+    // watcher thread needs stdin.
+    let request = read_frame::<WorkerRequest>(&mut io::stdin().lock());
+    let response = match request {
+        Ok(request) => {
+            parent::exit_when_stdin_closes();
+            request::handle(request)
+        }
         // No request ID is known; the supervisor accepts an empty one here.
         Err(_) => error::WorkerError::runtime("invalid request frame").into_response(String::new()),
     };

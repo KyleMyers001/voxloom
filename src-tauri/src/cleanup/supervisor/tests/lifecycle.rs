@@ -168,3 +168,27 @@ write({{"error": None, "errorCode": None,
         .unwrap_err();
     assert_eq!(queued.code, "cancelled");
 }
+
+/// BUS-16 3c-2: the worker exits as soon as its stdin closes (it takes that
+/// as the app dying), so the app holds stdin open until the reply is in.
+#[test]
+fn stdin_stays_open_until_the_reply_is_read() {
+    let worker = fake_worker(
+        "stdin-open",
+        &format!(
+            r#"{FRAMING}
+import select
+request = read()
+ready, _, _ = select.select([sys.stdin], [], [], 0.3)
+closed = bool(ready) and sys.stdin.buffer.read1(1) == b""
+write({{"error": None, "errorCode": None, "requestId": request["requestId"],
+       "status": "ok", "text": "closed" if closed else "open"}})
+"#
+        ),
+    );
+    let supervisor = WorkerSupervisor::with_timeout(worker, Duration::from_secs(5));
+    let text = supervisor
+        .run(&model_file("stdin-open"), "p".into(), "open".into())
+        .unwrap();
+    assert_eq!(text, "open");
+}

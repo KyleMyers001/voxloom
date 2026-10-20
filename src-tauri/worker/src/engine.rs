@@ -14,8 +14,8 @@ use llama_cpp_2::token::LlamaToken;
 use llama_cpp_2::{send_logs_to_tracing, LogOptions};
 
 use crate::error::WorkerError;
-use crate::template::{max_new_tokens, suffix, PREFIX};
-use crate::{output, user_tokens};
+use crate::template::{suffix, PREFIX};
+use crate::{output, sizing, user_tokens};
 
 /// Prompt tokens fed per decode call.
 const BATCH: usize = 512;
@@ -34,16 +34,10 @@ pub fn generate(model_path: &str, prompt: &str) -> Result<String, WorkerError> {
         .map_err(|_| WorkerError::model("could not load the cleanup model"))?;
 
     let tokens = chat_tokens(&model, prompt);
-    let budget = max_new_tokens(tokens.len());
-    let needed = tokens.len().saturating_add(budget);
-    if needed > model.n_ctx_train() as usize {
-        return Err(WorkerError::overflow(
-            "prompt too long for the model context",
-        ));
-    }
+    let sizing = sizing::size(tokens.len(), model.n_ctx_train())?;
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get() as i32);
     let ctx_params = LlamaContextParams::default()
-        .with_n_ctx(NonZeroU32::new(needed as u32))
+        .with_n_ctx(NonZeroU32::new(sizing.n_ctx))
         .with_n_batch(BATCH as u32)
         .with_n_threads(threads)
         .with_n_threads_batch(threads);
@@ -68,7 +62,7 @@ pub fn generate(model_path: &str, prompt: &str) -> Result<String, WorkerError> {
 
     let vocab = model.vocab();
     let mut sampler = LlamaSampler::greedy();
-    output::collect(budget, || {
+    output::collect(sizing.budget, || {
         let token = sampler.sample(&ctx, batch.n_tokens() - 1);
         sampler.accept(token);
         if vocab.is_eog(token) {
