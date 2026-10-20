@@ -131,6 +131,24 @@ fn a_request_during_the_load_waits_for_it_and_skips_the_warm_up() {
 
 #[cfg(debug_assertions)]
 #[test]
+fn the_app_going_away_after_a_handover_still_ends_the_worker() {
+    // A request handed over during an 800 ms load, then stdin closes (the
+    // app quit or died): the worker ends at once, not after its reply.
+    let mut worker = Worker::spawn(Some("800,200"), None);
+    worker.hand_over(10_000);
+    std::thread::sleep(Duration::from_millis(100));
+    let closed = Instant::now();
+    let (code, _) = worker.close();
+    assert_eq!(code, Some(4), "the parent-gone exit status");
+    assert!(
+        closed.elapsed() < Duration::from_millis(500),
+        "{:?}",
+        closed.elapsed()
+    );
+}
+
+#[cfg(debug_assertions)]
+#[test]
 fn a_request_preempts_the_warm_up_decode() {
     // Warm-up: 5 pieces at 200 ms, about 1.2 s if nothing stops it.
     let mut worker = Worker::spawn(Some("0,200"), None);
