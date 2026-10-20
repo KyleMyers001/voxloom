@@ -14,6 +14,9 @@ WORKER="$ROOT/src-tauri/worker"
 OUT="$ROOT/src-tauri/binaries"
 NAME="voxloom-cleanup-worker"
 TARGET_DIR="${CARGO_TARGET_DIR:-$WORKER/target}"
+# cargo resolves a relative CARGO_TARGET_DIR against the directory it runs
+# in, which is $WORKER below, so the copy must look there too.
+[[ "$TARGET_DIR" = /* ]] || TARGET_DIR="$WORKER/$TARGET_DIR"
 HOOK="VOXLOOM_WORKER_TEST_SLOW_GENERATION"
 
 case "$TARGET" in
