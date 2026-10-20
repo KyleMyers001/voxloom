@@ -11,7 +11,7 @@ use tauri::{Runtime, State, Webview};
 
 use super::auth::require_main;
 use super::model_store::{ModelLease, MODEL_ID};
-use super::supervisor::WorkerSupervisor;
+use super::supervisor::{LowPowerMode, WorkerSupervisor};
 use super::{CleanupCommandError, CleanupState};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,7 +53,7 @@ pub async fn cleanup_prewarm<R: Runtime>(
 pub(super) fn prewarm(
     supervisor: &WorkerSupervisor,
     trigger: Trigger,
-    low_power_mode: impl FnOnce() -> bool,
+    low_power_mode: LowPowerMode,
     lease: impl FnOnce() -> Result<ModelLease, String>,
 ) -> &'static str {
     if trigger == Trigger::Launch && low_power_mode() {
@@ -73,7 +73,7 @@ pub(super) fn prewarm(
     if lease.verify().is_err() {
         return "unavailable";
     }
-    if ticket.start(lease) {
+    if ticket.start(lease, low_power_mode) {
         "started"
     } else {
         "busy"

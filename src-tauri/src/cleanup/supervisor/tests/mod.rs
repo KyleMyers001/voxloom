@@ -2,10 +2,35 @@
 
 use super::*;
 use crate::cleanup::test_support::{test_root, write_executable};
+use crate::cleanup::worker_process::WorkerProcess;
 use std::fs;
+use std::fs::File;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 use std::thread;
+
+/// Test-only runs: admit and run in one call, optionally with a stub spawn.
+impl WorkerSupervisor {
+    pub fn run(
+        &self,
+        model: &File,
+        prompt: String,
+        request_id: String,
+    ) -> Result<String, SupervisorError> {
+        self.run_with_spawn(prompt, request_id, || {
+            WorkerProcess::spawn(&self.worker_path, model)
+        })
+    }
+
+    fn run_with_spawn(
+        &self,
+        prompt: String,
+        request_id: String,
+        spawn: impl FnOnce() -> Result<WorkerProcess, String>,
+    ) -> Result<String, SupervisorError> {
+        self.reserve(request_id)?.run_with_spawn(prompt, spawn)
+    }
+}
 
 fn fake_root(name: &str) -> PathBuf {
     test_root().join(format!("supervisor-{name}"))
@@ -55,5 +80,6 @@ write({{"error": None, "errorCode": None, "requestId": request["requestId"],
 mod budget;
 mod lifecycle;
 mod prewarm;
+mod prewarm_claim;
 mod recovery;
 mod responses;

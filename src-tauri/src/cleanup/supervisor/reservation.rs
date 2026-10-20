@@ -171,6 +171,7 @@ impl Drop for WorkerReservation {
         self.finish();
         let mut state = self.shared.state.lock().unwrap();
         state.active = None;
+        super::handoff::on_release(&mut state.prewarm);
         self.shared.settled.notify_all();
     }
 }

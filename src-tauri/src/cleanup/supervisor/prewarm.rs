@@ -1,14 +1,19 @@
 //! Prewarm, supervisor side (BUS-16 3c-2c C2). At most one prewarm worker
 //! loads the model and warms it up (worker src/prewarm.rs). It never holds
-//! the run slot, so a dictation is never refused because of it:
+//! the run slot, so a dictation is never refused because of it (the
+//! dictation side, claim and handoff, is in handoff.rs):
 //! - before the spawn (the model is still being hashed), a dictation's
 //!   admission abandons the prewarm, since nothing is loading yet;
 //! - while the worker loads or warms up, the dictation is handed to it as a
 //!   second frame and reuses the load, never cancelled and never repeated;
 //!   the worker cuts its warm-up short for it;
-//!   (the dictation side is in handoff.rs);
-//! - once the warm-up has replied, the prewarm worker is closed and a
-//!   dictation spawns its own, as before.
+//!   a dictation admitted by then claims the worker, so it is kept for that
+//!   dictation even if the warm-up replies while the dictation re-hashes;
+//! - once the warm-up has replied with no claim, the prewarm worker is
+//!   killed and reaped, and a dictation spawns its own, as before;
+//! - if a dictation's budget runs out or the user cancels it, its handed-over
+//!   load dies with it; the prewarm then starts over (re-arms) once the run
+//!   slot is free, unless Low Power Mode is on.
 
 use std::borrow::Borrow;
 use std::fs::File;
@@ -40,15 +45,11 @@ pub(super) enum Slot {
         process: ProcessHandle,
         stdin: Option<ChildStdin>,
         handoff: Option<Sender<Reply>>,
+        /// The warm-up has replied (or timed out).
         warmed: bool,
+        /// A dictation admitted before then holds the run slot.
+        claimed: bool,
     },
-}
-
-/// A dictation's admission: a prewarm that hasn't spawned gives way.
-pub(super) fn on_reserve(slot: &mut Option<Slot>) {
-    if let Some(Slot::Reserved { abandoned }) = slot {
-        *abandoned = true;
-    }
 }
 
 /// The one prewarm; dropping it frees the prewarm slot.
@@ -57,6 +58,9 @@ pub struct PrewarmTicket {
     timeout: Duration,
     worker_path: PathBuf,
 }
+
+/// Whether to skip the prewarm (macOS Low Power Mode), read on a re-arm.
+pub type LowPowerMode = fn() -> bool;
 
 impl WorkerSupervisor {
     /// None while a run or another prewarm is in.
@@ -78,7 +82,10 @@ impl PrewarmTicket {
     /// Spawn the prewarm worker on `model` and leave it to a thread that
     /// keeps `model` until the worker is reaped. False if a dictation came
     /// first or the worker could not start.
-    pub fn start<M: Borrow<File> + Send + 'static>(self, model: M) -> bool {
+    pub fn start<M>(self, model: M, low_power_mode: LowPowerMode) -> bool
+    where
+        M: Borrow<File> + Send + 'static,
+    {
         let frame = encode_frame(&WorkerRequest {
             model_path: "/dev/fd/3".into(),
             prompt: PROMPT.into(),
@@ -108,26 +115,31 @@ impl PrewarmTicket {
             stdin: Some(stdin),
             handoff: None,
             warmed: false,
+            claimed: false,
         });
         drop(state);
         std::thread::spawn(move || {
-            self.watch(stdout);
+            let cut_off = self.watch(stdout);
             process.finish();
-            drop(model);
+            if cut_off && !low_power_mode() {
+                self.rearm();
+                self.start(model, low_power_mode);
+            }
         });
         true
     }
 
     /// Wait for the prewarm's reply and pass on a handed-over dictation's.
     /// The caller then kills and reaps the worker: once warm with nobody
-    /// waiting, or stuck past the timeout, it has nothing left to do.
-    fn watch(&self, stdout: ChildStdout) {
+    /// waiting, or stuck past the timeout, it has nothing left to do. True
+    /// if a handed-over dictation was cut off (killed) before its reply.
+    fn watch(&self, stdout: ChildStdout) -> bool {
         let replies = read_replies(stdout);
         // The prewarm's own reply first: warm, preempted, or a load error.
         let first = replies.recv_timeout(self.timeout);
         let timed_out = matches!(first, Err(RecvTimeoutError::Timeout));
         let Some(handoff) = self.settle() else {
-            return;
+            return false;
         };
         // A dictation is waiting on this worker; its own deadline bounds it.
         if timed_out {
@@ -136,21 +148,42 @@ impl PrewarmTicket {
         let reply = replies
             .recv()
             .unwrap_or_else(|_| Err("cleanup worker ended".into()));
+        let cut_off = reply.is_err();
         let _ = handoff.send(reply);
+        cut_off
     }
 
-    /// Under the lock: no handoff from here on. The handed-over dictation,
-    /// if any.
-    fn settle(&self) -> Option<Sender<Reply>> {
+    /// Under the lock: no new handoff from here on. The handed-over
+    /// dictation, if any; a claiming dictation still re-hashing is waited
+    /// for, until it hands over or its reservation ends.
+    pub(super) fn settle(&self) -> Option<Sender<Reply>> {
         let mut state = self.shared.state.lock().unwrap();
-        let Some(Slot::Running {
-            handoff, warmed, ..
-        }) = state.prewarm.as_mut()
-        else {
-            return None;
-        };
-        *warmed = true;
-        handoff.take()
+        loop {
+            let Some(Slot::Running {
+                handoff,
+                warmed,
+                claimed,
+                ..
+            }) = state.prewarm.as_mut()
+            else {
+                return None;
+            };
+            *warmed = true;
+            if handoff.is_some() || !*claimed {
+                return handoff.take();
+            }
+            state = self.shared.settled.wait(state).unwrap();
+        }
+    }
+
+    /// Reserve the slot again once the cut-off dictation's run slot is free,
+    /// so the restarted load is never alongside a dictation's own.
+    fn rearm(&self) {
+        let mut state = self.shared.state.lock().unwrap();
+        while state.active.is_some() {
+            state = self.shared.settled.wait(state).unwrap();
+        }
+        state.prewarm = Some(Slot::Reserved { abandoned: false });
     }
 }
 
