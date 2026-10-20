@@ -8,6 +8,7 @@
 #[path = "../../src/cleanup/protocol.rs"]
 mod protocol;
 
+mod deadline;
 mod engine;
 mod error;
 mod output;
@@ -27,6 +28,8 @@ use protocol::{encode_frame, read_frame, write_encoded_frame, WorkerRequest, Wor
 const PANIC_MESSAGE: &[u8] = b"voxloom-cleanup-worker: internal error\n";
 
 fn main() -> ExitCode {
+    // The app's time left counts from here, about when it spawned us.
+    let started = std::time::Instant::now();
     // The default hook prints the payload, which may quote request data.
     std::panic::set_hook(Box::new(|_| {
         let _ = io::stderr().write_all(PANIC_MESSAGE);
@@ -37,7 +40,7 @@ fn main() -> ExitCode {
     let response = match request {
         Ok(request) => {
             parent::exit_when_stdin_closes();
-            request::handle(request)
+            request::handle(request, started)
         }
         // No request ID is known; the supervisor accepts an empty one here.
         Err(_) => error::WorkerError::runtime("invalid request frame").into_response(String::new()),

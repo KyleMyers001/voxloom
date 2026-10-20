@@ -20,7 +20,11 @@ use crate::{output, sizing, user_tokens};
 /// Prompt tokens fed per decode call.
 const BATCH: usize = 512;
 
-pub fn generate(model_path: &str, prompt: &str) -> Result<String, WorkerError> {
+pub fn generate(
+    model_path: &str,
+    prompt: &str,
+    deadline: Option<std::time::Instant>,
+) -> Result<String, WorkerError> {
     // llama.cpp logs to stderr by default, including prompt-derived details.
     send_logs_to_tracing(LogOptions::default().with_logs_enabled(false));
     // load_from_file debug-asserts the path exists; answer a closed fd 3 first.
@@ -62,7 +66,9 @@ pub fn generate(model_path: &str, prompt: &str) -> Result<String, WorkerError> {
 
     let vocab = model.vocab();
     let mut sampler = LlamaSampler::greedy();
-    output::collect(sizing.budget, || {
+    // After load and prefill, so the cap reflects the time really left.
+    let limit = crate::deadline::limit(sizing.budget, deadline, std::time::Instant::now());
+    let reply = output::collect(limit.tokens, || {
         let token = sampler.sample(&ctx, batch.n_tokens() - 1);
         sampler.accept(token);
         if vocab.is_eog(token) {
@@ -77,7 +83,8 @@ pub fn generate(model_path: &str, prompt: &str) -> Result<String, WorkerError> {
         ctx.decode(&mut batch)
             .map_err(|_| WorkerError::runtime("output decode failed"))?;
         Ok(Some(piece))
-    })
+    });
+    reply.map_err(|error| limit.explain(error))
 }
 
 /// Template parts parse special tokens. The prompt does not, which keeps

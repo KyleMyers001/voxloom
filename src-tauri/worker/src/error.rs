@@ -39,6 +39,19 @@ impl WorkerError {
         }
     }
 
+    /// The reply reached the token budget.
+    pub fn token_limit() -> Self {
+        Self::output("cleanup output reached the token limit")
+    }
+
+    /// The reply would not fit the time left (deadline.rs).
+    pub fn timeout() -> Self {
+        Self {
+            code: "timeout",
+            message: "cleanup ran out of time",
+        }
+    }
+
     pub fn into_response(self, request_id: String) -> WorkerResponse {
         WorkerResponse {
             error: Some(self.message.to_owned()),

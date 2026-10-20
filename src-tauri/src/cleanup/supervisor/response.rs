@@ -35,6 +35,7 @@ pub(super) fn interpret(
                 "context-overflow" => "context-overflow",
                 "model-missing" => "model-missing",
                 "invalid-output" => "invalid-output",
+                "timeout" => "timeout",
                 _ => "runtime-error",
             },
             message,

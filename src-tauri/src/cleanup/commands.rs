@@ -138,10 +138,12 @@ pub async fn cleanup_run<R: Runtime>(
             attempt: None,
         });
     }
-    let running =
-        state
-            .requests
-            .start_run(owner(&session_id)?, &request.request_id, &request.model_id)?;
+    // Before the re-hash, so it is paid for out of the same budget.
+    let deadline = super::budget::run_deadline(request.time_left_ms, std::time::Instant::now());
+    let running = state
+        .requests
+        .start_run(owner(&session_id)?, &request.request_id, &request.model_id)?
+        .with_deadline(deadline);
     tauri::async_runtime::spawn_blocking(move || {
         running.run_with_attempt(request.prompt, |attempt| {
             // Failure to reach a retired renderer does not erase evidence in
