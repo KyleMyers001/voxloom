@@ -20,6 +20,9 @@ fn cleanup_run() {}
 fn cleanup_model_status() {}
 
 #[tauri::command]
+fn cleanup_prewarm() {}
+
+#[tauri::command]
 fn cleanup_pick_and_import_model() {}
 
 fn invoke_from(app: &tauri::App<MockRuntime>, label: &str, page: &str) -> Result<(), String> {
@@ -56,12 +59,14 @@ fn invoke_command(
 fn cleanup_models_are_available_in_settings_but_worker_execution_is_main_only() {
     for command in [
         "cleanup_run",
+        "cleanup_prewarm",
         "cleanup_model_status",
         "cleanup_pick_and_import_model",
     ] {
         let app = mock_builder()
             .invoke_handler(tauri::generate_handler![
                 cleanup_run,
+                cleanup_prewarm,
                 cleanup_model_status,
                 cleanup_pick_and_import_model
             ])
@@ -69,7 +74,7 @@ fn cleanup_models_are_available_in_settings_but_worker_execution_is_main_only() 
             .expect("mock app");
         assert_eq!(invoke_command(&app, "main", "index.html", command), Ok(()));
         let settings = invoke_command(&app, "settings", "settings.html", command);
-        if command == "cleanup_run" {
+        if matches!(command, "cleanup_run" | "cleanup_prewarm") {
             assert!(settings.unwrap_err().contains("not allowed"));
         } else {
             assert_eq!(settings, Ok(()));

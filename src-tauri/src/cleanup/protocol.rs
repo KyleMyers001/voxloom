@@ -14,6 +14,10 @@ pub struct WorkerRequest {
     /// it. Absent: no cap beyond the token budget.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub time_left_ms: Option<u64>,
+    /// Load the model and warm it up, then serve at most one more request
+    /// frame with the loaded model (BUS-16 3c-2c C2). Absent: false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub prewarm: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -100,6 +104,7 @@ mod tests {
             prompt: "hello".into(),
             request_id: "r1".into(),
             time_left_ms: Some(4_500),
+            prewarm: true,
         };
         let mut bytes = Vec::new();
         write_frame(&mut bytes, &request).unwrap();
@@ -107,6 +112,7 @@ mod tests {
         assert_eq!(decoded.request_id, "r1");
         assert_eq!(decoded.prompt, "hello");
         assert_eq!(decoded.time_left_ms, Some(4_500));
+        assert!(decoded.prewarm);
     }
 
     #[test]
@@ -116,13 +122,16 @@ mod tests {
             prompt: "hello".into(),
             request_id: "r1".into(),
             time_left_ms: None,
+            prewarm: false,
         };
         let json = serde_json::to_string(&request).unwrap();
         assert!(!json.contains("timeLeftMs"), "{json}");
+        assert!(!json.contains("prewarm"), "{json}");
         let old: WorkerRequest =
             serde_json::from_str(r#"{"modelPath":"/dev/fd/3","prompt":"p","requestId":"r"}"#)
                 .unwrap();
         assert_eq!(old.time_left_ms, None);
+        assert!(!old.prewarm);
     }
 
     #[test]

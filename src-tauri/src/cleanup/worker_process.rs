@@ -82,6 +82,18 @@ impl WorkerProcess {
         })
     }
 
+    /// The handle and both pipes, for a caller that runs its own exchange
+    /// (a prewarm, supervisor/prewarm.rs).
+    pub fn into_parts(
+        self,
+    ) -> (
+        ProcessHandle,
+        std::process::ChildStdin,
+        std::process::ChildStdout,
+    ) {
+        (self.handle, self.stdin, self.stdout)
+    }
+
     pub fn exchange(
         self,
         frame: Vec<u8>,
