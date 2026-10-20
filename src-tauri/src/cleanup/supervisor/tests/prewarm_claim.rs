@@ -6,6 +6,7 @@
 use super::prewarm::{all_reaped, dictation, idle, never, prewarm_worker, spawns};
 use super::*;
 use crate::cleanup::test_support::wait_until;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 fn always() -> bool {
@@ -148,4 +149,32 @@ fn a_prewarm_that_warms_up_unused_is_not_re_armed() {
     assert!(wait_until(Duration::from_secs(5), || idle(&supervisor)));
     thread::sleep(Duration::from_millis(300));
     assert_eq!(spawns(&log), 1);
+}
+
+static SECOND_ADMITTED: AtomicBool = AtomicBool::new(false);
+
+/// Read just before the re-arm: holds it until the next dictation is in.
+fn after_the_second_dictation() -> bool {
+    wait_until(Duration::from_secs(5), || {
+        SECOND_ADMITTED.load(Ordering::SeqCst)
+    });
+    false
+}
+
+#[test]
+fn the_re_arm_waits_for_a_dictation_that_got_in_first() {
+    let (supervisor, log) = cancel_a_handed_over_load("rearm-wait", after_the_second_dictation);
+    let mut second = supervisor.reserve("second".into()).unwrap();
+    SECOND_ADMITTED.store(true, Ordering::SeqCst);
+    thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        spawns(&log),
+        1,
+        "no re-armed load beside the dictation's own"
+    );
+    let model = model_file("rearm-wait-second");
+    assert_eq!(second.run(&model, "p".into(), || {}).unwrap(), "fresh");
+    drop(second);
+    // Then the re-arm goes ahead.
+    assert!(wait_until(Duration::from_secs(5), || spawns(&log) == 3));
 }
