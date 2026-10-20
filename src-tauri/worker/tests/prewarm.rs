@@ -88,6 +88,7 @@ impl Worker {
     }
 
     /// Close stdin, as the app does when no dictation came.
+    #[cfg(debug_assertions)]
     fn close(mut self) -> (Option<i32>, Vec<u8>) {
         drop(self.stdin.take());
         let output = self.child.wait_with_output().unwrap();
@@ -147,8 +148,10 @@ fn a_request_preempts_the_warm_up_decode() {
 #[cfg(debug_assertions)]
 #[test]
 fn the_budget_can_run_out_during_the_load() {
+    // 1000 ms left on arrival; the load takes 800, which leaves less than
+    // the reply margin. Counted from the end of the load it would fit.
     let mut worker = Worker::spawn(Some("800,10"), None);
-    worker.hand_over(300);
+    worker.hand_over(1_000);
     let (first, _) = worker.reply();
     assert_eq!(first["text"], "preempted", "{first}");
     let (second, _) = worker.reply();
