@@ -4,7 +4,7 @@
 
 use crate::protocol::WorkerResponse;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WorkerError {
     pub code: &'static str,
     pub message: &'static str,
@@ -42,6 +42,12 @@ impl WorkerError {
     /// The reply reached the token budget.
     pub fn token_limit() -> Self {
         Self::output("cleanup output reached the token limit")
+    }
+
+    /// A prewarm's warm-up gave way to a real request (prewarm.rs). Never
+    /// sent as a reply.
+    pub fn preempted() -> Self {
+        Self::runtime("cleanup warm-up preempted")
     }
 
     /// The reply would not fit the time left (deadline.rs).

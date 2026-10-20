@@ -1,7 +1,9 @@
 //! Debug builds only: seams for the contract tests, without a real model.
 //! A generation that never finishes on its own, so a test can kill the app
 //! mid-generation (tests/parent_death.rs), and a panic that quotes the
-//! request, so a test can check the panic hook (tests/panic_hook.rs).
+//! request, so a test can check the panic hook (tests/panic_hook.rs). And a
+//! fake model with a set load time and pace, for the prewarm tests
+//! (tests/prewarm.rs).
 //! Release builds, the ones the app bundles, have no such paths, and the app
 //! clears the worker's environment anyway.
 
@@ -12,6 +14,10 @@ use crate::output;
 
 pub const SLOW_GENERATION_ENV: &str = "VOXLOOM_WORKER_TEST_SLOW_GENERATION";
 pub const PANIC_ENV: &str = "VOXLOOM_WORKER_TEST_PANIC";
+/// `<load ms>,<ms per piece>`.
+pub const FAKE_MODEL_ENV: &str = "VOXLOOM_WORKER_TEST_FAKE_MODEL";
+/// The fake model's reply: this many "x" pieces, then end of generation.
+const FAKE_REPLY_PIECES: usize = 5;
 
 /// Panic with the prompt in the payload, as a bug deep in generation might.
 /// The hook in main.rs must keep it off stderr (BUS-16 10555 L3, mutant W11).
@@ -37,4 +43,46 @@ pub fn slow_generation(deadline: Option<Instant>) -> Option<Result<String, Worke
         Ok(Some(b"x".to_vec()))
     });
     Some(reply.map_err(|error| limit.explain(error)))
+}
+
+/// A model that takes `load ms` to load and replies "xxxxx" one piece per
+/// `ms per piece`, with the real caps, deadline and preemption checks.
+pub struct FakeEngine {
+    piece: Duration,
+}
+
+pub fn fake_engine() -> Option<FakeEngine> {
+    let value = std::env::var(FAKE_MODEL_ENV).ok()?;
+    let (load, piece) = value.split_once(',')?;
+    std::thread::sleep(Duration::from_millis(load.parse().ok()?));
+    Some(FakeEngine {
+        piece: Duration::from_millis(piece.parse().ok()?),
+    })
+}
+
+impl crate::engine::Generate for FakeEngine {
+    fn generate(
+        &self,
+        _prompt: &str,
+        deadline: Option<Instant>,
+        cap: usize,
+        preempt: &mut dyn FnMut() -> bool,
+    ) -> Result<String, WorkerError> {
+        let started = Instant::now();
+        let limit = crate::deadline::limit(cap, deadline, started);
+        let mut pieces = 0;
+        let reply = output::collect(limit.tokens, || {
+            if preempt() {
+                return Err(WorkerError::preempted());
+            }
+            if pieces == FAKE_REPLY_PIECES {
+                return Ok(None);
+            }
+            pieces += 1;
+            let due = started + self.piece * pieces as u32;
+            std::thread::sleep(due.saturating_duration_since(Instant::now()));
+            Ok(Some(b"x".to_vec()))
+        });
+        reply.map_err(|error| limit.explain(error))
+    }
 }
