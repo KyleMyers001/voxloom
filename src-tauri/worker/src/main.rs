@@ -1,5 +1,6 @@
 //! Voxloom cleanup worker (BUS-16 PR 3c-1): one framed request on stdin, one
-//! framed reply on stdout, then exit. The model arrives on fd 3. Nothing about
+//! framed reply on stdout, then exit. (A prewarm request may be followed by
+//! one more; see prewarm.rs.) The model arrives on fd 3. Nothing about
 //! the request is ever written to stderr. The app holds stdin open until the
 //! reply; if it closes first, the worker exits at once (see parent.rs).
 
@@ -13,6 +14,7 @@ mod engine;
 mod error;
 mod output;
 mod parent;
+mod prewarm;
 mod request;
 mod sizing;
 mod template;
@@ -38,6 +40,7 @@ fn main() -> ExitCode {
     // watcher thread needs stdin.
     let request = read_frame::<WorkerRequest>(&mut io::stdin().lock());
     let response = match request {
+        Ok(request) if request.prewarm => return prewarm::serve(request),
         Ok(request) => {
             parent::exit_when_stdin_closes();
             request::handle(request, started)

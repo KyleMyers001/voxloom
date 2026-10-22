@@ -4,7 +4,8 @@
 # voxloom-cleanup-worker-<triple>. For universal-apple-darwin, cargo runs
 # once per arch, and each run's tauri-build wants its own arch's file, while
 # the bundler wants the lipo'd universal one, so all three are written.
-# Every binary is checked for the debug-only test hook (QA 3c-2a Low-2).
+# Every binary is checked for the debug-only test hooks (QA 3c-2a Low-2):
+# any VOXLOOM_WORKER_TEST_ string (SLOW_GENERATION, PANIC, FAKE_MODEL, …).
 # Usage: scripts/release/build-worker.sh <rust-target>
 set -euo pipefail
 
@@ -17,7 +18,7 @@ TARGET_DIR="${CARGO_TARGET_DIR:-$WORKER/target}"
 # cargo resolves a relative CARGO_TARGET_DIR against the directory it runs
 # in, which is $WORKER below, so the copy must look there too.
 [[ "$TARGET_DIR" = /* ]] || TARGET_DIR="$WORKER/$TARGET_DIR"
-HOOK="VOXLOOM_WORKER_TEST_SLOW_GENERATION"
+HOOK="VOXLOOM_WORKER_TEST_"
 
 case "$TARGET" in
   universal-apple-darwin) ARCHES=(aarch64-apple-darwin x86_64-apple-darwin) ;;
@@ -42,7 +43,7 @@ fi
 
 for bin in "$OUT/$NAME-"*; do
   if grep -q "$HOOK" "$bin"; then
-    echo "error: $bin contains the debug-only test hook ($HOOK)" >&2
+    echo "error: $bin contains a debug-only test hook (${HOOK}*)" >&2
     exit 1
   fi
   echo "$(basename "$bin"): $(wc -c < "$bin" | tr -d ' ') bytes"

@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use super::super::protocol::{encode_frame, WorkerRequest};
-use super::super::worker_process::{ProcessError, WorkerProcess};
+use super::super::protocol::{encode_frame, WorkerRequest, WorkerResponse};
+use super::super::worker_process::{ProcessError, ProcessHandle, WorkerProcess};
 use super::{response, SharedState, SupervisorError, WorkerSupervisor};
 
 /// Reserves the native slot before verification/spawn. Cancellation is sticky
@@ -79,6 +79,7 @@ impl WorkerReservation {
             request_id: request_id.clone(),
             // Counted after the re-hash, just before the spawn.
             time_left_ms: super::super::budget::time_left_ms(self.deadline, Instant::now()),
+            prewarm: false,
         })
         .map_err(|_| SupervisorError {
             code: "context-overflow",
@@ -89,8 +90,30 @@ impl WorkerReservation {
                 "cleanup worker is not installed or not executable in this build",
             ));
         }
+        // A prewarm worker still loading or warming up takes this request
+        // over its load instead of a second one (prewarm.rs).
+        if let Some(handoff) = super::handoff::hand_over(&self.shared) {
+            let handle = handoff.process.clone();
+            return self.exchange(&request_id, handle, on_started, |deadline| {
+                handoff.exchange(&frame, deadline)
+            });
+        }
         let process = spawn().map_err(SupervisorError::runtime)?;
         let handle = process.handle.clone();
+        self.exchange(&request_id, handle, on_started, |deadline| {
+            process.exchange(frame, deadline)
+        })
+    }
+
+    /// Run one exchange with a started worker under the backstop deadline,
+    /// with sticky cancellation, and map its reply.
+    fn exchange(
+        &mut self,
+        request_id: &str,
+        handle: ProcessHandle,
+        on_started: impl FnOnce(),
+        exchange: impl FnOnce(Instant) -> Result<WorkerResponse, ProcessError>,
+    ) -> Result<String, SupervisorError> {
         let cancelled = {
             let mut state = self.shared.state.lock().unwrap();
             let active = state.active.as_mut().unwrap();
@@ -105,7 +128,7 @@ impl WorkerReservation {
             return Err(WorkerSupervisor::cancelled_error());
         }
         let deadline = Instant::now() + self.timeout;
-        let response = process.exchange(frame, deadline);
+        let response = exchange(deadline);
         handle.finish();
         if self.cancelled() || handle.cancelled() {
             return Err(WorkerSupervisor::cancelled_error());
@@ -125,7 +148,7 @@ impl WorkerReservation {
                 })
             }
         };
-        response::interpret(response, &request_id)
+        response::interpret(response, request_id)
     }
 
     pub fn finish(&self) {
@@ -148,6 +171,7 @@ impl Drop for WorkerReservation {
         self.finish();
         let mut state = self.shared.state.lock().unwrap();
         state.active = None;
+        super::handoff::on_release(&mut state.prewarm);
         self.shared.settled.notify_all();
     }
 }

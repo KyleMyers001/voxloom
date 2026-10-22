@@ -138,6 +138,7 @@ fn exact_serialized_frame_limit_is_accepted() {
         prompt: String::new(),
         request_id: "r".into(),
         time_left_ms: None,
+        prewarm: false,
     };
     let overhead = serde_json::to_vec(&request).unwrap().len();
     let prompt = "x".repeat(crate::cleanup::protocol::MAX_FRAME_BYTES - overhead);

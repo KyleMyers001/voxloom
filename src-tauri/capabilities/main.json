@@ -42,6 +42,7 @@
     "allow-cleanup-cancel",
     "allow-cleanup-release",
     "allow-cleanup-run",
+    "allow-cleanup-prewarm",
     "allow-cleanup-model-status",
     "allow-cleanup-pick-and-import-model",
     "allow-delivery-insert-text",

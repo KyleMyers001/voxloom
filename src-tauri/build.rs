@@ -19,6 +19,7 @@ const COMMANDS: &[&str] = &[
     "cleanup_cancel",
     "cleanup_release",
     "cleanup_run",
+    "cleanup_prewarm",
     "cleanup_model_status",
     "cleanup_pick_and_import_model",
     "delivery_insert_text",

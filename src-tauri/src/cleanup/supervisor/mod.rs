@@ -1,21 +1,20 @@
 //! Single-slot supervisor for the disposable cleanup worker. Admission and
 //! cancellation state live here; one reservation owns a run (`reservation`),
-//! and worker replies are validated in `response`.
+//! worker replies are validated in `response`, and `prewarm` warms the model.
 
 use std::collections::VecDeque;
-#[cfg(test)]
-use std::fs::File;
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use super::worker_process::ProcessHandle;
-#[cfg(test)]
-use super::worker_process::WorkerProcess;
 
+mod handoff;
+mod prewarm;
 mod reservation;
 mod response;
 
+pub use prewarm::LowPowerMode;
 pub use reservation::WorkerReservation;
 
 #[cfg(test)]
@@ -35,6 +34,7 @@ struct ActiveWorker {
 struct SupervisorState {
     active: Option<ActiveWorker>,
     cancelled: VecDeque<String>,
+    prewarm: Option<prewarm::Slot>,
 }
 
 #[derive(Default)]
@@ -60,6 +60,7 @@ impl SupervisorError {
 
 pub struct WorkerSupervisor {
     shared: Arc<SharedState>,
+    prewarm_timeout: Duration,
     timeout: Duration,
     worker_path: PathBuf,
 }
@@ -72,6 +73,7 @@ impl WorkerSupervisor {
     fn with_timeout(worker_path: PathBuf, timeout: Duration) -> Self {
         Self {
             shared: Arc::new(SharedState::default()),
+            prewarm_timeout: prewarm::PREWARM_TIMEOUT,
             timeout,
             worker_path,
         }
@@ -108,6 +110,7 @@ impl WorkerSupervisor {
                 "cleanup worker is already processing",
             ));
         }
+        handoff::on_reserve(&mut state.prewarm);
         state.active = Some(ActiveWorker {
             process: None,
             cancelled: false,
@@ -121,28 +124,6 @@ impl WorkerSupervisor {
             timeout: self.timeout,
             worker_path: self.worker_path.clone(),
         })
-    }
-
-    #[cfg(test)]
-    pub fn run(
-        &self,
-        model: &File,
-        prompt: String,
-        request_id: String,
-    ) -> Result<String, SupervisorError> {
-        self.run_with_spawn(prompt, request_id, || {
-            WorkerProcess::spawn(&self.worker_path, model)
-        })
-    }
-
-    #[cfg(test)]
-    fn run_with_spawn(
-        &self,
-        prompt: String,
-        request_id: String,
-        spawn: impl FnOnce() -> Result<WorkerProcess, String>,
-    ) -> Result<String, SupervisorError> {
-        self.reserve(request_id)?.run_with_spawn(prompt, spawn)
     }
 
     /// Marks cancellation without doing process I/O; safe under the registry

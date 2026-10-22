@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Check the cleanup worker sidecar inside a built Voxloom.app (BUS-16 3c-2b):
 # present and executable, built for the target's arches, signed with the
-# hardened runtime like the app, no debug-only test hook, and its
+# hardened runtime like the app, no debug-only test hooks, and its
 # third-party notices bundled. Mac-only (lipo, codesign).
 # Usage: scripts/release/check-sidecar.sh <path/to/Voxloom.app> <rust-target>
 set -euo pipefail
@@ -15,8 +15,9 @@ fail() { echo "error: $*" >&2; exit 1; }
 
 [[ -x "$SIDECAR" ]] || fail "no executable sidecar at $SIDECAR"
 [[ -s "$NOTICES" ]] || fail "no worker notices at $NOTICES"
-if grep -q VOXLOOM_WORKER_TEST_SLOW_GENERATION "$SIDECAR"; then
-  fail "the sidecar contains the debug-only test hook"
+# Any debug-only test hook: SLOW_GENERATION, PANIC, FAKE_MODEL, …
+if grep -q VOXLOOM_WORKER_TEST_ "$SIDECAR"; then
+  fail "the sidecar contains a debug-only test hook (VOXLOOM_WORKER_TEST_*)"
 fi
 
 case "$TARGET" in

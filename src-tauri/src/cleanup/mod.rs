@@ -9,6 +9,7 @@ mod error;
 pub mod model_store;
 mod ownership;
 mod picker;
+pub mod prewarm;
 pub mod protocol;
 #[cfg(all(test, unix))]
 mod state_tests;

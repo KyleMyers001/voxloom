@@ -72,6 +72,13 @@ impl ModelLease {
     }
 }
 
+/// A prewarm spawns from the lease and keeps it until the worker is reaped.
+impl std::borrow::Borrow<File> for ModelLease {
+    fn borrow(&self) -> &File {
+        &self.file
+    }
+}
+
 struct ImportGuard {
     inner: Arc<Mutex<StoreInner>>,
 }
