@@ -133,7 +133,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install Tauri Linux and whisper.cpp build dependencies
         working-directory: .
-        timeout-minutes: 15
+        timeout-minutes: 25
         run: |
           APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30"
           sudo apt-get $APT_OPTS update
