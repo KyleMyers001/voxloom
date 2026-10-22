@@ -14,12 +14,13 @@ mod state_tests;
 pub mod supervisor;
 #[cfg(all(test, unix))]
 mod test_support;
+mod worker_path;
 mod worker_process;
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 pub use error::{CleanupAttempt, CleanupCommandError, CleanupRequestDto, CleanupRunOutput};
 use model_store::CleanupModelStore;
@@ -34,31 +35,15 @@ pub struct CleanupState {
 
 impl CleanupState {
     pub fn from_app(app: &AppHandle) -> Result<Self, String> {
-        // Model store first. A resource-dir / worker-path miss must not discard
-        // a working app-data store — disable the runtime instead.
+        // Model store first. A worker-path miss must not discard a working
+        // app-data store; it only leaves the runtime unavailable.
         let models = CleanupModelStore::from_app(app)?;
-        let worker_path = match Self::worker_path(app) {
-            Ok(path) => path,
-            Err(error) => {
-                eprintln!("[cleanup] worker path unavailable, cleanup runtime disabled: {error}");
-                PathBuf::new()
-            }
-        };
+        let app_exe = std::env::current_exe()
+            .inspect_err(|error| eprintln!("[cleanup] app path unavailable: {error}"))
+            .ok();
+        let worker_path =
+            worker_path::resolve(app_exe.as_deref(), worker_path::development_fallback());
         Ok(Self::with_parts(models, worker_path))
-    }
-
-    fn worker_path(app: &AppHandle) -> Result<PathBuf, String> {
-        let resource = app
-            .path()
-            .resource_dir()
-            .map_err(|error| format!("resolve resources: {error}"))?
-            .join("cleanup")
-            .join("voxloom-cleanup-worker");
-        Ok(if resource.is_file() {
-            resource
-        } else {
-            development_worker_path()
-        })
     }
 
     /// Same shape as a normal store, pointed at a disposable temp root and an
@@ -98,14 +83,4 @@ impl CleanupState {
         let retired = self.requests.retire(None);
         tauri::async_runtime::spawn_blocking(move || retired.finish());
     }
-}
-
-fn development_worker_path() -> PathBuf {
-    #[cfg(debug_assertions)]
-    return PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("resources")
-        .join("cleanup")
-        .join("voxloom-cleanup-worker");
-    #[cfg(not(debug_assertions))]
-    PathBuf::new()
 }

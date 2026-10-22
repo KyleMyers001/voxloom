@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "externalBin": ["binaries/voxloom-cleanup-worker"],
+    "resources": {
+      "licenses/cleanup-worker/THIRD-PARTY-NOTICES.txt": "licenses/cleanup-worker/THIRD-PARTY-NOTICES.txt"
+    }
+  }
+}

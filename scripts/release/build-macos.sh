@@ -29,4 +29,9 @@ else
 fi
 unset APPLE_API_PRIVATE_KEY
 
-npm run tauri -- build --target "$TARGET" --bundles app,dmg -- --locked --features whisper
+# BUS-16 3c-2b: the cleanup worker sidecar. Its externalBin entry lives in a
+# merge config, not tauri.conf.json, because tauri-build fails any cargo
+# build that lacks the sidecar file and the dev/test builds never make one.
+bash scripts/release/build-worker.sh "$TARGET"
+npm run tauri -- build --target "$TARGET" --bundles app,dmg \
+  --config src-tauri/tauri.worker.conf.json -- --locked --features whisper
