@@ -70,7 +70,7 @@ jobs:
   rust:
     runs-on: ubuntu-latest
     # Fail fast on a stalled apt mirror instead of GitHub's 6 h default.
-    timeout-minutes: 45
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: src-tauri
@@ -78,7 +78,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install Tauri Linux system dependencies
         working-directory: .
-        timeout-minutes: 25
+        timeout-minutes: 40
         run: |
           APT_OPTS="-o Acquire::http::Timeout=30"
           sudo apt-get $APT_OPTS update
@@ -137,7 +137,7 @@ jobs:
     runs-on: ubuntu-latest
     # A stalled apt mirror once hung this job for 1.5 h (run 39779540930);
     # fail fast instead of waiting for GitHub's 6 h default.
-    timeout-minutes: 45
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: src-tauri
@@ -145,7 +145,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install Tauri Linux and whisper.cpp build dependencies
         working-directory: .
-        timeout-minutes: 25
+        timeout-minutes: 40
         run: |
           APT_OPTS="-o Acquire::http::Timeout=30"
           sudo apt-get $APT_OPTS update
