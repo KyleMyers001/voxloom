@@ -123,6 +123,9 @@ jobs:
     # whisper.cpp via cmake + bindgen/libclang), which the other Rust jobs
     # never compile. Separate cache key: whisper.cpp objects differ.
     runs-on: ubuntu-latest
+    # A stalled apt mirror once hung this job for 1.5 h (run 39779540930);
+    # fail fast instead of waiting for GitHub's 6 h default.
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: src-tauri
@@ -130,9 +133,11 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install Tauri Linux and whisper.cpp build dependencies
         working-directory: .
+        timeout-minutes: 15
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+          APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30"
+          sudo apt-get $APT_OPTS update
+          sudo apt-get $APT_OPTS install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
             librsvg2-dev patchelf libasound2-dev libxdo-dev libssl-dev \
             cmake clang libclang-dev
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
