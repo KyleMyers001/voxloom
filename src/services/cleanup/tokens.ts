@@ -5,6 +5,8 @@
 
 export const FILLERS = new Set(['um', 'uh', 'erm', 'er', 'hmm']);
 export const ARTICLES = new Set(['a', 'an', 'the']);
+/** A sign-off the speaker can lose only as a sentence of its own. */
+const STANDALONE = new Set(['okay', 'ok']);
 
 export interface Token {
   /** Lowercased word. */
@@ -106,6 +108,16 @@ function isDroppable(words: Set<string>, word: string, sentenceStart: boolean): 
   return word === lower || (sentenceStart && /^\p{Lu}\p{Ll}*$/u.test(word));
 }
 
+/**
+ * `text[start, end)` is a whole sentence on its own ("… see. Okay."): it
+ * opens a sentence and only `.` or `!` (or the end of the text) follows.
+ * Never mid-sentence ("that's okay with me", "Okay, ship it") or a question.
+ */
+function isStandaloneSentence(text: string, start: number, end: number): boolean {
+  return opensSentence(text, start) && /^(?:[.!。！]+)?(?:\s|$)/u.test(text.slice(end))
+    && !/^\s*[,;:?？]/u.test(text.slice(end));
+}
+
 export function isDroppableFiller(word: string, sentenceStart: boolean): boolean {
   return isDroppable(FILLERS, word, sentenceStart);
 }
@@ -122,6 +134,7 @@ export function tokenize(text: string): Token[] {
   const quotes = scanQuotes(characters).quotes.map((index) => offsets[index]);
   const tokens: Token[] = [];
   let quotesBefore = 0;
+  const standalone: number[] = [];
   for (const match of normalized.matchAll(/[\p{L}\p{M}\p{N}]+(?:['’][\p{L}\p{M}]+)*/gu)) {
     const start = match.index;
     while (quotesBefore < quotes.length && quotes[quotesBefore] < start) quotesBefore++;
@@ -132,12 +145,20 @@ export function tokenize(text: string): Token[] {
       const sentenceStart = part === 0 && opensSentence(normalized, start);
       const skippable = !quoted && (isDroppable(ARTICLES, word, sentenceStart)
         || isDroppable(FILLERS, word, sentenceStart));
+      if (!quoted && parts.length === 1 && STANDALONE.has(word.toLowerCase())
+        && isStandaloneSentence(normalized, start, start + match[0].length)) {
+        standalone.push(tokens.length);
+      }
       const [partStart, partEnd] = spans[part];
       tokens.push({
         continuesWord: part > 0, end: partEnd, skippable, start: partStart,
         word: word.toLowerCase(),
       });
     });
+  }
+  // A dictated "Okay." with nothing else to keep is the content itself.
+  if (tokens.some(({ skippable }, index) => !skippable && !standalone.includes(index))) {
+    for (const index of standalone) tokens[index].skippable = true;
   }
   return tokens;
 }

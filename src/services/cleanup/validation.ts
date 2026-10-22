@@ -17,6 +17,45 @@ function protectedValues(text: string): string[] {
     .filter((value) => /[\p{N}_/@\\=]|[\p{L}]-[\p{L}]|^-+[\p{L}]|^[.~][\p{L}]|[\p{Ll}][\p{Lu}]|[\p{L}]\.[\p{L}]/u.test(value));
 }
 
+/**
+ * Protected values, except that an exact all-letter dictionary spelling
+ * (StupidJargon, WhisperKit) is the join or repair the content guard checks,
+ * not a technical value: the output may add one. One the speaker already
+ * said must still survive with its exact spelling.
+ */
+function preservesProtectedValues(
+  raw: string,
+  candidate: string,
+  dictionary: readonly string[],
+): boolean {
+  const spellings = new Set(dictionary.map((term) => term.trim().normalize('NFC'))
+    .filter((term) => /^[\p{L}\p{M}]+$/u.test(term)));
+  const source = protectedValues(raw);
+  const output = protectedValues(candidate);
+  const left = output.filter((value) => spellings.has(value));
+  for (const value of source.filter((term) => spellings.has(term))) {
+    const index = left.indexOf(value);
+    if (index < 0) return false;
+    left.splice(index, 1);
+  }
+  return sameMultiset(
+    source.filter((value) => !spellings.has(value)),
+    output.filter((value) => !spellings.has(value)),
+  );
+}
+
+/**
+ * The output without one pair of double quotes around all of it, when the
+ * transcript was not itself quoted: small models echo the prompt's JSON
+ * string quotes. Partial or nested quotation is left for the guards.
+ */
+function unwrapQuotedOutput(raw: string, cleaned: string): string {
+  if (wrapsWholeText(raw)) return cleaned;
+  const pair = /^(?:"([^"“”]*)"|“([^"“”]*)”)$/u.exec(cleaned);
+  const inner = (pair?.[1] ?? pair?.[2])?.trim();
+  return inner || cleaned;
+}
+
 // An uppercase stem of 2+ letters, optionally plural or possessive: ER, APIs,
 // CEO's (curly apostrophes are normalized first).
 const ACRONYM = /^\p{Lu}{2,}(?:'?s)?$/u;
@@ -103,7 +142,7 @@ export function validateCleanupOutput(
   dictionary: readonly string[] = [],
 ): string | null {
   if (hasUnsafeEncoding(candidate)) return null;
-  const cleaned = candidate.trim();
+  const cleaned = unwrapQuotedOutput(rawText, candidate.trim());
   if (!cleaned) return null;
   if (encoder.encode(cleaned).byteLength > CLEANUP_OUTPUT_MAX_BYTES) {
     return null;
@@ -112,7 +151,7 @@ export function validateCleanupOutput(
     + CLEANUP_OUTPUT_EXTRA_CHARS;
   if (cleaned.length > maxChars) return null;
   if (reasoningMarkers(cleaned) > reasoningMarkers(rawText)) return null;
-  if (!sameMultiset(protectedValues(rawText), protectedValues(cleaned))) return null;
+  if (!preservesProtectedValues(rawText, cleaned, dictionary)) return null;
   if (!preservesCapitalization(rawText, cleaned)) return null;
   if (JSON.stringify(symbols(rawText)) !== JSON.stringify(symbols(cleaned))) return null;
   if (!preservesMarks(rawText, cleaned, dictionary)) return null;
