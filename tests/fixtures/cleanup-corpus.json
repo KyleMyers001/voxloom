@@ -26,7 +26,7 @@
       "candidates": [
         {"text": "I will send you our report.", "acceptWhen": ["off", "on"]},
         {"text": "We will send you our report.", "acceptWhen": []},
-        {"text": "\"I will send you our report\"", "acceptWhen": []}
+        {"text": "\"I will send\" you our report", "acceptWhen": []}
       ]
     },
     {

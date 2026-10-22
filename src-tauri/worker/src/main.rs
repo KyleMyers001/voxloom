@@ -70,7 +70,10 @@ fn reply_frame(response: WorkerResponse) -> (Vec<u8>, bool) {
         Err(_) => {
             let fallback = error::WorkerError::output("cleanup reply could not be framed")
                 .into_response(request_id);
-            // A fixed message plus an ID taken from a ≤128 KiB request frame.
+            // A fixed message plus the request ID: fits unless the ID alone
+            // is near the frame cap. The app's IDs are at most 128 bytes
+            // (auth.rs); a longer one would get no frame, which the app
+            // treats as a runtime error and pastes the raw text.
             (encode_frame(&fallback).unwrap_or_default(), false)
         }
     }
