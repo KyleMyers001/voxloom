@@ -90,11 +90,11 @@ export function utf16Offsets(characters: readonly string[]): number[] {
   return offsets;
 }
 
-/** `text[start]` begins the text or a sentence (after . ! ?). */
+/** `text[start]` begins the text or a sentence (after . ! ? or …). */
 function opensSentence(text: string, start: number): boolean {
   let at = start - 1;
   while (at >= 0 && /[\s"'“”‘’([]/u.test(text[at])) at--;
-  return at < 0 || /[.!?。！？]/u.test(text[at]);
+  return at < 0 || /[.!?…。！？]/u.test(text[at]);
 }
 
 /**
@@ -110,13 +110,13 @@ function isDroppable(words: Set<string>, word: string, sentenceStart: boolean): 
 
 /**
  * `text[start, end)` is a whole sentence on its own ("… see. Okay."): it
- * opens a sentence and is followed by `.` or `!` and then a space, or by
- * the end of the text. Never mid-sentence ("that's okay with me"), before
+ * opens a sentence and is followed by `.`, `!` or `…` and then a space, or
+ * by the end of the text. Never mid-sentence ("that's okay with me"), before
  * more words ("Okay to delete it", "OK Google"), or a question ("Okay?").
  */
 function isStandaloneSentence(text: string, start: number, end: number): boolean {
   return opensSentence(text, start)
-    && /^(?:[.!。！]+(?:\s|$)|$)/u.test(text.slice(end));
+    && /^(?:[.!…。！]+(?:\s|$)|$)/u.test(text.slice(end));
 }
 
 export function isDroppableFiller(word: string, sentenceStart: boolean): boolean {
