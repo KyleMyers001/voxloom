@@ -17,7 +17,7 @@ describe('dictionary spellings are not technical values', () => {
     expect(validateCleanupOutput(JARGON, ideal, ['StupidJargon'])).toBe(ideal);
   });
 
-  // Intended (Code Reviewer, BUS-16): the same one-edit repair as
+  // Intended (Sophie, BUS-16): the same one-edit repair as
   // motion → Notion, now open to camelCase terms the user added.
   it('accepts a one-edit repair to a camelCase dictionary term', () => {
     expect(validateCleanupOutput(

@@ -28,7 +28,8 @@ function preservesProtectedValues(
   candidate: string,
   dictionary: readonly string[],
 ): boolean {
-  const spellings = new Set(dictionary.map((term) => term.trim().normalize('NFC'))
+  // runCleanup passes snapshotDictionary terms, which are already trimmed.
+  const spellings = new Set(dictionary.map((term) => term.normalize('NFC'))
     .filter((term) => /^[\p{L}\p{M}]+$/u.test(term)));
   const source = protectedValues(raw);
   const output = protectedValues(candidate);
@@ -47,13 +48,16 @@ function preservesProtectedValues(
 /**
  * The output without one pair of double quotes around all of it, when the
  * transcript was not itself quoted: small models echo the prompt's JSON
- * string quotes. Partial or nested quotation is left for the guards.
+ * string quotes. A period just outside the closing quote (`"Send it".`)
+ * moves inside unless the quoted text already ends a sentence. Partial or
+ * nested quotation is left for the guards.
  */
 function unwrapQuotedOutput(raw: string, cleaned: string): string {
   if (wrapsWholeText(raw)) return cleaned;
-  const pair = /^(?:"([^"“”]*)"|“([^"“”]*)”)$/u.exec(cleaned);
+  const pair = /^(?:"([^"“”]*)"|“([^"“”]*)”)(\.?)$/u.exec(cleaned);
   const inner = (pair?.[1] ?? pair?.[2])?.trim();
-  return inner || cleaned;
+  if (!inner) return cleaned;
+  return pair?.[3] && !/[.!?…。！？]$/u.test(inner) ? `${inner}.` : inner;
 }
 
 // An uppercase stem of 2+ letters, optionally plural or possessive: ER, APIs,
