@@ -17,6 +17,14 @@ describe('dictionary spellings are not technical values', () => {
     expect(validateCleanupOutput(JARGON, ideal, ['StupidJargon'])).toBe(ideal);
   });
 
+  // Intended (Code Reviewer, BUS-16): the same one-edit repair as
+  // motion → Notion, now open to camelCase terms the user added.
+  it('accepts a one-edit repair to a camelCase dictionary term', () => {
+    expect(validateCleanupOutput(
+      'I lost my phone today', 'I lost my iPhone today.', ['iPhone'],
+    )).toBe('I lost my iPhone today.');
+  });
+
   it('accepts a camelCase dictionary case repair', () => {
     expect(validateCleanupOutput(
       'Whisperkit transcribes faster than the old pipeline.',
@@ -30,6 +38,7 @@ describe('dictionary spellings are not technical values', () => {
     ['a dictionary term the speaker said is dropped', 'Open WhisperKit now', 'Open now.', ['WhisperKit']],
     ['a dictionary term the speaker said loses its case', 'Open WhisperKit now', 'Open Whisperkit now.', ['WhisperKit']],
     ['a technical value in the dictionary', 'Use user_id', 'Use user_ids', ['user_id']],
+    ['an added technical value from the dictionary', 'I use node js', 'I use node.js.', ['node.js']],
     ['an invented dictionary term', 'Open the app', 'Open the WhisperKit app.', ['WhisperKit']],
     ['a near miss of the dictionary spelling', JARGON, 'You\'re making a lot of progress on the StupidJargons app.', ['StupidJargon']],
   ])('still rejects %s', (_name, raw, candidate, dictionary) => {
@@ -69,6 +78,11 @@ describe('one pair of quotes around the whole output', () => {
     expect(validateCleanupOutput('send the report', candidate)).toBeNull();
   });
 
+  it('is not removed when the output holds another quotation', () => {
+    expect(validateCleanupOutput('she said "hi" to me', '"She said "hi" to me."'))
+      .toBeNull();
+  });
+
   it('does not hide a changed word inside the quotes', () => {
     expect(validateCleanupOutput('send the report', '"Send the summary."'))
       .toBeNull();
@@ -86,6 +100,9 @@ describe('a standalone Okay sentence', () => {
     ['opening the text', 'Okay. Ship it today.', 'Ship it today.'],
     ['between sentences', 'Ship it. Okay! Then rest.', 'Ship it. Then rest.'],
     ['spelled OK', 'Ship it today. OK.', 'Ship it today.'],
+    // Sophie (BUS-16): after a question it is still a sign-off, not an answer.
+    ['after a question', 'Do you agree? Okay.', 'Do you agree?'],
+    ['after a closing sentence', 'We\'re done here. Okay.', 'We\'re done here.'],
   ])('may be dropped when %s', (_name, raw, candidate) => {
     expect(validateCleanupOutput(raw, candidate)).toBe(candidate);
   });
@@ -99,6 +116,12 @@ describe('a standalone Okay sentence', () => {
     ['opening a sentence', 'Okay, ship it.', 'Ship it.'],
     ['closing a sentence', 'Ship it, okay.', 'Ship it.'],
     ['a question', 'Ship it today. Okay?', 'Ship it today.'],
+    ['before a spaced question mark', 'Ship it today. Okay ?', 'Ship it today. ?'],
+    ['opening a sentence with more words', 'Okay to delete the backup.', 'To delete the backup.'],
+    ['before a wake word', 'OK Google set a timer', 'Google set a timer.'],
+    ['before more words', 'Okay so let us go now', 'So let us go now.'],
+    ['inside a contraction', 'Done. Okay\'ll.', 'Done. Will.'],
+    ['inside a quotation', 'She wrote "Fine. Okay. Go." on the card.', 'She wrote "Fine. Go." on the card.'],
     ['inside a quotation', 'He said "Okay." and left.', 'He said "" and left.'],
     ['the whole transcript', 'Okay.', ''],
     ['replaced rather than dropped', 'Ship it today. Okay.', 'Ship it today. Fine.'],
