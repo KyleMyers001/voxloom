@@ -52,6 +52,7 @@ write({{"error": None, "errorCode": None, "requestId": request["requestId"],
     )
 }
 
+mod budget;
 mod lifecycle;
 mod recovery;
 mod responses;

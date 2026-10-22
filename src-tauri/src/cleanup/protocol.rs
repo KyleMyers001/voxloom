@@ -10,6 +10,10 @@ pub struct WorkerRequest {
     pub model_path: String,
     pub prompt: String,
     pub request_id: String,
+    /// Milliseconds the worker has left (BUS-16 3c-2c); it caps the reply by
+    /// it. Absent: no cap beyond the token budget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_left_ms: Option<u64>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -95,12 +99,30 @@ mod tests {
             model_path: "/private/model.gguf".into(),
             prompt: "hello".into(),
             request_id: "r1".into(),
+            time_left_ms: Some(4_500),
         };
         let mut bytes = Vec::new();
         write_frame(&mut bytes, &request).unwrap();
         let decoded: WorkerRequest = read_frame(&mut bytes.as_slice()).unwrap();
         assert_eq!(decoded.request_id, "r1");
         assert_eq!(decoded.prompt, "hello");
+        assert_eq!(decoded.time_left_ms, Some(4_500));
+    }
+
+    #[test]
+    fn time_left_is_optional_on_the_wire() {
+        let request = WorkerRequest {
+            model_path: "/dev/fd/3".into(),
+            prompt: "hello".into(),
+            request_id: "r1".into(),
+            time_left_ms: None,
+        };
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(!json.contains("timeLeftMs"), "{json}");
+        let old: WorkerRequest =
+            serde_json::from_str(r#"{"modelPath":"/dev/fd/3","prompt":"p","requestId":"r"}"#)
+                .unwrap();
+        assert_eq!(old.time_left_ms, None);
     }
 
     #[test]

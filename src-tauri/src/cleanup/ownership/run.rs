@@ -21,6 +21,12 @@ impl OwnedRun {
         self.permit.as_ref().unwrap().cancelled()
     }
 
+    /// Bound the run by the renderer's budget (BUS-16 3c-2c).
+    pub fn with_deadline(mut self, deadline: Option<std::time::Instant>) -> Self {
+        self.permit.as_mut().unwrap().set_deadline(deadline);
+        self
+    }
+
     #[cfg(test)]
     pub fn run(self, prompt: String) -> Result<String> {
         self.run_with_attempt(prompt, |_| {})

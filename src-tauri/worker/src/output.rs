@@ -22,9 +22,7 @@ pub fn collect(
             return Err(WorkerError::output("cleanup output too long"));
         }
     }
-    Err(WorkerError::output(
-        "cleanup output reached the token limit",
-    ))
+    Err(WorkerError::token_limit())
 }
 
 fn finish(output: Vec<u8>) -> Result<String, WorkerError> {

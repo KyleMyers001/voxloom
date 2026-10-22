@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isCleanupActive } from '../../../src/domain/cleanup';
+import { CLEANUP_BUDGET_MS } from '../../../src/services/cleanup/budget';
 import type { CleanupEngine } from '../../../src/services/cleanup/contracts';
 import {
   CLEANUP_MODEL_ID,
@@ -304,7 +305,7 @@ describe('useDogfoodCapture with a hung cleanup worker', () => {
     };
     const { copy, hook, onHistoryRecord } = await setup({ cleanupActive: true, cleanupEngine: engine });
     await waitFor(() => expect(hook.result.current.phase).toBe('cleaning'));
-    await act(async () => { await vi.advanceTimersByTimeAsync(29_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(CLEANUP_BUDGET_MS - 1_000); });
     expect(hook.result.current.phase).toBe('cleaning');
     await act(async () => { await vi.advanceTimersByTimeAsync(2_500); });
     expect(hook.result.current.phase).toBe('success');

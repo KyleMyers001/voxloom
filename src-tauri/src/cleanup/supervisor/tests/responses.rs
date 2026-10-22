@@ -78,6 +78,16 @@ fn worker_response_shapes_ids_and_diagnostics_are_bounded() {
             "invalid-output",
         ),
         (
+            // BUS-16 3c-2c: the worker's own time cap.
+            "worker-timeout",
+            "error",
+            "r",
+            "'timeout'",
+            "'cleanup ran out of time'",
+            "None",
+            "timeout",
+        ),
+        (
             "long-output",
             "ok",
             "r",

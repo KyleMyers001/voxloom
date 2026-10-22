@@ -52,6 +52,8 @@ export interface CleanupRequest {
   rawText: string;
   requestId: string;
   style: WritingStyle;
+  /** Milliseconds left of the cleanup budget when the run starts. */
+  timeLeftMs?: number;
 }
 
 export interface CleanupModelStatus {
