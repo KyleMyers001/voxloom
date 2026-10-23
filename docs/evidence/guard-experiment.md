@@ -33,7 +33,7 @@ dictation (the "Okay" effect).
 | 0.6B, app prompt | 33 (66%) | content 10, marks 5, capitalization 1, protected-values 1 |
 | 1.7B, app prompt | 41 (82%) | content 6, capitalization 2, protected-values 1 |
 
-The two rejections seen on Kyle's Mac build had two reproducible causes, not a too-strict guard:
+The two rejections seen on a Mac build had two reproducible causes, not a too-strict guard:
 
 1. **0.6B wraps the whole reply in quotes** (it copies the JSON string quotes from
    the prompt payload). 5 of 50 outputs on the app prompt (4 quote-wrapped, 1 JSON
