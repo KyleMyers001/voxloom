@@ -79,6 +79,18 @@ pub fn open_regular(path: &Path) -> Result<File, String> {
 }
 
 pub fn validate_file(file: &mut File, spec: ArtifactSpec) -> Result<(), String> {
+    validate_file_while(file, spec, || true).map(drop)
+}
+
+/// `validate_file`, but `keep_going` is asked before every chunk of the hash
+/// and the hash stops there when it says no (BUS-125: a prewarm abandoned
+/// for a dictation must not go on hashing beside the dictation's own pass).
+/// Ok(true) if the file is verified, Ok(false) if the hash was stopped.
+pub fn validate_file_while(
+    file: &mut File,
+    spec: ArtifactSpec,
+    mut keep_going: impl FnMut() -> bool,
+) -> Result<bool, String> {
     file.seek(SeekFrom::Start(0))
         .map_err(|error| format!("rewind cleanup model: {error}"))?;
     let metadata = file
@@ -102,6 +114,9 @@ pub fn validate_file(file: &mut File, spec: ArtifactSpec) -> Result<(), String> 
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 1024 * 1024];
     loop {
+        if !keep_going() {
+            return Ok(false);
+        }
         let count = file
             .read(&mut buffer)
             .map_err(|error| format!("hash cleanup model: {error}"))?;
@@ -115,7 +130,7 @@ pub fn validate_file(file: &mut File, spec: ArtifactSpec) -> Result<(), String> 
     }
     file.seek(SeekFrom::Start(0))
         .map_err(|error| format!("rewind cleanup model: {error}"))?;
-    Ok(())
+    Ok(true)
 }
 
 #[cfg(test)]

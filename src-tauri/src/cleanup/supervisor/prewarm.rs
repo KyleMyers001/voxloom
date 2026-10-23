@@ -3,7 +3,8 @@
 //! the run slot, so a dictation is never refused because of it (the
 //! dictation side, claim and handoff, is in handoff.rs):
 //! - before the spawn (the model is still being hashed), a dictation's
-//!   admission abandons the prewarm, since nothing is loading yet;
+//!   admission abandons the prewarm, since nothing is loading yet, and the
+//!   prewarm stops hashing the model at its next chunk (BUS-125);
 //! - while the worker loads or warms up, the dictation is handed to it as a
 //!   second frame and reuses the load, never cancelled and never repeated;
 //!   the worker cuts its warm-up short for it;
@@ -79,6 +80,15 @@ impl WorkerSupervisor {
 }
 
 impl PrewarmTicket {
+    /// A dictation was admitted while this prewarm was reserved, so it has
+    /// lost the right to spawn. Read between chunks of its model hash.
+    pub fn abandoned(&self) -> bool {
+        !matches!(
+            self.shared.state.lock().unwrap().prewarm,
+            Some(Slot::Reserved { abandoned: false })
+        )
+    }
+
     /// Spawn the prewarm worker on `model` and leave it to a thread that
     /// keeps `model` until the worker is reaped. False if a dictation came
     /// first or the worker could not start.

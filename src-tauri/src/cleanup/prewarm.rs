@@ -49,7 +49,8 @@ pub async fn cleanup_prewarm<R: Runtime>(
     .map_err(|error| CleanupCommandError::runtime(format!("cleanup prewarm task failed: {error}")))
 }
 
-/// What happened: "started", or why it was skipped. The renderer ignores it.
+/// What happened: "started", or why it was skipped ("abandoned": a dictation
+/// took its turn first). The renderer ignores it.
 pub(super) fn prewarm(
     supervisor: &WorkerSupervisor,
     trigger: Trigger,
@@ -69,9 +70,13 @@ pub(super) fn prewarm(
     let Ok(mut lease) = lease() else {
         return "unavailable";
     };
-    // As for a run: the worker only ever loads a verified descriptor.
-    if lease.verify().is_err() {
-        return "unavailable";
+    // As for a run: the worker only ever loads a verified descriptor. A
+    // dictation admitted meanwhile abandons this prewarm and hashes the model
+    // itself, so stop at the next chunk rather than hash it twice (BUS-125).
+    match lease.verify_while(|| !ticket.abandoned()) {
+        Ok(true) => {}
+        Ok(false) => return "abandoned",
+        Err(_) => return "unavailable",
     }
     if ticket.start(lease, low_power_mode) {
         "started"

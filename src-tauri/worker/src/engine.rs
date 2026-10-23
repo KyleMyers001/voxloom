@@ -86,9 +86,9 @@ impl Generate for Engine {
         let tokens = chat_tokens(model, prompt);
         let sizing = sizing::size(tokens.len(), model.n_ctx_train())?;
         let threads = std::thread::available_parallelism().map_or(4, |n| n.get() as i32);
-        let mut ctx = model
-            .new_context(&self.backend, context_params(&sizing, threads))
-            .map_err(|_| WorkerError::runtime("could not create a model context"))?;
+        let mut ctx = open_context(&sizing, threads, |params| {
+            model.new_context(&self.backend, params)
+        })?;
 
         let mut batch = LlamaBatch::new(BATCH, 1);
         let mut position = 0_i32;
@@ -145,6 +145,18 @@ fn context_params(sizing: &Sizing, threads: i32) -> LlamaContextParams {
         .with_n_threads_batch(threads)
 }
 
+/// The one place a context is made: `new_context` gets `context_params` for
+/// `sizing`, whichever path (one-shot, prewarm warm-up, handed-over request)
+/// is generating. A seam so a test can see the params (BUS-126, QA E5/E6).
+fn open_context<C, E>(
+    sizing: &Sizing,
+    threads: i32,
+    new_context: impl FnOnce(LlamaContextParams) -> Result<C, E>,
+) -> Result<C, WorkerError> {
+    new_context(context_params(sizing, threads))
+        .map_err(|_| WorkerError::runtime("could not create a model context"))
+}
+
 /// Template parts parse special tokens. The prompt does not, which keeps
 /// CONTROL tokens such as "<|im_end|>" as plain text; USER_DEFINED ones
 /// (`<think>`, `<tool_call>` …) are split apart by `user_tokens` first.
@@ -174,3 +186,7 @@ mod tests {
         assert_eq!(params.n_threads_batch(), 3);
     }
 }
+
+#[cfg(test)]
+#[path = "engine_tests.rs"]
+mod call_site_tests;

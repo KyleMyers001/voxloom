@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager};
 
 use super::artifact::{
-    copy_private, open_regular, validate as validate_artifact, validate_file, ArtifactSpec,
+    copy_private, open_regular, validate as validate_artifact, validate_file_while, ArtifactSpec,
 };
 
 mod status_cache;
@@ -60,8 +60,15 @@ impl ModelLease {
 
     /// Hash the already reserved descriptor, without holding the store lock.
     pub fn verify(&mut self) -> Result<(), String> {
-        match validate_file(&mut self.file, self.artifact) {
-            Ok(()) => Ok(()),
+        self.verify_while(|| true).map(drop)
+    }
+
+    /// `verify`, stopped between chunks of the hash once `keep_going` says
+    /// no: Ok(true) if verified, Ok(false) if stopped. A stopped hash found
+    /// nothing wrong, so the status cache is kept.
+    pub fn verify_while(&mut self, keep_going: impl FnMut() -> bool) -> Result<bool, String> {
+        match validate_file_while(&mut self.file, self.artifact, keep_going) {
+            Ok(verified) => Ok(verified),
             Err(error) => {
                 // Status may still trust a stale fingerprint (e.g. in-place
                 // rewrite that restored mtime before ctime was keyed). Drop it.
@@ -288,3 +295,5 @@ impl CleanupModelStore {
 mod status_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod verify_tests;
