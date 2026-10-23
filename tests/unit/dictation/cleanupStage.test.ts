@@ -12,6 +12,7 @@ import {
   type CleanupStageInput,
 } from '../../../src/services/dictation/cleanupStage';
 import { signalFor } from '../../../src/services/dictation/signal';
+import { CLEANUP_MAX_WORDS } from '../../../src/services/cleanup/budget';
 
 const attempt = { modelDigest: CLEANUP_MODEL_SHA256, modelId: CLEANUP_MODEL_ID };
 const snapshot: CleanupSnapshot = {
@@ -215,5 +216,110 @@ describe('cleanTranscript', () => {
     expect(settled).toBe('pending');
     await vi.advanceTimersByTimeAsync(2);
     expect(settled).toMatchObject({ finalText: 'um send to voxlom', reason: 'cancelled', status: 'fallback' });
+  });
+  describe('cancellation before the word-count fast path (BUS-122)', () => {
+    const longText = Array.from({ length: CLEANUP_MAX_WORDS + 1 }, () => 'word').join(' ');
+
+    it('a user cancel with a too-long transcript delivers nothing, as the normal path does', async () => {
+      const controller = new AbortController();
+      controller.abort();
+      const live = engine();
+      await expect(cleanTranscript(input({
+        engine: live, rawText: longText, signal: signalFor(controller), userCancelled: () => true,
+      }))).resolves.toEqual({ reason: 'cancelled', status: 'cancelled' });
+      expect(live.acquire).not.toHaveBeenCalled();
+      expect(live.run).not.toHaveBeenCalled();
+    });
+
+    it('a superseded too-long run (aborted, not user-cancelled) keeps the raw text as cancelled', async () => {
+      const controller = new AbortController();
+      controller.abort();
+      const live = engine();
+      await expect(cleanTranscript(input({
+        engine: live, rawText: longText, signal: signalFor(controller),
+      }))).resolves.toEqual({ finalText: longText, reason: 'cancelled', status: 'fallback' });
+      expect(live.acquire).not.toHaveBeenCalled();
+      expect(live.run).not.toHaveBeenCalled();
+    });
+
+    it('a user cancel flagged before the signal aborts still delivers nothing', async () => {
+      await expect(cleanTranscript(input({ rawText: longText, userCancelled: () => true })))
+        .resolves.toEqual({ reason: 'cancelled', status: 'cancelled' });
+    });
+
+    it('a too-long transcript that is not cancelled still falls back to context-overflow', async () => {
+      const live = engine();
+      await expect(cleanTranscript(input({ engine: live, rawText: longText }))).resolves.toEqual({
+        finalText: longText, reason: 'context-overflow', status: 'fallback',
+      });
+      expect(live.acquire).not.toHaveBeenCalled();
+      expect(live.run).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('monotonic cleanup deadline (BUS-123)', () => {
+    /** A lease that settles when the test says so, with the clock it runs on. */
+    function pendingLease() {
+      let settle: () => void = () => {};
+      const acquire = vi.fn(() => new Promise<void>((resolve) => { settle = resolve; }));
+      return { acquire, settle: () => settle() };
+    }
+
+    it.each([
+      ['steps back', -60_000],
+      ['steps forward', 60_000],
+    ])('a wall clock that %s during the lease does not change the time left for the run', async (_label, step) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(1_700_000_000_000);
+      const lease = pendingLease();
+      const live = engine({ acquire: lease.acquire });
+      const pending = cleanTranscript(input({ engine: live, timeoutMs: 5_000 }));
+      await vi.advanceTimersByTimeAsync(1_000);
+      vi.setSystemTime(Date.now() + step);
+      lease.settle();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(live.run).toHaveBeenCalledOnce();
+      // 1 s of the lease is gone, whatever the wall clock says.
+      expect(vi.mocked(live.run).mock.calls[0]?.[0].timeLeftMs).toBe(4_000);
+      await expect(pending).resolves.toMatchObject({ status: 'cleaned' });
+    });
+
+    it('counts the run budget on the injected monotonic clock', async () => {
+      let tick = 5_000;
+      const lease = pendingLease();
+      const live = engine({ acquire: lease.acquire });
+      const pending = cleanTranscript(input({ engine: live, now: () => tick, timeoutMs: 10_000 }));
+      await vi.waitFor(() => expect(lease.acquire).toHaveBeenCalled());
+      tick += 2_500;
+      lease.settle();
+      await expect(pending).resolves.toMatchObject({ status: 'cleaned' });
+      expect(vi.mocked(live.run).mock.calls[0]?.[0].timeLeftMs).toBe(7_500);
+    });
+
+    it('rounds a fractional time left down to a whole number for native', async () => {
+      let tick = 100.25;
+      const lease = pendingLease();
+      const live = engine({ acquire: lease.acquire });
+      const pending = cleanTranscript(input({ engine: live, now: () => tick, timeoutMs: 10_000 }));
+      await vi.waitFor(() => expect(lease.acquire).toHaveBeenCalled());
+      tick += 5_500.5;
+      lease.settle();
+      await pending;
+      const left = vi.mocked(live.run).mock.calls[0]?.[0].timeLeftMs;
+      expect(left).toBe(4_499);
+      expect(Number.isInteger(left)).toBe(true);
+    });
+
+    it('leaves at least 1 ms when the lease used the whole budget', async () => {
+      let tick = 0;
+      const lease = pendingLease();
+      const live = engine({ acquire: lease.acquire });
+      const pending = cleanTranscript(input({ engine: live, now: () => tick, timeoutMs: 1_000 }));
+      await vi.waitFor(() => expect(lease.acquire).toHaveBeenCalled());
+      tick += 5_000;
+      lease.settle();
+      await pending;
+      expect(vi.mocked(live.run).mock.calls[0]?.[0].timeLeftMs).toBe(1);
+    });
   });
 });

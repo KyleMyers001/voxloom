@@ -28,6 +28,8 @@ export interface CleanupStageInput {
   /** Aborted by the user's cancel or by a newer dictation superseding this one. */
   signal: ProcessingSignal;
   snapshot: CleanupSnapshot;
+  /** Monotonic milliseconds for the shared deadline (tests inject one). */
+  now?: () => number;
   timeoutMs?: number;
   /** True only for the user's cancel; a superseded run falls back to raw. */
   userCancelled: () => boolean;
@@ -77,14 +79,31 @@ function fallback(
   return { ...(attempt ? { attempt } : {}), finalText: rawText, reason, status: 'fallback' };
 }
 
+/**
+ * The outcome of a cancel that is already in: nothing to deliver after the
+ * user's own cancel, the raw text when only a newer dictation superseded this
+ * one (the same as a cancel that lands in the lease or the run).
+ */
+function cancelledBeforeStart(
+  input: CleanupStageInput,
+): CleanupOutcome | undefined {
+  if (input.userCancelled()) return { reason: 'cancelled', status: 'cancelled' };
+  return input.signal.aborted ? fallback(input.rawText, 'cancelled') : undefined;
+}
+
 export async function cleanTranscript(input: CleanupStageInput): Promise<CleanupOutcome> {
   const { engine, rawText, requestId, signal, snapshot } = input;
   if (!snapshot.enabled || !rawText.trim()) return { finalText: rawText, status: 'skipped' };
   // Too long for the budget: raw at once, with no lease, hash or worker. The
-  // history row already says "too long to clean up" for this reason.
-  if (tooLongToClean(rawText)) return fallback(rawText, 'context-overflow');
+  // history row already says "too long to clean up" for this reason. A
+  // cancel that is already in comes first (BUS-122).
+  if (tooLongToClean(rawText)) {
+    return cancelledBeforeStart(input) ?? fallback(rawText, 'context-overflow');
+  }
   const budget = input.timeoutMs ?? CLEANUP_STAGE_TIMEOUT_MS;
-  const deadline = Date.now() + budget;
+  // A monotonic clock: a wall-clock step must not move the deadline (BUS-123).
+  const now = input.now ?? (() => performance.now());
+  const deadline = now() + budget;
   try {
     const admissionError = await acquireLease(input, budget);
     const outcome = await runCleanup({
@@ -94,7 +113,8 @@ export async function cleanTranscript(input: CleanupStageInput): Promise<Cleanup
       requestId,
       signal,
       snapshot,
-      timeoutMs: Math.max(1, deadline - Date.now()),
+      // Whole milliseconds: native reads this as a u64 and rejects fractions.
+      timeoutMs: Math.max(1, Math.floor(deadline - now())),
     });
     if (outcome.status !== 'cancelled' || input.userCancelled()) return outcome;
     // Superseded, or the native side retired the request: keep the dictation.
