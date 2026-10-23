@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
-use super::{prewarm, Trigger};
+use super::{disarm, prewarm, Trigger};
 use crate::cleanup::artifact::ArtifactSpec;
 use crate::cleanup::model_store::{CleanupModelStore, MODEL_ID};
 use crate::cleanup::supervisor::WorkerSupervisor;
@@ -145,6 +145,34 @@ fn a_prewarm_abandoned_before_its_hash_never_hashes_or_spawns() {
     );
     assert!(!log.exists(), "an abandoned prewarm never spawns");
     assert!(supervisor.reserve_prewarm().is_some(), "the slot is free");
+}
+
+#[test]
+fn a_disarm_during_the_hash_is_reported_and_the_prewarm_never_spawns() {
+    let (store, spec, supervisor, log) = fixture("disarm-hash");
+    // Cleanup is switched off while the model is being hashed.
+    let lease = || {
+        assert_eq!(disarm(&supervisor), "stopped");
+        store.lease_artifact(MODEL_ID, spec)
+    };
+    assert_eq!(
+        prewarm(&supervisor, Trigger::SwitchOn, || false, lease),
+        "abandoned"
+    );
+    assert!(!log.exists(), "a disarmed prewarm never spawns");
+    assert!(supervisor.reserve_prewarm().is_some(), "the slot is free");
+}
+
+#[test]
+fn a_disarm_with_nothing_armed_says_so() {
+    let (store, spec, supervisor, log) = fixture("disarm-idle");
+    assert_eq!(disarm(&supervisor), "nothing");
+    let lease = || store.lease_artifact(MODEL_ID, spec);
+    assert_eq!(
+        prewarm(&supervisor, Trigger::SwitchOn, || false, lease),
+        "started"
+    );
+    assert!(spawned(&log));
 }
 
 #[test]

@@ -185,6 +185,7 @@ pub fn run() {
             cleanup::commands::cleanup_release,
             cleanup::commands::cleanup_run,
             cleanup::prewarm::cleanup_prewarm,
+            cleanup::prewarm::cleanup_prewarm_disarm,
             cleanup::commands::cleanup_session_open,
             cleanup::commands::cleanup_session_dispose,
             delivery::delivery_insert_text,

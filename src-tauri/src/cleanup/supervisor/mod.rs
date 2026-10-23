@@ -9,11 +9,13 @@ use std::time::Duration;
 
 use super::worker_process::ProcessHandle;
 
+mod disarm;
 mod handoff;
 mod prewarm;
 mod reservation;
 mod response;
 
+pub use disarm::Disarmed;
 pub use prewarm::LowPowerMode;
 pub use reservation::WorkerReservation;
 
@@ -35,6 +37,8 @@ struct SupervisorState {
     active: Option<ActiveWorker>,
     cancelled: VecDeque<String>,
     prewarm: Option<prewarm::Slot>,
+    /// The prewarm now armed was disarmed (disarm.rs); cleared with it.
+    prewarm_disarmed: bool,
 }
 
 #[derive(Default)]
