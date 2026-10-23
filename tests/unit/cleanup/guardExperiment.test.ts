@@ -60,6 +60,8 @@ describe('guard experiment fixtures', () => {
       expect(rejectedNow).toEqual(ids);
     });
 
+    // These counts come from the pinned lists above, so this only checks the
+    // report's A2 column against them; the four rejected-set tests are the pins.
     it('accepts 39, 31, 43 and 44 of 50 (the A2 column of the report)', () => {
       const counts = Object.keys(rejected).map((key) => 50 - rejected[key].length);
       expect(counts).toEqual([39, 31, 43, 44]);

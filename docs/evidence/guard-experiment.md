@@ -15,15 +15,15 @@ product behaviour.
 
 Build D defaults: Qwen3-0.6B Q4_K_M (the app pin) and Qwen3-1.7B Q4_K_M, Formal
 style, greedy decoding, the real `buildCleanupPrompt` and the real worker binary
-built from build-d `2b61e3b`. It ran on Linux CPU (8 threads), not Metal, with no
+built from the `build-d` branch at `2b61e3b` (a scratch build branch, not on main). It ran on Linux CPU (8 threads), not Metal, with no
 `timeLeftMs` cap, so a Metal token difference is possible. The "loose" prompt
 replaced the line "Use canonicalSpellings only to correct the spelling of
 existing words." with permission to fix sound-alike mishearings.
 
-Corpus: 50 items. 3 dictated sentences (the jargon sentence and the 60-word dictation
-also in Casual), 12 ASR mishearings, 14 dictionary terms, 5 negation, 5 number,
-3 pronoun and 6 control items. The corpus is synthetic apart from the 3 dictated
-sentences, and short, so measured acceptance probably overstates real long
+Corpus: 50 items: 5 dictated, 12 mishearing, 14 dictionary, 5 negation, 5 number,
+3 pronoun and 6 control. The 5 dictated items are 3 distinct sentences (jargon,
+60-word and smirk), with the jargon and 60-word ones repeated as Casual variants.
+The corpus is synthetic apart from those dictated sentences, and short, so measured acceptance probably overstates real long
 dictation (the "Okay" effect).
 
 ## Baseline: the guard on Build D (variant A)
@@ -33,7 +33,7 @@ dictation (the "Okay" effect).
 | 0.6B, app prompt | 33 (66%) | content 10, marks 5, capitalization 1, protected-values 1 |
 | 1.7B, app prompt | 41 (82%) | content 6, capitalization 2, protected-values 1 |
 
-The two Mac rejections had two reproducible causes, not a too-strict guard:
+The two rejections seen on Kyle's Mac build had two reproducible causes, not a too-strict guard:
 
 1. **0.6B wraps the whole reply in quotes** (it copies the JSON string quotes from
    the prompt payload). 5 of 50 outputs on the app prompt (4 quote-wrapped, 1 JSON
@@ -42,7 +42,7 @@ The two Mac rejections had two reproducible causes, not a too-strict guard:
    um/uh/erm/er/hmm, so it counted the loss as content. Both models dropped the
    final `Okay.` of the 60-word dictation.
 
-A third, a real guard bug: `protectedValues()` treated any lowercase-to-uppercase
+A third cause, a real guard bug found while replaying the corpus: `protectedValues()` treated any lowercase-to-uppercase
 word as a technical value that must appear in both texts, so an exact camelCase
 dictionary spelling (StupidJargon, WhisperKit) was rejected before the join rule
 ran. Every mixed-case dictionary term was impossible to apply.
@@ -104,8 +104,8 @@ Kubernetes. The current repair needs 5 or more letters and exactly one edit.
 
 - vitest: base 130 files, 1652/1652; head 131 files, 1708/1708 (+56). Typecheck
   and lint exit 0 at both.
-- 108 edge-case probes against the real `validateCleanupOutput` at head and base:
-  every result matched expectations. Regressions (26 probes: negation, pronoun,
+- 107 recorded edge-case probes against the real `validateCleanupOutput` at head and base:
+  every result matched expectations. Regressions (25 negative probes plus 3 positive controls: negation, pronoun,
   number, capitalization, symbols, marks, coverage, protected values, reasoning
   markers, embedded quotes, dictionary over-repair) were identical at base and head.
 - Replay of the saved raw outputs: `{ 0.6b: [50, 33, 39], 1.7b: [50, 41, 43] }`
