@@ -67,6 +67,13 @@ pub(super) fn may_rearm(state: &mut SupervisorState) -> bool {
     true
 }
 
+/// Under the lock, when the prewarm's ticket drops: the slot is free, and a
+/// disarm ends with the prewarm it found.
+pub(super) fn on_ticket_drop(state: &mut SupervisorState) {
+    state.prewarm = None;
+    state.prewarm_disarmed = false;
+}
+
 /// Under the lock, when a dictation's reservation ends (after
 /// `handoff::on_release` dropped its claim): a disarmed load that the
 /// dictation claimed but never used, or finished with, has nothing left to

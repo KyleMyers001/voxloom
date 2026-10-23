@@ -200,10 +200,7 @@ impl PrewarmTicket {
 
 impl Drop for PrewarmTicket {
     fn drop(&mut self) {
-        let mut state = self.shared.state.lock().unwrap();
-        state.prewarm = None;
-        state.prewarm_disarmed = false;
-        drop(state);
+        super::disarm::on_ticket_drop(&mut self.shared.state.lock().unwrap());
         self.shared.settled.notify_all();
     }
 }

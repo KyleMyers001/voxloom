@@ -8,6 +8,10 @@ use tauri::test::{get_ipc_response, mock_builder, MockRuntime, INVOKE_KEY};
 use tauri::webview::InvokeRequest;
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 
+/// The overlay's real window label (capabilities/overlay.json `windows`), so
+/// the deny checks below hit the overlay capability, not an unknown window.
+const OVERLAY: &str = "dictation-overlay";
+
 #[tauri::command]
 fn store_backup(store: String) -> Result<Option<String>, String> {
     Ok(Some(format!("stub-{store}")))
@@ -87,7 +91,7 @@ fn cleanup_models_are_available_in_settings_but_worker_execution_is_main_only() 
         } else {
             assert_eq!(settings, Ok(()));
         }
-        assert!(invoke_command(&app, "overlay", "overlay.html", command)
+        assert!(invoke_command(&app, OVERLAY, "overlay.html", command)
             .unwrap_err()
             .contains("not allowed"));
     }
@@ -102,6 +106,6 @@ fn store_backup_is_granted_to_main_only() {
     assert_eq!(invoke_from(&app, "main", "index.html"), Ok(()));
     let settings = invoke_from(&app, "settings", "settings.html").unwrap_err();
     assert!(settings.contains("not allowed"), "{settings}");
-    let overlay = invoke_from(&app, "overlay", "overlay.html").unwrap_err();
+    let overlay = invoke_from(&app, OVERLAY, "overlay.html").unwrap_err();
     assert!(overlay.contains("not allowed"), "{overlay}");
 }

@@ -218,4 +218,58 @@ describe('switching cleanup off disarms the prewarm (BUS-121)', () => {
     expect(order).toEqual(['disarmed', 'prewarm']);
     expect(prewarm).toHaveBeenCalledExactlyOnceWith('switch-on');
   });
+
+  it('does not start a switch-on prewarm when cleanup is switched off again before it starts', async () => {
+    const { calls, disarm, finish, prewarm } = deferredDisarms();
+    const hook = renderHook((props: { active: boolean }) => useCleanupPrewarm({ ...props, disarm, prewarm, ready: true }), {
+      initialProps: { active: true },
+    });
+    hook.rerender({ active: false });
+    hook.rerender({ active: true });
+    hook.rerender({ active: false });
+    finish(0);
+    finish(1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toEqual(['disarm', 'disarm']);
+    hook.rerender({ active: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toEqual(['disarm', 'disarm', 'prewarm']);
+  });
+
+  it('keeps a switch-on waiting for the latest disarm when an earlier one finishes first', async () => {
+    const { calls, disarm, finish, prewarm } = deferredDisarms();
+    const hook = renderHook((props: { active: boolean }) => useCleanupPrewarm({ ...props, disarm, prewarm, ready: true }), {
+      initialProps: { active: true },
+    });
+    hook.rerender({ active: false });
+    hook.rerender({ active: true });
+    hook.rerender({ active: false });
+    finish(0);
+    await vi.advanceTimersByTimeAsync(0);
+    hook.rerender({ active: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toEqual(['disarm', 'disarm']);
+    finish(1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toEqual(['disarm', 'disarm', 'prewarm']);
+  });
 });
+
+/** Disarms that finish only when the test says so, in any order. */
+function deferredDisarms() {
+  const calls: string[] = [];
+  const pending: (() => void)[] = [];
+  const disarm = vi.fn(
+    () =>
+      new Promise<string>((resolve) => {
+        calls.push('disarm');
+        pending.push(() => resolve('stopped'));
+      }),
+  );
+  const prewarm = vi.fn(() => {
+    calls.push('prewarm');
+    return Promise.resolve('started');
+  });
+  const finish = (index: number) => pending[index]?.();
+  return { calls, disarm, finish, prewarm };
+}
