@@ -73,15 +73,17 @@ impl WorkerReservation {
         }
         self.started = true;
         let request_id = self.request_id.clone();
-        let frame = encode_frame(&WorkerRequest {
+        let mut request = WorkerRequest {
             model_path: "/dev/fd/3".into(),
             prompt,
             request_id: request_id.clone(),
             // Counted after the re-hash, just before the spawn.
             time_left_ms: super::super::budget::time_left_ms(self.deadline, Instant::now()),
             prewarm: false,
-        })
-        .map_err(|_| SupervisorError {
+        };
+        // Serialized once up front so an oversize request fails before any
+        // child is spawned.
+        let mut frame = encode_frame(&request).map_err(|_| SupervisorError {
             code: "context-overflow",
             message: "cleanup serialized request exceeds 128 KiB".into(),
         })?;
@@ -99,6 +101,14 @@ impl WorkerReservation {
             });
         }
         let process = spawn().map_err(SupervisorError::runtime)?;
+        // The worker turns its time left into a deadline from its own start,
+        // so what the spawn took must come out of it (BUS-124). The new value
+        // is never larger, so it fits wherever the first one did; if it ever
+        // failed to encode, the first frame still goes out.
+        request.time_left_ms = super::super::budget::time_left_ms(self.deadline, Instant::now());
+        if let Ok(fresh) = encode_frame(&request) {
+            frame = fresh;
+        }
         let handle = process.handle.clone();
         self.exchange(&request_id, handle, on_started, |deadline| {
             process.exchange(frame, deadline)
