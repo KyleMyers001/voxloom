@@ -126,6 +126,37 @@ fn a_running_dictation_or_missing_worker_skips_it() {
 }
 
 #[test]
+fn a_prewarm_abandoned_before_its_hash_never_hashes_or_spawns() {
+    let (store, _spec, supervisor, log) = fixture("abandoned");
+    // A dictation is admitted while the prewarm is being set up: the
+    // reservation abandons it. The model's digest is wrong, so a hash that
+    // ran would say "unavailable"; one that never ran says "abandoned".
+    let wrong = ArtifactSpec {
+        sha256: "0".repeat(64).leak(),
+        size: 8,
+    };
+    let lease = || {
+        drop(supervisor.reserve("dictation".into()).unwrap());
+        store.lease_artifact(MODEL_ID, wrong)
+    };
+    assert_eq!(
+        prewarm(&supervisor, Trigger::SwitchOn, || false, lease),
+        "abandoned"
+    );
+    assert!(!log.exists(), "an abandoned prewarm never spawns");
+    assert!(supervisor.reserve_prewarm().is_some(), "the slot is free");
+}
+
+#[test]
+fn the_ticket_knows_when_a_dictation_took_its_turn() {
+    let (_store, _spec, supervisor, _log) = fixture("ticket");
+    let ticket = supervisor.reserve_prewarm().unwrap();
+    assert!(!ticket.abandoned());
+    drop(supervisor.reserve("dictation".into()).unwrap());
+    assert!(ticket.abandoned(), "stays abandoned after the run ends");
+}
+
+#[test]
 fn only_the_two_triggers_are_accepted() {
     assert_eq!(Trigger::parse("launch").unwrap(), Trigger::Launch);
     assert_eq!(Trigger::parse("switch-on").unwrap(), Trigger::SwitchOn);
