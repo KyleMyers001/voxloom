@@ -182,6 +182,11 @@ impl Drop for WorkerReservation {
         let mut state = self.shared.state.lock().unwrap();
         state.active = None;
         super::handoff::on_release(&mut state.prewarm);
+        let disarmed = super::disarm::on_release(&mut state);
+        drop(state);
         self.shared.settled.notify_all();
+        if let Some(process) = disarmed {
+            process.cancel();
+        }
     }
 }

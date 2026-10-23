@@ -19,3 +19,12 @@ export type PrewarmTrigger = 'launch' | 'switch-on';
 export type Prewarm = (trigger: PrewarmTrigger) => Promise<unknown>;
 
 export const prewarmCleanup: Prewarm = (trigger) => invoke('cleanup_prewarm', { trigger });
+
+export type DisarmPrewarm = () => Promise<unknown>;
+
+/**
+ * Cleanup was switched off: end a prewarm that is hashing or loading, and
+ * stop one that was cut off from restarting. Never touches a dictation
+ * (src-tauri/src/cleanup/prewarm.rs).
+ */
+export const disarmCleanupPrewarm: DisarmPrewarm = () => invoke('cleanup_prewarm_disarm');

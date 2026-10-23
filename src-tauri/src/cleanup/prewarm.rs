@@ -11,7 +11,7 @@ use tauri::{Runtime, State, Webview};
 
 use super::auth::require_main;
 use super::model_store::{ModelLease, MODEL_ID};
-use super::supervisor::{LowPowerMode, WorkerSupervisor};
+use super::supervisor::{Disarmed, LowPowerMode, WorkerSupervisor};
 use super::{CleanupCommandError, CleanupState};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,6 +47,33 @@ pub async fn cleanup_prewarm<R: Runtime>(
     })
     .await
     .map_err(|error| CleanupCommandError::runtime(format!("cleanup prewarm task failed: {error}")))
+}
+
+/// Cleanup was switched off (BUS-121): end the prewarm, whichever window it
+/// is in, and keep it from restarting. A dictation is never cancelled. The
+/// native side can't see the setting, so the renderer says so. Returns what
+/// it found ("nothing", "stopped", "kept": a dictation is using the load);
+/// the renderer ignores it.
+#[tauri::command]
+pub async fn cleanup_prewarm_disarm<R: Runtime>(
+    webview: Webview<R>,
+    state: State<'_, CleanupState>,
+) -> Result<&'static str, CleanupCommandError> {
+    require_main(&webview)?;
+    let supervisor = Arc::clone(&state.supervisor);
+    tauri::async_runtime::spawn_blocking(move || disarm(&supervisor))
+        .await
+        .map_err(|error| {
+            CleanupCommandError::runtime(format!("cleanup disarm task failed: {error}"))
+        })
+}
+
+pub(super) fn disarm(supervisor: &WorkerSupervisor) -> &'static str {
+    match supervisor.disarm_prewarm() {
+        Disarmed::Nothing => "nothing",
+        Disarmed::Stopped => "stopped",
+        Disarmed::Kept => "kept",
+    }
 }
 
 /// What happened: "started", or why it was skipped ("abandoned": a dictation

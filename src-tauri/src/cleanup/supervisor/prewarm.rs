@@ -14,7 +14,8 @@
 //!   killed and reaped, and a dictation spawns its own, as before;
 //! - if a dictation's budget runs out or the user cancels it, its handed-over
 //!   load dies with it; the prewarm then starts over (re-arms) once the run
-//!   slot is free, unless Low Power Mode is on.
+//!   slot is free, unless Low Power Mode is on;
+//! - switching cleanup off disarms all of this (disarm.rs).
 
 use std::borrow::Borrow;
 use std::fs::File;
@@ -131,8 +132,7 @@ impl PrewarmTicket {
         std::thread::spawn(move || {
             let cut_off = self.watch(stdout);
             process.finish();
-            if cut_off && !low_power_mode() {
-                self.rearm();
+            if cut_off && !low_power_mode() && self.rearm() {
                 self.start(model, low_power_mode);
             }
         });
@@ -187,19 +187,20 @@ impl PrewarmTicket {
     }
 
     /// Reserve the slot again once the cut-off dictation's run slot is free,
-    /// so the restarted load is never alongside a dictation's own.
-    fn rearm(&self) {
+    /// so the restarted load is never alongside a dictation's own. False if
+    /// cleanup was switched off meanwhile (disarm.rs).
+    fn rearm(&self) -> bool {
         let mut state = self.shared.state.lock().unwrap();
         while state.active.is_some() {
             state = self.shared.settled.wait(state).unwrap();
         }
-        state.prewarm = Some(Slot::Reserved { abandoned: false });
+        super::disarm::may_rearm(&mut state)
     }
 }
 
 impl Drop for PrewarmTicket {
     fn drop(&mut self) {
-        self.shared.state.lock().unwrap().prewarm = None;
+        super::disarm::on_ticket_drop(&mut self.shared.state.lock().unwrap());
         self.shared.settled.notify_all();
     }
 }

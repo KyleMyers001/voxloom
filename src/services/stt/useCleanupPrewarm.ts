@@ -2,11 +2,18 @@
 /// is switched on, and once after launch if it was already on, a little
 /// later (PREWARM_LAUNCH_DELAY_MS). Settings that hydrate at boot are the
 /// launch state, not a switch-on. Switching off cancels a pending launch
-/// prewarm. The plan lives in a ref, so StrictMode's effect replay neither
-/// loses nor repeats a prewarm.
+/// prewarm and disarms one that is running (BUS-121). A switch-on right after
+/// waits for that disarm, so it can't end the new prewarm, and is dropped if
+/// cleanup is switched off again meanwhile. The plan lives in a ref, so
+/// StrictMode's effect replay neither loses nor repeats a prewarm.
 
 import { useEffect, useRef } from 'react';
-import { PREWARM_LAUNCH_DELAY_MS, type Prewarm, type PrewarmTrigger } from '../cleanup/prewarm';
+import {
+  PREWARM_LAUNCH_DELAY_MS,
+  type DisarmPrewarm,
+  type Prewarm,
+  type PrewarmTrigger,
+} from '../cleanup/prewarm';
 
 export interface CleanupPrewarmOptions {
   /** `isCleanupActive(settings)`. */
@@ -15,6 +22,8 @@ export interface CleanupPrewarmOptions {
   ready: boolean;
   /** Native only; absent in the browser build. Must be stable. */
   prewarm?: Prewarm;
+  /** Native only, like `prewarm`. Must be stable. */
+  disarm?: DisarmPrewarm;
 }
 
 interface Plan {
@@ -23,14 +32,35 @@ interface Plan {
   launchPending: boolean;
 }
 
-export function useCleanupPrewarm({ active, ready, prewarm }: CleanupPrewarmOptions): void {
+export function useCleanupPrewarm({ active, disarm, ready, prewarm }: CleanupPrewarmOptions): void {
   const plan = useRef<Plan>({ launchPending: false, seen: null });
+  /** The disarm in flight, so the next prewarm starts after it. */
+  const disarming = useRef<Promise<void> | null>(null);
+  /** Counts switch-offs; a prewarm queued behind a disarm checks it. */
+  const switchOffs = useRef(0);
   useEffect(() => {
     if (!ready || !prewarm) return undefined;
     const fire = (trigger: PrewarmTrigger) => {
-      void prewarm(trigger).catch(() => {
+      const pending = disarming.current;
+      const queuedAt = switchOffs.current;
+      const started = pending
+        ? pending.then(() => (switchOffs.current === queuedAt ? prewarm(trigger) : undefined))
+        : prewarm(trigger);
+      void started.catch(() => {
         // Best effort: the first dictation simply loads the model itself.
       });
+    };
+    const stop = () => {
+      switchOffs.current += 1;
+      if (!disarm) return;
+      // Best effort: a prewarm that outlives the switch ends at its own
+      // warm-up reply or timeout, and a dictation never waits on it.
+      const done: Promise<void> = disarm()
+        .then(() => undefined, () => undefined)
+        .finally(() => {
+          if (disarming.current === done) disarming.current = null;
+        });
+      disarming.current = done;
     };
     const current = plan.current;
     if (current.seen === null) {
@@ -38,6 +68,7 @@ export function useCleanupPrewarm({ active, ready, prewarm }: CleanupPrewarmOpti
     } else if (active !== current.seen) {
       current.launchPending = false;
       if (active) fire('switch-on');
+      else stop();
     }
     current.seen = active;
     if (!current.launchPending) return undefined;
@@ -46,5 +77,5 @@ export function useCleanupPrewarm({ active, ready, prewarm }: CleanupPrewarmOpti
       fire('launch');
     }, PREWARM_LAUNCH_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [active, prewarm, ready]);
+  }, [active, disarm, prewarm, ready]);
 }

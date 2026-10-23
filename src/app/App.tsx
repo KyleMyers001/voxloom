@@ -9,7 +9,7 @@ import { Onboarding } from '../features/onboarding/Onboarding';
 import { Settings } from '../features/settings/Settings';
 import { isTauriEnv } from '../services/capture/captureService';
 import { listenOnboardingOpen, openSettingsWindow, subscribe } from '../services/settingsWindow';
-import { prewarmCleanup } from '../services/cleanup/prewarm';
+import { disarmCleanupPrewarm, prewarmCleanup } from '../services/cleanup/prewarm';
 import { useCleanupPrewarm } from '../services/stt/useCleanupPrewarm';
 import { useDogfoodCapture } from '../services/stt/useDogfoodCapture';
 import { ResetSessionDialog, ShortcutsDialog } from './AppDialogs';
@@ -51,9 +51,11 @@ export function App() {
     style: state.settings.style,
   });
 
-  // Native: warm the cleanup model at launch and on switch-on (BUS-16 3c-2c).
+  // Native: warm the cleanup model at launch and on switch-on (BUS-16 3c-2c),
+  // and disarm that prewarm on switch-off (BUS-121).
   useCleanupPrewarm({
     active: isCleanupActive(state.settings),
+    disarm: isTauriEnv() ? disarmCleanupPrewarm : undefined,
     prewarm: isTauriEnv() ? prewarmCleanup : undefined,
     ready: bootReady,
   });

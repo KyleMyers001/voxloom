@@ -78,6 +78,7 @@ write({{"error": None, "errorCode": None, "requestId": request["requestId"],
 }
 
 mod budget;
+mod disarm;
 mod lifecycle;
 mod prewarm;
 mod prewarm_claim;

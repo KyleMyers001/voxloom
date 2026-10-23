@@ -93,11 +93,16 @@ fn settling_without_a_claim_closes_the_handoff() {
     held.finish();
 }
 
-/// A dictation handed over to a 1 s load and cancelled at once.
-fn cancel_a_handed_over_load(
+/// A dictation handed over to a 1 s load, still waiting on it.
+pub(super) fn hand_over_a_load(
     name: &str,
     low_power_mode: LowPowerMode,
-) -> (Arc<WorkerSupervisor>, PathBuf) {
+) -> (
+    Arc<WorkerSupervisor>,
+    PathBuf,
+    String,
+    thread::JoinHandle<Result<String, SupervisorError>>,
+) {
     let (path, log) = prewarm_worker(name, 1.0, 5.0);
     let supervisor = Arc::new(WorkerSupervisor::new(path));
     assert!(supervisor
@@ -114,6 +119,15 @@ fn cancel_a_handed_over_load(
             state.active.as_ref().is_some_and(|a| a.process.is_some())
         }) && wait_until(Duration::from_secs(5), || spawns(&log) == 1)
     );
+    (supervisor, log, id, run)
+}
+
+/// A dictation handed over to a 1 s load and cancelled at once.
+fn cancel_a_handed_over_load(
+    name: &str,
+    low_power_mode: LowPowerMode,
+) -> (Arc<WorkerSupervisor>, PathBuf) {
+    let (supervisor, log, id, run) = hand_over_a_load(name, low_power_mode);
     supervisor.cancel(&id);
     assert_eq!(run.join().unwrap().unwrap_err().code, "cancelled");
     (supervisor, log)
