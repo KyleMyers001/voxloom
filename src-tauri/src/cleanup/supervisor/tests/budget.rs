@@ -2,6 +2,7 @@
 //! spawned, and no field at all without a deadline.
 
 use super::*;
+use crate::cleanup::worker_process::WorkerProcess;
 use std::time::{Duration, Instant};
 
 /// Replies with the `timeLeftMs` it was sent (or "absent").
@@ -37,6 +38,56 @@ fn the_worker_is_sent_the_time_left_at_spawn() {
         .parse()
         .unwrap();
     assert!((3_000..=3_800).contains(&sent), "{sent}");
+}
+
+/// BUS-124: the spawn itself takes `delay` before the worker has its request.
+fn sent_time_left_after_slow_spawn(name: &str, deadline: Instant, delay: Duration) -> u64 {
+    let supervisor = WorkerSupervisor::new(echo_worker(name));
+    let model = model_file(name);
+    let worker = supervisor.worker_path.clone();
+    let mut reservation = supervisor.reserve("r".into()).unwrap();
+    reservation.set_deadline(Some(deadline));
+    reservation
+        .run_with_spawn("p".into(), || {
+            std::thread::sleep(delay);
+            WorkerProcess::spawn(&worker, &model)
+        })
+        .unwrap()
+        .parse()
+        .unwrap()
+}
+
+#[test]
+fn the_spawn_time_comes_out_of_the_time_left_sent_to_the_worker() {
+    let deadline = Instant::now() + Duration::from_millis(4_000);
+    let sent =
+        sent_time_left_after_slow_spawn("budget-slow-spawn", deadline, Duration::from_millis(700));
+    // Counted from the spawn's end (about 3.3 s), not from before it (4 s).
+    assert!((2_300..=3_350).contains(&sent), "{sent}");
+}
+
+#[test]
+fn a_spawn_that_outlasts_the_deadline_sends_zero() {
+    let deadline = Instant::now() + Duration::from_millis(100);
+    let sent =
+        sent_time_left_after_slow_spawn("budget-spawn-late", deadline, Duration::from_millis(300));
+    assert_eq!(sent, 0);
+}
+
+#[test]
+fn a_slow_spawn_with_no_deadline_still_sends_nothing() {
+    let supervisor = WorkerSupervisor::new(echo_worker("budget-slow-none"));
+    let model = model_file("budget-slow-none");
+    let worker = supervisor.worker_path.clone();
+    let sent = supervisor
+        .reserve("r".into())
+        .unwrap()
+        .run_with_spawn("p".into(), || {
+            std::thread::sleep(Duration::from_millis(50));
+            WorkerProcess::spawn(&worker, &model)
+        })
+        .unwrap();
+    assert_eq!(sent, "absent");
 }
 
 #[test]
