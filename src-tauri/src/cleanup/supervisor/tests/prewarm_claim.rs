@@ -1,17 +1,12 @@
 //! BUS-16 3c-2c C2: a dictation admitted while the prewarm loads or warms up
 //! claims its worker, even if the warm-up replies while the dictation still
-//! re-hashes; a warmed, unclaimed worker is never handed over; and a load cut
-//! off with a handed-over dictation is re-armed.
+//! re-hashes; and a warmed, unclaimed worker is never handed over.
 
-use super::prewarm::{all_reaped, dictation, idle, never, prewarm_worker, spawns};
+use super::prewarm::{all_reaped, dictation, idle, prewarm_worker, spawns, started};
 use super::*;
 use crate::cleanup::test_support::wait_until;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::time::Duration;
-
-fn always() -> bool {
-    true
-}
 
 #[test]
 fn a_dictation_re_hashing_when_the_warm_up_replies_still_reuses_the_load() {
@@ -21,7 +16,7 @@ fn a_dictation_re_hashing_when_the_warm_up_replies_still_reuses_the_load() {
     assert!(supervisor
         .reserve_prewarm()
         .unwrap()
-        .start(model_file("claim-rehash"), never));
+        .start(model_file("claim-rehash")));
     let mut reservation = supervisor.reserve("rehash".into()).unwrap();
     // The lease re-hash, between admission and the run.
     thread::sleep(Duration::from_millis(900));
@@ -42,7 +37,7 @@ fn a_claim_that_ends_unused_ends_the_worker() {
     assert!(supervisor
         .reserve_prewarm()
         .unwrap()
-        .start(model_file("claim-unused"), never));
+        .start(model_file("claim-unused")));
     let reservation = supervisor.reserve("unused".into()).unwrap();
     thread::sleep(Duration::from_millis(600));
     assert!(!idle(&supervisor), "kept for the claiming dictation");
@@ -55,7 +50,7 @@ fn a_claim_that_ends_unused_ends_the_worker() {
 /// A prewarm worker in the slot by hand, with no reader: the window between
 /// the warm-up's reply and the reap, held open. A handoff to it would never
 /// get a reply.
-fn held_slot(supervisor: &WorkerSupervisor, name: &str, warmed: bool) -> ProcessHandle {
+pub(super) fn held_slot(supervisor: &WorkerSupervisor, name: &str, warmed: bool) -> ProcessHandle {
     let (process, stdin, _stdout) =
         WorkerProcess::spawn(&supervisor.worker_path, &model_file(name))
             .unwrap()
@@ -66,6 +61,8 @@ fn held_slot(supervisor: &WorkerSupervisor, name: &str, warmed: bool) -> Process
         handoff: None,
         warmed,
         claimed: false,
+        owed: 1,
+        wake: mpsc::channel().0,
     });
     process
 }
@@ -87,108 +84,77 @@ fn settling_without_a_claim_closes_the_handoff() {
     let supervisor = WorkerSupervisor::with_timeout(path, Duration::from_secs(1));
     let ticket = supervisor.reserve_prewarm().unwrap();
     let held = held_slot(&supervisor, "claim-settle", false);
-    assert!(ticket.settle().is_none());
+    assert!(!ticket.settle(), "nothing to keep it for");
     // Warmed and not yet reaped: a dictation now spawns its own worker.
     assert_eq!(dictation(&supervisor, "after-settle").unwrap(), "fresh");
     held.finish();
 }
 
-/// A dictation handed over to a 1 s load, still waiting on it.
+/// A dictation handed over to a load of `load` s, still waiting on it.
 pub(super) fn hand_over_a_load(
     name: &str,
-    low_power_mode: LowPowerMode,
+    load: f64,
 ) -> (
     Arc<WorkerSupervisor>,
     PathBuf,
     String,
     thread::JoinHandle<Result<String, SupervisorError>>,
 ) {
-    let (path, log) = prewarm_worker(name, 1.0, 5.0);
+    let (path, log) = prewarm_worker(name, load, 5.0);
     let supervisor = Arc::new(WorkerSupervisor::new(path));
     assert!(supervisor
         .reserve_prewarm()
         .unwrap()
-        .start(model_file(name), low_power_mode));
+        .start(model_file(name)));
     let running = Arc::clone(&supervisor);
     let id = format!("{name}-cut");
     let cut = id.clone();
     let run = thread::spawn(move || dictation(&running, &cut));
     assert!(
-        wait_until(Duration::from_secs(5), || {
-            let state = supervisor.shared.state.lock().unwrap();
-            state.active.as_ref().is_some_and(|a| a.process.is_some())
-        }) && wait_until(Duration::from_secs(5), || spawns(&log) == 1)
+        wait_until(Duration::from_secs(5), || started(&supervisor))
+            && wait_until(Duration::from_secs(5), || spawns(&log) == 1)
     );
     (supervisor, log, id, run)
 }
 
-/// A dictation handed over to a 1 s load and cancelled at once.
-fn cancel_a_handed_over_load(
-    name: &str,
-    low_power_mode: LowPowerMode,
-) -> (Arc<WorkerSupervisor>, PathBuf) {
-    let (supervisor, log, id, run) = hand_over_a_load(name, low_power_mode);
-    supervisor.cancel(&id);
-    assert_eq!(run.join().unwrap().unwrap_err().code, "cancelled");
-    (supervisor, log)
-}
-
 #[test]
-fn a_cut_off_load_is_re_armed_and_the_next_dictation_reuses_it() {
-    let (supervisor, log) = cancel_a_handed_over_load("rearm", never);
-    assert!(wait_until(Duration::from_secs(5), || spawns(&log) == 2));
-    // The re-armed load is the next dictation's: no third, concurrent one.
-    assert_eq!(dictation(&supervisor, "after-rearm").unwrap(), "reused");
-    assert!(wait_until(Duration::from_secs(5), || idle(&supervisor)));
-    assert_eq!(spawns(&log), 2);
-    assert!(wait_until(Duration::from_secs(5), || all_reaped(&log)));
-}
-
-#[test]
-fn low_power_mode_skips_the_re_arm() {
-    let (supervisor, log) = cancel_a_handed_over_load("rearm-low-power", always);
-    assert!(wait_until(Duration::from_secs(5), || idle(&supervisor)));
-    thread::sleep(Duration::from_millis(300));
-    assert_eq!(spawns(&log), 1);
-}
-
-#[test]
-fn a_prewarm_that_warms_up_unused_is_not_re_armed() {
-    let (path, log) = prewarm_worker("rearm-unused", 0.0, 0.0);
+fn a_prewarm_that_warms_up_unused_is_ended() {
+    let (path, log) = prewarm_worker("warm-unused", 0.0, 0.0);
     let supervisor = WorkerSupervisor::new(path);
     assert!(supervisor
         .reserve_prewarm()
         .unwrap()
-        .start(model_file("rearm-unused"), never));
+        .start(model_file("warm-unused")));
     assert!(wait_until(Duration::from_secs(5), || idle(&supervisor)));
-    thread::sleep(Duration::from_millis(300));
+    assert!(wait_until(Duration::from_secs(5), || all_reaped(&log)));
     assert_eq!(spawns(&log), 1);
 }
 
-static SECOND_ADMITTED: AtomicBool = AtomicBool::new(false);
-
-/// Read just before the re-arm: holds it until the next dictation is in.
-fn after_the_second_dictation() -> bool {
-    wait_until(Duration::from_secs(5), || {
-        SECOND_ADMITTED.load(Ordering::SeqCst)
-    });
-    false
-}
-
 #[test]
-fn the_re_arm_waits_for_a_dictation_that_got_in_first() {
-    let (supervisor, log) = cancel_a_handed_over_load("rearm-wait", after_the_second_dictation);
-    let mut second = supervisor.reserve("second".into()).unwrap();
-    SECOND_ADMITTED.store(true, Ordering::SeqCst);
-    thread::sleep(Duration::from_millis(300));
-    assert_eq!(
-        spawns(&log),
-        1,
-        "no re-armed load beside the dictation's own"
-    );
-    let model = model_file("rearm-wait-second");
-    assert_eq!(second.run(&model, "p".into(), || {}).unwrap(), "fresh");
-    drop(second);
-    // Then the re-arm goes ahead.
-    assert!(wait_until(Duration::from_secs(5), || spawns(&log) == 3));
+fn a_handoff_dropped_before_its_frame_reopens_the_load_owing_nothing_more() {
+    // A dictation cancelled between the handover and writing its frame.
+    let (path, _) = prewarm_worker("claim-unwritten", 0.0, 0.0);
+    let supervisor = WorkerSupervisor::with_timeout(path, Duration::from_secs(1));
+    let held = held_slot(&supervisor, "claim-unwritten", false);
+    let reservation = supervisor.reserve("unwritten".into()).unwrap();
+    drop(super::super::handoff::hand_over(&supervisor.shared).expect("claimed"));
+    {
+        let state = supervisor.shared.state.lock().unwrap();
+        let Some(super::super::prewarm::Slot::Running {
+            stdin,
+            handoff,
+            warmed,
+            claimed,
+            owed,
+            ..
+        }) = state.prewarm.as_ref()
+        else {
+            panic!("the load is still there");
+        };
+        assert!(stdin.is_some() && handoff.is_none());
+        assert!(!warmed && !claimed, "open to the next dictation");
+        assert_eq!(*owed, 1, "no frame was written, so no reply is owed for it");
+    }
+    drop(reservation);
+    held.finish();
 }

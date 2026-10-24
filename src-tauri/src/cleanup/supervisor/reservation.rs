@@ -3,11 +3,13 @@
 
 use std::fs::File;
 use std::path::PathBuf;
+use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use super::super::protocol::{encode_frame, WorkerRequest, WorkerResponse};
 use super::super::worker_process::{ProcessError, ProcessHandle, WorkerProcess};
+use super::watch::Delivery;
 use super::{response, SharedState, SupervisorError, WorkerSupervisor};
 
 /// Reserves the native slot before verification/spawn. Cancellation is sticky
@@ -94,9 +96,9 @@ impl WorkerReservation {
         }
         // A prewarm worker still loading or warming up takes this request
         // over its load instead of a second one (prewarm.rs).
-        if let Some(handoff) = super::handoff::hand_over(&self.shared) {
-            let handle = handoff.process.clone();
-            return self.exchange(&request_id, handle, on_started, |deadline| {
+        if let Some(mut handoff) = super::handoff::hand_over(&self.shared) {
+            let started = Started::Handed(handoff.canceller());
+            return self.exchange(&request_id, started, on_started, |deadline| {
                 handoff.exchange(&frame, deadline)
             });
         }
@@ -109,38 +111,52 @@ impl WorkerReservation {
         if let Ok(fresh) = encode_frame(&request) {
             frame = fresh;
         }
-        let handle = process.handle.clone();
-        self.exchange(&request_id, handle, on_started, |deadline| {
+        let started = Started::Spawned(process.handle.clone());
+        self.exchange(&request_id, started, on_started, |deadline| {
             process.exchange(frame, deadline)
         })
     }
 
     /// Run one exchange with a started worker under the backstop deadline,
-    /// with sticky cancellation, and map its reply.
+    /// with sticky cancellation, and map its reply. Only a worker of its own
+    /// is killed and reaped; a handed-over load is kept (BUS-120).
     fn exchange(
         &mut self,
         request_id: &str,
-        handle: ProcessHandle,
+        started: Started,
         on_started: impl FnOnce(),
         exchange: impl FnOnce(Instant) -> Result<WorkerResponse, ProcessError>,
     ) -> Result<String, SupervisorError> {
-        let cancelled = {
+        let (cancelled, handle) = {
             let mut state = self.shared.state.lock().unwrap();
             let active = state.active.as_mut().unwrap();
-            active.process = Some(handle.clone());
-            active.cancelled
+            let handle = match started {
+                Started::Spawned(handle) => {
+                    active.process = Some(handle.clone());
+                    Some(handle)
+                }
+                Started::Handed(cancel) => {
+                    active.handed = Some(cancel);
+                    None
+                }
+            };
+            (active.cancelled, handle)
         };
         // An actual child received the verified descriptor. Notify outside
         // locks, even if cancellation raced spawn: this is attempt evidence.
         on_started();
         if cancelled {
-            handle.cancel();
+            if let Some(handle) = &handle {
+                handle.cancel();
+            }
             return Err(WorkerSupervisor::cancelled_error());
         }
         let deadline = Instant::now() + self.timeout;
         let response = exchange(deadline);
-        handle.finish();
-        if self.cancelled() || handle.cancelled() {
+        if let Some(handle) = &handle {
+            handle.finish();
+        }
+        if self.cancelled() || handle.as_ref().is_some_and(ProcessHandle::cancelled) {
             return Err(WorkerSupervisor::cancelled_error());
         }
         let response = match response {
@@ -174,6 +190,12 @@ impl WorkerReservation {
             process.finish();
         }
     }
+}
+
+/// The worker a run's frame went to.
+enum Started {
+    Spawned(ProcessHandle),
+    Handed(Sender<Delivery>),
 }
 
 impl Drop for WorkerReservation {

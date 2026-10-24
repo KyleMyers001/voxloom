@@ -1,11 +1,11 @@
 //! BUS-121: switching cleanup off disarms the prewarm in every window (model
-//! hash, load, warm-up, re-armed load) and never touches a dictation.
+//! hash, load, warm-up, a load kept after a cut-off) and never touches a
+//! dictation.
 
-use super::prewarm::{all_reaped, dictation, idle, never, prewarm_worker, spawns};
+use super::prewarm::{all_reaped, dictation, idle, prewarm_worker, spawns, started};
 use super::prewarm_claim::hand_over_a_load;
 use super::*;
 use crate::cleanup::test_support::wait_until;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 const WAIT: Duration = Duration::from_secs(5);
@@ -20,7 +20,7 @@ fn disarming_during_the_hash_stops_it_and_never_spawns() {
     assert!(!ticket.abandoned());
     assert_eq!(supervisor.disarm_prewarm(), Disarmed::Stopped);
     assert!(ticket.abandoned(), "the hash stops at its next chunk");
-    assert!(!ticket.start(model_file("disarm-hash"), never));
+    assert!(!ticket.start(model_file("disarm-hash")));
     assert!(idle(&supervisor));
     assert_eq!(spawns(&log), 0);
     assert_eq!(dictation(&supervisor, "after-hash").unwrap(), "fresh");
@@ -35,7 +35,7 @@ fn disarming_during_the_load_or_the_warm_up_reaps_the_worker() {
         assert!(supervisor
             .reserve_prewarm()
             .unwrap()
-            .start(model_file(name), never));
+            .start(model_file(name)));
         assert!(wait_until(WAIT, || spawns(&log) == 1));
         assert_eq!(supervisor.disarm_prewarm(), Disarmed::Stopped);
         assert!(wait_until(QUICK, || idle(&supervisor)), "{name}");
@@ -47,35 +47,37 @@ fn disarming_during_the_load_or_the_warm_up_reaps_the_worker() {
 }
 
 #[test]
-fn disarming_a_re_armed_load_reaps_it() {
-    let (supervisor, log, id, run) = hand_over_a_load("disarm-rearmed", never);
+fn disarming_a_kept_load_reaps_it() {
+    // BUS-120: a cancelled dictation leaves its 30 s load running for the
+    // next one; a disarm reaches it there.
+    let (supervisor, log, id, run) = hand_over_a_load("disarm-kept-load", 30.0);
     supervisor.cancel(&id);
     assert_eq!(run.join().unwrap().unwrap_err().code, "cancelled");
-    assert!(wait_until(WAIT, || spawns(&log) == 2), "re-armed");
+    assert!(!idle(&supervisor), "kept");
     assert_eq!(supervisor.disarm_prewarm(), Disarmed::Stopped);
     assert!(wait_until(QUICK, || idle(&supervisor)));
     assert!(wait_until(QUICK, || all_reaped(&log)));
-    assert_eq!(spawns(&log), 2);
-}
-
-static DISARMED: AtomicBool = AtomicBool::new(false);
-
-/// Read just before the re-arm: holds it until the disarm has happened.
-fn after_the_disarm() -> bool {
-    wait_until(WAIT, || DISARMED.load(Ordering::SeqCst));
-    false
+    assert_eq!(spawns(&log), 1);
 }
 
 #[test]
-fn a_disarm_between_the_cut_off_and_the_re_arm_cancels_the_re_arm() {
-    let (supervisor, log, id, run) = hand_over_a_load("disarm-window", after_the_disarm);
-    supervisor.cancel(&id);
-    assert_eq!(run.join().unwrap().unwrap_err().code, "cancelled");
-    let _ = supervisor.disarm_prewarm();
-    DISARMED.store(true, Ordering::SeqCst);
+fn a_disarm_right_after_a_timeout_cut_off_reaps_the_kept_load() {
+    // The window the re-arm used to have: cut off by the backstop, not a
+    // cancel, and disarmed at once.
+    let (path, log) = prewarm_worker("disarm-window", 30.0, 0.0);
+    let supervisor = WorkerSupervisor::with_timeout(path, Duration::from_millis(300));
+    assert!(supervisor
+        .reserve_prewarm()
+        .unwrap()
+        .start(model_file("disarm-window")));
+    assert_eq!(
+        dictation(&supervisor, "window").unwrap_err().code,
+        "timeout"
+    );
+    assert_eq!(supervisor.disarm_prewarm(), Disarmed::Stopped);
     assert!(wait_until(QUICK, || idle(&supervisor)));
-    std::thread::sleep(Duration::from_millis(300));
-    assert_eq!(spawns(&log), 1, "never re-armed");
+    assert!(wait_until(QUICK, || all_reaped(&log)));
+    assert_eq!(spawns(&log), 1, "never loaded again");
 }
 
 #[test]
@@ -90,7 +92,7 @@ fn disarming_with_nothing_armed_is_a_no_op_and_does_not_stick() {
     assert!(supervisor
         .reserve_prewarm()
         .unwrap()
-        .start(model_file("disarm-idle"), never));
+        .start(model_file("disarm-idle")));
     assert!(wait_until(WAIT, || spawns(&log) == 1));
     assert!(wait_until(WAIT, || idle(&supervisor)));
 }
@@ -114,17 +116,14 @@ fn a_disarm_leaves_a_handed_over_dictation_its_reply() {
     assert!(supervisor
         .reserve_prewarm()
         .unwrap()
-        .start(model_file("disarm-kept"), never));
+        .start(model_file("disarm-kept")));
     let running = Arc::clone(&supervisor);
-    let started = Instant::now();
+    let begun = Instant::now();
     let run = thread::spawn(move || dictation(&running, "kept"));
-    assert!(wait_until(WAIT, || {
-        let state = supervisor.shared.state.lock().unwrap();
-        state.active.as_ref().is_some_and(|a| a.process.is_some())
-    }));
+    assert!(wait_until(WAIT, || started(&supervisor)));
     assert_eq!(supervisor.disarm_prewarm(), Disarmed::Kept);
     assert_eq!(run.join().unwrap().unwrap(), "reused");
-    assert!(started.elapsed() >= Duration::from_millis(800));
+    assert!(begun.elapsed() >= Duration::from_millis(800));
     assert!(wait_until(WAIT, || idle(&supervisor)));
     assert_eq!(spawns(&log), 1);
 }
@@ -136,7 +135,7 @@ fn a_disarm_with_a_dictation_claiming_the_load_keeps_it_until_the_claim_ends() {
     assert!(supervisor
         .reserve_prewarm()
         .unwrap()
-        .start(model_file("disarm-claim"), never));
+        .start(model_file("disarm-claim")));
     assert!(wait_until(WAIT, || spawns(&log) == 1));
     let reservation = supervisor.reserve("claim".into()).unwrap();
     assert_eq!(supervisor.disarm_prewarm(), Disarmed::Kept);
@@ -151,15 +150,15 @@ fn a_disarm_with_a_dictation_claiming_the_load_keeps_it_until_the_claim_ends() {
 }
 
 #[test]
-fn a_disarmed_load_a_dictation_used_is_not_re_armed_when_it_is_cut_off() {
-    let (supervisor, log, id, run) = hand_over_a_load("disarm-no-rearm", never);
+fn a_disarmed_load_a_dictation_used_is_not_kept_when_it_is_cut_off() {
+    let (supervisor, log, id, run) = hand_over_a_load("disarm-not-kept", 30.0);
     assert_eq!(supervisor.disarm_prewarm(), Disarmed::Kept);
     supervisor.cancel(&id);
     assert_eq!(run.join().unwrap().unwrap_err().code, "cancelled");
+    // Ended with the dictation, not after its 30 s load.
     assert!(wait_until(QUICK, || idle(&supervisor)));
-    std::thread::sleep(Duration::from_millis(300));
-    assert_eq!(spawns(&log), 1, "never re-armed");
     assert!(wait_until(QUICK, || all_reaped(&log)));
+    assert_eq!(spawns(&log), 1);
 }
 
 #[test]
@@ -169,7 +168,7 @@ fn a_dictation_right_after_a_disarm_gets_its_own_worker() {
     assert!(supervisor
         .reserve_prewarm()
         .unwrap()
-        .start(model_file("disarm-then-dictate"), never));
+        .start(model_file("disarm-then-dictate")));
     assert!(wait_until(WAIT, || spawns(&log) == 1));
     assert_eq!(supervisor.disarm_prewarm(), Disarmed::Stopped);
     // At once: the dying load is closed to claims, not handed this dictation.
@@ -179,8 +178,8 @@ fn a_dictation_right_after_a_disarm_gets_its_own_worker() {
 }
 
 #[test]
-fn a_disarm_ends_with_its_prewarm_and_the_next_one_is_re_armed_again() {
-    let (supervisor, log, _, run) = hand_over_a_load("disarm-ends", never);
+fn a_disarm_ends_with_its_prewarm_and_the_next_one_is_kept_again() {
+    let (supervisor, log, _, run) = hand_over_a_load("disarm-ends", 1.0);
     assert_eq!(supervisor.disarm_prewarm(), Disarmed::Kept);
     // The dictation gets its reply (the 1 s load, then the 5 s warm-up cut
     // short for it) and the prewarm is over.
@@ -188,15 +187,15 @@ fn a_disarm_ends_with_its_prewarm_and_the_next_one_is_re_armed_again() {
     assert!(wait_until(QUICK, || idle(&supervisor)));
     let again = Arc::clone(&supervisor);
     let ticket = supervisor.reserve_prewarm().unwrap();
-    assert!(ticket.start(model_file("disarm-ends-again"), never));
+    assert!(ticket.start(model_file("disarm-ends-again")));
     let run = thread::spawn(move || dictation(&again, "second"));
-    assert!(wait_until(WAIT, || spawns(&log) == 2));
+    assert!(wait_until(WAIT, || spawns(&log) == 2 && started(&supervisor)));
     supervisor.cancel("second");
     assert_eq!(run.join().unwrap().unwrap_err().code, "cancelled");
-    assert!(
-        wait_until(WAIT, || spawns(&log) == 3),
-        "a new prewarm is not born disarmed"
-    );
+    // A new prewarm is not born disarmed: its cut-off load is kept.
+    assert!(!supervisor.shared.state.lock().unwrap().prewarm_disarmed);
+    assert_eq!(dictation(&supervisor, "third").unwrap(), "reused");
+    assert_eq!(spawns(&log), 2);
 }
 
 #[test]
@@ -206,7 +205,7 @@ fn a_load_nobody_disarmed_stays_for_the_next_dictation_after_a_claim_ends_unused
     assert!(supervisor
         .reserve_prewarm()
         .unwrap()
-        .start(model_file("disarm-not-armed"), never));
+        .start(model_file("disarm-not-armed")));
     assert!(wait_until(WAIT, || spawns(&log) == 1));
     // A dictation claims the load and ends without using it.
     drop(supervisor.reserve("gave-up".into()).unwrap());
