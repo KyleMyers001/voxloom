@@ -122,3 +122,17 @@ fn room_noise_needs_200_ms_before_the_gate_to_set_the_floor() {
     assert_eq!(with(0.18), secs(2.18) + KEPT);
     assert_eq!(with(0.2), secs(2.0) + KEPT);
 }
+
+#[test]
+fn a_noise_swell_just_before_the_gate_is_not_speech() {
+    // Room noise rising 6.5 dB for 120 ms (a breath) as the gate closes.
+    let after = [
+        noise(0.0004, 0.3),
+        noise(0.00085, 0.12),
+        vec![0.0; secs(2.0)],
+    ];
+    assert_eq!(
+        keep(&cat(&[tone(0.3, 2.0), after.concat()])),
+        secs(2.0) + KEPT
+    );
+}

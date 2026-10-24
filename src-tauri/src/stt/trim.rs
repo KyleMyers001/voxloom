@@ -57,6 +57,10 @@ const GATED_MARGIN: f32 = 2.0;
 const LSB_RMS: f32 = 1.0 / 32_768.0;
 /// Window for the noise floor before a gate (200 ms).
 const NOISE_FRAMES: usize = 10;
+/// Quiet level before a gate: the floor times this (+8 dB). The quietest
+/// window reads lower than the whole tail, so a breath or noise swell just
+/// before the gate needs more margin not to count as speech.
+const GATED_NOISE_MARGIN: f32 = 2.5;
 /// Before a gate the quiet level stays this far under the loud threshold
 /// (−6 dB), so soft speech running into the gate still counts.
 const GATED_QUIET_FACTOR: f32 = 0.5;
@@ -127,21 +131,21 @@ pub fn trailing_trim(samples: &[f32], sample_rate_hz: u32) -> TailTrim {
 
 /// 6 dB over the noise floor of the frames after the loud anchor, at most
 /// `threshold`. If the tail ends in a gate after 200 ms or more of sound,
-/// the quietest 200 ms before the gate set the floor, and the level stays
-/// 6 dB under `threshold`.
+/// the quietest 200 ms before the gate set the floor (+8 dB), and the level
+/// stays 6 dB under `threshold`.
 fn quiet_level(tail: &[f32], threshold: f32) -> f32 {
-    let quiet = |noise: f32| (noise * NOISE_MARGIN).max(MIN_QUIET_RMS);
+    let quiet = |noise: f32, margin: f32| (noise * margin).max(MIN_QUIET_RMS);
     match gate_start(tail) {
         Some(n) if n >= NOISE_FRAMES => {
             let noise = tail[..n]
                 .windows(NOISE_FRAMES)
                 .filter_map(|w| percentile(w.to_vec(), NOISE_PERCENTILE))
                 .fold(f32::INFINITY, f32::min);
-            quiet(noise).min(threshold * GATED_QUIET_FACTOR)
+            quiet(noise, GATED_NOISE_MARGIN).min(threshold * GATED_QUIET_FACTOR)
         }
         _ => {
             let noise = percentile(tail.to_vec(), NOISE_PERCENTILE).unwrap_or(0.0);
-            quiet(noise).min(threshold)
+            quiet(noise, NOISE_MARGIN).min(threshold)
         }
     }
 }
