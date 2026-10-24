@@ -3,6 +3,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::ax::*;
+use super::focus_fallback::frontmost_app_focus;
 use super::{host, registry, web_ax};
 use crate::delivery::decide::{classify_role, effective_role, element_token};
 use crate::delivery::types::TargetSnapshotDto;
@@ -58,7 +59,7 @@ pub(super) fn focused_ui_element_once(
     if focus_err != AX_OK || focused.is_null() {
         let reason = focus_unavailable_reason(stage, app_err, focus_err, focused.is_null());
         release(focused);
-        return Err(reason);
+        return frontmost_app_focus(&reason);
     }
     Ok((focused as AXUIElementRef, app_name))
 }
