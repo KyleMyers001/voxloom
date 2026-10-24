@@ -84,7 +84,12 @@ fn settling_without_a_claim_closes_the_handoff() {
     let supervisor = WorkerSupervisor::with_timeout(path, Duration::from_secs(1));
     let ticket = supervisor.reserve_prewarm().unwrap();
     let held = held_slot(&supervisor, "claim-settle", false);
-    assert!(!ticket.settle(), "nothing to keep it for");
+    if let Some(super::super::prewarm::Slot::Running { owed, .. }) =
+        supervisor.shared.state.lock().unwrap().prewarm.as_mut()
+    {
+        *owed = 0;
+    }
+    assert!(!ticket.settle(false), "nothing to keep it for");
     // Warmed and not yet reaped: a dictation now spawns its own worker.
     assert_eq!(dictation(&supervisor, "after-settle").unwrap(), "fresh");
     held.finish();
@@ -156,5 +161,19 @@ fn a_handoff_dropped_before_its_frame_reopens_the_load_owing_nothing_more() {
         assert_eq!(*owed, 1, "no frame was written, so no reply is owed for it");
     }
     drop(reservation);
+    held.finish();
+}
+
+#[test]
+fn settling_with_a_reply_still_owed_keeps_the_worker() {
+    // Codex 4365519849: while the prewarm waited for a claim, the claiming
+    // dictation handed over, wrote its frame and was cut off: unclaimed,
+    // nobody handed over, one reply owed.
+    let (path, _) = prewarm_worker("claim-owed", 0.0, 0.0);
+    let supervisor = WorkerSupervisor::with_timeout(path, Duration::from_secs(1));
+    let ticket = supervisor.reserve_prewarm().unwrap();
+    let held = held_slot(&supervisor, "claim-owed", false);
+    assert!(ticket.settle(false), "kept for the next dictation");
+    assert!(!ticket.settle(true), "unless the bound ran out");
     held.finish();
 }

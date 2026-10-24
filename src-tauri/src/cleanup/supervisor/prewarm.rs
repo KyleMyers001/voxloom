@@ -149,17 +149,20 @@ impl PrewarmTicket {
         true
     }
 
-    /// Under the lock, once nothing is owed or nobody waits any more:
-    /// whether to keep the worker. Kept while a dictation is handed over to
-    /// it; a claiming dictation still re-hashing is waited for, until it
-    /// hands over or its reservation ends. Otherwise closed to claims.
-    pub(super) fn settle(&self) -> bool {
+    /// Under the lock, once nothing is owed, nobody waits any more or the
+    /// bound ran out (`timed_out`): whether to keep the worker. Kept while a
+    /// dictation is handed over to it; a claiming dictation still re-hashing
+    /// is waited for, until it hands over or its reservation ends. Then kept
+    /// if that dictation was cut off owing a reply, unless the bound ran out
+    /// (watch.rs). Otherwise closed to claims.
+    pub(super) fn settle(&self, timed_out: bool) -> bool {
         let mut state = self.shared.state.lock().unwrap();
         loop {
             let Some(Slot::Running {
                 handoff,
                 warmed,
                 claimed,
+                owed,
                 ..
             }) = state.prewarm.as_mut()
             else {
@@ -169,6 +172,9 @@ impl PrewarmTicket {
                 return true;
             }
             if !*claimed {
+                if *owed > 0 && !timed_out {
+                    return true;
+                }
                 *warmed = true;
                 return false;
             }

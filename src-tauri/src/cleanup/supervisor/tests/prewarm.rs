@@ -170,22 +170,6 @@ fn a_dictation_preempts_the_warm_up_decode() {
 }
 
 #[test]
-fn a_handed_over_dictation_outlasts_the_prewarm_timeout() {
-    // The load runs past the prewarm's own timeout, but a dictation waits on
-    // it: the worker is kept, and the dictation gets its reply, not the
-    // prewarm's late one.
-    let (path, log) = prewarm_worker("prewarm-late", 0.8, 5.0);
-    let mut supervisor = WorkerSupervisor::new(path);
-    supervisor.prewarm_timeout = Duration::from_millis(300);
-    assert!(supervisor
-        .reserve_prewarm()
-        .unwrap()
-        .start(model_file("prewarm-late")));
-    assert_eq!(dictation(&supervisor, "late").unwrap(), "reused");
-    assert_eq!(spawns(&log), 1);
-}
-
-#[test]
 fn a_dictation_before_the_spawn_abandons_the_prewarm() {
     let (path, log) = prewarm_worker("prewarm-abandoned", 0.0, 0.0);
     let supervisor = WorkerSupervisor::new(path);
@@ -207,17 +191,4 @@ fn no_prewarm_starts_while_a_dictation_holds_the_slot() {
     assert!(supervisor.reserve_prewarm().is_none());
     drop(reservation);
     assert!(supervisor.reserve_prewarm().is_some());
-}
-
-#[test]
-fn a_prewarm_that_never_warms_up_is_ended() {
-    let (path, log) = prewarm_worker("prewarm-stuck", 30.0, 0.0);
-    let mut supervisor = WorkerSupervisor::new(path);
-    supervisor.prewarm_timeout = Duration::from_millis(300);
-    assert!(supervisor
-        .reserve_prewarm()
-        .unwrap()
-        .start(model_file("prewarm-stuck")));
-    assert!(wait_until(Duration::from_secs(5), || idle(&supervisor)));
-    assert!(all_reaped(&log), "the worker is killed and reaped");
 }

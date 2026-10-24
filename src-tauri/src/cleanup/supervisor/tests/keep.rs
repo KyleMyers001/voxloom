@@ -1,7 +1,8 @@
 //! BUS-120: a dictation cut off while handed over to the prewarm's load (its
 //! budget ran out, or it was cancelled) leaves that load running: the next
 //! dictation reuses it, and with nobody waiting it ends when its last reply
-//! is in, or at the prewarm's timeout.
+//! is in, or at the prewarm's timeout (orphan_bound.rs). A disarm still
+//! reaps a kept load.
 
 use super::prewarm::{
     all_reaped, decoding_prewarm_worker, dictation, idle, prewarm_worker, spawns, started,
@@ -96,59 +97,35 @@ fn a_newer_dictation_preempts_the_abandoned_one() {
 }
 
 #[test]
-fn the_backstop_can_run_out_during_the_load() {
-    let (path, log) = prewarm_worker("prewarm-slow", 30.0, 0.0);
-    let mut supervisor = WorkerSupervisor::with_timeout(path, Duration::from_millis(400));
-    supervisor.prewarm_timeout = Duration::from_millis(300);
-    assert!(supervisor
-        .reserve_prewarm()
-        .unwrap()
-        .start(model_file("prewarm-slow")));
-    let error = dictation(&supervisor, "slow-load").unwrap_err();
-    assert_eq!(error.code, "timeout", "{}", error.message);
-    // The load is kept for the next dictation (keep.rs), but nobody waits on
-    // it any more: it ends at the prewarm's timeout, not after its 30 s.
-    assert!(wait_until(Duration::from_secs(3), || idle(&supervisor)));
-    assert!(wait_until(Duration::from_secs(3), || all_reaped(&log)));
-    assert_eq!(spawns(&log), 1, "never loaded again");
-}
-
-#[test]
-fn cancelling_a_handed_over_dictation_keeps_its_load_only_until_the_timeout() {
-    let (path, log) = prewarm_worker("prewarm-cancel", 30.0, 0.0);
-    let mut supervisor = WorkerSupervisor::new(path);
-    supervisor.prewarm_timeout = Duration::from_millis(300);
-    let supervisor = Arc::new(supervisor);
-    assert!(supervisor
-        .reserve_prewarm()
-        .unwrap()
-        .start(model_file("prewarm-cancel")));
-    let running = Arc::clone(&supervisor);
-    let run = thread::spawn(move || dictation(&running, "cancelled"));
-    assert!(wait_until(Duration::from_secs(5), || started(&supervisor)));
-    assert!(wait_until(Duration::from_secs(5), || spawns(&log) == 1));
-    supervisor.cancel("cancelled");
+fn disarming_a_kept_load_reaps_it() {
+    // BUS-120: a cancelled dictation leaves its 30 s load running for the
+    // next one; a disarm reaches it there.
+    let (supervisor, log, id, run) = hand_over_a_load("disarm-kept-load", 30.0);
+    supervisor.cancel(&id);
     assert_eq!(run.join().unwrap().unwrap_err().code, "cancelled");
-    // Kept, not re-armed: one load, ended at its timeout.
-    assert!(wait_until(Duration::from_secs(3), || idle(&supervisor)));
-    assert!(wait_until(Duration::from_secs(3), || all_reaped(&log)));
-    assert_eq!(spawns(&log), 1);
-}
-
-#[test]
-fn a_cut_off_restarts_the_orphan_bound() {
-    let (path, log) = prewarm_worker("keep-bound", 30.0, 0.0);
-    let mut supervisor = WorkerSupervisor::with_timeout(path, Duration::from_millis(800));
-    supervisor.prewarm_timeout = Duration::from_millis(600);
-    assert!(supervisor
-        .reserve_prewarm()
-        .unwrap()
-        .start(model_file("keep-bound")));
-    // Cut off past the 0.6 s from the start: the bound runs from here.
-    assert_eq!(dictation(&supervisor, "late").unwrap_err().code, "timeout");
-    thread::sleep(Duration::from_millis(300));
-    assert!(!idle(&supervisor), "kept for the next dictation");
+    assert!(!idle(&supervisor), "kept");
+    assert_eq!(supervisor.disarm_prewarm(), Disarmed::Stopped);
     assert!(wait_until(QUICK, || idle(&supervisor)));
     assert!(wait_until(QUICK, || all_reaped(&log)));
     assert_eq!(spawns(&log), 1);
+}
+
+#[test]
+fn a_disarm_right_after_a_timeout_cut_off_reaps_the_kept_load() {
+    // The window the re-arm used to have: cut off by the backstop, not a
+    // cancel, and disarmed at once.
+    let (path, log) = prewarm_worker("disarm-window", 30.0, 0.0);
+    let supervisor = WorkerSupervisor::with_timeout(path, Duration::from_millis(300));
+    assert!(supervisor
+        .reserve_prewarm()
+        .unwrap()
+        .start(model_file("disarm-window")));
+    assert_eq!(
+        dictation(&supervisor, "window").unwrap_err().code,
+        "timeout"
+    );
+    assert_eq!(supervisor.disarm_prewarm(), Disarmed::Stopped);
+    assert!(wait_until(QUICK, || idle(&supervisor)));
+    assert!(wait_until(QUICK, || all_reaped(&log)));
+    assert_eq!(spawns(&log), 1, "never loaded again");
 }

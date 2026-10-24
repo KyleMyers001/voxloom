@@ -135,7 +135,6 @@ impl Drop for Handoff {
         let Some(Slot::Running {
             stdin,
             handoff,
-            warmed,
             claimed,
             owed,
             wake,
@@ -146,7 +145,6 @@ impl Drop for Handoff {
         };
         *stdin = self.stdin.take();
         *handoff = None;
-        *warmed = false;
         *claimed = false;
         *owed += usize::from(self.written);
         let _ = wake.send(Event::Wake);

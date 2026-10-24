@@ -38,14 +38,8 @@ impl PrewarmTicket {
     /// Until the worker has nothing left to do; the caller then reaps it.
     pub(super) fn watch(&self, events: Receiver<Event>) {
         let mut bound = Instant::now() + self.timeout;
-        let mut was_live = false;
         loop {
-            let live = self.live();
-            if was_live && !live {
-                bound = Instant::now() + self.timeout;
-            }
-            was_live = live;
-            let event = if live {
+            let event = if self.live() {
                 events.recv().ok()
             } else {
                 events
@@ -54,9 +48,13 @@ impl PrewarmTicket {
             };
             let keep = match event {
                 Some(Event::Reply(reply)) => self.on_reply(reply),
-                Some(Event::Wake) if !self.idle() => true,
-                // Timed out, or a cut-off left nothing owed.
-                Some(Event::Wake) | None => self.settle(),
+                Some(Event::Wake) => {
+                    // A cut-off: the bound runs from here, whether or not
+                    // this thread saw the dictation handed over.
+                    bound = Instant::now() + self.timeout;
+                    !self.idle() || self.settle(false)
+                }
+                None => self.settle(true),
             };
             if !keep {
                 return;
@@ -82,7 +80,7 @@ impl PrewarmTicket {
                 return true;
             }
             drop(state);
-            return self.settle();
+            return self.settle(false);
         }
         // The handed-over dictation's reply, or the worker ended.
         *warmed = true;

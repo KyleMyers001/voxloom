@@ -69,8 +69,8 @@ pub(super) fn on_ticket_drop(state: &mut SupervisorState) {
 /// Under the lock, when a dictation's reservation ends (after
 /// `handoff::on_release` dropped its claim): a disarmed load that the
 /// dictation claimed but never used, was cut off from, or finished with,
-/// has nothing left to do. Closed to claims; the caller kills it once the lock is released. A
-/// load that isn't disarmed stays for the next dictation to claim.
+/// has nothing left to do. It is closed to claims, and the caller kills it
+/// outside the lock. A load that isn't disarmed stays for the next one.
 pub(super) fn on_release(state: &mut SupervisorState) -> Option<ProcessHandle> {
     if !state.prewarm_disarmed {
         return None;
