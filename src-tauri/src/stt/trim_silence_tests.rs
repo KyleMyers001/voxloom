@@ -136,3 +136,44 @@ fn a_noise_swell_just_before_the_gate_is_not_speech() {
         secs(2.0) + KEPT
     );
 }
+
+#[test]
+fn a_gate_after_louder_room_noise_is_a_gate() {
+    // −56 dBFS room noise lowered 20 dB, to −76 dBFS.
+    let clip = speech_room_then(0.0015, 0.3, noise(0.00015, 2.0));
+    assert_eq!(keep(&clip), secs(2.0) + KEPT);
+    // −52 dBFS room noise cut to zeros stays under the quiet level.
+    let clip = speech_room_then(0.0025, 0.3, vec![0.0; secs(2.0)]);
+    assert_eq!(keep(&clip), secs(2.0) + KEPT);
+}
+
+#[test]
+fn a_gate_level_of_exactly_minus_74_dbfs_is_a_gate() {
+    let clip = speech_room_then(0.002, 0.3, vec![0.0002; secs(2.0)]);
+    assert_eq!(keep(&clip), secs(2.0) + KEPT);
+}
+
+#[test]
+fn a_one_lsb_offset_after_the_gate_is_silence() {
+    let after = [vec![1.0 / 32_768.0; secs(0.2)], vec![0.0; secs(2.0)]];
+    let clip = speech_room_then(0.0004, 0.2, after.concat());
+    assert_eq!(keep(&clip), secs(2.0) + KEPT);
+}
+
+#[test]
+fn dither_then_trailing_zeros_is_one_gate() {
+    let after = [noise(0.000061, 2.0), vec![0.0; secs(0.06)]];
+    let clip = speech_room_then(0.0004, 0.2, after.concat());
+    assert_eq!(keep(&clip), secs(2.0) + KEPT);
+}
+
+#[test]
+fn a_faint_tick_in_the_last_200_ms_does_not_split_the_gate() {
+    let after = [
+        vec![0.0; secs(1.9)],
+        noise(0.00015, 0.02),
+        vec![0.0; secs(0.08)],
+    ];
+    let clip = speech_room_then(0.0004, 0.2, after.concat());
+    assert_eq!(keep(&clip), secs(2.0) + KEPT);
+}

@@ -155,7 +155,7 @@ fn quiet_level(tail: &[f32], threshold: f32) -> f32 {
 /// within `GATED_MARGIN` of that level. `None` when the tail isn't gated.
 fn gate_start(tail: &[f32]) -> Option<usize> {
     let last = &tail[tail.len().saturating_sub(NOISE_FRAMES)..];
-    let level = percentile(last.to_vec(), 0.5)?;
+    let level = last.iter().copied().fold(0.0, f32::max);
     if level > GATED_MAX_RMS {
         return None;
     }
