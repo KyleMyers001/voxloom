@@ -170,9 +170,9 @@ fn dither_then_trailing_zeros_is_one_gate() {
 #[test]
 fn a_faint_tick_in_the_last_200_ms_does_not_split_the_gate() {
     let after = [
-        vec![0.0; secs(1.9)],
+        vec![0.0; secs(1.82)],
         noise(0.00015, 0.02),
-        vec![0.0; secs(0.08)],
+        vec![0.0; secs(0.16)],
     ];
     let clip = speech_room_then(0.0004, 0.2, after.concat());
     assert_eq!(keep(&clip), secs(2.0) + KEPT);
