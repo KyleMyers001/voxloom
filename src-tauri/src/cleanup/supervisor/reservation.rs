@@ -87,10 +87,9 @@ impl WorkerReservation {
             code: "context-overflow",
             message: "cleanup serialized request exceeds 128 KiB".into(),
         })?;
+        // Checked at the lease too; this catches a worker removed since.
         if !WorkerSupervisor::path_available(&self.worker_path) {
-            return Err(SupervisorError::runtime(
-                "cleanup worker is not installed or not executable in this build",
-            ));
+            return Err(SupervisorError::worker_missing());
         }
         // A prewarm worker still loading or warming up takes this request
         // over its load instead of a second one (prewarm.rs).

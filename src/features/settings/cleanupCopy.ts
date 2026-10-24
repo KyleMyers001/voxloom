@@ -30,7 +30,9 @@ export function cleanupModelNote(view: CleanupModelView): string {
   const { status } = view;
   if (!status.available) return 'Not installed. Import the Qwen3 0.6B (Q4_K_M) GGUF file.';
   if (!status.runtimeAvailable) {
-    // Only reachable in dev builds: production hides the block without a worker.
+    // Dev builds, and production builds where cleanup was already on, since
+    // the block stays so it can be turned off (cleanupShown). Dictations then
+    // keep their raw text, labelled "cleanup unavailable" (BUS-135).
     return 'Model installed. This build doesn\'t include the cleanup worker yet.';
   }
   return 'Qwen3 0.6B is installed.';

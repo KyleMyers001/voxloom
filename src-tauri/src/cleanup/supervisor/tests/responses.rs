@@ -131,7 +131,8 @@ fn readiness_requires_an_executable_regular_file() {
     let error = supervisor
         .run(&model_file("not-executable"), "p".into(), "r".into())
         .unwrap_err();
-    assert_eq!(error.code, "runtime-error");
+    // Its own reason, so History says "cleanup unavailable" (BUS-135).
+    assert_eq!(error.code, "worker-missing");
     assert!(error.message.contains("not executable"));
 }
 
@@ -141,5 +142,6 @@ fn unavailable_worker_fails_honestly() {
     let error = supervisor
         .run(&model_file("missing"), "prompt".into(), "r1".into())
         .unwrap_err();
+    assert_eq!(error.code, "worker-missing");
     assert!(error.message.contains("not installed"));
 }
