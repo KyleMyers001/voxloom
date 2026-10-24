@@ -45,9 +45,10 @@ where
     let trim = trailing_trim(samples, sample_rate_hz);
     #[cfg(debug_assertions)]
     eprintln!(
-        "[stt] tail trim: tail_rms={:.4} threshold={:.4} trimmed_ms={}",
+        "[stt] tail trim: tail_rms={:.4} threshold={:.4} quiet={:.4} trimmed_ms={}",
         trim.tail_rms,
         trim.threshold,
+        trim.quiet_level,
         trim.trimmed_ms(samples.len(), sample_rate_hz)
     );
     let mut out = engine(&samples[..trim.keep_len])?;

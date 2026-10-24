@@ -114,35 +114,8 @@ fn tail_no_longer_than_the_kept_tail_is_unchanged() {
 
 #[test]
 fn never_trims_to_empty() {
-    let clip = cat(&[tone(0.3, 0.06), vec![0.0; secs(5.0)]]);
-    assert_eq!(keep(&clip), 3 * FRAME + KEPT);
-}
-
-#[test]
-fn a_blip_shorter_than_60_ms_is_not_a_speech_end() {
-    // With no run of three loud frames anywhere, the clip is left alone.
-    let clip = cat(&[tone(0.3, 0.04), vec![0.0; secs(5.0)]]);
-    assert_eq!(keep(&clip), clip.len());
-}
-
-#[test]
-fn a_click_in_the_tail_does_not_stop_the_trim() {
-    // A 3 ms click 100 ms before the end, as from a key release.
-    let mut tail = vec![0.0; secs(2.0)];
-    let at = tail.len() - secs(0.1);
-    tail[at..at + 48].iter_mut().for_each(|s| *s = 0.9);
-    let clip = cat(&[tone(0.3, 2.0), tail]);
-    assert_eq!(keep(&clip), secs(2.0) + KEPT);
-    // A 25 ms thump (two loud frames) is ignored too.
-    let mut tail = vec![0.0; secs(2.0)];
-    tail[at..at + 400].iter_mut().for_each(|s| *s = 0.5);
-    assert_eq!(keep(&cat(&[tone(0.3, 2.0), tail])), secs(2.0) + KEPT);
-}
-
-#[test]
-fn a_sustained_sound_at_the_end_still_counts_as_speech() {
-    let clip = cat(&[tone(0.3, 2.0), vec![0.0; secs(2.0)], tone(0.3, 0.06)]);
-    assert_eq!(keep(&clip), clip.len());
+    let clip = cat(&[tone(0.3, 0.08), vec![0.0; secs(5.0)]]);
+    assert_eq!(keep(&clip), 4 * FRAME + KEPT);
 }
 
 #[test]
@@ -196,13 +169,5 @@ fn a_single_loud_click_does_not_raise_the_threshold() {
     assert_eq!(keep(&clip), secs(3.0) + FRAME + KEPT);
 }
 
-#[test]
-fn levels_exactly_at_the_floor_or_threshold_count_as_loud() {
-    assert_eq!(
-        speech_level(&[0.0, ABSOLUTE_FLOOR_RMS]),
-        Some(ABSOLUTE_FLOOR_RMS)
-    );
-    assert_eq!(speech_end(&[0.5, 0.5, 0.5, 0.0], 0.5), Some(3));
-    // p90 of 6 loud frames is index round(4.5) = 5.
-    assert_eq!(speech_level(&[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]), Some(0.6));
-}
+#[path = "trim_click_tests.rs"]
+mod clicks;

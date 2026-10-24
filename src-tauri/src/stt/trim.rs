@@ -2,10 +2,16 @@
 //!
 //! Whisper hallucinates "Thank you." or "you" over the silence or room noise
 //! left after the last word. The trailing run of quiet 20 ms frames is cut
-//! down to a short kept tail. "Quiet" is relative to the clip's own speech
-//! level, with an absolute floor, so a mic with a higher noise floor still
-//! trims when the speech is much louder. The speech end is the last run of
-//! at least 60 ms of loud frames, so a click or key thump at the very end
+//! down to a short kept tail. Two levels decide where speech ends:
+//!
+//! - The loud anchor: the last run of loud frames, relative to the clip's
+//!   own speech level with an absolute floor, so a higher noise floor still
+//!   trims under much louder speech.
+//! - The speech end: the last run at or above a quiet level 6 dB over the
+//!   tail's own noise floor. A soft final word below the loud threshold
+//!   still counts, so the kept tail starts after it, not inside it.
+//!
+//! Both need 80 ms of frames in a row, so a click or key thump in the tail
 //! doesn't count as speech.
 
 use super::gate::AudioStats;
@@ -15,17 +21,27 @@ const FRAME_MS: usize = 20;
 /// "thanks") that ends 250–500 ms before the clip end; at 1000 ms "Thank
 /// you" comes back. 750 ms kept every final word in the QA tail sweep.
 const KEPT_TAIL_MS: usize = 750;
-/// Loud frames in a row needed to count as speech for the speech end.
-const MIN_SPEECH_FRAMES: usize = 3;
+/// Frames in a row needed to count as speech (80 ms). A 40 ms thump touches
+/// at most 3 frames; a short word like "so" lasts well over 80 ms.
+const MIN_SPEECH_FRAMES: usize = 4;
 /// Frames at or above this RMS (≈ −44 dBFS) may be speech. Hallucinated
 /// tails measured 0.0000–0.0011 RMS in the BUS-139 harness.
 const ABSOLUTE_FLOOR_RMS: f32 = 0.006;
 /// Speech level: this percentile of the possible-speech frames.
 const SPEECH_PERCENTILE: f32 = 0.9;
-/// Quiet is below this fraction (≈ −30 dB) of the speech level, so a final
-/// word up to about 30 dB softer than the dictation is kept. Hallucinated
-/// tails measured ≤ 0.0011 RMS; at typical levels the 0.006 floor decides.
+/// Loud is at or above this fraction (≈ −30 dB) of the speech level. Only
+/// speech louder than 0.2 RMS (≈ −14 dBFS) gets a threshold above the
+/// floor; quieter dictation uses the floor, and its soft final words rely
+/// on the quiet level below.
 const RELATIVE_FACTOR: f32 = 0.03;
+/// Tail noise floor: this percentile of the frames after the loud anchor.
+/// Low, so a soft final word longer than the noise doesn't set it.
+const NOISE_PERCENTILE: f32 = 0.2;
+/// Quiet level: the noise floor times this (+6 dB).
+const NOISE_MARGIN: f32 = 2.0;
+/// Lowest quiet level (≈ −74 dBFS), for a digitally silent tail. A final
+/// word 32 dB under −30 dBFS speech sits near −62 dBFS.
+const MIN_QUIET_RMS: f32 = 0.0002;
 
 /// What `trailing_trim` decided for one clip.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -34,8 +50,10 @@ pub struct TailTrim {
     pub keep_len: usize,
     /// RMS of the trailing quiet run (0 when there is none).
     pub tail_rms: f32,
-    /// Frame RMS below which the tail counted as quiet.
+    /// Frame RMS at or above which a run counts as loud speech.
     pub threshold: f32,
+    /// Frame RMS at or above which a run counts as (soft) speech.
+    pub quiet_level: f32,
 }
 
 impl TailTrim {
@@ -58,21 +76,23 @@ pub fn trailing_trim(samples: &[f32], sample_rate_hz: u32) -> TailTrim {
         .chunks(frame)
         .map(|f| AudioStats::measure(f).rms)
         .collect();
+    let unchanged = |threshold, quiet_level| TailTrim {
+        keep_len: samples.len(),
+        tail_rms: 0.0,
+        threshold,
+        quiet_level,
+    };
     let Some(speech) = speech_level(&levels) else {
-        return TailTrim {
-            keep_len: samples.len(),
-            tail_rms: 0.0,
-            threshold: ABSOLUTE_FLOOR_RMS,
-        };
+        return unchanged(ABSOLUTE_FLOOR_RMS, ABSOLUTE_FLOOR_RMS);
     };
     let threshold = (speech * RELATIVE_FACTOR).max(ABSOLUTE_FLOOR_RMS);
-    let Some(end_frame) = speech_end(&levels, threshold) else {
-        return TailTrim {
-            keep_len: samples.len(),
-            tail_rms: 0.0,
-            threshold,
-        };
+    let Some(loud_end) = speech_end(&levels, threshold) else {
+        return unchanged(threshold, threshold);
     };
+    let quiet_level = quiet_level(&levels[loud_end..]).min(threshold);
+    // The loud run is at or above the quiet level too, so this ends at or
+    // after `loud_end`.
+    let end_frame = speech_end(&levels, quiet_level).unwrap_or(loud_end);
     let quiet_start = (end_frame * frame).min(samples.len());
     let tail_rms = if quiet_start == samples.len() {
         0.0
@@ -83,7 +103,14 @@ pub fn trailing_trim(samples: &[f32], sample_rate_hz: u32) -> TailTrim {
         keep_len: (quiet_start + ms(KEPT_TAIL_MS)).min(samples.len()),
         tail_rms,
         threshold,
+        quiet_level,
     }
+}
+
+/// 6 dB over the noise floor of the frames after the loud anchor.
+fn quiet_level(tail: &[f32]) -> f32 {
+    let noise = percentile(tail.to_vec(), NOISE_PERCENTILE).unwrap_or(0.0);
+    (noise * NOISE_MARGIN).max(MIN_QUIET_RMS)
 }
 
 /// Frame index just past the last run of `MIN_SPEECH_FRAMES` or more frames
@@ -105,17 +132,22 @@ fn speech_end(levels: &[f32], threshold: f32) -> Option<usize> {
 
 /// The given percentile of the frames at or above the absolute floor.
 fn speech_level(levels: &[f32]) -> Option<f32> {
-    let mut loud: Vec<f32> = levels
+    let loud: Vec<f32> = levels
         .iter()
         .copied()
         .filter(|&r| r >= ABSOLUTE_FLOOR_RMS)
         .collect();
-    if loud.is_empty() {
+    percentile(loud, SPEECH_PERCENTILE)
+}
+
+/// The `p` percentile (nearest rank, rounded) of `values`.
+fn percentile(mut values: Vec<f32>, p: f32) -> Option<f32> {
+    if values.is_empty() {
         return None;
     }
-    loud.sort_by(f32::total_cmp);
-    let index = ((loud.len() - 1) as f32 * SPEECH_PERCENTILE).round() as usize;
-    Some(loud[index])
+    values.sort_by(f32::total_cmp);
+    let index = ((values.len() - 1) as f32 * p).round() as usize;
+    Some(values[index])
 }
 
 #[cfg(test)]

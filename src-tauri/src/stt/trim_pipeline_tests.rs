@@ -36,12 +36,17 @@ fn syllables(count: usize, gain: f32) -> Vec<f32> {
         .collect()
 }
 
-/// Dictation, pause, final word at `-db` dB, then 2 s of silence. Returns
-/// the clip and the sample index just past the final word's last vowel.
-fn dictation_with_final_word(db: f32) -> (Vec<f32>, usize) {
-    let mut clip = syllables(10, 1.0);
+fn gain(db: f32) -> f32 {
+    10f32.powf(db / 20.0)
+}
+
+/// Dictation at `level` dB (0 ≈ −9 dBFS RMS), pause, final word `db` dB
+/// softer, then 2 s of silence. Returns the clip and the sample index just
+/// past the final word's last vowel.
+fn dictation_with_final_word(level: f32, db: f32) -> (Vec<f32>, usize) {
+    let mut clip = syllables(10, gain(level));
     clip.extend(std::iter::repeat_n(0.0, ms(400)));
-    clip.extend(syllables(3, 10f32.powf(-db / 20.0)));
+    clip.extend(syllables(3, gain(level - db)));
     let word_end = clip.len() - ms(60);
     clip.extend(std::iter::repeat_n(0.0, 2 * RATE));
     (clip, word_end)
@@ -65,8 +70,23 @@ fn engine_sees(clip: &[f32]) -> usize {
 }
 
 fn assert_final_word_kept(db: f32) {
-    let (clip, word_end) = dictation_with_final_word(db);
-    let seen = engine_sees(&clip);
+    assert_final_word_kept_at(0.0, db);
+}
+
+fn assert_final_word_kept_at(level: f32, db: f32) {
+    let (mut clip, word_end) = dictation_with_final_word(level, db);
+    assert_kept(&clip, word_end, db);
+    // Again under a −60 dBFS room-noise floor.
+    let mut x: u32 = 0x9e37_79b9;
+    for s in clip.iter_mut() {
+        x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        *s += 0.001 * 3f32.sqrt() * ((x >> 8) as f32 / (1 << 23) as f32 - 1.0);
+    }
+    assert_kept(&clip, word_end, db);
+}
+
+fn assert_kept(clip: &[f32], word_end: usize, db: f32) {
+    let seen = engine_sees(clip);
     assert!(
         seen >= word_end,
         "-{db} dB: engine saw {seen} of {word_end}"
@@ -99,6 +119,17 @@ fn final_word_26_db_down_is_kept() {
 #[test]
 fn final_word_30_db_down_is_kept() {
     assert_final_word_kept(30.0);
+}
+
+/// Dictation at about −30 dBFS, where the 0.006 floor sets the loud
+/// threshold, with a final word 14 and 16 dB softer (≈ −44 / −46 dBFS).
+#[test]
+fn final_word_14_and_16_db_down_in_quiet_speech_is_kept() {
+    assert_final_word_kept_at(-21.0, 14.0);
+    assert_final_word_kept_at(-21.0, 16.0);
+    // 32 dB softer (≈ −62 dBFS) still counts after a digitally silent pause.
+    let (clip, word_end) = dictation_with_final_word(-21.0, 32.0);
+    assert_kept(&clip, word_end, 32.0);
 }
 
 #[test]
