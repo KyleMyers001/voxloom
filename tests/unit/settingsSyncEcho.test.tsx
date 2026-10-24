@@ -3,6 +3,7 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { AppProvider, useApp } from '../../src/app/AppContext';
+import { createInitialState } from '../../src/app/state';
 import { mergeForeignSave } from '../../src/app/useSettingsSync';
 import { listenSettingsChanged } from '../../src/services/settingsWindow';
 import {
@@ -30,13 +31,24 @@ vi.mock('@tauri-apps/api/webviewWindow', () => ({
 }));
 
 function Probe() {
-  const { settings, state } = useApp();
+  const { dispatch, settings, state } = useApp();
   return (
     <>
       <output aria-label="style">{state.settings.style}</output>
       <output aria-label="appearance">{state.settings.appearance}</output>
+      <output aria-label="nonfailed">{state.records.filter((r) => r.status !== 'failed').length}</output>
       <button onClick={() => settings.update({ key: 'style', value: 'casual' })} type="button">A</button>
       <button onClick={() => settings.update({ key: 'appearance', value: 'dark' })} type="button">B</button>
+      <button
+        onClick={() => dispatch({
+          now: 1_000,
+          record: { ...createInitialState(1_000).records[0], id: 'kept', status: 'inserted' },
+          type: 'append-record',
+        })}
+        type="button"
+      >
+        Rec
+      </button>
     </>
   );
 }
@@ -79,6 +91,25 @@ describe('settings:changed echo', () => {
     const contents = serializeSettingsFile({ ...defaultSettingsFile().settings, style: 'very-casual' }, true);
     act(() => bus.emit({ contents, source: 'settings' }));
     await waitFor(() => expect(screen.getByLabelText('style')).toHaveTextContent('very-casual'));
+  });
+});
+
+describe('retention Off from the Settings window (BUS-78)', () => {
+  it('clears loaded transcripts in main, not only on restart', async () => {
+    const io = createMemorySettingsIo(serializeSettingsFile(defaultSettingsFile().settings, true));
+    render(
+      <AppProvider settingsPersistence={{ enabled: true, store: createSettingsStore(io) }}>
+        <Probe />
+      </AppProvider>,
+    );
+    await waitFor(() => expect(bus.listeners.length).toBeGreaterThan(0));
+    act(() => screen.getByText('Rec').click());
+    expect(Number(screen.getByLabelText('nonfailed').textContent)).toBeGreaterThan(0);
+    const contents = serializeSettingsFile(
+      { ...defaultSettingsFile().settings, transcriptRetention: 'off' }, true,
+    );
+    act(() => bus.emit({ contents, source: 'settings' }));
+    await waitFor(() => expect(screen.getByLabelText('nonfailed')).toHaveTextContent('0'));
   });
 });
 
