@@ -8,12 +8,15 @@
 //!   own speech level with an absolute floor, so a higher noise floor still
 //!   trims under much louder speech.
 //! - The speech end: the last run at or above a quiet level 6 dB over the
-//!   tail's own noise floor, its quietest 200 ms. A soft final word below
-//!   the loud threshold still counts, so the kept tail starts after it, not
-//!   inside it. When a noise gate cuts recorded room noise to (near)
-//!   digital silence, the floor comes from before the gate, so that noise
-//!   doesn't count as speech, and soft speech running into the gate still
-//!   does. A click, blip or dither in the gate doesn't end it.
+//!   tail's own noise floor. A soft final word below the loud threshold
+//!   still counts, so the kept tail starts after it, not inside it. When a
+//!   noise gate cuts recorded room noise to (near) digital silence, the
+//!   floor is the quietest 200 ms before the gate, so that noise doesn't
+//!   count as speech, and soft speech running into the gate still does. A
+//!   click, blip or dither in the gate doesn't end it.
+//!
+//! Soft speech running to the end of the clip with no pause, under the
+//! loud threshold, is cut like room noise: a known loss (BUS-143).
 //!
 //! Both need 80 ms of frames (one 20 ms dip per run), so a click or key
 //! thump in the tail doesn't count as speech. A lone 60–79 ms sound after

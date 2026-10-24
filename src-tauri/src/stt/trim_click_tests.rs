@@ -121,15 +121,13 @@ fn levels_exactly_at_the_floor_or_threshold_count_as_loud() {
     let ramp = |n: usize| (1..=n).map(|i| i as f32 / 100.0).collect::<Vec<_>>();
     assert_eq!(speech_level(&ramp(8)), Some(7.0 / 100.0));
     assert_eq!(speech_level(&ramp(21)), Some(19.0 / 100.0));
-    // The noise floor is p20 of a 200 ms window: of 10 frames, index
-    // round(1.8) = 2, not 1 (p10) or 3 (p30).
+    // Without a gate the noise floor is p20 of the whole tail: of 11
+    // frames, index round(2.0) = 2, not 1 (p10) or 3 (p30).
     let mut tail = vec![0.003, 0.004, 0.005];
-    tail.extend([0.009; 7]);
+    tail.extend([0.009; 8]);
     assert!((quiet_level(&tail, 1.0) - 0.01).abs() < 1e-6);
-    // The lowest window sets it: an 11th frame moves the second window up.
-    tail.push(0.009);
-    assert!((quiet_level(&tail, 1.0) - 0.01).abs() < 1e-6);
-    // Whole-tail p20 of these 21 frames would be 0.009.
+    // Not the quietest 200 ms: of these 21 frames p20 is 0.009 (BUS-143
+    // comment 10631: a quietest-window floor brought "you" back).
     let tail = [vec![0.009; 10], tail].concat();
-    assert!((quiet_level(&tail, 1.0) - 0.01).abs() < 1e-6);
+    assert!((quiet_level(&tail, 1.0) - 0.018).abs() < 1e-6);
 }

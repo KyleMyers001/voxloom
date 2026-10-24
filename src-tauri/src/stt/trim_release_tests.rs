@@ -1,8 +1,10 @@
 //! Releasing the shortcut while still trailing off: the clip ends in soft
 //! speech, with no pause before the end. Soft speech that runs to the end
 //! of the clip under the loud threshold is cut as room noise, a known loss
-//! tracked in BUS-143 (comment 10631): keeping it whole kept room noise
-//! that loud too, and brought back "you" on 49–77 of 162 changed clips.
+//! tracked in BUS-143 (comment 10631). Keeping it whole kept room noise
+//! that loud too, and brought back "you" on 61 of 209 changed main QA
+//! clips; a floor from the tail's quietest 200 ms, which kept soft speech
+//! before short room noise, brought it back on 49–77 of 162 focus clips.
 
 use super::*;
 
@@ -58,15 +60,15 @@ fn a_breath_or_click_at_release_is_cut_with_the_trail_off() {
 }
 
 #[test]
-fn room_noise_from_60_ms_after_the_trail_off_keeps_it() {
-    // −60 dBFS room noise before the release: from 60 ms it sets the
-    // floor, so the soft speech counts; 20 ms of it does not.
+fn room_noise_after_the_trail_off_keeps_it_only_when_long() {
+    // −60 dBFS room noise before the release sets the floor only once it
+    // is over a fifth of the tail: up to 500 ms of it, the 2 s of soft
+    // speech is cut too (known loss, BUS-143 comment 10631).
     let clip = |ms: u32| released_during(cat(&[tone(0.005, 2.0), noise(0.001, ms as f32 / 1e3)]));
-    assert_eq!(keep(&clip(20)), LOUD_END + KEPT);
-    for ms in [60, 100, 120, 200, 300, 500, 800] {
-        let kept = (secs(4.0) + KEPT).min(clip(ms).len());
-        assert_eq!(keep(&clip(ms)), kept, "{ms} ms of room noise");
+    for ms in [20, 60, 100, 200, 300, 500] {
+        assert_eq!(keep(&clip(ms)), LOUD_END + KEPT, "{ms} ms of room noise");
     }
+    assert_eq!(keep(&clip(800)), secs(4.0) + KEPT);
 }
 
 #[test]

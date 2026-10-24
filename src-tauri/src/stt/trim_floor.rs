@@ -3,11 +3,12 @@
 
 use super::{percentile, MIN_SPEECH_FRAMES};
 
-/// Noise floor: the lowest of this percentile over each 200 ms window.
-/// Low, so a soft final word longer than the noise doesn't set it.
+/// Noise floor: this percentile of the tail, or before a gate the lowest of
+/// it over each 200 ms window. Low, so a soft final word longer than the
+/// noise doesn't set it.
 const NOISE_PERCENTILE: f32 = 0.2;
-/// Window for the noise floor (200 ms). 60 ms of room noise after a soft
-/// final word is enough to set it, so the word still counts.
+/// Window for the noise floor before a gate (200 ms). 60 ms of room noise
+/// before the gate is enough to set it.
 const NOISE_FRAMES: usize = 10;
 /// Quiet level: the floor times this (+6 dB).
 const NOISE_MARGIN: f32 = 2.0;
@@ -29,7 +30,8 @@ const GATED_NOISE_MARGIN: f32 = 2.5;
 /// (−6 dB), so soft speech running into the gate still counts.
 const GATED_QUIET_FACTOR: f32 = 0.5;
 /// 6 dB over the noise floor of the frames after the loud anchor, at most
-/// `threshold`. If the tail ends in a gate after 200 ms or more of sound,
+/// `threshold`. Not their quietest 200 ms: that kept room noise as speech
+/// and brought hallucinations back (BUS-143). If the tail ends in a gate after 200 ms or more of sound,
 /// only the frames before the gate set the floor (+8 dB), and the level
 /// stays 6 dB under `threshold`, so soft speech running into the gate still
 /// counts.
@@ -39,7 +41,7 @@ pub(super) fn quiet_level(tail: &[f32], threshold: f32) -> f32 {
             let quiet = floor(&tail[..n]) * GATED_NOISE_MARGIN;
             quiet.max(MIN_QUIET_RMS).min(threshold * GATED_QUIET_FACTOR)
         }
-        _ => (floor(tail) * NOISE_MARGIN)
+        _ => (percentile(tail.to_vec(), NOISE_PERCENTILE).unwrap_or(0.0) * NOISE_MARGIN)
             .max(MIN_QUIET_RMS)
             .min(threshold),
     }
