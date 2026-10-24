@@ -1,7 +1,7 @@
 use super::*;
 
 const RATE: u32 = 16_000;
-const KEPT: usize = 4_000; // 250 ms at 16 kHz
+const KEPT: usize = 12_000; // 750 ms at 16 kHz
 const FRAME: usize = 320; // 20 ms at 16 kHz
 
 fn secs(s: f32) -> usize {
@@ -53,14 +53,14 @@ fn quiet_noise_tail_is_cut() {
 
 #[test]
 fn higher_noise_floor_still_trims_when_speech_is_much_louder() {
-    // −36 dBFS floor: above the absolute floor, far below the speech.
-    let floor = noise(0.015, 4.0);
-    let speech = cat(&[tone(0.5, 2.0), vec![0.0; secs(2.0)]]);
+    // −40 dBFS floor: above the absolute floor, 35 dB below the speech.
+    let floor = noise(0.01, 4.0);
+    let speech = cat(&[tone(0.8, 2.0), vec![0.0; secs(2.0)]]);
     let clip = mix(&speech, &floor);
     let trim = trailing_trim(&clip, RATE);
-    assert!(trim.threshold > 0.015, "threshold {}", trim.threshold);
+    assert!(trim.threshold > 0.012, "threshold {}", trim.threshold);
     assert!(
-        (trim.tail_rms - 0.015).abs() < 0.002,
+        (trim.tail_rms - 0.01).abs() < 0.002,
         "tail {}",
         trim.tail_rms
     );
@@ -69,9 +69,9 @@ fn higher_noise_floor_still_trims_when_speech_is_much_louder() {
 
 #[test]
 fn soft_final_word_is_kept() {
-    // Final word ~14 dB below the rest of the dictation.
-    let clip = cat(&[tone(0.3, 2.0), tone(0.06, 0.3), vec![0.0; secs(2.0)]]);
-    assert_eq!(keep(&clip), secs(2.3) + KEPT);
+    // A 1 s final word ~24 dB below the rest, longer than the kept tail.
+    let clip = cat(&[tone(0.3, 2.0), tone(0.02, 1.0), vec![0.0; secs(2.0)]]);
+    assert_eq!(keep(&clip), secs(3.0) + KEPT);
 }
 
 #[test]
@@ -114,16 +114,43 @@ fn tail_no_longer_than_the_kept_tail_is_unchanged() {
 
 #[test]
 fn never_trims_to_empty() {
-    let clip = cat(&[tone(0.3, 0.02), vec![0.0; secs(5.0)]]);
-    assert_eq!(keep(&clip), FRAME + KEPT);
+    let clip = cat(&[tone(0.3, 0.06), vec![0.0; secs(5.0)]]);
+    assert_eq!(keep(&clip), 3 * FRAME + KEPT);
 }
 
 #[test]
-fn threshold_is_a_tenth_of_speech_level_with_an_absolute_floor() {
-    let loud = cat(&[tone(0.3, 2.0), vec![0.0; secs(2.0)]]);
+fn a_blip_shorter_than_60_ms_is_not_a_speech_end() {
+    // With no run of three loud frames anywhere, the clip is left alone.
+    let clip = cat(&[tone(0.3, 0.04), vec![0.0; secs(5.0)]]);
+    assert_eq!(keep(&clip), clip.len());
+}
+
+#[test]
+fn a_click_in_the_tail_does_not_stop_the_trim() {
+    // A 3 ms click 100 ms before the end, as from a key release.
+    let mut tail = vec![0.0; secs(2.0)];
+    let at = tail.len() - secs(0.1);
+    tail[at..at + 48].iter_mut().for_each(|s| *s = 0.9);
+    let clip = cat(&[tone(0.3, 2.0), tail]);
+    assert_eq!(keep(&clip), secs(2.0) + KEPT);
+    // A 25 ms thump (two loud frames) is ignored too.
+    let mut tail = vec![0.0; secs(2.0)];
+    tail[at..at + 400].iter_mut().for_each(|s| *s = 0.5);
+    assert_eq!(keep(&cat(&[tone(0.3, 2.0), tail])), secs(2.0) + KEPT);
+}
+
+#[test]
+fn a_sustained_sound_at_the_end_still_counts_as_speech() {
+    let clip = cat(&[tone(0.3, 2.0), vec![0.0; secs(2.0)], tone(0.3, 0.06)]);
+    assert_eq!(keep(&clip), clip.len());
+}
+
+#[test]
+fn threshold_is_3_percent_of_speech_level_with_an_absolute_floor() {
+    let loud = cat(&[tone(0.9, 2.0), vec![0.0; secs(2.0)]]);
     let t = trailing_trim(&loud, RATE).threshold;
-    assert!((t - 0.3 / 2f32.sqrt() * 0.1).abs() < 0.001, "loud {t}");
-    let soft = cat(&[tone(0.04, 2.0), vec![0.0; secs(2.0)]]);
+    assert!((t - 0.9 / 2f32.sqrt() * 0.03).abs() < 0.0003, "loud {t}");
+    let soft = cat(&[tone(0.2, 2.0), vec![0.0; secs(2.0)]]);
     let trim = trailing_trim(&soft, RATE);
     assert_eq!(trim.threshold, 0.006);
     assert_eq!(trim.keep_len, secs(2.0) + KEPT);
@@ -141,7 +168,7 @@ fn reports_tail_rms_of_the_quiet_run() {
 fn trimmed_ms_reports_the_removed_duration() {
     let clip = cat(&[tone(0.3, 2.0), vec![0.0; secs(2.0)]]);
     let trim = trailing_trim(&clip, RATE);
-    assert_eq!(trim.trimmed_ms(clip.len(), RATE), 1_750);
+    assert_eq!(trim.trimmed_ms(clip.len(), RATE), 1_250);
     assert_eq!(
         trailing_trim(&clip[..secs(2.0)], RATE).trimmed_ms(secs(2.0), RATE),
         0
@@ -151,10 +178,10 @@ fn trimmed_ms_reports_the_removed_duration() {
 #[test]
 fn speech_level_follows_the_loud_part_not_the_soft_bulk() {
     // 0.5 s loud then 1.5 s soft speech, then a 0.01 RMS noise tail.
-    let speech = cat(&[tone(0.3, 0.5), tone(0.05, 1.5)]);
+    let speech = cat(&[tone(0.9, 0.5), tone(0.05, 1.5)]);
     let clip = cat(&[speech, noise(0.01, 2.0)]);
     let trim = trailing_trim(&clip, RATE);
-    assert!((trim.threshold - 0.3 / 2f32.sqrt() * 0.1).abs() < 0.001);
+    assert!((trim.threshold - 0.9 / 2f32.sqrt() * 0.03).abs() < 0.0003);
     assert_eq!(trim.keep_len, secs(2.0) + KEPT);
 }
 
@@ -163,8 +190,19 @@ fn a_single_loud_click_does_not_raise_the_threshold() {
     let clip = cat(&[
         tone(0.3, 2.0),
         tone(0.95, 0.02),
-        tone(0.06, 0.3),
+        tone(0.012, 1.0),
         vec![0.0; secs(2.0)],
     ]);
-    assert_eq!(keep(&clip), secs(2.3) + FRAME + KEPT);
+    assert_eq!(keep(&clip), secs(3.0) + FRAME + KEPT);
+}
+
+#[test]
+fn levels_exactly_at_the_floor_or_threshold_count_as_loud() {
+    assert_eq!(
+        speech_level(&[0.0, ABSOLUTE_FLOOR_RMS]),
+        Some(ABSOLUTE_FLOOR_RMS)
+    );
+    assert_eq!(speech_end(&[0.5, 0.5, 0.5, 0.0], 0.5), Some(3));
+    // p90 of 6 loud frames is index round(4.5) = 5.
+    assert_eq!(speech_level(&[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]), Some(0.6));
 }

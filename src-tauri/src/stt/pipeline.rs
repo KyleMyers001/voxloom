@@ -179,7 +179,7 @@ mod tests {
         let cfg = SpeechFilterConfig::default();
         let clip = [speech(), vec![0.0; 32_000]].concat();
         let out = transcribe_filtered(&clip, 16_000, &cfg, &NoVad, |pcm| {
-            assert_eq!(pcm.len(), 16_000 + 4_000, "250 ms tail kept");
+            assert_eq!(pcm.len(), 16_000 + 12_000, "750 ms tail kept");
             Ok(TranscriptDto::raw("hi".into(), Some("en".into())))
         })
         .unwrap();
