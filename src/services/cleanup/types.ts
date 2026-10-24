@@ -7,6 +7,8 @@ export const CLEANUP_MODEL_SHA256 =
 export const CLEANUP_REASONS = [
   'cancelled', 'context-overflow', 'invalid-output', 'model-missing',
   'runtime-error', 'timeout',
+  // BUS-135: this build has no cleanup worker; native refuses the lease.
+  'worker-missing',
 ] as const;
 export type CleanupReason = typeof CLEANUP_REASONS[number];
 

@@ -68,6 +68,8 @@ describe('cleanTranscript', () => {
     ['reasoning leak', { run: vi.fn().mockResolvedValue({ attempt, text: '<think>x</think>' }) }, 'invalid-output'],
     ['worker error', { run: vi.fn().mockRejectedValue(new CleanupEngineError('runtime-error', 'boom')) }, 'runtime-error'],
     ['missing worker', { run: vi.fn().mockRejectedValue(new Error('not a CleanupEngineError')) }, 'runtime-error'],
+    // BUS-135: the worker vanished between the lease and the run.
+    ['worker gone at run', { run: vi.fn().mockRejectedValue(new CleanupEngineError('worker-missing', 'gone')) }, 'worker-missing'],
     ['lease failure', { acquire: vi.fn().mockRejectedValue(new CleanupEngineError('model-missing', 'no model')) }, 'model-missing'],
     ['native retirement', { run: vi.fn().mockRejectedValue(new CleanupEngineError('cancelled', 'retired')) }, 'cancelled'],
   ])('falls back to the raw text on %s', async (_label, overrides, reason) => {
