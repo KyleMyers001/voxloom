@@ -14,13 +14,16 @@
 //!   floor is the quietest 200 ms before the gate, so that noise doesn't
 //!   count as speech, and soft speech running into the gate still does.
 //!
+//! A clip that still ends within 6 dB of the loud threshold is left whole:
+//! push-to-talk released mid trail-off. Room noise that loud is kept too.
+//!
 //! Both need 80 ms of frames (one 20 ms dip per run), so a click or key
 //! thump in the tail doesn't count as speech. A lone 60–79 ms sound after
 //! the last such run is cut, so about 3% of random clips keep less than
 //! with 60 ms runs.
 
 use super::gate::AudioStats;
-use floor::quiet_level;
+use floor::{ends_in_speech, quiet_level};
 
 #[path = "trim_floor.rs"]
 mod floor;
@@ -91,6 +94,9 @@ pub fn trailing_trim(samples: &[f32], sample_rate_hz: u32) -> TailTrim {
         return unchanged(threshold, threshold);
     };
     let quiet_level = quiet_level(&levels[loud_end..], threshold);
+    if ends_in_speech(&levels, threshold) {
+        return unchanged(threshold, quiet_level);
+    }
     // The loud run is at or above the quiet level too, so this ends at or
     // after `loud_end`.
     let end_frame = speech_end(&levels, quiet_level).unwrap_or(loud_end);

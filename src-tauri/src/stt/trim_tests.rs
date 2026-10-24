@@ -53,14 +53,15 @@ fn quiet_noise_tail_is_cut() {
 
 #[test]
 fn higher_noise_floor_still_trims_when_speech_is_much_louder() {
-    // −40 dBFS floor: above the absolute floor, 35 dB below the speech.
-    let floor = noise(0.01, 4.0);
+    // −43 dBFS floor: above the absolute floor, 38 dB below the speech,
+    // and more than 6 dB under the loud threshold, so not a trail-off.
+    let floor = noise(0.007, 4.0);
     let speech = cat(&[tone(0.8, 2.0), vec![0.0; secs(2.0)]]);
     let clip = mix(&speech, &floor);
     let trim = trailing_trim(&clip, RATE);
     assert!(trim.threshold > 0.012, "threshold {}", trim.threshold);
     assert!(
-        (trim.tail_rms - 0.01).abs() < 0.002,
+        (trim.tail_rms - 0.007).abs() < 0.002,
         "tail {}",
         trim.tail_rms
     );
@@ -150,9 +151,9 @@ fn trimmed_ms_reports_the_removed_duration() {
 
 #[test]
 fn speech_level_follows_the_loud_part_not_the_soft_bulk() {
-    // 0.5 s loud then 1.5 s soft speech, then a 0.01 RMS noise tail.
+    // 0.5 s loud then 1.5 s soft speech, then a 0.007 RMS noise tail.
     let speech = cat(&[tone(0.9, 0.5), tone(0.05, 1.5)]);
-    let clip = cat(&[speech, noise(0.01, 2.0)]);
+    let clip = cat(&[speech, noise(0.007, 2.0)]);
     let trim = trailing_trim(&clip, RATE);
     assert!((trim.threshold - 0.9 / 2f32.sqrt() * 0.03).abs() < 0.0003);
     assert_eq!(trim.keep_len, secs(2.0) + KEPT);
@@ -174,3 +175,6 @@ mod clicks;
 
 #[path = "trim_silence_tests.rs"]
 mod silence;
+
+#[path = "trim_release_tests.rs"]
+mod release;

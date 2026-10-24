@@ -80,10 +80,9 @@ fn a_soft_final_word_below_the_floor_anchors_the_kept_tail() {
 #[test]
 fn the_quiet_level_never_exceeds_the_loud_threshold() {
     // Noise at 0.005 RMS: +6 dB would be 0.01, over the 0.006 threshold.
-    let clip = mix(
-        &cat(&[tone(0.2, 2.0), vec![0.0; secs(2.0)]]),
-        &noise(0.005, 4.0),
-    );
+    // It drops to 0.002 for the last 300 ms, so the clip doesn't end in it.
+    let speech = cat(&[tone(0.2, 2.0), vec![0.0; secs(1.7)]]);
+    let clip = cat(&[mix(&speech, &noise(0.005, 3.7)), noise(0.002, 0.3)]);
     let trim = trailing_trim(&clip, RATE);
     assert_eq!(trim.quiet_level, trim.threshold);
     assert_eq!(trim.keep_len, secs(2.0) + KEPT);
@@ -91,8 +90,8 @@ fn the_quiet_level_never_exceeds_the_loud_threshold() {
 
 #[test]
 fn leading_silence_does_not_set_the_tail_noise_floor() {
-    // Digital silence before the speech, 0.003 RMS room noise after it.
-    let clip = cat(&[vec![0.0; secs(2.0)], tone(0.3, 2.0), noise(0.003, 2.0)]);
+    // Digital silence before the speech, 0.0025 RMS room noise after it.
+    let clip = cat(&[vec![0.0; secs(2.0)], tone(0.3, 2.0), noise(0.0025, 2.0)]);
     assert_eq!(keep(&clip), secs(4.0) + KEPT);
 }
 

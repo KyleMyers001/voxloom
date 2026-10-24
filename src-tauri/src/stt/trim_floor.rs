@@ -1,5 +1,6 @@
 //! BUS-139: the quiet level that ends speech in the tail: the tail's noise
 //! floor plus a margin, measured before a noise gate when there is one.
+//! Also whether the clip still ends in soft speech, so there is no tail.
 
 use super::percentile;
 
@@ -27,6 +28,18 @@ const GATED_NOISE_MARGIN: f32 = 2.5;
 /// Before a gate the quiet level stays this far under the loud threshold
 /// (−6 dB), so soft speech running into the gate still counts.
 const GATED_QUIET_FACTOR: f32 = 0.5;
+/// A clip whose last 200 ms (median) sit at or above this fraction of the
+/// loud threshold (−6 dB) ends in soft speech, as when push-to-talk is
+/// released mid trail-off. Of 4,585 trimmed QA clips, 111 ended within
+/// 6 dB (96 of them in −46 dBFS room noise, now kept); 9 dB adds 3 more.
+const ENDS_IN_SPEECH_FACTOR: f32 = 0.5;
+
+/// Whether `levels` end within 6 dB of `threshold`, with no pause before
+/// the end of the clip: the tail is soft speech, not room noise.
+pub(super) fn ends_in_speech(levels: &[f32], threshold: f32) -> bool {
+    let last = levels[levels.len().saturating_sub(NOISE_FRAMES)..].to_vec();
+    percentile(last, 0.5).is_some_and(|r| r >= threshold * ENDS_IN_SPEECH_FACTOR)
+}
 
 /// 6 dB over the noise floor of the frames after the loud anchor, at most
 /// `threshold`. If the tail ends in a gate after 200 ms or more of sound,
