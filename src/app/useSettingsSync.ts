@@ -66,7 +66,7 @@ export function useSettingsSync({ allowRef, enabled, dispatch, lastSavedRef, las
         allowRef.current = true;
         dispatch({ message: null, type: 'set-settings-error' });
       }
-      dispatch({ ...merged, type: 'hydrate-settings' });
+      dispatch({ ...merged, now: Date.now(), type: 'hydrate-settings' });
     }));
   }, [allowRef, dispatch, enabled, lastRequestedRef, lastSavedRef, persistGenRef]);
 }

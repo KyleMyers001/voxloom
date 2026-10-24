@@ -6,19 +6,21 @@ import type {
   SettingUpdate,
 } from '../domain/types';
 
-export type SettingAction = SettingUpdate & { type: 'set-setting' };
+/** `now` lets Retention Off keep only rows still recoverable (BUS-78). */
+export type SettingAction = SettingUpdate & { now: number; type: 'set-setting' };
 
 export type AppAction =
-  | { type: 'append-record'; record: DictationRecord }
+  | { type: 'append-record'; now: number; record: DictationRecord }
   | { runId: number; type: 'cancel-dictation' }
   | { type: 'complete-dictation'; now: number; runId: number }
   | { type: 'delete-record'; id: string }
   | { type: 'delete-word'; word: string }
   | { type: 'expire-recovery'; now: number }
   | { type: 'fail-dictation'; now: number; runId: number }
-  | { type: 'hydrate-records'; records: DictationRecord[] }
+  | { now: number; type: 'hydrate-records'; records: DictationRecord[] }
   | { type: 'hydrate-words'; words: string[] }
   | {
+      now: number;
       onboardingComplete: boolean;
       settings: Settings;
       type: 'hydrate-settings';

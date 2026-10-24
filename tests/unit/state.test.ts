@@ -176,7 +176,7 @@ describe('appReducer', () => {
       style: 'formal' as const,
       text: 'session history from dogfood',
     };
-    const next = appReducer(initial, { record, type: 'append-record' });
+    const next = appReducer(initial, { now: 1_000, record, type: 'append-record' });
     expect(next.records[0]).toEqual(record);
     expect(next.records).toHaveLength(initial.records.length + 1);
   });
@@ -200,7 +200,7 @@ describe('appReducer', () => {
     };
     const hydrated = appReducer(errored, {
       records: [row],
-      type: 'hydrate-records',
+      now: Date.now(), type: 'hydrate-records',
     });
     expect(hydrated.records).toEqual([row]);
     expect(hydrated.historyError).toBeNull();
@@ -219,7 +219,7 @@ describe('appReducer', () => {
     };
     const hydrated = appReducer(
       createInitialState(1_000, { persistHistory: true }),
-      { records: [row], type: 'hydrate-records' },
+      { records: [row], now: Date.now(), type: 'hydrate-records' },
     );
     const configured = {
       ...hydrated,
@@ -250,7 +250,7 @@ describe('appReducer', () => {
     };
     const hydrated = appReducer(
       createInitialState(1_000, { persistHistory: true }),
-      { records: [row], type: 'hydrate-records' },
+      { records: [row], now: Date.now(), type: 'hydrate-records' },
     );
     const wiped = appReducer(hydrated, {
       now: 20_000,
@@ -288,7 +288,7 @@ describe('appReducer', () => {
     const hydrated = appReducer(errored, {
       onboardingComplete: true,
       settings: nextSettings,
-      type: 'hydrate-settings',
+      now: Date.now(), type: 'hydrate-settings',
     });
     expect(hydrated.settings).toEqual(nextSettings);
     expect(hydrated.onboarding.complete).toBe(true);
