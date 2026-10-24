@@ -112,6 +112,9 @@ fn levels_exactly_at_the_floor_or_threshold_count_as_loud() {
     // Two dips end a run; the next run may bridge its own dip.
     let runs = [0.5, 0.5, 0.0, 0.5, 0.5, 0.0, 0.0, 0.5, 0.5];
     assert_eq!(speech_end(&runs, 0.5), Some(5));
+    // A second dip ends a run even when it isn't next to the first.
+    assert_eq!(speech_end(&[0.5, 0.5, 0.0, 0.5, 0.0, 0.5, 0.5], 0.5), None);
+    assert_eq!(speech_end(&[0.5, 0.5, 0.0, 0.5, 0.5], 0.5), Some(5));
     // p90 of 6 loud frames is index round(4.5) = 5.
     assert_eq!(speech_level(&[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]), Some(0.6));
     // 8 frames: index round(6.3) = 6. 21 frames: index 18, not 19 (p95).
@@ -122,5 +125,5 @@ fn levels_exactly_at_the_floor_or_threshold_count_as_loud() {
     // not 1 (p10) or 3 (p30).
     let mut tail = vec![0.003, 0.004, 0.005];
     tail.extend([0.009; 8]);
-    assert_eq!(quiet_level(&tail), 0.01);
+    assert_eq!(quiet_level(&tail, 1.0), 0.01);
 }

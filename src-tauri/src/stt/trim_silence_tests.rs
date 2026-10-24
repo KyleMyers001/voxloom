@@ -60,3 +60,65 @@ fn only_the_noise_just_before_digital_silence_sets_the_floor() {
     let clip = cat(&[tone(0.3, 2.0), soft_then_room, vec![0.0; secs(2.0)]]);
     assert_eq!(keep(&clip), secs(3.0) + KEPT);
 }
+
+#[test]
+fn soft_speech_running_into_digital_silence_is_kept() {
+    // Soft speech (0.006 peak, under the loud threshold) straight after the
+    // loud part and into the gate: none of it sets the floor.
+    for soft_s in [1.0, 1.3, 2.0] {
+        let clip = speech_room_then(
+            0.0,
+            0.0,
+            [tone(0.006, soft_s), vec![0.0; secs(2.0)]].concat(),
+        );
+        assert_eq!(keep(&clip), secs(2.0 + soft_s) + KEPT, "{soft_s} s");
+    }
+}
+
+#[test]
+fn a_faint_word_just_before_the_gate_is_kept() {
+    // −60 dBFS, 180 ms, 600 ms after the speech in −70 dBFS room noise; the
+    // gate closes 20 ms after the word.
+    let after = [
+        noise(0.000316, 0.6),
+        noise(0.001, 0.18),
+        noise(0.000316, 0.02),
+        vec![0.0; secs(2.0)],
+    ];
+    assert_eq!(
+        keep(&cat(&[tone(0.3, 2.0), after.concat()])),
+        secs(2.78) + KEPT
+    );
+}
+
+#[test]
+fn dither_over_2_lsb_after_room_noise_is_still_a_gate() {
+    // ±3 and ±4 LSB dither (6.1e-5 and 7.9e-5 RMS) in place of zeros.
+    for dither in [0.000061, 0.000079] {
+        let clip = speech_room_then(0.0004, 0.2, noise(dither, 2.0));
+        assert_eq!(keep(&clip), secs(2.0) + KEPT, "{dither}");
+    }
+}
+
+#[test]
+fn a_gate_that_lowers_room_noise_by_20_db_is_a_gate() {
+    let clip = speech_room_then(0.0006, 0.3, noise(0.00006, 2.0));
+    assert_eq!(keep(&clip), secs(2.0) + KEPT);
+}
+
+#[test]
+fn room_noise_over_minus_74_dbfs_is_not_a_gate() {
+    // A soft final word straight after the speech, then plain room noise: the
+    // noise sets the floor, so the word counts.
+    let clip = speech_room_then(0.0, 0.0, [tone(0.003, 0.5), noise(0.0003, 2.0)].concat());
+    assert_eq!(keep(&clip), secs(2.5) + KEPT);
+}
+
+#[test]
+fn room_noise_needs_200_ms_before_the_gate_to_set_the_floor() {
+    // 180 ms (9 frames) is too short to measure, so the noise counts and the
+    // trim keeps it (as on main); 200 ms is trimmed.
+    let with = |room_s: f32| keep(&speech_room_then(0.0004, room_s, vec![0.0; secs(2.0)]));
+    assert_eq!(with(0.18), secs(2.18) + KEPT);
+    assert_eq!(with(0.2), secs(2.0) + KEPT);
+}

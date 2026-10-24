@@ -10,10 +10,11 @@
 //! - The speech end: the last run at or above a quiet level 6 dB over the
 //!   tail's own noise floor. A soft final word below the loud threshold
 //!   still counts, so the kept tail starts after it, not inside it. When a
-//!   noise gate cuts recorded room noise to digital silence, the floor is
-//!   measured on the room noise, so that noise doesn't count as speech.
+//!   noise gate cuts recorded room noise to (near) digital silence, the
+//!   floor is the quietest 200 ms before the gate, so that noise doesn't
+//!   count as speech, and soft speech running into the gate still does.
 //!
-//! Both need 80 ms of frames (one 20 ms dip allowed), so a click or key
+//! Both need 80 ms of frames (one 20 ms dip per run), so a click or key
 //! thump in the tail doesn't count as speech. A lone 60–79 ms sound after
 //! the last such run is cut, so about 3% of random clips keep less than
 //! with 60 ms runs.
@@ -47,11 +48,18 @@ const NOISE_MARGIN: f32 = 2.0;
 /// Lowest quiet level (≈ −74 dBFS), for a digitally silent tail. A final
 /// word 32 dB under −30 dBFS speech sits near −62 dBFS.
 const MIN_QUIET_RMS: f32 = 0.0002;
-/// Frames under this RMS (≈ −86 dBFS, under 2 LSB of 16-bit audio) are
-/// digital silence, as left by a device or OS noise gate.
-const SILENT_RMS: f32 = 0.00005;
-/// Recorded noise measured just before digital silence (200 ms).
+/// A clip whose last 200 ms sit at or under this RMS (≈ −74 dBFS) may end
+/// in a noise gate: digital silence, dither, or room noise lowered 20 dB.
+const GATED_MAX_RMS: f32 = 0.0002;
+/// The gated stretch: frames up to this many times the level of the last
+/// 200 ms (+6 dB), or one 16-bit LSB, whichever is higher.
+const GATED_MARGIN: f32 = 2.0;
+const LSB_RMS: f32 = 1.0 / 32_768.0;
+/// Window for the noise floor before a gate (200 ms).
 const NOISE_FRAMES: usize = 10;
+/// Before a gate the quiet level stays this far under the loud threshold
+/// (−6 dB), so soft speech running into the gate still counts.
+const GATED_QUIET_FACTOR: f32 = 0.5;
 
 /// What `trailing_trim` decided for one clip.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -99,7 +107,7 @@ pub fn trailing_trim(samples: &[f32], sample_rate_hz: u32) -> TailTrim {
     let Some(loud_end) = speech_end(&levels, threshold) else {
         return unchanged(threshold, threshold);
     };
-    let quiet_level = quiet_level(&levels[loud_end..]).min(threshold);
+    let quiet_level = quiet_level(&levels[loud_end..], threshold);
     // The loud run is at or above the quiet level too, so this ends at or
     // after `loud_end`.
     let end_frame = speech_end(&levels, quiet_level).unwrap_or(loud_end);
@@ -117,22 +125,44 @@ pub fn trailing_trim(samples: &[f32], sample_rate_hz: u32) -> TailTrim {
     }
 }
 
-/// 6 dB over the noise floor of the frames after the loud anchor. If the
-/// tail turns digitally silent after recorded noise, the 200 ms just before
-/// the silence set the floor.
-fn quiet_level(tail: &[f32]) -> f32 {
-    let measured = match tail.iter().position(|&r| r < SILENT_RMS) {
-        Some(n) if n >= NOISE_FRAMES => &tail[n - NOISE_FRAMES..n],
-        _ => tail,
-    };
-    let noise = percentile(measured.to_vec(), NOISE_PERCENTILE).unwrap_or(0.0);
-    (noise * NOISE_MARGIN).max(MIN_QUIET_RMS)
+/// 6 dB over the noise floor of the frames after the loud anchor, at most
+/// `threshold`. If the tail ends in a gate after 200 ms or more of sound,
+/// the quietest 200 ms before the gate set the floor, and the level stays
+/// 6 dB under `threshold`.
+fn quiet_level(tail: &[f32], threshold: f32) -> f32 {
+    let quiet = |noise: f32| (noise * NOISE_MARGIN).max(MIN_QUIET_RMS);
+    match gate_start(tail) {
+        Some(n) if n >= NOISE_FRAMES => {
+            let noise = tail[..n]
+                .windows(NOISE_FRAMES)
+                .filter_map(|w| percentile(w.to_vec(), NOISE_PERCENTILE))
+                .fold(f32::INFINITY, f32::min);
+            quiet(noise).min(threshold * GATED_QUIET_FACTOR)
+        }
+        _ => {
+            let noise = percentile(tail.to_vec(), NOISE_PERCENTILE).unwrap_or(0.0);
+            quiet(noise).min(threshold)
+        }
+    }
+}
+
+/// Start of the gated stretch at the end of `tail`: the last 200 ms are at
+/// or under `GATED_MAX_RMS`, and the stretch runs back while frames stay
+/// within `GATED_MARGIN` of that level. `None` when the tail isn't gated.
+fn gate_start(tail: &[f32]) -> Option<usize> {
+    let last = &tail[tail.len().saturating_sub(NOISE_FRAMES)..];
+    let level = percentile(last.to_vec(), 0.5)?;
+    if level > GATED_MAX_RMS {
+        return None;
+    }
+    let limit = (level * GATED_MARGIN).max(LSB_RMS);
+    Some(tail.iter().rposition(|&r| r > limit).map_or(0, |i| i + 1))
 }
 
 /// Frame index just past the last run of `MIN_SPEECH_FRAMES` or more frames
-/// at or above `threshold`. `None` when there is no such run. One frame
-/// under it inside a run, like the closure before the burst of a fast "it",
-/// doesn't end the run.
+/// at or above `threshold`. `None` when there is no such run. A run may
+/// bridge one frame under it, like the closure before the burst of a fast
+/// "it"; a second such frame, adjacent or not, ends the run.
 fn speech_end(levels: &[f32], threshold: f32) -> Option<usize> {
     let (mut run, mut end, mut dipped) = (0, 0, false);
     for (i, &r) in levels.iter().enumerate().rev() {
