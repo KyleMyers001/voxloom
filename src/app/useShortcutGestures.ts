@@ -58,6 +58,8 @@ export interface GestureDogfoodBridge {
   hudReady?: boolean;
   start: () => Promise<void>;
   stop: () => Promise<void>;
+  /** The recording session already asked to stop (its audio is on the way). */
+  stopRequested?: () => boolean;
 }
 
 interface GestureOptions {
@@ -321,6 +323,13 @@ export function useShortcutGestures(options: GestureOptions) {
     if (phase === guard.seen) return;
     guard.seen = phase;
     if (!isDogfoodTerminal(phase)) return;
+    if (phase === 'cancelled') {
+      // Escape/Home cancel: a latched gesture must not need an extra press
+      // to "finish" a run that no longer exists. (A hold-start that cancels
+      // leftover capture pre-marks the guard, so its new run is untouched.)
+      pendingFinishRef.current?.clear();
+      nativeControllerRef.current?.resetPartial();
+    }
     const { hudResult, origin } = optionsRef.current.dogfood;
     // HUD rules 3–6: Copied / failure flash briefly for gesture runs (the
     // bridge holds off the teardown hide); everything else hides at once.
@@ -354,11 +363,13 @@ function handleGesture(
   if (gesture === 'hold-start' || gesture === 'latch-start') {
     // Leftover overlay run (missed finish): clear it before the new run.
     tearDownOverlayDictation(options);
-    if (dogfood.phase === 'recording') {
+    if (dogfood.phase === 'recording' && !dogfood.stopRequested?.()) {
       // Prior capture never stopped (Home Start / missed hold-finish):
       // abandon it so the new hold can start — never silently ignore as busy.
       // Mark the resulting "cancelled" as handled: it commits in the same
       // React batch as the new listening run, which must survive.
+      // A capture already stopping (quick tap, then re-hold) is not
+      // cancelled: start() supersedes it and its text reaches History.
       dogfood.cancel();
       phaseGuard.seen = 'cancelled';
     }
@@ -402,5 +413,6 @@ export function toGestureDogfoodBridge(
     phase: dogfood.phase,
     start: () => dogfood.start('gesture'),
     stop: dogfood.stop,
+    stopRequested: dogfood.stopRequested,
   };
 }

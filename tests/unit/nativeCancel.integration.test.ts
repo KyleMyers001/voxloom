@@ -13,7 +13,7 @@ vi.mock('../../src/services/shortcut/cancelScope', () => ({ beginCancelScope: na
 function capture(state: CaptureState): UseCaptureStateResult {
   return {
     captureState: state, captureReady: true, devices: [], devicesLoading: false, deviceListError: null,
-    permissionStatus: 'authorized', cancelActiveCapture: vi.fn(), startFullCaptureSession: vi.fn().mockResolvedValue('started'),
+    permissionStatus: 'authorized', cancelActiveCapture: vi.fn(), waitForCaptureRelease: vi.fn().mockResolvedValue(undefined), startFullCaptureSession: vi.fn().mockResolvedValue('started'),
     stopFullCapture: vi.fn(), stopMicTest: vi.fn(), requestMicPermission: vi.fn(),
     refreshDevices: vi.fn(), runMicTest: vi.fn(), prepareDeviceChange: vi.fn(),
   };

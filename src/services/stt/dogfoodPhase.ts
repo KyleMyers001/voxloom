@@ -52,6 +52,10 @@ export interface DogfoodViewState {
 /** Stable setters plus announce (message + toast) and toast-only. */
 export interface DogfoodViewActions {
   announce: (text: string) => void;
+  /** Message + error toast (error tone; falls back to the plain toast). */
+  announceError: (text: string) => void;
+  /** Error toast only; falls back to the plain toast. */
+  errorToast: (text: string) => void;
   setHudReady: (ready: boolean) => void;
   setHudResult: (result: OverlayResult | null) => void;
   setIntendedTarget: (target: TargetSnapshot | null) => void;
@@ -65,6 +69,7 @@ export interface DogfoodViewActions {
 
 export function useDogfoodView(
   onToast?: (message: string) => void,
+  onErrorToast?: (message: string) => void,
 ): { actions: DogfoodViewActions; state: DogfoodViewState } {
   const [phase, setPhase] = useState<DogfoodPhase>('idle');
   const [scopeReady, setScopeReady] = useState(false);
@@ -85,10 +90,21 @@ export function useDogfoodView(
     setMessage(text);
     toastRef.current?.(text);
   }, []);
+  const errorToastRef = useRef(onErrorToast);
+  errorToastRef.current = onErrorToast;
+  const errorToast = useCallback((text: string) => {
+    (errorToastRef.current ?? toastRef.current)?.(text);
+  }, []);
+  const announceError = useCallback((text: string) => {
+    setMessage(text);
+    errorToast(text);
+  }, [errorToast]);
 
   // Every member is stable, so callers can depend on `actions` freely.
   const actions = useMemo(() => ({
     announce,
+    announceError,
+    errorToast,
     setHudReady,
     setHudResult,
     setIntendedTarget,
@@ -98,7 +114,7 @@ export function useDogfoodView(
     setScopeReady,
     setTranscript,
     toast,
-  }), [announce, toast]);
+  }), [announce, announceError, errorToast, toast]);
 
   return {
     actions,

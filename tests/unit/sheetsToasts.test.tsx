@@ -6,6 +6,7 @@ import { ShortcutsDialog } from '../../src/app/AppDialogs';
 import { useToastMessages } from '../../src/app/useToastMessages';
 import { Toast, toastTone } from '../../src/components/Toast';
 import { StepDots } from '../../src/features/onboarding/StepDots';
+import { SUPERSEDED_DELIVERY_MESSAGE } from '../../src/services/delivery';
 
 describe('toastTone (toasts board strings)', () => {
   it.each([
@@ -18,6 +19,9 @@ describe('toastTone (toasts board strings)', () => {
     ['Finish the current dictation before retrying', 'err'],
     ['Recovery buffer expired', 'err'],
     ['Shortcut “Ctrl + Space” is in use; kept Ctrl + Shift + Space', 'err'],
+    ['Escape-cancel is off: Voxloom does not have Accessibility permission. Dictation still works.', 'warn'],
+    // BUS-91: neutral info icon, never the error style.
+    [SUPERSEDED_DELIVERY_MESSAGE, 'warn'],
   ])('%s → %s', (message, tone) => expect(toastTone(message)).toBe(tone));
 
   it('renders an icon by severity and an explicit tone wins', () => {
@@ -83,6 +87,20 @@ describe('review #45 nits', () => {
     act(() => { vi.advanceTimersByTime(1_000); }); // first's 1.8 s timer would have fired here
     expect(result.current.toast).toBe('second');
     act(() => { vi.advanceTimersByTime(800); });
+    expect(result.current.toast).toBe('');
+    vi.useRealTimers();
+  });
+
+  it('keeps longer toasts up long enough to read (BUS-91)', () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useToastMessages([]));
+    act(() => result.current.announce(SUPERSEDED_DELIVERY_MESSAGE)); // 12 words → 3 s
+    act(() => { vi.advanceTimersByTime(2_999); });
+    expect(result.current.toast).toBe(SUPERSEDED_DELIVERY_MESSAGE);
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(result.current.toast).toBe('');
+    act(() => result.current.announce('Listening…')); // short text keeps the 1.8 s floor
+    act(() => { vi.advanceTimersByTime(1_800); });
     expect(result.current.toast).toBe('');
     vi.useRealTimers();
   });
