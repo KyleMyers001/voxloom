@@ -65,7 +65,7 @@ fn a_soft_final_word_below_the_floor_anchors_the_kept_tail() {
     let clip = cat(&parts);
     let trim = trailing_trim(&clip, RATE);
     assert_eq!(trim.keep_len, secs(2.9) + KEPT);
-    assert_eq!(trim.quiet_level, MIN_QUIET_RMS);
+    assert_eq!(trim.quiet_level, floor::MIN_QUIET_RMS);
     // Under 0.001 RMS room noise the quiet level follows the noise (+6 dB).
     let noisy = mix(&clip, &noise(0.001, 4.9));
     let trim = trailing_trim(&noisy, RATE);
