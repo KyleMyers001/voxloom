@@ -178,3 +178,6 @@ mod silence;
 
 #[path = "trim_release_tests.rs"]
 mod release;
+
+#[path = "trim_gate_tests.rs"]
+mod gate;

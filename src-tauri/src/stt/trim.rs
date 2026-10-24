@@ -8,11 +8,12 @@
 //!   own speech level with an absolute floor, so a higher noise floor still
 //!   trims under much louder speech.
 //! - The speech end: the last run at or above a quiet level 6 dB over the
-//!   tail's own noise floor. A soft final word below the loud threshold
-//!   still counts, so the kept tail starts after it, not inside it. When a
-//!   noise gate cuts recorded room noise to (near) digital silence, the
-//!   floor is the quietest 200 ms before the gate, so that noise doesn't
-//!   count as speech, and soft speech running into the gate still does.
+//!   tail's own noise floor, its quietest 200 ms. A soft final word below
+//!   the loud threshold still counts, so the kept tail starts after it, not
+//!   inside it. When a noise gate cuts recorded room noise to (near)
+//!   digital silence, the floor comes from before the gate, so that noise
+//!   doesn't count as speech, and soft speech running into the gate still
+//!   does. A click, blip or dither in the gate doesn't end it.
 //!
 //! A clip that still ends within 6 dB of the loud threshold is left whole:
 //! push-to-talk released mid trail-off. Room noise that loud is kept too.
@@ -93,10 +94,10 @@ pub fn trailing_trim(samples: &[f32], sample_rate_hz: u32) -> TailTrim {
     let Some(loud_end) = speech_end(&levels, threshold) else {
         return unchanged(threshold, threshold);
     };
-    let quiet_level = quiet_level(&levels[loud_end..], threshold);
     if ends_in_speech(&levels, threshold) {
-        return unchanged(threshold, quiet_level);
+        return unchanged(threshold, threshold);
     }
+    let quiet_level = quiet_level(&levels[loud_end..], threshold);
     // The loud run is at or above the quiet level too, so this ends at or
     // after `loud_end`.
     let end_frame = speech_end(&levels, quiet_level).unwrap_or(loud_end);

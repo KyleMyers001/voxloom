@@ -78,14 +78,14 @@ fn a_soft_final_word_below_the_floor_anchors_the_kept_tail() {
 }
 
 #[test]
-fn the_quiet_level_never_exceeds_the_loud_threshold() {
-    // Noise at 0.005 RMS: +6 dB would be 0.01, over the 0.006 threshold.
-    // It drops to 0.002 for the last 300 ms, so the clip doesn't end in it.
-    let speech = cat(&[tone(0.2, 2.0), vec![0.0; secs(1.7)]]);
-    let clip = cat(&[mix(&speech, &noise(0.005, 3.7)), noise(0.002, 0.3)]);
-    let trim = trailing_trim(&clip, RATE);
-    assert_eq!(trim.quiet_level, trim.threshold);
-    assert_eq!(trim.keep_len, secs(2.0) + KEPT);
+fn noise_within_6_db_of_the_loud_threshold_is_kept() {
+    // 0.005 RMS noise under 0.006: it may be a trail-off, so it stays. Its
+    // +6 dB level, 0.01, would be over the threshold.
+    let clip = mix(
+        &cat(&[tone(0.2, 2.0), vec![0.0; secs(2.0)]]),
+        &noise(0.005, 4.0),
+    );
+    assert_eq!(keep(&clip), clip.len());
 }
 
 #[test]
@@ -120,9 +120,15 @@ fn levels_exactly_at_the_floor_or_threshold_count_as_loud() {
     let ramp = |n: usize| (1..=n).map(|i| i as f32 / 100.0).collect::<Vec<_>>();
     assert_eq!(speech_level(&ramp(8)), Some(7.0 / 100.0));
     assert_eq!(speech_level(&ramp(21)), Some(19.0 / 100.0));
-    // The noise floor is p20 of the tail: of 11 frames, index round(2.0) = 2,
-    // not 1 (p10) or 3 (p30).
+    // The noise floor is p20 of a 200 ms window: of 10 frames, index
+    // round(1.8) = 2, not 1 (p10) or 3 (p30).
     let mut tail = vec![0.003, 0.004, 0.005];
-    tail.extend([0.009; 8]);
-    assert_eq!(quiet_level(&tail, 1.0), 0.01);
+    tail.extend([0.009; 7]);
+    assert!((quiet_level(&tail, 1.0) - 0.01).abs() < 1e-6);
+    // The lowest window sets it: an 11th frame moves the second window up.
+    tail.push(0.009);
+    assert!((quiet_level(&tail, 1.0) - 0.01).abs() < 1e-6);
+    // Whole-tail p20 of these 21 frames would be 0.009.
+    let tail = [vec![0.009; 10], tail].concat();
+    assert!((quiet_level(&tail, 1.0) - 0.01).abs() < 1e-6);
 }
