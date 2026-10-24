@@ -105,7 +105,7 @@ pub(super) fn prewarm(
         Ok(false) => return "abandoned",
         Err(_) => return "unavailable",
     }
-    if ticket.start(lease, low_power_mode) {
+    if ticket.start(lease) {
         "started"
     } else {
         "busy"
