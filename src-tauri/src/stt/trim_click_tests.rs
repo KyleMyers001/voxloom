@@ -32,6 +32,21 @@ fn a_click_in_the_tail_does_not_stop_the_trim() {
 }
 
 #[test]
+fn a_fast_it_with_a_stop_closure_counts_as_speech() {
+    // 60 ms vowel, a 20 ms closure under the quiet level, a 40 ms burst,
+    // all over −60 dBFS room noise (quiet level ≈ 0.002 RMS).
+    let word = [tone(0.01, 0.06), tone(0.002, 0.02), tone(0.005, 0.04)];
+    let clip = cat(&[tone(0.3, 2.0), vec![0.0; secs(1.0)], word.concat()]);
+    let clip = cat(&[clip, vec![0.0; secs(2.0)]]);
+    let clip = mix(&clip, &noise(0.001, 5.12));
+    assert_eq!(keep(&clip), secs(3.12) + KEPT);
+    // Two dips in a row do end the run: the vowel alone is too short.
+    let gap = [tone(0.01, 0.06), vec![0.0; secs(0.04)], tone(0.005, 0.04)];
+    let clip = cat(&[tone(0.3, 2.0), vec![0.0; secs(1.0)], gap.concat()]);
+    assert_eq!(keep(&cat(&[clip, vec![0.0; secs(2.0)]])), secs(2.0) + KEPT);
+}
+
+#[test]
 fn a_sustained_sound_at_the_end_still_counts_as_speech() {
     let clip = cat(&[tone(0.3, 2.0), vec![0.0; secs(2.0)], tone(0.3, 0.08)]);
     assert_eq!(keep(&clip), clip.len());
@@ -94,12 +109,18 @@ fn levels_exactly_at_the_floor_or_threshold_count_as_loud() {
         Some(ABSOLUTE_FLOOR_RMS)
     );
     assert_eq!(speech_end(&[0.5, 0.5, 0.5, 0.5, 0.0], 0.5), Some(4));
+    // Two dips end a run; the next run may bridge its own dip.
+    let runs = [0.5, 0.5, 0.0, 0.5, 0.5, 0.0, 0.0, 0.5, 0.5];
+    assert_eq!(speech_end(&runs, 0.5), Some(5));
     // p90 of 6 loud frames is index round(4.5) = 5.
     assert_eq!(speech_level(&[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]), Some(0.6));
     // 8 frames: index round(6.3) = 6. 21 frames: index 18, not 19 (p95).
     let ramp = |n: usize| (1..=n).map(|i| i as f32 / 100.0).collect::<Vec<_>>();
     assert_eq!(speech_level(&ramp(8)), Some(7.0 / 100.0));
     assert_eq!(speech_level(&ramp(21)), Some(19.0 / 100.0));
-    // The noise floor is p20 of the tail: index round(0.8) = 1.
-    assert_eq!(quiet_level(&[0.003, 0.004, 0.009, 0.009, 0.009]), 0.008);
+    // The noise floor is p20 of the tail: of 11 frames, index round(2.0) = 2,
+    // not 1 (p10) or 3 (p30).
+    let mut tail = vec![0.003, 0.004, 0.005];
+    tail.extend([0.009; 8]);
+    assert_eq!(quiet_level(&tail), 0.01);
 }

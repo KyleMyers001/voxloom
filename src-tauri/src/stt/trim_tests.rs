@@ -171,3 +171,6 @@ fn a_single_loud_click_does_not_raise_the_threshold() {
 
 #[path = "trim_click_tests.rs"]
 mod clicks;
+
+#[path = "trim_silence_tests.rs"]
+mod silence;

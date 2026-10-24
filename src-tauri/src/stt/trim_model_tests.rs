@@ -1,6 +1,8 @@
 //! Real-model check: speech plus a silent tail must not gain a hallucinated
-//! trailing "Thank you." / "you". Use speech that does not itself end in
-//! "you". Not run in CI:
+//! trailing "Thank you." / "you". Use a raw recording that keeps its own
+//! room noise after the last word (e.g. LibriSpeech 1272-128104-0001) and
+//! does not itself end in "you"; the zeros appended here then follow that
+//! noise, as after a noise gate. Not run in CI:
 //!
 //! ```sh
 //! ffmpeg -i speech.wav -ar 16000 -ac 1 -f s16le speech.pcm

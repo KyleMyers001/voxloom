@@ -9,10 +9,14 @@
 //!   trims under much louder speech.
 //! - The speech end: the last run at or above a quiet level 6 dB over the
 //!   tail's own noise floor. A soft final word below the loud threshold
-//!   still counts, so the kept tail starts after it, not inside it.
+//!   still counts, so the kept tail starts after it, not inside it. When a
+//!   noise gate cuts recorded room noise to digital silence, the floor is
+//!   measured on the room noise, so that noise doesn't count as speech.
 //!
-//! Both need 80 ms of frames in a row, so a click or key thump in the tail
-//! doesn't count as speech.
+//! Both need 80 ms of frames (one 20 ms dip allowed), so a click or key
+//! thump in the tail doesn't count as speech. A lone 60–79 ms sound after
+//! the last such run is cut, so about 3% of random clips keep less than
+//! with 60 ms runs.
 
 use super::gate::AudioStats;
 
@@ -21,8 +25,9 @@ const FRAME_MS: usize = 20;
 /// "thanks") that ends 250–500 ms before the clip end; at 1000 ms "Thank
 /// you" comes back. 750 ms kept every final word in the QA tail sweep.
 const KEPT_TAIL_MS: usize = 750;
-/// Frames in a row needed to count as speech (80 ms). A 40 ms thump touches
-/// at most 3 frames; a short word like "so" lasts well over 80 ms.
+/// Frames in a row needed to count as speech (80 ms). A thump of up to
+/// 40 ms touches at most 3 frames (41–60 ms can touch 4, by alignment); a
+/// short word like "so" lasts well over 80 ms.
 const MIN_SPEECH_FRAMES: usize = 4;
 /// Frames at or above this RMS (≈ −44 dBFS) may be speech. Hallucinated
 /// tails measured 0.0000–0.0011 RMS in the BUS-139 harness.
@@ -42,6 +47,11 @@ const NOISE_MARGIN: f32 = 2.0;
 /// Lowest quiet level (≈ −74 dBFS), for a digitally silent tail. A final
 /// word 32 dB under −30 dBFS speech sits near −62 dBFS.
 const MIN_QUIET_RMS: f32 = 0.0002;
+/// Frames under this RMS (≈ −86 dBFS, under 2 LSB of 16-bit audio) are
+/// digital silence, as left by a device or OS noise gate.
+const SILENT_RMS: f32 = 0.00005;
+/// Recorded noise measured just before digital silence (200 ms).
+const NOISE_FRAMES: usize = 10;
 
 /// What `trailing_trim` decided for one clip.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -107,24 +117,38 @@ pub fn trailing_trim(samples: &[f32], sample_rate_hz: u32) -> TailTrim {
     }
 }
 
-/// 6 dB over the noise floor of the frames after the loud anchor.
+/// 6 dB over the noise floor of the frames after the loud anchor. If the
+/// tail turns digitally silent after recorded noise, the 200 ms just before
+/// the silence set the floor.
 fn quiet_level(tail: &[f32]) -> f32 {
-    let noise = percentile(tail.to_vec(), NOISE_PERCENTILE).unwrap_or(0.0);
+    let measured = match tail.iter().position(|&r| r < SILENT_RMS) {
+        Some(n) if n >= NOISE_FRAMES => &tail[n - NOISE_FRAMES..n],
+        _ => tail,
+    };
+    let noise = percentile(measured.to_vec(), NOISE_PERCENTILE).unwrap_or(0.0);
     (noise * NOISE_MARGIN).max(MIN_QUIET_RMS)
 }
 
 /// Frame index just past the last run of `MIN_SPEECH_FRAMES` or more frames
-/// at or above `threshold`. `None` when there is no such run.
+/// at or above `threshold`. `None` when there is no such run. One frame
+/// under it inside a run, like the closure before the burst of a fast "it",
+/// doesn't end the run.
 fn speech_end(levels: &[f32], threshold: f32) -> Option<usize> {
-    let mut run = 0;
+    let (mut run, mut end, mut dipped) = (0, 0, false);
     for (i, &r) in levels.iter().enumerate().rev() {
-        if r < threshold {
+        if r >= threshold {
+            if run == 0 {
+                end = i + 1;
+            }
+            run += 1;
+            if run == MIN_SPEECH_FRAMES {
+                return Some(end);
+            }
+        } else if run > 0 && !dipped {
+            dipped = true;
+        } else {
             run = 0;
-            continue;
-        }
-        run += 1;
-        if run == MIN_SPEECH_FRAMES {
-            return Some(i + run);
+            dipped = false;
         }
     }
     None
