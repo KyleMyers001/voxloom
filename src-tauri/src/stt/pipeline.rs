@@ -1,11 +1,13 @@
-//! BUS-23 transcription pipeline: validate → RMS gate → VAD → whisper →
-//! text cleanup. Runs before delivery so insert and Copy share one result.
+//! BUS-23 transcription pipeline: validate → RMS gate → VAD → quiet-tail
+//! trim (BUS-139) → whisper → text cleanup. Runs before delivery so insert
+//! and Copy share one result.
 
 use super::cleanup::{clean_transcript, CleanupOptions, DropReason};
 use super::engine::{validate_pcm, TranscriptDto};
 use super::error::SttErrorDto;
 use super::filter_config::SpeechFilterConfig;
 use super::gate::{AudioStats, VoiceActivityDetector};
+use super::trim::trailing_trim;
 
 fn empty(dropped: DropReason) -> TranscriptDto {
     TranscriptDto {
@@ -38,7 +40,18 @@ where
         return Ok(empty(DropReason::NoSpeech));
     }
 
-    let mut out = engine(samples)?;
+    // Whisper hallucinates over a quiet tail; the gates above still judge
+    // the whole clip.
+    let trim = trailing_trim(samples, sample_rate_hz);
+    #[cfg(debug_assertions)]
+    eprintln!(
+        "[stt] tail trim: tail_rms={:.4} threshold={:.4} quiet={:.4} trimmed_ms={}",
+        trim.tail_rms,
+        trim.threshold,
+        trim.quiet_level,
+        trim.trimmed_ms(samples.len(), sample_rate_hz)
+    );
+    let mut out = engine(&samples[..trim.keep_len])?;
     if !cfg.cleanup {
         return Ok(out);
     }
@@ -160,6 +173,18 @@ mod tests {
         let out = transcribe_filtered(&speech(), 16_000, &cfg, &NoVad, whisper_says("[Music] hi"))
             .unwrap();
         assert_eq!(out.text, "[Music] hi");
+    }
+
+    #[test]
+    fn engine_sees_the_clip_without_its_quiet_tail() {
+        let cfg = SpeechFilterConfig::default();
+        let clip = [speech(), vec![0.0; 32_000]].concat();
+        let out = transcribe_filtered(&clip, 16_000, &cfg, &NoVad, |pcm| {
+            assert_eq!(pcm.len(), 16_000 + 12_000, "750 ms tail kept");
+            Ok(TranscriptDto::raw("hi".into(), Some("en".into())))
+        })
+        .unwrap();
+        assert_eq!(out.text, "hi");
     }
 
     #[test]
