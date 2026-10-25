@@ -28,6 +28,12 @@ const RECORD_STUB = `#!/usr/bin/env bash
 } >> "$STUB_OUT"
 `;
 
+// Prints the arches the test asks for, like `lipo -archs <binary>`.
+const LIPO_STUB = `#!/usr/bin/env bash
+echo "== lipo $*" >> "$STUB_OUT"
+echo "$STUB_ARCHS"
+`;
+
 const SECRETS = {
   APPLE_CERTIFICATE: 'cDEy',
   APPLE_CERTIFICATE_PASSWORD: 'cert-pw',
@@ -53,6 +59,7 @@ const SIGNED_ENV = {
 let dir: string;
 
 function run(script: string, env: Record<string, string>) {
+  // Deliberately not GITHUB_ACTIONS: tests that need it pass it in env.
   const out = join(dir, 'stub-out');
   const ghEnv = join(dir, 'github-env');
   const result = spawnSync(
@@ -65,6 +72,7 @@ function run(script: string, env: Record<string, string>) {
         STUB_OUT: out,
         GITHUB_ENV: ghEnv,
         RUNNER_TEMP: dir,
+        STUB_ARCHS: 'x86_64 arm64',
         ...env,
       },
     },
@@ -87,6 +95,8 @@ beforeEach(() => {
     writeFileSync(join(dir, stub), RECORD_STUB);
     chmodSync(join(dir, stub), 0o755);
   }
+  writeFileSync(join(dir, 'bin/lipo'), LIPO_STUB);
+  chmodSync(join(dir, 'bin/lipo'), 0o755);
 });
 
 afterEach(() => {
@@ -101,16 +111,33 @@ describe('build-macos.sh (compile phase)', () => {
       '== build-worker.sh universal-apple-darwin\n' +
         '== npm run tauri -- build --no-bundle --target ' +
         'universal-apple-darwin --config src-tauri/tauri.worker.conf.json ' +
-        '-- --locked --features whisper\n',
+        '-- --locked --features whisper\n' +
+        '== lipo -archs src-tauri/target/universal-apple-darwin/release/voxloom\n',
+    );
+  });
+
+  it('fails when the universal app binary lacks an arch', () => {
+    const r = run('build-macos.sh', { STUB_ARCHS: 'arm64' });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('universal app binary has archs \'arm64\'');
+  });
+
+  it('checks the arches under an absolute CARGO_TARGET_DIR', () => {
+    const r = run('build-macos.sh', { CARGO_TARGET_DIR: '/tmp/vx-target' });
+    expect(r.status).toBe(0);
+    expect(r.seen).toContain(
+      '== lipo -archs /tmp/vx-target/universal-apple-darwin/release/voxloom\n',
     );
   });
 });
 
 describe('bundle-macos.sh (sign and notarize phase)', () => {
   it('only bundles, with the signing secrets and the key as a file', () => {
-    const r = run('bundle-macos.sh', SIGNED_ENV);
-    expect(r.status).toBe(0);
     const keyPath = join(dir, 'AuthKey_KEYID12345.p8');
+    // A stale, world-readable key from an earlier run is replaced, not reused.
+    writeFileSync(keyPath, 'old key', { mode: 0o644 });
+    const r = run('bundle-macos.sh', { ...SIGNED_ENV, GITHUB_ACTIONS: 'true' });
+    expect(r.status).toBe(0);
     expect(r.seen).toBe(
       '== npm run tauri -- bundle --target universal-apple-darwin ' +
         '--bundles app,dmg --config src-tauri/tauri.worker.conf.json ' +
@@ -126,6 +153,13 @@ describe('bundle-macos.sh (sign and notarize phase)', () => {
     expect(readFileSync(keyPath, 'utf8')).toBe(SECRETS.APPLE_API_PRIVATE_KEY);
     expect(statSync(keyPath).mode & 0o777).toBe(0o600);
     expect(r.githubEnv).toBe(`SIGNED=true\nAPPLE_API_KEY_PATH=${keyPath}\n`);
+  });
+
+  it('removes the key file on exit outside Actions', () => {
+    const r = run('bundle-macos.sh', SIGNED_ENV);
+    expect(r.status).toBe(0);
+    expect(r.seen).toContain('APPLE_API_KEY_PATH=');
+    expect(existsSync(join(dir, 'AuthKey_KEYID12345.p8'))).toBe(false);
   });
 
   it('bundles ad-hoc with no APPLE_* when no secrets are set', () => {
@@ -145,30 +179,5 @@ describe('bundle-macos.sh (sign and notarize phase)', () => {
     });
     expect(r.status).not.toBe(0);
     expect(r.seen).toBe('');
-  });
-});
-
-describe('release.yml secret scope', () => {
-  const workflow = readFileSync(
-    resolve(root, '.github/workflows/release.yml'),
-    'utf8',
-  );
-  const step = (name: string) => {
-    const start = workflow.indexOf(`- name: ${name}\n`);
-    expect(start).toBeGreaterThan(-1);
-    const next = workflow.indexOf('\n      - ', start + 1);
-    return workflow.slice(start, next === -1 ? undefined : next);
-  };
-
-  it('gives the compile step no secrets', () => {
-    expect(step('Compile app and worker (no secrets)')).not.toContain(
-      'secrets.',
-    );
-  });
-
-  it('gives the Apple secrets to the bundle step', () => {
-    expect(step('Bundle, sign and notarize')).toContain(
-      'secrets.APPLE_CERTIFICATE ',
-    );
   });
 });

@@ -22,3 +22,16 @@ done < <(compgen -e | grep '^APPLE_' || true)
 bash scripts/release/build-worker.sh "$TARGET"
 npm run tauri -- build --no-bundle --target "$TARGET" \
   --config src-tauri/tauri.worker.conf.json -- --locked --features whisper
+
+# A universal app must carry both arches before it is bundled and signed.
+if [[ "$TARGET" == universal-apple-darwin ]]; then
+  # cargo runs in src-tauri, so a relative CARGO_TARGET_DIR is under it.
+  TARGET_DIR="${CARGO_TARGET_DIR:-target}"
+  [[ "$TARGET_DIR" = /* ]] || TARGET_DIR="src-tauri/$TARGET_DIR"
+  archs="$(lipo -archs "$TARGET_DIR/$TARGET/release/voxloom")"
+  if [[ "$archs" != *arm64* || "$archs" != *x86_64* ]]; then
+    echo "error: universal app binary has archs '$archs'" >&2
+    exit 1
+  fi
+  echo "universal app binary archs: $archs"
+fi

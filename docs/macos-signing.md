@@ -143,11 +143,15 @@ missing names. `APPLE_TEAM_ID` on its own doesn't sign anything.
   the cleanup worker and the app (`tauri build --no-bundle`) in a step that
   gets no secrets, and it unsets every `APPLE_*` variable. Dependency build
   scripts (cargo `build.rs`, npm lifecycle scripts, llama.cpp's cmake) run
-  there and can't read them. Only `scripts/release/bundle-macos.sh` gets the
-  secrets, and `tauri bundle` compiles nothing. It imports the certificate
-  into a temporary keychain on the runner (deleted afterwards), signs the
-  worker, app and dmg, then notarizes and staples the app. The App Store
-  Connect key is written to a 0600 file and removed at the end of the job.
+  there and can't read them. Only the bundle and package steps get Apple
+  secrets, and neither of them compiles. `scripts/release/bundle-macos.sh`
+  gets the signing and notarization secrets and runs `tauri bundle`, which
+  compiles nothing. It imports the certificate into a temporary keychain on
+  the runner (deleted afterwards), signs the worker, app and dmg, then
+  notarizes and staples the app. The package step gets the identity, Team ID
+  and notarization credentials, but not the certificate. The App Store
+  Connect key is written to a 0600 file and removed at the end of the job
+  (or when the script exits, on a local run).
 - **Package:** `scripts/release/package-macos.sh` runs
   `xcrun notarytool submit --wait` and `xcrun stapler staple` on the dmg,
   then checks both with `spctl`.
