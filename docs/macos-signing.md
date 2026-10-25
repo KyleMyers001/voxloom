@@ -154,6 +154,19 @@ set, even to an empty value, so the workflow doesn't map them at all, and
 - **Package:** `scripts/release/package-macos.sh` runs
   `xcrun notarytool submit --wait` and `xcrun stapler staple` on the dmg,
   then checks both with `spctl`.
+- **Time budget:** each `notarytool submit --wait` sits in Apple's queue
+  until Apple answers. That's usually minutes, but a new account's first
+  submissions can take hours. The build job allows 180 minutes, and the
+  bundle step 120 of them, so Package still has time for the dmg. A job
+  killed while waiting leaves its submission in Apple's queue, and the next
+  run rebuilds and submits again, because Apple's ticket matches the exact
+  binaries and a rebuild isn't guaranteed to be byte-identical.
+- **After a timeout:** "Re-run jobs" on the old run won't help. A re-run
+  uses the `release.yml` at the tagged commit, with that commit's time
+  limits, so it times out the same way. To get a new budget, either delete
+  the tag and tag again on a `main` commit that has the new limits (the
+  `protect-v-tags` ruleset lets only the repo owner, as admin, do this), or
+  bump the version and tag that.
 
 ## g. Verify the first signed tag
 
@@ -173,3 +186,29 @@ spctl -a -vv -t open --context context:primary-signature \
 Finally, open the app from Finder. Gatekeeper should open it with no
 warning beyond the usual "downloaded from the internet" prompt. If any check
 fails, delete the draft release and the tag, and don't publish.
+
+## h. Check a notarization from a Mac
+
+Use the App Store Connect key from section e (`AuthKey_<KeyID>.p8`, wherever
+you saved it when it downloaded; `~/Downloads` by default). Store it once
+in the login keychain:
+
+```sh
+xcrun notarytool store-credentials voxloom-notary \
+  --key /path/to/AuthKey_<KeyID>.p8 --key-id <KeyID> --issuer <IssuerID>
+```
+
+Then:
+
+```sh
+xcrun notarytool history --keychain-profile voxloom-notary   # newest first
+xcrun notarytool info <submission-id> --keychain-profile voxloom-notary
+xcrun notarytool log <submission-id> --keychain-profile voxloom-notary
+xcrun notarytool wait <submission-id> --timeout 2h \
+  --keychain-profile voxloom-notary
+```
+
+Without the profile, pass `--key /path/to/AuthKey_<KeyID>.p8 --key-id
+<KeyID> --issuer <IssuerID>` instead of `--keychain-profile`. A status of
+`In Progress` is still queued and `Accepted` is notarized. `Invalid` and
+`Rejected` are final failures; `log` explains why.

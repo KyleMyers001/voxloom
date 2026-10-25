@@ -58,7 +58,10 @@ jobs:
     # no environment, need no approval and build ad-hoc. The step env below
     # also blanks every APPLE_* secret outside tag pushes.
     environment: ${{ github.event_name == 'push' && github.ref_type == 'tag' && 'release' || '' }}
-    timeout-minutes: 60
+    # Notarization waits in Apple's queue (notarytool submit --wait, twice:
+    # app, then dmg), which can take well over an hour, mostly on a new
+    # account's first submissions. GitHub-hosted jobs stop at 360 minutes.
+    timeout-minutes: 180
     outputs:
       version: ${{ steps.version.outputs.version }}
       signed: ${{ steps.package.outputs.signed }}
@@ -105,6 +108,9 @@ jobs:
       # Map only secrets that exist: Tauri treats a set-but-empty APPLE_ID
       # and APPLE_PASSWORD as Apple ID credentials and skips the API key.
       - name: Bundle, sign and notarize
+        # Leaves the rest of the job's 180 minutes for the dmg's own
+        # notarization in Package.
+        timeout-minutes: 120
         env:
           APPLE_CERTIFICATE: ${{ (github.event_name == 'push' && github.ref_type == 'tag') && secrets.APPLE_CERTIFICATE || '' }}
           APPLE_CERTIFICATE_PASSWORD: ${{ (github.event_name == 'push' && github.ref_type == 'tag') && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
