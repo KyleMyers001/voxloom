@@ -158,9 +158,15 @@ set, even to an empty value, so the workflow doesn't map them at all, and
   until Apple answers. That's usually minutes, but a new account's first
   submissions can take hours. The build job allows 180 minutes, and the
   bundle step 120 of them, so Package still has time for the dmg. A job
-  killed while waiting leaves its submission in Apple's queue. The re-run
-  rebuilds and submits again, because Apple's ticket matches the exact
+  killed while waiting leaves its submission in Apple's queue, and the next
+  run rebuilds and submits again, because Apple's ticket matches the exact
   binaries and a rebuild isn't guaranteed to be byte-identical.
+- **After a timeout:** "Re-run jobs" on the old run won't help. A re-run
+  uses the `release.yml` at the tagged commit, with that commit's time
+  limits, so it times out the same way. To get a new budget, either delete
+  the tag and tag again on a `main` commit that has the new limits (the
+  `protect-v-tags` ruleset lets only the repo owner, as admin, do this), or
+  bump the version and tag that.
 
 ## g. Verify the first signed tag
 
@@ -204,5 +210,5 @@ xcrun notarytool wait <submission-id> --timeout 2h \
 
 Without the profile, pass `--key /path/to/AuthKey_<KeyID>.p8 --key-id
 <KeyID> --issuer <IssuerID>` instead of `--keychain-profile`. A status of
-`In Progress` is still queued, `Accepted` is notarized, and `Invalid` comes
-with a `log` explaining why.
+`In Progress` is still queued and `Accepted` is notarized. `Invalid` and
+`Rejected` are final failures; `log` explains why.

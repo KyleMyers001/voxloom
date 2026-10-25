@@ -179,4 +179,14 @@ describe('release.yml notarization time budget', () => {
     expect(stepNamed(PACKAGE).step['timeout-minutes']).toBeUndefined();
     expect(bundle).toBeLessThan(build['timeout-minutes'] ?? 0);
   });
+
+  // A timeout must fail the job (never be ignored), and the key must still
+  // be removed when the bundle step is cancelled or times out.
+  it('fails on timeout and still removes the App Store Connect key', () => {
+    expect(build['continue-on-error']).toBeUndefined();
+    expect(stepNamed(BUNDLE).step['continue-on-error']).toBeUndefined();
+    const cleanup = stepNamed('Remove App Store Connect key');
+    expect(cleanup.step.if).toMatch(/^(\$\{\{\s*)?always\(\)(\s*\}\})?$/);
+    expect(cleanup.index).toBeGreaterThan(stepNamed(PACKAGE).index);
+  });
 });
