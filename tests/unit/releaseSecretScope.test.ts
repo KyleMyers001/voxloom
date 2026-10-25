@@ -43,6 +43,8 @@ const SECRETS = {
   APPLE_ID: 'dev@example.com',
   APPLE_PASSWORD: 'app-pw',
 };
+// What a tag run's step env looks like when a mapped secret doesn't exist.
+const EMPTY = { APPLE_ID: '', APPLE_PASSWORD: '', APPLE_PROVIDER_SHORT_NAME: '' };
 const IDENTITY = {
   APPLE_SIGNING_IDENTITY: 'Developer ID Application: Example Dev (ABCDE12345)',
   APPLE_TEAM_ID: 'ABCDE12345',
@@ -153,6 +155,29 @@ describe('bundle-macos.sh (sign and notarize phase)', () => {
     expect(readFileSync(keyPath, 'utf8')).toBe(SECRETS.APPLE_API_PRIVATE_KEY);
     expect(statSync(keyPath).mode & 0o777).toBe(0o600);
     expect(r.githubEnv).toBe(`SIGNED=true\nAPPLE_API_KEY_PATH=${keyPath}\n`);
+  });
+
+  // Tauri 2 (tauri-bundler 2.9.4, macos/sign.rs notarize_auth) picks Apple
+  // ID notarization when APPLE_ID, APPLE_PASSWORD and APPLE_TEAM_ID are set,
+  // even to '', ahead of the API key: the first signed tag got a 401.
+  it('never passes an empty APPLE_* variable to tauri', () => {
+    const r = run('bundle-macos.sh', { ...SIGNED_ENV, ...EMPTY });
+    expect(r.status).toBe(0);
+    expect(r.seen).toContain('APPLE_API_KEY_PATH=');
+    expect(r.seen).not.toMatch(/^APPLE_[A-Z_]+=$/m);
+    for (const name of Object.keys(EMPTY)) {
+      expect(r.seen).not.toContain(`${name}=`);
+    }
+  });
+
+  it('stops before bundling when an Apple ID is set', () => {
+    const r = run('bundle-macos.sh', {
+      ...SIGNED_ENV,
+      APPLE_ID: SECRETS.APPLE_ID,
+      APPLE_PASSWORD: SECRETS.APPLE_PASSWORD,
+    });
+    expect(r.status).not.toBe(0);
+    expect(r.seen).toBe('');
   });
 
   it('removes the key file on exit outside Actions', () => {
