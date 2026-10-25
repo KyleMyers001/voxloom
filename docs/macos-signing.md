@@ -105,7 +105,7 @@ Certificate (required):
 - `APPLE_TEAM_ID`: the Team ID. Required for every signed build, so the
   build always checks the app's TeamIdentifier against it.
 
-Notarization, preferred: App Store Connect API key. App Store Connect →
+Notarization: App Store Connect API key. App Store Connect →
 Users and Access → Integrations → App Store Connect API → Team Keys → **+**
 with Developer access.
 
@@ -114,16 +114,15 @@ with Developer access.
 - `APPLE_API_PRIVATE_KEY`: the full contents of the downloaded
   `AuthKey_<KeyID>.p8`. It downloads only once.
 
-Notarization, alternative: Apple ID. Use these instead of the API key.
+Set all seven secrets, or none of them; a partial set fails the build with
+the missing names. `APPLE_TEAM_ID` on its own doesn't sign anything.
 
-- `APPLE_ID`: your Apple ID email.
-- `APPLE_PASSWORD`: an app-specific password from appleid.apple.com →
-  Sign-In and Security → App-Specific Passwords.
-- `APPLE_TEAM_ID` from the certificate group above.
-
-Set the whole certificate group (including `APPLE_TEAM_ID`) plus one
-notarization group, or none of them; a partial set fails the build with the
-missing names. `APPLE_TEAM_ID` on its own doesn't sign anything.
+Apple ID notarization (`APPLE_ID` + `APPLE_PASSWORD`) isn't supported, and
+the build fails if either is set. Tauri prefers Apple ID credentials over
+the API key whenever `APPLE_ID`, `APPLE_PASSWORD` and `APPLE_TEAM_ID` are
+set, even to an empty value, so the workflow doesn't map them at all, and
+`bundle-macos.sh` unsets every empty `APPLE_*` variable before
+`tauri bundle`.
 
 ## f. How a release run uses them
 
@@ -148,8 +147,8 @@ missing names. `APPLE_TEAM_ID` on its own doesn't sign anything.
   gets the signing and notarization secrets and runs `tauri bundle`, which
   compiles nothing. It imports the certificate into a temporary keychain on
   the runner (deleted afterwards), signs the worker, app and dmg, then
-  notarizes and staples the app. The package step gets the identity, Team ID
-  and notarization credentials, but not the certificate. The App Store
+  notarizes and staples the app. The package step gets the identity, Team ID,
+  API key ID and issuer, but not the certificate. The App Store
   Connect key is written to a 0600 file and removed at the end of the job
   (or when the script exits, on a local run).
 - **Package:** `scripts/release/package-macos.sh` runs

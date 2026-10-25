@@ -66,6 +66,24 @@ describe('release.yml secret scope (BUS-119)', () => {
     expect(withSecrets).toEqual([BUNDLE, PACKAGE]);
   });
 
+  // Only these exist in the 'release' Environment. Mapping any other name
+  // hands tauri an empty variable: an empty APPLE_ID + APPLE_PASSWORD made
+  // it try Apple ID notarization instead of the API key (HTTP 401).
+  it('maps only Apple secrets that exist, never APPLE_ID/APPLE_PASSWORD', () => {
+    const known = [
+      'APPLE_CERTIFICATE', 'APPLE_CERTIFICATE_PASSWORD',
+      'APPLE_SIGNING_IDENTITY', 'APPLE_TEAM_ID', 'APPLE_API_KEY',
+      'APPLE_API_ISSUER', 'APPLE_API_PRIVATE_KEY',
+    ];
+    for (const step of build.steps) {
+      for (const [name, value] of Object.entries(step.env ?? {})) {
+        if (!name.startsWith('APPLE_')) continue;
+        expect(known, `${step.name}: ${name}`).toContain(name);
+        expect(value, `${step.name}: ${name}`).toContain(`secrets.${name} `);
+      }
+    }
+  });
+
   it('compiles, then bundles, then packages, each with its own script', () => {
     const compile = stepNamed(COMPILE);
     const bundle = stepNamed(BUNDLE);

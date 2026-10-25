@@ -33,6 +33,12 @@ if [[ "$SIGNED" == "true" ]]; then
     to_env APPLE_API_KEY_PATH "$APPLE_API_KEY_PATH"
   fi
   unset APPLE_API_PRIVATE_KEY
+  # Tauri tests these with var_os, so a variable set to '' still counts:
+  # an empty APPLE_ID + APPLE_PASSWORD next to APPLE_TEAM_ID selects Apple
+  # ID notarization over the API key (HTTP 401). Pass only real values.
+  while IFS= read -r var; do
+    [[ -n "${!var}" ]] || unset "$var"
+  done < <(compgen -e | grep '^APPLE_' || true)
 else
   echo "No Apple signing secrets: bundling ad-hoc signed (UNSIGNED) release."
   # Empty values would make Tauri attempt (and fail) signing/notarization.
