@@ -27,7 +27,29 @@ env:
   TARGET: ${{ inputs.target || 'universal-apple-darwin' }}
 
 jobs:
+  # Runs before any approval or secret: a v* tag is only released from a
+  # commit that is already on main. Rulesets can't check this. Manual runs
+  # skip it (they build ad-hoc and never publish).
+  tag-on-main:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - name: Require the tagged commit on main
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag $GITHUB_REF_NAME points at $GITHUB_SHA, which is not on main. Delete the tag and tag a commit that is on main."
+            exit 1
+          fi
+          echo "OK: $GITHUB_REF_NAME ($GITHUB_SHA) is on main."
+
   build-macos:
+    needs: tag-on-main
+    # tag-on-main is skipped on manual runs, so don't require its success.
+    if: ${{ !cancelled() && needs.tag-on-main.result != 'failure' }}
     runs-on: macos-latest
     # BUS-59/BUS-96: signing and notarization secrets live only in the
     # protected 'release' Environment, so tag pushes must enter it to sign.
@@ -68,13 +90,18 @@ jobs:
             npm run release:check-version
           fi
           echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      # BUS-119: cargo, npm and the worker's cmake build run dependency
+      # build scripts, so this step gets no secrets at all.
+      - name: Compile app and worker (no secrets)
+        run: bash scripts/release/build-macos.sh "$TARGET"
+      # Only this step gets the signing secrets, and it compiles nothing.
       # With the secrets present, Tauri imports APPLE_CERTIFICATE into a
       # temporary keychain (random password, deleted when the build exits),
       # signs the .app and .dmg, then notarizes and staples the .app.
-      # With none present, build-macos.sh builds today's ad-hoc app.
+      # With none present, bundle-macos.sh bundles today's ad-hoc app.
       # Every APPLE_* value is '' unless this is a tag push, so manual runs
       # stay ad-hoc even if same-named repository-level secrets exist.
-      - name: Build app and dmg
+      - name: Bundle, sign and notarize
         env:
           APPLE_CERTIFICATE: ${{ (github.event_name == 'push' && github.ref_type == 'tag') && secrets.APPLE_CERTIFICATE || '' }}
           APPLE_CERTIFICATE_PASSWORD: ${{ (github.event_name == 'push' && github.ref_type == 'tag') && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
@@ -85,7 +112,7 @@ jobs:
           APPLE_API_KEY: ${{ (github.event_name == 'push' && github.ref_type == 'tag') && secrets.APPLE_API_KEY || '' }}
           APPLE_API_ISSUER: ${{ (github.event_name == 'push' && github.ref_type == 'tag') && secrets.APPLE_API_ISSUER || '' }}
           APPLE_API_PRIVATE_KEY: ${{ (github.event_name == 'push' && github.ref_type == 'tag') && secrets.APPLE_API_PRIVATE_KEY || '' }}
-        run: bash scripts/release/build-macos.sh "$TARGET"
+        run: bash scripts/release/bundle-macos.sh "$TARGET"
       # Signed builds: notarytool submit --wait + stapler staple on the .dmg,
       # then spctl. The entitlements check also asserts the Developer ID
       # signature and TeamIdentifier (APPLE_TEAM_ID is required when signed).

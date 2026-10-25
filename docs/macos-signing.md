@@ -1,13 +1,17 @@
 # macOS signing (Developer ID)
 
-Voxloom is ad-hoc signed today. Every rebuild gets a new code hash, so macOS
-forgets the Accessibility, Input Monitoring and Microphone permissions you
-granted to the previous build. A Developer ID signature fixes that: macOS ties
+Developer ID signing is set up. Local builds sign when you export the
+identity and Team ID (section b). Release builds sign and notarize from the
+secrets in the protected `release` Environment (section e).
+
+Why it matters: an ad-hoc build gets a new code hash on every rebuild, so
+macOS forgets the Accessibility, Input Monitoring and Microphone permissions
+you granted to the previous build. With a Developer ID signature, macOS ties
 the permissions to the bundle id (`com.voxloom.prototype`) plus your Team ID,
 and both stay the same across rebuilds. (BUS-96)
 
-Nothing changes until you set the values below. With no identity set, local
-and release builds stay ad-hoc exactly as before.
+With no identity set, local builds stay ad-hoc. Release builds stay ad-hoc
+(**UNSIGNED**) when the secrets are missing or the run isn't a `v*` tag push.
 
 ## a. Create the certificate (once)
 
@@ -79,12 +83,16 @@ spctl -a -vv "$APP"
 your own Mac. A notarized release build says
 `accepted source=Notarized Developer ID`.
 
-## e. Release signing and notarization (you add the secrets)
+CI release builds are under
+`src-tauri/target/universal-apple-darwin/release/bundle/` (the
+`universal-apple-darwin` target), not `target/release/`.
+
+## e. Release signing and notarization (secrets)
 
 The release workflow signs and notarizes only when these secrets exist in the
 protected `release` Environment (GitHub → repo Settings → Environments →
-`release` → Environment secrets). Without them it keeps producing the ad-hoc
-**UNSIGNED** build. Delete any same-named repository-level secrets so there's
+`release` → Environment secrets). Without them it produces the ad-hoc
+**UNSIGNED** build. Keep no same-named repository-level secrets, so there's
 one source.
 
 Certificate (required):
@@ -117,14 +125,48 @@ Set the whole certificate group (including `APPLE_TEAM_ID`) plus one
 notarization group, or none of them; a partial set fails the build with the
 missing names. `APPLE_TEAM_ID` on its own doesn't sign anything.
 
-A `v*` tag push waits for **two** approvals in the `release` Environment.
-The first lets the build job use the signing secrets. The second publishes
-the release. Manual workflow runs, even on a tag, need neither. The workflow
-also blanks every `APPLE_*` secret outside tag pushes, so a manual run stays
-ad-hoc even if same-named repository-level secrets exist.
+## f. How a release run uses them
 
-Tauri imports the certificate into a temporary keychain on the runner and
-deletes it afterwards, signs the app and dmg, then notarizes and staples the
-app. `scripts/release/package-macos.sh` runs
-`xcrun notarytool submit --wait` and `xcrun stapler staple` on the dmg, then
-checks both with `spctl`.
+- **Tag on main:** a `v*` tag push first checks that the tagged commit is on
+  `main` (`git merge-base --is-ancestor`). If it isn't, the run fails before
+  any approval or secret. Tag only commits that are already on `main`.
+- **Two approvals:** the run then waits for **two** approvals in the
+  `release` Environment. The first lets the build job use the signing
+  secrets. The second publishes the draft release. Manual workflow runs, even
+  on a tag, need neither, and the workflow blanks every `APPLE_*` secret
+  outside tag pushes, so a manual run stays ad-hoc.
+- **Admin bypass off:** in Settings → Environments → `release`, untick
+  "Allow administrators to bypass configured protection rules" (GitHub ticks
+  it by default). Otherwise an admin, or a token with admin rights, can skip
+  both approvals.
+- **Secret scoping (BUS-119):** `scripts/release/build-macos.sh` compiles
+  the cleanup worker and the app (`tauri build --no-bundle`) in a step that
+  gets no secrets, and it unsets every `APPLE_*` variable. Dependency build
+  scripts (cargo `build.rs`, npm lifecycle scripts, llama.cpp's cmake) run
+  there and can't read them. Only `scripts/release/bundle-macos.sh` gets the
+  secrets, and `tauri bundle` compiles nothing. It imports the certificate
+  into a temporary keychain on the runner (deleted afterwards), signs the
+  worker, app and dmg, then notarizes and staples the app. The App Store
+  Connect key is written to a 0600 file and removed at the end of the job.
+- **Package:** `scripts/release/package-macos.sh` runs
+  `xcrun notarytool submit --wait` and `xcrun stapler staple` on the dmg,
+  then checks both with `spctl`.
+
+## g. Verify the first signed tag
+
+Download the draft release's `.dmg` (not `-unsigned`) on a Mac, open it, and
+copy `Voxloom.app` out. Then:
+
+```sh
+codesign -dv --verbose=4 Voxloom.app   # Authority=Developer ID Application: …,
+                                       # TeamIdentifier=<Team ID>, flags runtime
+spctl -a -vv Voxloom.app               # accepted source=Notarized Developer ID
+xcrun stapler validate Voxloom.app
+xcrun stapler validate Voxloom_<version>_macos_universal.dmg
+spctl -a -vv -t open --context context:primary-signature \
+  Voxloom_<version>_macos_universal.dmg
+```
+
+Finally, open the app from Finder. Gatekeeper should open it with no
+warning beyond the usual "downloaded from the internet" prompt. If any check
+fails, delete the draft release and the tag, and don't publish.

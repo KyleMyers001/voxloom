@@ -1,37 +1,24 @@
 #!/usr/bin/env bash
-# Build the macOS app + dmg for release. Signs and notarizes only when a
-# complete set of Apple secrets is present; otherwise builds ad-hoc (UNSIGNED).
+# Compile the macOS app and cleanup worker for release, without bundling or
+# signing. bundle-macos.sh then bundles, signs and notarizes.
+# BUS-119: dependency build scripts (cargo build.rs, npm lifecycle scripts,
+# llama.cpp's cmake) run here, so this phase must never see any APPLE_*
+# value, secret or not. The workflow gives this step no secrets; the unset
+# below also covers a local run with signing variables exported.
 # Usage: scripts/release/build-macos.sh <rust-target>   (e.g. universal-apple-darwin)
-# Writes SIGNED (and APPLE_API_KEY_PATH) to $GITHUB_ENV when running in Actions.
 set -euo pipefail
 
 TARGET="${1:?usage: build-macos.sh <rust-target>}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
-SIGNED="$(bash scripts/release/signing-env.sh)"
-to_env() { [[ -z "${GITHUB_ENV:-}" ]] || echo "$1=$2" >> "$GITHUB_ENV"; }
-to_env SIGNED "$SIGNED"
-
-if [[ "$SIGNED" == "true" ]]; then
-  echo "Apple signing secrets found: building Developer ID signed + notarized."
-  if [[ -n "${APPLE_API_PRIVATE_KEY:-}" ]]; then
-    APPLE_API_KEY_PATH="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/AuthKey_${APPLE_API_KEY}.p8"
-    (umask 077 && printf '%s' "$APPLE_API_PRIVATE_KEY" > "$APPLE_API_KEY_PATH")
-    export APPLE_API_KEY_PATH
-    to_env APPLE_API_KEY_PATH "$APPLE_API_KEY_PATH"
-  fi
-else
-  echo "No Apple signing secrets: building ad-hoc signed (UNSIGNED) release."
-  # Empty values would make Tauri attempt (and fail) signing/notarization.
-  unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
-    APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID APPLE_API_KEY APPLE_API_ISSUER
-fi
-unset APPLE_API_PRIVATE_KEY
+while IFS= read -r var; do
+  unset "$var"
+done < <(compgen -e | grep '^APPLE_' || true)
 
 # BUS-16 3c-2b: the cleanup worker sidecar. Its externalBin entry lives in a
 # merge config, not tauri.conf.json, because tauri-build fails any cargo
 # build that lacks the sidecar file and the dev/test builds never make one.
 bash scripts/release/build-worker.sh "$TARGET"
-npm run tauri -- build --target "$TARGET" --bundles app,dmg \
+npm run tauri -- build --no-bundle --target "$TARGET" \
   --config src-tauri/tauri.worker.conf.json -- --locked --features whisper
