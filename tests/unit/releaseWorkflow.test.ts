@@ -19,6 +19,7 @@ interface Step {
   with?: Record<string, unknown>;
   if?: string;
   'continue-on-error'?: unknown;
+  'timeout-minutes'?: number;
 }
 interface Job {
   needs?: string | string[];
@@ -26,6 +27,7 @@ interface Job {
   env?: Record<string, string>;
   environment?: string;
   'continue-on-error'?: unknown;
+  'timeout-minutes'?: number;
   steps: Step[];
 }
 interface Workflow {
@@ -160,5 +162,21 @@ describe('release.yml tag-on-main gate', () => {
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }
+  });
+});
+
+// The first signed v0.1.0 run sat in Apple's notarization queue
+// past the old 60-minute job limit. Both notarytool waits (app, then dmg)
+// must fit in the job, and the job must fit GitHub's 360-minute cap.
+describe('release.yml notarization time budget', () => {
+  it('gives build-macos 180 minutes, under the hosted-runner cap', () => {
+    expect(build['timeout-minutes']).toBe(180);
+  });
+
+  it('caps the bundle step so Package still has time for the dmg', () => {
+    const bundle = stepNamed(BUNDLE).step['timeout-minutes'] ?? 0;
+    expect(bundle).toBe(120);
+    expect(stepNamed(PACKAGE).step['timeout-minutes']).toBeUndefined();
+    expect(bundle).toBeLessThan(build['timeout-minutes'] ?? 0);
   });
 });
