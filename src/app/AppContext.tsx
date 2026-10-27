@@ -38,6 +38,7 @@ import {
   reallowHistoryWritesAfterLoad,
   showHistoryBlockError,
 } from './blockHistoryWrites';
+import { recordReloadDeletion, type ReloadTombstones, trackReload } from './reloadTombstones';
 import { useSettingsPersist } from './useSettingsPersist';
 import { useSettingsSync } from './useSettingsSync';
 import {
@@ -186,11 +187,8 @@ export function AppProvider({
   ) {
     historyDivergedRef.current = true;
   }
-  /**
-   * While reloadHistoryFromDisk awaits load, deletes must not be undone by the
-   * merge. Null when no reload is in flight.
-   */
-  const reloadDeletedIdsRef = useRef<Set<string> | null>(null);
+  /** Deletes made while a history reload is queued or running (see reloadTombstones). */
+  const reloadTombstonesRef = useRef<ReloadTombstones>(new Set());
 
   const dictionaryHydratedRef = useRef(!dictionaryPers.enabled);
   const allowDictionaryPersistRef = useRef(!dictionaryPers.enabled);
@@ -236,61 +234,56 @@ export function AppProvider({
     lastRequestedSettingsRef.current?.settings.transcriptRetention === 'off'
     && lastSavedSettingsRef.current?.settings.transcriptRetention !== 'off';
 
-  const reloadHistoryFromDisk = async (retention: typeof state.settings.transcriptRetention) => {
+  const reloadHistoryFromDisk = async (
+    retention: typeof state.settings.transcriptRetention,
+    deletedDuringReload: Set<string>,
+  ) => {
     if (!historyPers.enabled || !historyHydratedRef.current) return;
     // Supersede any in-flight wipe: bump gen, then load after prior jobs finish.
     historyPersistGenRef.current += 1;
     const gen = historyPersistGenRef.current;
-    const deletedDuringReload = new Set<string>();
-    reloadDeletedIdsRef.current = deletedDuringReload;
-    try {
-      const result = await historyPers.store.load(retention, clock());
-      if (gen !== historyPersistGenRef.current) return;
-      if (result.ok && offPendingOnSettings()) {
-        // A newer Off is waiting on settings.json: memory is Off-filtered and
-        // its confirmation wipes (or its failure reloads again). Clearing the
-        // divergence or re-allowing writes now would let a queued snapshot
-        // wipe history.json before that Off is confirmed.
-        return;
-      }
-      if (result.ok) {
-        // Prefer in-memory for shared ids (live edits / deletes already applied).
-        // Drop ids deleted while load was in flight so an explicit Delete is not
-        // undone. Memory-only rows added during the load stay first; disk order
-        // is preserved for restored rows.
-        const current = historySnapshotRef.current.records;
-        const diskIds = new Set(result.records.map((record) => record.id));
-        const memoryById = new Map(
-          current
-            .filter((record) => !deletedDuringReload.has(record.id))
-            .map((record) => [record.id, record]),
-        );
-        const memoryOnly = current.filter(
-          (record) => !deletedDuringReload.has(record.id) && !diskIds.has(record.id),
-        );
-        const fromDisk = result.records
+    const result = await historyPers.store.load(retention, clock());
+    if (gen !== historyPersistGenRef.current) return;
+    if (result.ok && offPendingOnSettings()) {
+      // A newer Off is waiting on settings.json: memory is Off-filtered and
+      // its confirmation wipes (or its failure reloads again). Clearing the
+      // divergence or re-allowing writes now would let a queued snapshot
+      // wipe history.json before that Off is confirmed.
+      return;
+    }
+    if (result.ok) {
+      // Prefer in-memory for shared ids (live edits / deletes already applied).
+      // Drop ids deleted while load was in flight so an explicit Delete is not
+      // undone. Memory-only rows added during the load stay first; disk order
+      // is preserved for restored rows.
+      const current = historySnapshotRef.current.records;
+      const diskIds = new Set(result.records.map((record) => record.id));
+      const memoryById = new Map(
+        current
           .filter((record) => !deletedDuringReload.has(record.id))
-          .map((record) => memoryById.get(record.id) ?? record);
-        const merged = [...memoryOnly, ...fromDisk];
-        historyDivergedRef.current = false;
-        // A readable file again: memory matches disk, so writes are safe.
-        reallowHistoryWritesAfterLoad(historyWriteGate);
-        // Queued saves run before React re-renders; give them the merged list.
-        historySnapshotRef.current = { ...historySnapshotRef.current, records: merged };
-        dispatch({ now: clock(), records: merged, type: 'hydrate-records' });
-        dispatch({ message: null, type: 'set-history-error' });
-        // Hydrating cleared the error; keep it while writes stay blocked.
-        showHistoryBlockError(historyWriteGate, dispatch);
-      } else {
-        // Unreadable history.json after boot: never write over it, same as
-        // the boot-load failure path (BUS-42). historyDivergedRef stays set;
-        // with writes blocked it can no longer trigger a wipe or save.
-        blockHistoryWrites(historyWriteGate, dispatch, result.error, 'load');
-      }
-    } finally {
-      if (reloadDeletedIdsRef.current === deletedDuringReload) {
-        reloadDeletedIdsRef.current = null;
-      }
+          .map((record) => [record.id, record]),
+      );
+      const memoryOnly = current.filter(
+        (record) => !deletedDuringReload.has(record.id) && !diskIds.has(record.id),
+      );
+      const fromDisk = result.records
+        .filter((record) => !deletedDuringReload.has(record.id))
+        .map((record) => memoryById.get(record.id) ?? record);
+      const merged = [...memoryOnly, ...fromDisk];
+      historyDivergedRef.current = false;
+      // A readable file again: memory matches disk, so writes are safe.
+      reallowHistoryWritesAfterLoad(historyWriteGate);
+      // Queued saves run before React re-renders; give them the merged list.
+      historySnapshotRef.current = { ...historySnapshotRef.current, records: merged };
+      dispatch({ now: clock(), records: merged, type: 'hydrate-records' });
+      dispatch({ message: null, type: 'set-history-error' });
+      // Hydrating cleared the error; keep it while writes stay blocked.
+      showHistoryBlockError(historyWriteGate, dispatch);
+    } else {
+      // Unreadable history.json after boot: never write over it, same as
+      // the boot-load failure path (BUS-42). historyDivergedRef stays set;
+      // with writes blocked it can no longer trigger a wipe or save.
+      blockHistoryWrites(historyWriteGate, dispatch, result.error, 'load');
     }
   };
 
@@ -339,23 +332,29 @@ export function AppProvider({
       if (historyBlockReasonRef.current === 'load') {
         // Off is confirmed but history.json was unreadable: wipe it only once
         // a reload reads it (that reload clears the divergence).
-        enqueueHistoryJob(() => reloadHistoryFromDisk(retention));
+        enqueueHistoryJob(trackReload(
+          reloadTombstonesRef.current,
+          (deleted) => reloadHistoryFromDisk(retention, deleted),
+        ));
         enqueueHistoryJob(() => saveHistorySnapshot());
         return;
       }
       historyDivergedRef.current = false;
       enqueueHistoryJob(() => saveHistorySnapshot());
     } else {
-      enqueueHistoryJob(() => reloadHistoryFromDisk(retention));
+      enqueueHistoryJob(trackReload(
+          reloadTombstonesRef.current,
+          (deleted) => reloadHistoryFromDisk(retention, deleted),
+        ));
     }
   };
 
   const history = useMemo(() => ({
     delete: (id: string) => {
       historyDispatch.delete(id);
-      // Tombstone for an in-flight failed-Off reload merge (prefer memory /
-      // drop deleted ids so Delete is not silently undone).
-      reloadDeletedIdsRef.current?.add(id);
+      // Tombstone for every queued or running reload merge, so Delete is not
+      // silently undone.
+      recordReloadDeletion(reloadTombstonesRef.current, id);
       // While Off is optimistic, memory no longer mirrors disk — patch disk so a
       // failed Off save + reload cannot revive a row the user just deleted.
       enqueueHistoryJob(() => patchHistoryDeleteOnDisk(id));
