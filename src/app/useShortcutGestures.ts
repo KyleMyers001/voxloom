@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { subscribeModal } from './modalState';
 import { handlePractice, interactionContext } from './gestureContext';
 import { suspendable } from '../services/shortcut/recordingSuspend';
+import { unbindWhileRecording } from '../services/shortcut/recordingUnbind';
 import type { AppState } from './state';
 import type {
   DictationLifecycle,
@@ -24,7 +25,7 @@ import {
 import { useShortcutRegistration } from './useShortcutRegistration';
 import { bootRefusedText } from '../features/settings/shortcutCopy';
 import { answerShortcutQueries, emitShortcutBound } from '../services/shortcut/bindingEvents';
-import { subscribe } from '../services/settingsWindow';
+import { isSettingsWindowOpen, subscribe } from '../services/settingsWindow';
 import type {
   DogfoodPhase,
   UseDogfoodCaptureResult,
@@ -52,6 +53,9 @@ export interface GestureDogfoodBridge {
   hudResult?: OverlayResult | null;
   origin?: 'home' | 'gesture' | null;
   phase: DogfoodPhase;
+  scopeReady: boolean;
+  /** Arm attempt settled; defaults to scopeReady. False only while arming. */
+  hudReady?: boolean;
   start: () => Promise<void>;
   stop: () => Promise<void>;
 }
@@ -77,7 +81,8 @@ const browserScheduler = {
 };
 
 function isDogfoodBusy(phase: DogfoodPhase): boolean {
-  return phase === 'recording' || phase === 'transcribing';
+  return phase === 'recording' || phase === 'transcribing'
+    || phase === 'cleaning';
 }
 
 function isDogfoodTerminal(phase: DogfoodPhase): boolean {
@@ -130,6 +135,8 @@ export function useShortcutGestures(options: GestureOptions) {
   const optionsRef = useRef(options);
   /** Last combo the OS accepted (settings format); the revert target. */
   const registeredRef = useRef<string | null>(null);
+  /** BUS-69: combo lost by a failed re-bind after recording (until recovered). */
+  const lostRef = useRef<string | null>(null);
   optionsRef.current = options;
   const phaseGuardRef = useRef<PhaseGuard>({ seen: options.dogfood.phase });
 
@@ -182,6 +189,29 @@ export function useShortcutGestures(options: GestureOptions) {
       )),
       // No onRegisterFailure toast: registration outcomes are reported once,
       // in words, by the boot path below and useShortcutRegistration.
+      // BUS-69: a failed re-bind after recording is reported the same way.
+      onSuspendFailure: (kind, message) => {
+        if (kind === 'unbind') {
+          // Still bound: only re-recording the same combo is affected.
+          console.warn('[shortcut] unbind while recording failed:', message);
+          return;
+        }
+        const lost = registeredRef.current;
+        if (lost === null) return;
+        lostRef.current = lost;
+        registeredRef.current = null;
+        emitShortcutBound({ active: null, message, ok: false, previous: lost, shortcut: lost });
+        void isSettingsWindowOpen().then((open) => {
+          if (!open) optionsRef.current.onShortcutError?.(bootRefusedText(lost, null));
+        }, () => undefined);
+      },
+      onSuspendRecovered: () => {
+        const back = lostRef.current;
+        lostRef.current = null;
+        if (back === null || registeredRef.current !== null) return;
+        registeredRef.current = back;
+        emitShortcutBound({ active: back, ok: true, shortcut: back });
+      },
       scheduler: browserScheduler,
     });
     nativeControllerRef.current = controller;
@@ -210,6 +240,8 @@ export function useShortcutGestures(options: GestureOptions) {
       controller.setContext(interactionContext(optionsRef.current));
     const unsubscribe = subscribeModal(update);
     const unanswer = subscribe(answerShortcutQueries);
+    // BUS-69: the OS hotkey would swallow a re-recording of the same combo.
+    const stopUnbind = unbindWhileRecording(controller, { scheduler: browserScheduler });
 
     // Do NOT resetPartial / clear pending on document visibilitychange.
     // ADR §3: other-app focus must keep an in-flight native hold alive;
@@ -222,6 +254,7 @@ export function useShortcutGestures(options: GestureOptions) {
       overlayRef.current = null;
       unsubscribe();
       unanswer();
+      stopUnbind();
       pendingFinishRef.current?.clear();
       void controller.dispose();
       void overlay.dispose();
@@ -243,9 +276,22 @@ export function useShortcutGestures(options: GestureOptions) {
   useEffect(() => {
     const overlay = overlayRef.current;
     if (!overlay) return;
-    const homeRecording = options.dogfood.origin === 'home'
-      && options.dogfood.phase === 'recording';
-    void overlay.sync(options.state.dictation, homeRecording);
+    const phase = options.dogfood.phase;
+    const homeRecording = phase === 'starting'
+      || (options.dogfood.origin === 'home' && phase === 'recording');
+    // The gesture state is cleared on release; STT and cleanup still own a
+    // cancellable HUD.
+    const visualState = phase === 'transcribing' || phase === 'cleaning'
+      ? { kind: 'processing' as const, completion: 'held' as const, runId: -1 }
+      : options.state.dictation;
+    // Arming can lag the starting/listening render. Hide until the arm
+    // attempt settles, then resync even if model/microphone startup has not
+    // changed the phase. A failed arm still shows the HUD, just not as a
+    // cancellable popup (overlay_show refuses cancellable without a scope).
+    const { scopeReady } = options.dogfood;
+    const hudReady = options.dogfood.hudReady ?? scopeReady;
+    void overlay.sync(hudReady ? visualState : { kind: 'ready' },
+      hudReady && homeRecording, scopeReady);
     const kind = options.state.dictation.kind;
     if (kind === 'listening') {
       pendingFinishRef.current?.onListening();
@@ -262,7 +308,7 @@ export function useShortcutGestures(options: GestureOptions) {
       // Document path resets via context; also clear if mid-hold somehow.
     }
   }, [options.state.dictation, options.dogfood.origin,
-    options.dogfood.phase]);
+    options.dogfood.phase, options.dogfood.scopeReady, options.dogfood.hudReady]);
 
   // When dogfood *enters* success/error/cancelled, guarantee overlay
   // dictation is cleared without synthetic Inserted rows (Home Stop / cancel
@@ -316,7 +362,7 @@ function handleGesture(
       dogfood.cancel();
       phaseGuard.seen = 'cancelled';
     }
-    // "transcribing": prior utterance's STT/delivery keeps running in the
+    // "transcribing"/"cleaning": prior utterance's work keeps running in the
     // background; dogfood.start() supersedes its phase (session-guarded).
     pending?.resetForStart();
     // Overlay first (sync), then real capture. Target selection waits until
@@ -349,6 +395,8 @@ export function toGestureDogfoodBridge(
 ): GestureDogfoodBridge {
   return {
     cancel: dogfood.cancel,
+    scopeReady: dogfood.scopeReady,
+    hudReady: dogfood.hudReady,
     hudResult: dogfood.hudResult,
     origin: dogfood.origin,
     phase: dogfood.phase,

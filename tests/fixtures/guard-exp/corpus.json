@@ -1,0 +1,732 @@
+[
+ {
+  "id": "dictated-jargon",
+  "category": "dictated",
+  "raw": "You're making a lot of progress on the stupid jargon app.",
+  "dictionary": [
+   "StupidJargon"
+  ],
+  "style": "formal",
+  "expected": "You're making a lot of progress on the StupidJargon app.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "you",
+   "stupidjargon"
+  ],
+  "note": ""
+ },
+ {
+  "id": "dictated-60w",
+  "category": "dictated",
+  "raw": "So I'm doing a test to say this can work or not. To commit a little progress on the setup and such, you're kind of impressive how much we've done. So far, I'm really liking how the application's coming together. Now I'm trying to find filler words to do a smirk test. I don't know how many words I've actually spoken right now, but we're trying to see. Okay.",
+  "dictionary": [
+   "StupidJargon"
+  ],
+  "style": "formal",
+  "expected": "So I'm doing a test to say this can work or not. To commit a little progress on the setup and such, you're kind of impressive how much we've done. So far, I'm really liking how the application's coming together. Now I'm trying to find filler words to do a smoke test. I don't know how many words I've actually spoken right now, but we're trying to see. Okay.",
+  "alsoAcceptable": [
+   "So I'm doing a test to say this can work or not. To commit a little progress on the setup and such, you're kind of impressive how much we've done. So far, I'm really liking how the application's coming together. Now I'm trying to find filler words to do a smirk test. I don't know how many words I've actually spoken right now, but we're trying to see. Okay."
+  ],
+  "criticalTokens": [
+   "not",
+   "i",
+   "you",
+   "we",
+   "do not",
+   "smoke"
+  ],
+  "note": "Exact text dictated on Build D. Only the smirk->smoke fix is unambiguous."
+ },
+ {
+  "id": "dictated-smirk",
+  "category": "dictated",
+  "raw": "Can you run a smirk test on the new build before lunch?",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "Can you run a smoke test on the new build before lunch?",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "you",
+   "smoke"
+  ],
+  "note": ""
+ },
+ {
+  "id": "dictated-jargon-casual",
+  "category": "dictated",
+  "raw": "You're making a lot of progress on the stupid jargon app.",
+  "dictionary": [
+   "StupidJargon"
+  ],
+  "style": "casual",
+  "expected": "You're making a lot of progress on the StupidJargon app.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "you",
+   "stupidjargon"
+  ],
+  "note": ""
+ },
+ {
+  "id": "dictated-60w-casual",
+  "category": "dictated",
+  "raw": "So I'm doing a test to say this can work or not. To commit a little progress on the setup and such, you're kind of impressive how much we've done. So far, I'm really liking how the application's coming together. Now I'm trying to find filler words to do a smirk test. I don't know how many words I've actually spoken right now, but we're trying to see. Okay.",
+  "dictionary": [
+   "StupidJargon"
+  ],
+  "style": "casual",
+  "expected": "So I'm doing a test to say this can work or not. To commit a little progress on the setup and such, you're kind of impressive how much we've done. So far, I'm really liking how the application's coming together. Now I'm trying to find filler words to do a smoke test. I don't know how many words I've actually spoken right now, but we're trying to see. Okay.",
+  "alsoAcceptable": [
+   "So I'm doing a test to say this can work or not. To commit a little progress on the setup and such, you're kind of impressive how much we've done. So far, I'm really liking how the application's coming together. Now I'm trying to find filler words to do a smirk test. I don't know how many words I've actually spoken right now, but we're trying to see. Okay."
+  ],
+  "criticalTokens": [
+   "not",
+   "i",
+   "you",
+   "we",
+   "do not",
+   "smoke"
+  ],
+  "note": ""
+ },
+ {
+  "id": "mh-their",
+  "category": "mishearing",
+  "raw": "I think there going to ship the update tomorrow morning.",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "I think they're going to ship the update tomorrow morning.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "i",
+   "tomorrow"
+  ],
+  "note": "there->they're"
+ },
+ {
+  "id": "mh-wright",
+  "category": "mishearing",
+  "raw": "Please wright the release notes before the meeting.",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "Please write the release notes before the meeting.",
+  "alsoAcceptable": [],
+  "criticalTokens": [],
+  "note": ""
+ },
+ {
+  "id": "mh-except",
+  "category": "mishearing",
+  "raw": "We can except the invoice once legal signs off.",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "We can accept the invoice once legal signs off.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "we"
+  ],
+  "note": "except->accept (classic ambiguity)"
+ },
+ {
+  "id": "mh-peace",
+  "category": "mishearing",
+  "raw": "Send me the last peace of the report when it's ready.",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "Send me the last piece of the report when it's ready.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "me",
+   "it"
+  ],
+  "note": ""
+ },
+ {
+  "id": "mh-weather",
+  "category": "mishearing",
+  "raw": "I'm not sure weather the client approved the budget.",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "I'm not sure whether the client approved the budget.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "i",
+   "not"
+  ],
+  "note": ""
+ },
+ {
+  "id": "mh-brake",
+  "category": "mishearing",
+  "raw": "Let's take a quick brake and come back at three.",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "Let's take a quick break and come back at three.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "three"
+  ],
+  "note": ""
+ },
+ {
+  "id": "mh-flu",
+  "category": "mishearing",
+  "raw": "The bug flu under the radar for two weeks.",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "The bug flew under the radar for two weeks.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "two"
+  ],
+  "note": ""
+ },
+ {
+  "id": "mh-sight",
+  "category": "mishearing",
+  "raw": "Can you check the staging sight for broken links?",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "Can you check the staging site for broken links?",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "you"
+  ],
+  "note": ""
+ },
+ {
+  "id": "mh-mail",
+  "category": "mishearing",
+  "raw": "The meeting is in the mane conference room on the fourth floor.",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "The meeting is in the main conference room on the fourth floor.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "fourth"
+  ],
+  "note": ""
+ },
+ {
+  "id": "mh-cash",
+  "category": "mishearing",
+  "raw": "Clear your browser cash and try logging in again.",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "Clear your browser cache and try logging in again.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "your"
+  ],
+  "note": ""
+ },
+ {
+  "id": "mh-dessert",
+  "category": "mishearing",
+  "raw": "Don't dessert the project just because the first demo failed.",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "Don't desert the project just because the first demo failed.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "do not",
+   "first"
+  ],
+  "note": ""
+ },
+ {
+  "id": "mh-two-mishear",
+  "category": "mishearing",
+  "raw": "We need to by more server capacity before the lunch of the new plan.",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "We need to buy more server capacity before the launch of the new plan.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "we"
+  ],
+  "note": "two swaps by->buy, lunch->launch"
+ },
+ {
+  "id": "dict-voxloom-split",
+  "category": "dictionary",
+  "raw": "I pushed the fix to the vox loom repo last night.",
+  "dictionary": [
+   "Voxloom"
+  ],
+  "style": "formal",
+  "expected": "I pushed the fix to the Voxloom repo last night.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "i",
+   "voxloom"
+  ],
+  "note": "join (already supported)"
+ },
+ {
+  "id": "dict-voxloom-box",
+  "category": "dictionary",
+  "raw": "The box loom installer crashed on launch.",
+  "dictionary": [
+   "Voxloom"
+  ],
+  "style": "formal",
+  "expected": "The Voxloom installer crashed on launch.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "voxloom"
+  ],
+  "note": "split + 1 edit (box loom)"
+ },
+ {
+  "id": "dict-voxloom-fox",
+  "category": "dictionary",
+  "raw": "Fox loom should open when I press the shortcut.",
+  "dictionary": [
+   "Voxloom"
+  ],
+  "style": "formal",
+  "expected": "Voxloom should open when I press the shortcut.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "voxloom",
+   "i"
+  ],
+  "note": ""
+ },
+ {
+  "id": "dict-voxloom-blue",
+  "category": "dictionary",
+  "raw": "Voxlume is ready for another round of testing.",
+  "dictionary": [
+   "Voxloom"
+  ],
+  "style": "formal",
+  "expected": "Voxloom is ready for another round of testing.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "voxloom"
+  ],
+  "note": "voxlume: 2 edits"
+ },
+ {
+  "id": "dict-tauri-towery",
+  "category": "dictionary",
+  "raw": "The towery build is failing on the signing step.",
+  "dictionary": [
+   "Tauri"
+  ],
+  "style": "formal",
+  "expected": "The Tauri build is failing on the signing step.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "tauri"
+  ],
+  "note": ""
+ },
+ {
+  "id": "dict-tauri-tory",
+  "category": "dictionary",
+  "raw": "We should upgrade tory to the latest version this week.",
+  "dictionary": [
+   "Tauri"
+  ],
+  "style": "formal",
+  "expected": "We should upgrade Tauri to the latest version this week.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "we",
+   "tauri"
+  ],
+  "note": ""
+ },
+ {
+  "id": "dict-qwen-queen",
+  "category": "dictionary",
+  "raw": "Switch the cleanup model to queen three and compare the results.",
+  "dictionary": [
+   "Qwen"
+  ],
+  "style": "formal",
+  "expected": "Switch the cleanup model to Qwen three and compare the results.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "qwen",
+   "three"
+  ],
+  "note": ""
+ },
+ {
+  "id": "dict-qwen-when",
+  "category": "dictionary",
+  "raw": "The kwen model is too slow on the older laptops.",
+  "dictionary": [
+   "Qwen"
+  ],
+  "style": "formal",
+  "expected": "The Qwen model is too slow on the older laptops.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "qwen"
+  ],
+  "note": ""
+ },
+ {
+  "id": "dict-kubernetes",
+  "category": "dictionary",
+  "raw": "The cooper netties cluster ran out of memory again.",
+  "dictionary": [
+   "Kubernetes"
+  ],
+  "style": "formal",
+  "expected": "The Kubernetes cluster ran out of memory again.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "kubernetes"
+  ],
+  "note": ""
+ },
+ {
+  "id": "dict-notion-onedit",
+  "category": "dictionary",
+  "raw": "I added the meeting notes to motion this morning.",
+  "dictionary": [
+   "Notion"
+  ],
+  "style": "formal",
+  "expected": "I added the meeting notes to Notion this morning.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "i",
+   "notion"
+  ],
+  "note": "one edit (already supported)"
+ },
+ {
+  "id": "dict-sophie",
+  "category": "dictionary",
+  "raw": "Ask Sofie whether the build is ready to merge.",
+  "dictionary": [
+   "Sophie"
+  ],
+  "style": "formal",
+  "expected": "Ask Sophie whether the build is ready to merge.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "sophie"
+  ],
+  "note": ""
+ },
+ {
+  "id": "dict-jira",
+  "category": "dictionary",
+  "raw": "File a gira ticket for the crash and link it to the epic.",
+  "dictionary": [
+   "Jira"
+  ],
+  "style": "formal",
+  "expected": "File a Jira ticket for the crash and link it to the epic.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "jira",
+   "it"
+  ],
+  "note": ""
+ },
+ {
+  "id": "dict-stupidjargon-onedit",
+  "category": "dictionary",
+  "raw": "The stupid jargin app needs a new icon.",
+  "dictionary": [
+   "StupidJargon"
+  ],
+  "style": "formal",
+  "expected": "The StupidJargon app needs a new icon.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "stupidjargon"
+  ],
+  "note": "join + 1 edit"
+ },
+ {
+  "id": "dict-whisper",
+  "category": "dictionary",
+  "raw": "Whisperkit transcribes faster than the old pipeline.",
+  "dictionary": [
+   "WhisperKit"
+  ],
+  "style": "formal",
+  "expected": "WhisperKit transcribes faster than the old pipeline.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "whisperkit"
+  ],
+  "note": "case-only fix of camelCase term"
+ },
+ {
+  "id": "neg-dont-merge",
+  "category": "negation",
+  "raw": "Please don't merge the branch until QA signs off.",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "Please don't merge the branch until QA signs off.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "do not",
+   "qa"
+  ],
+  "note": ""
+ },
+ {
+  "id": "neg-never",
+  "category": "negation",
+  "raw": "We never ship on Fridays, um, no exceptions.",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "We never ship on Fridays, no exceptions.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "we",
+   "never",
+   "no",
+   "fridays"
+  ],
+  "note": ""
+ },
+ {
+  "id": "neg-not-sure",
+  "category": "negation",
+  "raw": "I'm not sure the fix works on the older macs.",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "I'm not sure the fix works on the older Macs.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "i",
+   "not"
+  ],
+  "note": ""
+ },
+ {
+  "id": "neg-cant",
+  "category": "negation",
+  "raw": "You can't delete the account without a backup.",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "You can't delete the account without a backup.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "you",
+   "can not",
+   "without"
+  ],
+  "note": ""
+ },
+ {
+  "id": "neg-mishear",
+  "category": "negation",
+  "raw": "I didn't no that the deadline moved to Thursday.",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "I didn't know that the deadline moved to Thursday.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "i",
+   "did not",
+   "thursday"
+  ],
+  "note": "no->know: a negation word that is a mishearing; guard must not swap"
+ },
+ {
+  "id": "num-time",
+  "category": "number",
+  "raw": "The demo starts at 3:30 tomorrow, uh, in room 204.",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "The demo starts at 3:30 tomorrow, in room 204.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "3:30",
+   "204"
+  ],
+  "note": ""
+ },
+ {
+  "id": "num-amount",
+  "category": "number",
+  "raw": "The invoice came to $1,250 which is 15% over budget.",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "The invoice came to $1,250, which is 15% over budget.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "1,250",
+   "15%"
+  ],
+  "note": ""
+ },
+ {
+  "id": "num-words",
+  "category": "number",
+  "raw": "We have fifteen open bugs and two of them are blockers.",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "We have fifteen open bugs, and two of them are blockers.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "fifteen",
+   "two",
+   "we"
+  ],
+  "note": ""
+ },
+ {
+  "id": "num-fifty",
+  "category": "number",
+  "raw": "Cut the timeout from fifty to fifteen seconds.",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "Cut the timeout from fifty to fifteen seconds.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "fifty",
+   "fifteen"
+  ],
+  "note": "near-phonetic numbers must not swap"
+ },
+ {
+  "id": "num-mishear",
+  "category": "number",
+  "raw": "Book the room for for people at ten.",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "Book the room for four people at ten.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "four",
+   "ten"
+  ],
+  "note": "for->four would be a number insertion; guard forbids"
+ },
+ {
+  "id": "pro-he-she",
+  "category": "pronoun",
+  "raw": "She said he would send the contract on Monday.",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "She said he would send the contract on Monday.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "she",
+   "he",
+   "monday"
+  ],
+  "note": ""
+ },
+ {
+  "id": "pro-we-they",
+  "category": "pronoun",
+  "raw": "They asked if we could, um, move the call to Friday.",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "They asked if we could move the call to Friday.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "they",
+   "we",
+   "friday"
+  ],
+  "note": ""
+ },
+ {
+  "id": "pro-mishear",
+  "category": "pronoun",
+  "raw": "Can you send it to there team before noon?",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "Can you send it to their team before noon?",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "you",
+   "it"
+  ],
+  "note": ""
+ },
+ {
+  "id": "ctl-1",
+  "category": "control",
+  "raw": "um so the build passed and the tests are green",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "So the build passed and the tests are green.",
+  "alsoAcceptable": [],
+  "criticalTokens": [],
+  "note": ""
+ },
+ {
+  "id": "ctl-2",
+  "category": "control",
+  "raw": "let's meet at the usual place after work",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "Let's meet at the usual place after work.",
+  "alsoAcceptable": [],
+  "criticalTokens": [],
+  "note": ""
+ },
+ {
+  "id": "ctl-3",
+  "category": "control",
+  "raw": "I uh I think the new onboarding flow is a lot clearer",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "I think the new onboarding flow is a lot clearer.",
+  "alsoAcceptable": [
+   "I, I think the new onboarding flow is a lot clearer."
+  ],
+  "criticalTokens": [
+   "i"
+  ],
+  "note": ""
+ },
+ {
+  "id": "ctl-4",
+  "category": "control",
+  "raw": "remind me to call the dentist when I get home",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "Remind me to call the dentist when I get home.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "me",
+   "i"
+  ],
+  "note": ""
+ },
+ {
+  "id": "ctl-5",
+  "category": "control",
+  "raw": "the report is due Friday so please send your numbers by Wednesday",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "The report is due Friday, so please send your numbers by Wednesday.",
+  "alsoAcceptable": [],
+  "criticalTokens": [
+   "friday",
+   "wednesday",
+   "your"
+  ],
+  "note": ""
+ },
+ {
+  "id": "ctl-6",
+  "category": "control",
+  "raw": "Thanks for the quick turnaround on the design review.",
+  "dictionary": [],
+  "style": "formal",
+  "expected": "Thanks for the quick turnaround on the design review.",
+  "alsoAcceptable": [],
+  "criticalTokens": [],
+  "note": ""
+ }
+]

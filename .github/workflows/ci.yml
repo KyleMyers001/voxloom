@@ -32,6 +32,33 @@ jobs:
       - run: npm run build
       - run: npm run test:e2e
 
+  browser-release:
+    # Release-mode Playwright suite (playwright.release.config.ts): serves the
+    # production build via `vite preview` and checks onboarding with no dev
+    # scenarios. Separate job so it runs in parallel with browser-app.
+    runs-on: ubuntu-latest
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: .playwright-browsers
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - run: npm run test:e2e:release
+      - if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-report-release
+          path: |
+            playwright-report-release/
+            test-results-release/
+          if-no-files-found: ignore
+          retention-days: 14
+
   rust:
     runs-on: ubuntu-latest
     defaults:
@@ -57,6 +84,95 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets
       - run: cargo test
+
+  cleanup-worker:
+    # BUS-16 PR 3c-1: the llama.cpp cleanup worker crate (src-tauri/worker,
+    # own Cargo.lock) and its contract test. Separate cache key: llama.cpp's
+    # cmake objects live in its target dir. macOS builds the Metal backend.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: src-tauri/worker
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri/worker
+          shared-key: cleanup-worker
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets
+      - run: cargo test --locked
+      # The release sidecar build (BUS-16 3c-2b): the same script the
+      # release workflow runs, which also fails if the debug-only test hook
+      # reached the release binary.
+      - name: Build the release sidecar
+        working-directory: .
+        run: |
+          host="$(rustc -vV | sed -n 's/^host: //p')"
+          bash scripts/release/build-worker.sh "$host"
+
+  rust-whisper:
+    # Builds and tests with the opt-in `whisper` feature (whisper-rs ->
+    # whisper.cpp via cmake + bindgen/libclang), which the other Rust jobs
+    # never compile. Separate cache key: whisper.cpp objects differ.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install Tauri Linux and whisper.cpp build dependencies
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libasound2-dev libxdo-dev libssl-dev \
+            cmake clang libclang-dev
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri
+          shared-key: whisper
+      - name: Ensure frontend dist exists for tauri::generate_context!
+        working-directory: .
+        run: mkdir -p dist
+      - run: cargo build --locked --features whisper
+      - run: cargo test --locked --features whisper
+
+  cargo-audit:
+    # RustSec advisories for src-tauri/Cargo.lock (BUS-63). Runs inside
+    # src-tauri so .cargo/audit.toml (the reasoned ignore list) is loaded;
+    # -D warnings fails on any advisory not ignored there.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri
+          shared-key: cargo-audit
+      - name: Install cargo-audit 0.22.2
+        run: |
+          if [ "$(cargo audit --version 2>/dev/null)" != "cargo-audit-audit 0.22.2" ]; then
+            cargo install cargo-audit --locked --version 0.22.2
+          fi
+      - run: cargo audit -D warnings
+      # The cleanup worker's own lock (BUS-16 3c-2b). No ignore list: it
+      # runs in src-tauri/worker, away from src-tauri/.cargo/audit.toml.
+      - run: cargo audit -D warnings
+        working-directory: src-tauri/worker
 
   rust-macos:
     # Compiles the macOS-only code paths (AX / text insertion) that the

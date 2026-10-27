@@ -19,6 +19,19 @@ let localCount = 0;
 const remote = new Map<string, number>();
 const WINDOW_ID = globalThis.crypto?.randomUUID?.() ?? `w${Math.random().toString(36).slice(2)}`;
 let listening: Promise<unknown> | null = null;
+const watchers = new Set<() => void>();
+const notify = () => { for (const w of watchers) w(); };
+
+/**
+ * BUS-69: be told whenever a lease starts or ends (this window or another).
+ * Remote leases can also lapse silently after LEASE_MS; callers re-check
+ * isDictationSuspended() on their own timer while suspended.
+ */
+export function onSuspendChange(watcher: () => void): () => void {
+  ensureListening();
+  watchers.add(watcher);
+  return () => { watchers.delete(watcher); };
+}
 
 const emit = (on: boolean) => {
   if (!isTauri()) return;
@@ -43,12 +56,14 @@ export function applyRemoteLease(payload: { on: boolean; source?: string }, now 
   if (source === WINDOW_ID) return; // our own lease is localCount
   if (payload.on) remote.set(source, now + LEASE_MS);
   else remote.delete(source);
+  notify();
 }
 
 /** Start suspending; returns an idempotent end function. */
 export function beginRecordingSuspend(): () => void {
   localCount += 1;
   emit(true);
+  notify();
   const renew = setInterval(() => emit(true), RENEW_MS);
   let ended = false;
   const end = () => {
@@ -58,6 +73,7 @@ export function beginRecordingSuspend(): () => void {
     window.removeEventListener('pagehide', end);
     localCount = Math.max(0, localCount - 1);
     emit(false);
+    notify();
   };
   window.addEventListener('pagehide', end);
   return end;
@@ -99,5 +115,6 @@ export function suspendable(
 export function resetRecordingSuspend(): void {
   localCount = 0;
   remote.clear();
+  watchers.clear();
   listening = null;
 }

@@ -30,10 +30,11 @@ export function createTauriOverlayApi(): OverlayWindowApi {
       const { emit } = await import('@tauri-apps/api/event');
       await emit('overlay:waveform', { result, waveform });
     },
-    async showBottomCenter(size = { height: OVERLAY_HEIGHT, width: OVERLAY_WIDTH }) {
+    async showBottomCenter(size = { height: OVERLAY_HEIGHT, width: OVERLAY_WIDTH }, cancellable = true) {
       if (!isTauri()) return;
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('overlay_show', {
+        cancellable,
         height: size.height,
         label: OVERLAY_WINDOW_LABEL,
         marginBottom: OVERLAY_BOTTOM_MARGIN,

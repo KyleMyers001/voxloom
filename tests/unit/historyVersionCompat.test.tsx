@@ -25,6 +25,10 @@ import {
 } from '../../src/services/settings';
 
 const V2 = readFileSync(join(__dirname, '../fixtures/history-v2.json'), 'utf8');
+// Written by main 7fd142b's own v1 writer (createDogfoodRecord +
+// serializeHistoryFile), not a v2 file with its version flipped.
+const V1 = readFileSync(join(__dirname, '../fixtures/history-v1.json'), 'utf8');
+const V1_IDS = ['v1-inserted', 'v1-raw-differs', 'v1-unverified', 'v1-failed'];
 const NOW = 1_800_000_000_000;
 
 const newRow: DictationRecord = {
@@ -69,7 +73,7 @@ async function settle() {
 }
 
 describe('BUS-42 history file version compatibility', () => {
-  it('parses the v2 fixture, keeping rawText and ignoring cleanup provenance', () => {
+  it('parses the v2 fixture, keeping rawText and cleanup provenance', () => {
     const parsed = parseHistoryJson(V2);
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
@@ -78,40 +82,67 @@ describe('BUS-42 history file version compatibility', () => {
       ['v2-cleaned', 'um so the meeting is at three', 'The meeting is at three.'],
       ['v2-legacy', 'hello world', 'hello world'],
     ]);
-    expect(parsed.file.records[0]).not.toHaveProperty('cleanup');
+    expect(parsed.file.records[0].cleanup).toMatchObject({ status: 'cleaned' });
   });
 
-  it('store backs up a v2 file before reporting it migratable', async () => {
-    const io = createMemoryHistoryIo(V2);
+  it('store backs up a v1 file before reporting it migratable', async () => {
+    const io = createMemoryHistoryIo(V1);
     const result = await createHistoryStore(io).load('forever', NOW);
-    expect(result).toMatchObject({ migratedFrom: 2, ok: true });
-    expect(io.backups()).toEqual([V2]);
-    expect(io.snapshot()).toBe(V2);
+    expect(result).toMatchObject({ migratedFrom: 1, ok: true });
+    expect(io.backups()).toEqual([V1]);
+    expect(io.snapshot()).toBe(V1);
   });
 
-  it('store refuses to migrate a v2 file it cannot back up', async () => {
-    const io = createMemoryHistoryIo(V2);
+  it('store refuses to migrate a v1 file it cannot back up', async () => {
+    const io = createMemoryHistoryIo(V1);
     const noBackup = { read: io.read, write: io.write };
     const result = await createHistoryStore(noBackup).load('forever', NOW);
     expect(result.ok).toBe(false);
   });
 
-  it('app boots with v2 history, shows it, and only then rewrites it as v1', async () => {
-    const io = createMemoryHistoryIo(V2);
+  it('app boots with v1 history, shows it, and only then rewrites it as v2', async () => {
+    const io = createMemoryHistoryIo(V1);
     boot(io);
     await waitFor(() => expect(api?.bootReady).toBe(true));
     await settle();
     expect(api!.state.historyError).toBeNull();
-    expect(api!.state.records.map((r) => r.id)).toEqual(['v2-cleaned', 'v2-legacy']);
-    expect(io.backups()).toEqual([V2]);
+    expect(api!.state.records.map((r) => r.id)).toEqual(V1_IDS);
+    expect(io.backups()).toEqual([V1]);
 
     act(() => api!.dispatch({ now: NOW, record: newRow, type: 'append-record' }));
     await waitFor(() => expect(io.snapshot() ?? '').toContain('new-after-boot'));
     const disk = JSON.parse(io.snapshot()!) as { records: { id: string }[]; version: number };
-    expect(disk.version).toBe(1);
+    expect(disk.version).toBe(2);
     expect(disk.records.map((r) => r.id).sort()).toEqual(
-      ['new-after-boot', 'v2-cleaned', 'v2-legacy'],
+      ['new-after-boot', ...V1_IDS].sort(),
     );
+  });
+
+  it('migrates main\'s real v1 rows as skipped legacy-v1, keeping their text', () => {
+    const parsed = parseHistoryJson(V1);
+    expect(parsed).toMatchObject({ ok: true, sourceVersion: 1 });
+    if (!parsed.ok) return;
+    const original = (JSON.parse(V1) as { records: DictationRecord[] }).records;
+    expect(parsed.file.records.map((r) => r.id)).toEqual(V1_IDS);
+    parsed.file.records.forEach((record, index) => {
+      const source = original[index];
+      expect(record.cleanup).toEqual({
+        dictionaryDigest: null,
+        dictionaryVersion: 1,
+        modelDigest: null,
+        modelId: null,
+        promptVersion: 'legacy-v1',
+        reason: 'migrated from history v1',
+        status: 'skipped',
+      });
+      expect(record.text).toBe(source.text);
+      // v1 stored rawText only when it differed (BUS-23); otherwise raw = final.
+      expect(record.rawText).toBe(source.rawText ?? source.text);
+      if (source.rawText === undefined) expect(record.rawText).toBe(record.text);
+      expect(record.status).toBe(source.status);
+    });
+    expect(parsed.file.records[1].rawText).toBe('[Music] hello world');
+    expect(parsed.file.records[2].mayHaveInserted).toEqual({ copied: true });
   });
 
   it('an unknown future version is surfaced, backed up, and never clobbered', async () => {
@@ -139,7 +170,7 @@ describe('BUS-42 history file version compatibility', () => {
     expect(blocked).toMatchObject({ ok: false, writeBlocked: true });
   });
 
-  it('settings v2 from #24 loads (after a backup) instead of resetting to defaults', async () => {
+  it('current settings v2 loads without a migration backup', async () => {
     const v2 = JSON.stringify({
       onboardingComplete: true,
       settings: { ...initialSettings, cleanupEnabled: true, cleanupModelId: null, transcriptRetention: 'forever' },
@@ -149,7 +180,7 @@ describe('BUS-42 history file version compatibility', () => {
     const result = await createSettingsStore(io).load();
     expect(result.ok).toBe(true);
     expect(result.file.settings.transcriptRetention).toBe('forever');
-    expect(io.backups()).toEqual([v2]);
+    expect(io.backups()).toEqual([]);
   });
 
   it('settings from a future version are backed up and never replaced with defaults', async () => {
@@ -207,11 +238,11 @@ describe('BUS-42 history file version compatibility', () => {
     expect(io.backups()).toEqual(['{broken']);
   });
 
-  it('main rewrites a v2 settings file as v1 during boot (after backup)', async () => {
+  it('main rewrites a v1 settings file as v2 during boot (after backup)', async () => {
     const v2 = JSON.stringify({
       onboardingComplete: true,
       settings: { ...initialSettings, cleanupEnabled: true, transcriptRetention: 'forever' },
-      version: 2,
+      version: 1,
     });
     const settingsIo = createMemorySettingsIo(v2);
     api = null;
@@ -229,13 +260,13 @@ describe('BUS-42 history file version compatibility', () => {
       settings: { transcriptRetention: string };
       version: number;
     };
-    expect(disk.version).toBe(1);
+    expect(disk.version).toBe(2);
     expect(disk.settings.transcriptRetention).toBe('forever');
     expect(settingsIo.backups()).toEqual([v2]);
     expect(api!.state.settingsError).toBeNull();
   });
 
-  it('main replaces corrupt settings with v1 defaults during boot, after a backup', async () => {
+  it('main replaces corrupt settings with v2 defaults during boot, after a backup', async () => {
     const settingsIo = createMemorySettingsIo('{not json');
     api = null;
     render(
@@ -248,7 +279,7 @@ describe('BUS-42 history file version compatibility', () => {
       </AppProvider>,
     );
     await waitFor(() => expect(api?.bootReady).toBe(true));
-    expect(JSON.parse(settingsIo.snapshot()!)).toMatchObject({ version: 1 });
+    expect(JSON.parse(settingsIo.snapshot()!)).toMatchObject({ version: 2 });
     expect(settingsIo.backups()).toEqual(['{not json']);
   });
 
@@ -312,7 +343,7 @@ describe('BUS-42 history file version compatibility', () => {
     await waitFor(() => expect(writes.at(-1)).toContain('"style": "casual"'));
   });
 
-  it('keeps #24 cleanup keys through the boot rewrite and a later edit, out of app state', async () => {
+  it('keeps cleanup settings through boot and a later edit in app state', async () => {
     const v2 = JSON.stringify({
       onboardingComplete: true,
       settings: {
@@ -337,14 +368,15 @@ describe('BUS-42 history file version compatibility', () => {
     await waitFor(() => expect(api?.bootReady).toBe(true));
     type Disk = { settings: Record<string, unknown>; version: number };
     const afterBoot = JSON.parse(settingsIo.snapshot()!) as Disk;
-    expect(afterBoot.version).toBe(1);
+    expect(afterBoot.version).toBe(2);
     expect(afterBoot.settings).toMatchObject({
       cleanupEnabled: true,
       cleanupModelId: 'local-cleanup-small',
       style: 'casual',
     });
-    expect(api!.state.settings).not.toHaveProperty('cleanupEnabled');
-    expect(api!.state.settings).not.toHaveProperty('cleanupModelId');
+    expect(api!.state.settings).toMatchObject({
+      cleanupEnabled: true, cleanupModelId: 'local-cleanup-small',
+    });
 
     act(() => api!.dispatch({ key: 'style', now: Date.now(), type: 'set-setting', value: 'formal' }));
     await waitFor(() => expect((JSON.parse(settingsIo.snapshot()!) as Disk).settings.style).toBe('formal'));
@@ -383,27 +415,27 @@ describe('BUS-42 history file version compatibility', () => {
 
   it('reload drops unknown keys that are no longer on disk', async () => {
     const io = createMemorySettingsIo(JSON.stringify({
-      onboardingComplete: true, settings: { ...initialSettings, cleanupEnabled: true }, version: 1,
+      onboardingComplete: true, settings: { ...initialSettings, futureOption: true }, version: 1,
     }));
     const store = createSettingsStore(io);
     await store.load();
     await io.write(JSON.stringify({ onboardingComplete: true, settings: initialSettings, version: 1 }));
     const loaded = await store.load();
     await store.save(loaded.file.settings, true);
-    expect(io.snapshot()).not.toContain('cleanupEnabled');
+    expect(io.snapshot()).not.toContain('futureOption');
   });
 
   describe('a backup that copied nothing (null path) never unlocks a write', () => {
     const nullBackup = async () => null;
     const readFails = async (): Promise<string | null> => { throw new Error('EISDIR'); };
 
-    it('settings: read error, corrupt JSON and v2 rewrite all stay blocked', async () => {
+    it('settings: read error, corrupt JSON and v1 rewrite all stay blocked', async () => {
       const write = async () => {};
       const readErr = await createSettingsStore({ backup: nullBackup, read: readFails, write }).load();
       expect(readErr).toMatchObject({ ok: false, writeBlocked: true });
       const corrupt = await createSettingsStore({ backup: nullBackup, read: async () => '{bad', write }).load();
       expect(corrupt).toMatchObject({ ok: false, writeBlocked: true });
-      const v2 = JSON.stringify({ onboardingComplete: true, settings: initialSettings, version: 2 });
+      const v2 = JSON.stringify({ onboardingComplete: true, settings: initialSettings, version: 1 });
       const migrate = await createSettingsStore({ backup: nullBackup, read: async () => v2, write }).load();
       expect(migrate).toMatchObject({ ok: false, writeBlocked: true });
     });
@@ -416,9 +448,9 @@ describe('BUS-42 history file version compatibility', () => {
       expect(corrupt).toMatchObject({ ok: false, writeBlocked: true });
     });
 
-    it('history: v2 is not migrated', async () => {
+    it('history: v1 is not migrated', async () => {
       const result = await createHistoryStore({
-        backup: nullBackup, read: async () => V2, write: async () => {},
+        backup: nullBackup, read: async () => V1, write: async () => {},
       }).load('forever', NOW);
       expect(result.ok).toBe(false);
     });
