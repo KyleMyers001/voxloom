@@ -28,7 +28,7 @@ let latest: Settings = initialSettings;
 function Probe({ start }: { start?: Partial<Settings> }) {
   const { dispatch, state } = useApp();
   useEffect(() => {
-    if (start) dispatch({ onboardingComplete: true, settings: { ...initialSettings, ...start }, type: 'hydrate-settings' });
+    if (start) dispatch({ now: Date.now(), onboardingComplete: true, settings: { ...initialSettings, ...start }, type: 'hydrate-settings' });
   }, [dispatch, start]);
   latest = state.settings;
   return null;
