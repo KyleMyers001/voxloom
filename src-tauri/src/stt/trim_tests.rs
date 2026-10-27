@@ -180,3 +180,6 @@ mod release;
 
 #[path = "trim_gate_tests.rs"]
 mod gate;
+
+#[path = "trim_soft_tests.rs"]
+mod soft;

@@ -1,0 +1,12 @@
+# file	kind	expected_word	speech_end_sample
+128104-0000_d2000_A36.s16	trailoff	welcome	72000
+128104-0001_d2000_A36.s16	trailoff	interesting	72000
+128104-0008_d2000_A36.s16	trailoff	foreign	72000
+128104-0013_d2000_A36.s16	trailoff	better	72000
+135031-0003_d2000_A30.s16	trailoff	door	72000
+128104-0000_d1000_A36.s16	trailoff	welcome	72000
+libri_128104-0008_a0.s16	halluc	-	48000
+iso_128104-0000_a0.s16	halluc	-	48000
+iso_141231-0009_a0.s16	halluc	-	48000
+iso_141231-0014_a0.s16	halluc	-	48000
+halluc_128104-0000.s16	halluc	-	48000

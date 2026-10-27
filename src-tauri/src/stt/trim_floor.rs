@@ -47,6 +47,12 @@ pub(super) fn quiet_level(tail: &[f32], threshold: f32) -> f32 {
     }
 }
 
+/// Whether the tail ends in a noise gate after 200 ms or more of sound, so
+/// that `quiet_level` uses the floor before the gate.
+pub(super) fn ends_in_gate(tail: &[f32]) -> bool {
+    gate_start(tail).is_some_and(|n| n >= NOISE_FRAMES)
+}
+
 /// The lowest `NOISE_PERCENTILE` over each 200 ms window of `levels` (over
 /// all of them when shorter), or 0 for none.
 fn floor(levels: &[f32]) -> f32 {

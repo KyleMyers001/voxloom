@@ -15,8 +15,11 @@
 //!   count as speech, and soft speech running into the gate still does. A
 //!   click, blip or dither in the gate doesn't end it.
 //!
-//! Soft speech running to the end of the clip with no pause, under the
-//! loud threshold, is cut like room noise: a known loss (BUS-143).
+//! Soft speech running to the end of the clip, under the loud threshold,
+//! dips below the 6 dB level between syllables. `trim_soft` finds it by its
+//! movement over a lower, 3 dB level (BUS-143); flat, ramped or stepped
+//! room noise isn't moving and is still cut. A tone-flat soft release is
+//! cut like noise: a known loss.
 //!
 //! Both need 80 ms of frames (one 20 ms dip per run), so a click or key
 //! thump in the tail doesn't count as speech. A lone 60–79 ms sound after
@@ -24,10 +27,13 @@
 //! with 60 ms runs.
 
 use super::gate::AudioStats;
-use floor::quiet_level;
+use floor::{ends_in_gate, quiet_level};
+use soft::soft_speech_end;
 
 #[path = "trim_floor.rs"]
 mod floor;
+#[path = "trim_soft.rs"]
+mod soft;
 
 const FRAME_MS: usize = 20;
 /// Tail kept after the speech end. Whisper drops a short final word ("okay",
@@ -98,6 +104,11 @@ pub fn trailing_trim(samples: &[f32], sample_rate_hz: u32) -> TailTrim {
     // The loud run is at or above the quiet level too, so this ends at or
     // after `loud_end`.
     let end_frame = speech_end(&levels, quiet_level).unwrap_or(loud_end);
+    let end_frame = if ends_in_gate(&levels[loud_end..]) {
+        end_frame
+    } else {
+        soft_speech_end(&levels, loud_end, end_frame)
+    };
     let quiet_start = (end_frame * frame).min(samples.len());
     let tail_rms = if quiet_start == samples.len() {
         0.0
@@ -165,6 +176,14 @@ mod tests;
 #[path = "trim_pipeline_tests.rs"]
 mod pipeline_tests;
 
+#[cfg(test)]
+#[path = "trim_corpus_tests.rs"]
+mod corpus_tests;
+
 #[cfg(all(test, feature = "whisper"))]
 #[path = "trim_model_tests.rs"]
 mod model_tests;
+
+#[cfg(all(test, feature = "whisper"))]
+#[path = "trim_corpus_model_tests.rs"]
+mod corpus_model_tests;
