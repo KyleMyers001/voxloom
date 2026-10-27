@@ -129,4 +129,18 @@ describe('history reload failure after a failed Off save (BUS-86)', () => {
     expect(save).not.toHaveBeenCalled();
     expect(historyIo.snapshot()).toBe(before);
   });
+
+  it('a delete, then a new record, after the failed reload never write history.json', async () => {
+    const { before, historyIo, save } = await bootWithFailingReload();
+
+    act(() => api!.history.delete('a'));
+    await settle();
+    act(() => api!.dispatch({ now: Date.now(), record: rec('r1'), type: 'append-record' }));
+    await settle();
+
+    expect(api!.state.records.some((r) => r.id === 'a')).toBe(false);
+    expect(save).not.toHaveBeenCalled();
+    expect(historyIo.snapshot()).toBe(before);
+    expect(api!.state.historyError).toMatch(/read failed/);
+  });
 });

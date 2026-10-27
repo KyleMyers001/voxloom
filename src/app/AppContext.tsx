@@ -32,6 +32,7 @@ import {
   type DurableSettingsStore,
   type SettingsFile,
 } from '../services/settings';
+import { blockHistoryWrites } from './blockHistoryWrites';
 import { useSettingsPersist } from './useSettingsPersist';
 import { useSettingsSync } from './useSettingsSync';
 import {
@@ -252,12 +253,7 @@ export function AppProvider({
         // Unreadable history.json after boot: never write over it, same as
         // the boot-load failure path (BUS-42). historyDivergedRef stays set;
         // with writes blocked it can no longer trigger a wipe or save.
-        allowHistoryPersistRef.current = false;
-        dispatch({
-          message: result.error,
-          sticky: true,
-          type: 'set-history-error',
-        });
+        blockHistoryWrites(allowHistoryPersistRef, dispatch, result.error);
       }
     } finally {
       if (reloadDeletedIdsRef.current === deletedDuringReload) {
@@ -276,7 +272,12 @@ export function AppProvider({
     const gen = historyPersistGenRef.current;
     try {
       const loaded = await historyPers.store.load(diskRetention, clock());
-      if (gen !== historyPersistGenRef.current || !loaded.ok) return;
+      if (gen !== historyPersistGenRef.current) return;
+      if (!loaded.ok) {
+        // The pending Off save would otherwise wipe the unreadable file.
+        blockHistoryWrites(allowHistoryPersistRef, dispatch, loaded.error);
+        return;
+      }
       const next = loaded.records.filter((record) => record.id !== id);
       await historyPers.store.save(next, diskRetention, clock());
       if (gen !== historyPersistGenRef.current) return;
@@ -479,12 +480,7 @@ export function AppProvider({
         // (the store already tried to back it up). BUS-42. Dictations made
         // before this load stay visible in memory but are never written.
         dispatch({ records: [], now: clock(), type: 'hydrate-records' });
-        allowHistoryPersistRef.current = false;
-        dispatch({
-          message: historyResult.error,
-          sticky: true,
-          type: 'set-history-error',
-        });
+        blockHistoryWrites(allowHistoryPersistRef, dispatch, historyResult.error);
       }
       historyHydratedRef.current = true;
       historyPersistGenRef.current += 1;
