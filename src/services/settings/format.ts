@@ -8,7 +8,7 @@ import {
 import type { Appearance, Settings, WritingStyle } from '../../domain/types';
 
 /** On-disk schema version for `settings.json`. */
-export const SETTINGS_FILE_VERSION = 1 as const;
+export const SETTINGS_FILE_VERSION = 2 as const;
 
 export interface SettingsFile {
   onboardingComplete: boolean;
@@ -52,6 +52,10 @@ function asBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
 }
 
+function asNullableString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
 /**
  * Merge a partial/unknown settings object onto defaults.
  * Invalid individual fields fall back; does not throw.
@@ -70,6 +74,11 @@ export function coerceSettings(raw: unknown): Settings {
       audioRetentions,
       base.audioRetention,
     ),
+    cleanupEnabled: asBoolean(raw.cleanupEnabled, base.cleanupEnabled),
+    cleanupModelId: asNullableString(raw.cleanupModelId),
+    // Added in BUS-16 PR 2c: files without it, including #24-era v2 files
+    // with `cleanupEnabled: true`, load with cleanup off.
+    cleanupOptIn: asBoolean(raw.cleanupOptIn, base.cleanupOptIn),
     clipboardFallback: asBoolean(raw.clipboardFallback, base.clipboardFallback),
     language: asString(raw.language, base.language),
     languageModel: asString(raw.languageModel, base.languageModel),
@@ -111,16 +120,22 @@ export function parseSettingsJson(raw: string): ParseSettingsResult {
   if (!isObject(parsed)) {
     return { error: 'Settings file root must be an object', ok: false };
   }
-  // v2 was written by the BUS-16 cleanup branch (#24): same envelope plus
-  // cleanup fields this build ignores (BUS-42).
-  if (parsed.version !== SETTINGS_FILE_VERSION && parsed.version !== 2) {
+  if (parsed.version !== 1 && parsed.version !== SETTINGS_FILE_VERSION) {
     return {
       error: `Unsupported settings file version: ${String(parsed.version)}`,
       ok: false,
     };
   }
   const onboardingComplete = asBoolean(parsed.onboardingComplete, false);
-  const settings = coerceSettings(parsed.settings);
+  const coerced = coerceSettings(parsed.settings);
+  // v1 never had a cleanup opt-in. A #24-era v1 file may carry
+  // `cleanupEnabled: true` as an extra key; it must not turn cleanup on
+  // (BUS-16: off until verified on macOS). Only a v2 file can opt in, so a
+  // stray `cleanupOptIn` in a v1 file is forced off too; that override is
+  // what keeps v1 off now that the opt-in alone gates cleanup.
+  const settings = parsed.version === 1
+    ? { ...coerced, cleanupEnabled: false, cleanupOptIn: false }
+    : coerced;
   return {
     file: {
       onboardingComplete,
@@ -132,8 +147,8 @@ export function parseSettingsJson(raw: string): ParseSettingsResult {
 }
 
 /**
- * Keys of the on-disk `settings` object this build does not know (e.g. #24's
- * `cleanupEnabled` / `cleanupModelId`). They never reach app state, but are
+ * Keys of the on-disk `settings` object this build does not know.
+ * They never reach app state, but are
  * written back on save so another build's settings are not lost (BUS-42).
  */
 export function unknownSettingsKeys(raw: string): Record<string, unknown> {

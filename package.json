@@ -41,8 +41,9 @@
     "jsdom": "30.0.1",
     "typescript": "5.9.3",
     "typescript-eslint": "8.70.0",
-    "vite": "8.3.0",
-    "vitest": "5.0.0"
+    "vite": "8.3.5",
+    "vitest": "5.0.5",
+    "yaml": "2.9.1"
   },
   "overrides": {
     "undici": "^6.28.1"

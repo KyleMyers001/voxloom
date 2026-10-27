@@ -60,3 +60,13 @@
   .history-row.recent-row { grid-template-columns: auto minmax(0, 1fr); }
   .history-row.recent-row > :last-child { grid-column: 2; }
 }
+
+/* BUS-16: cleanup provenance. */
+.history-row__original {
+  color: var(--mut);
+  font-size: var(--fs-secondary);
+  margin-top: 4px;
+}
+
+.history-row__original summary { cursor: default; width: fit-content; }
+.history-row__original p { margin: 4px 0 0; white-space: pre-wrap; }

@@ -23,7 +23,22 @@ SUFFIX=""
 NAME="Voxloom_${VERSION}_macos_${ARCH}${SUFFIX}"
 
 # Fails the build if the mic entitlement is missing; never repairs in CI.
-bash "$ROOT/scripts/macos-assert-entitlements.sh" "$APP"
+# Signed builds are also checked for the Developer ID signature and Team ID
+# (never skipped: APPLE_TEAM_ID is required); unsigned ones are ad-hoc, so
+# those checks must not apply.
+if [[ "$SIGNED" == "true" ]]; then
+  if [[ -z "${APPLE_TEAM_ID:-}" ]]; then
+    echo "error: APPLE_TEAM_ID is required for signed builds." >&2
+    exit 1
+  fi
+  bash "$ROOT/scripts/macos-assert-entitlements.sh" "$APP"
+else
+  env -u APPLE_SIGNING_IDENTITY -u APPLE_TEAM_ID \
+    bash "$ROOT/scripts/macos-assert-entitlements.sh" "$APP"
+fi
+
+# BUS-16 3c-2b: the bundled cleanup worker, signed like the app.
+bash "$ROOT/scripts/release/check-sidecar.sh" "$APP" "$TARGET"
 
 DMG="$(find "$BUNDLE/dmg" -maxdepth 1 -name '*.dmg' | head -n 1)"
 if [[ -z "$DMG" ]]; then
@@ -33,18 +48,12 @@ fi
 
 if [[ "$SIGNED" == "true" ]]; then
   # Tauri notarizes and staples the .app; notarize + staple the dmg too.
-  if [[ -n "${APPLE_API_KEY:-}" ]]; then
-    : "${APPLE_API_KEY_PATH:?APPLE_API_KEY_PATH missing (build step did not write the .p8)}"
-    : "${APPLE_API_ISSUER:?APPLE_API_ISSUER is required with APPLE_API_KEY}"
-    xcrun notarytool submit "$DMG" --wait --key "$APPLE_API_KEY_PATH" \
-      --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER"
-  else
-    : "${APPLE_ID:?APPLE_ID is required for notarization}"
-    : "${APPLE_PASSWORD:?APPLE_PASSWORD is required for notarization}"
-    : "${APPLE_TEAM_ID:?APPLE_TEAM_ID is required for notarization}"
-    xcrun notarytool submit "$DMG" --wait --apple-id "$APPLE_ID" \
-      --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID"
-  fi
+  # API key only, like signing-env.sh: no Apple ID fallback.
+  : "${APPLE_API_KEY:?APPLE_API_KEY is required for notarization}"
+  : "${APPLE_API_KEY_PATH:?APPLE_API_KEY_PATH missing (build step did not write the .p8)}"
+  : "${APPLE_API_ISSUER:?APPLE_API_ISSUER is required with APPLE_API_KEY}"
+  xcrun notarytool submit "$DMG" --wait --key "$APPLE_API_KEY_PATH" \
+    --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER"
   xcrun stapler staple "$DMG"
   xcrun stapler validate "$APP"
   spctl -a -vv "$APP"

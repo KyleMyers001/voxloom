@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Toast } from '../components/Toast';
+import { isCleanupActive } from '../domain/cleanup';
 import type { Screen } from '../domain/types';
 import { Dictionary } from '../features/dictionary/Dictionary';
 import { History } from '../features/history/History';
@@ -8,6 +9,8 @@ import { Onboarding } from '../features/onboarding/Onboarding';
 import { Settings } from '../features/settings/Settings';
 import { isTauriEnv } from '../services/capture/captureService';
 import { listenOnboardingOpen, openSettingsWindow, subscribe } from '../services/settingsWindow';
+import { disarmCleanupPrewarm, prewarmCleanup } from '../services/cleanup/prewarm';
+import { useCleanupPrewarm } from '../services/stt/useCleanupPrewarm';
 import { useDogfoodCapture } from '../services/stt/useDogfoodCapture';
 import { ResetSessionDialog, ShortcutsDialog } from './AppDialogs';
 import { useApp } from './AppContext';
@@ -36,12 +39,25 @@ export function App() {
   const dogfood = useDogfoodCapture({
     clipboard,
     clipboardFallback: state.settings.clipboardFallback,
+    // BUS-16: only cleanupOptIn gates cleanup; legacy cleanupEnabled is ignored.
+    cleanupActive: isCleanupActive(state.settings),
+    cleanupModelId: state.settings.cleanupModelId,
+    dictionary: state.words,
     modelId: state.settings.transcriptionModel,
     now,
     onHistoryRecord: (record) => dispatch({ now: now(), record, type: 'append-record' }),
     onToast: announce,
     preferredDeviceId: state.settings.microphone,
     style: state.settings.style,
+  });
+
+  // Native: warm the cleanup model at launch and on switch-on (BUS-16 3c-2c),
+  // and disarm that prewarm on switch-off (BUS-121).
+  useCleanupPrewarm({
+    active: isCleanupActive(state.settings),
+    disarm: isTauriEnv() ? disarmCleanupPrewarm : undefined,
+    prewarm: isTauriEnv() ? prewarmCleanup : undefined,
+    ready: bootReady,
   });
 
   // Close onboarding when durable settings hydrate with complete=true.
@@ -93,7 +109,8 @@ export function App() {
   useEffect(() => subscribe(() => listenOnboardingOpen(() => openSetup(null))), [openSetup]);
 
   const status = dogfood.phase === 'recording' ? 'Listening'
-    : dogfood.phase === 'transcribing' ? 'Transcribing' : 'Ready';
+    : dogfood.phase === 'transcribing' ? 'Transcribing'
+    : dogfood.phase === 'cleaning' ? 'Cleaning up' : 'Ready';
   const gated = (title: string, screen: ReactNode) =>
     bootReady ? screen : <BootHydratePlaceholder title={title} />;
 

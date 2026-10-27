@@ -48,6 +48,9 @@ export const initialOnboarding: OnboardingState = {
 export const initialSettings: Settings = {
   appearance: 'system',
   audioRetention: 'off',
+  cleanupEnabled: false,
+  cleanupModelId: null,
+  cleanupOptIn: false,
   clipboardFallback: true,
   language: 'English (US)',
   languageModel: 'Alder Text Small · local',

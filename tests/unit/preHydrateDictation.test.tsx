@@ -107,7 +107,7 @@ describe('BUS-45 dictations made before history hydrate', () => {
     expect(api!.state.records.map((r) => r.id)).toEqual(
       ['before-hydrate', 'v2-cleaned', 'v2-legacy'],
     );
-    expect(io.backups()).toEqual([V2]);
+    expect(io.backups()).toEqual([]);
     await waitFor(() => expect(io.snapshot() ?? '').toContain('before-hydrate'));
     const disk = JSON.parse(io.snapshot()!) as { records: { id: string }[] };
     expect(disk.records.map((r) => r.id).sort()).toEqual(

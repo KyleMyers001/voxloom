@@ -46,7 +46,8 @@ export function ModelCard({ model, selected, progress, failure, onSelect, onDown
               label={`Downloading ${model.label}`}
               value={progress ? pct : null}
             />
-            <button className="btn" onClick={onCancel} type="button">Cancel download</button>
+            {/* BUS-76: not yet registered natively, so Cancel would silently do nothing. */}
+            {!model.pending && <button className="btn" onClick={onCancel} type="button">Cancel download</button>}
           </>
         ) : model.status === 'available' ? null : failed ? (
           <button aria-describedby={downloadLocked ? `${errorId} ${lockNoteId}` : errorId} className={downloadLocked ? 'btn' : 'btn primary'} disabled={downloadLocked} onClick={onDownload} type="button">
@@ -62,7 +63,7 @@ export function ModelCard({ model, selected, progress, failure, onSelect, onDown
       </div>
       {failed && (
         <p className="form-error stt-model-error" id={errorId} role="alert">
-          {failure ?? 'Download failed. Nothing was saved.'}
+          {failure ?? 'Model file is damaged. Download it again.'}
         </p>
       )}
       {downloadLocked && !downloading && model.status !== 'available' && (

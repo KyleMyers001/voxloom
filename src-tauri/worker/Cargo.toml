@@ -1,0 +1,37 @@
+# BUS-16 PR 3c-1: the bundled cleanup worker. Its own crate and Cargo.lock so
+# the app jobs never compile llama.cpp. Speaks cleanup/protocol.rs (shared
+# source, see src/main.rs) and loads the model the app passes on fd 3.
+[package]
+name = "voxloom-cleanup-worker"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "voxloom-cleanup-worker"
+path = "src/main.rs"
+
+[dependencies]
+# Exact pins (the -sys crate too, per the design note): they release weekly.
+# No default features on llama-cpp-2: its `openmp` default breaks the macOS
+# link. `common` is still compiled: llama-cpp-2 depends on llama-cpp-sys-2
+# with sys-2's default features (which include `common`), and features are
+# additive, so default-features = false here cannot turn it off. Nothing from
+# it is linked (no common/vendor symbols in the binary, BUS-16 3c-2b).
+# CPU-only off macOS.
+llama-cpp-2 = { version = "=0.1.160", default-features = false }
+llama-cpp-sys-2 = { version = "=0.1.160", default-features = false }
+# _exit when the app dies (src/parent.rs).
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0.140"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+llama-cpp-2 = { version = "=0.1.160", default-features = false, features = ["metal"] }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+panic = "unwind"
+strip = true
