@@ -32,7 +32,10 @@ import {
   type DurableSettingsStore,
   type SettingsFile,
 } from '../services/settings';
-import { blockHistoryWrites } from './blockHistoryWrites';
+import {
+  blockHistoryWrites,
+  reallowHistoryWritesAfterLoad,
+} from './blockHistoryWrites';
 import { useSettingsPersist } from './useSettingsPersist';
 import { useSettingsSync } from './useSettingsSync';
 import {
@@ -148,6 +151,12 @@ export function AppProvider({
   const historyHydratedRef = useRef(!historyPers.enabled);
   /** False after a corrupt-load so we never overwrite the broken file. */
   const allowHistoryPersistRef = useRef(!historyPers.enabled);
+  /** True when allowHistoryPersistRef is false because history.json was unreadable. */
+  const historyLoadBlockedRef = useRef(false);
+  const historyWriteGate = useMemo(() => ({
+    allowRef: allowHistoryPersistRef,
+    loadBlockedRef: historyLoadBlockedRef,
+  }), []);
   const historyPersistGenRef = useRef(0);
   /** One queue for history.json writes/reloads so an Off wipe cannot race a restore. */
   const historyChainRef = useRef<Promise<void>>(Promise.resolve());
@@ -245,6 +254,8 @@ export function AppProvider({
           .map((record) => memoryById.get(record.id) ?? record);
         const merged = [...memoryOnly, ...fromDisk];
         historyDivergedRef.current = false;
+        // A readable file again: memory matches disk, so writes are safe.
+        reallowHistoryWritesAfterLoad(historyWriteGate);
         // Queued saves run before React re-renders; give them the merged list.
         historySnapshotRef.current = { ...historySnapshotRef.current, records: merged };
         dispatch({ now: clock(), records: merged, type: 'hydrate-records' });
@@ -253,7 +264,7 @@ export function AppProvider({
         // Unreadable history.json after boot: never write over it, same as
         // the boot-load failure path (BUS-42). historyDivergedRef stays set;
         // with writes blocked it can no longer trigger a wipe or save.
-        blockHistoryWrites(allowHistoryPersistRef, dispatch, result.error);
+        blockHistoryWrites(historyWriteGate, dispatch, result.error);
       }
     } finally {
       if (reloadDeletedIdsRef.current === deletedDuringReload) {
@@ -275,7 +286,7 @@ export function AppProvider({
       if (gen !== historyPersistGenRef.current) return;
       if (!loaded.ok) {
         // The pending Off save would otherwise wipe the unreadable file.
-        blockHistoryWrites(allowHistoryPersistRef, dispatch, loaded.error);
+        blockHistoryWrites(historyWriteGate, dispatch, loaded.error);
         return;
       }
       const next = loaded.records.filter((record) => record.id !== id);
@@ -480,7 +491,7 @@ export function AppProvider({
         // (the store already tried to back it up). BUS-42. Dictations made
         // before this load stay visible in memory but are never written.
         dispatch({ records: [], now: clock(), type: 'hydrate-records' });
-        blockHistoryWrites(allowHistoryPersistRef, dispatch, historyResult.error);
+        blockHistoryWrites(historyWriteGate, dispatch, historyResult.error);
       }
       historyHydratedRef.current = true;
       historyPersistGenRef.current += 1;
@@ -491,7 +502,7 @@ export function AppProvider({
       cancelled = true;
     };
     // Intentional once-on-mount boot load (persistence identity is stable).
-  }, [clock, dictionaryPers, historyPers, settingsPers]);
+  }, [clock, dictionaryPers, historyPers, historyWriteGate, settingsPers]);
 
   useSettingsSync({
     allowRef: allowSettingsPersistRef,
