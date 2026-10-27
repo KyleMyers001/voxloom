@@ -249,6 +249,10 @@ export function AppProvider({
         dispatch({ now: clock(), records: merged, type: 'hydrate-records' });
         dispatch({ message: null, type: 'set-history-error' });
       } else {
+        // Unreadable history.json after boot: never write over it, same as
+        // the boot-load failure path (BUS-42). historyDivergedRef stays set;
+        // with writes blocked it can no longer trigger a wipe or save.
+        allowHistoryPersistRef.current = false;
         dispatch({
           message: result.error,
           sticky: true,
