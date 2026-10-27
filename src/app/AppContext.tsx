@@ -34,7 +34,9 @@ import {
 } from '../services/settings';
 import {
   blockHistoryWrites,
+  type HistoryBlockReason,
   reallowHistoryWritesAfterLoad,
+  showHistoryBlockError,
 } from './blockHistoryWrites';
 import { useSettingsPersist } from './useSettingsPersist';
 import { useSettingsSync } from './useSettingsSync';
@@ -151,11 +153,12 @@ export function AppProvider({
   const historyHydratedRef = useRef(!historyPers.enabled);
   /** False after a corrupt-load so we never overwrite the broken file. */
   const allowHistoryPersistRef = useRef(!historyPers.enabled);
-  /** True when allowHistoryPersistRef is false because history.json was unreadable. */
-  const historyLoadBlockedRef = useRef(false);
+  const historyBlockReasonRef = useRef<HistoryBlockReason>(null);
+  const historyBlockMessageRef = useRef<string | null>(null);
   const historyWriteGate = useMemo(() => ({
     allowRef: allowHistoryPersistRef,
-    loadBlockedRef: historyLoadBlockedRef,
+    messageRef: historyBlockMessageRef,
+    reasonRef: historyBlockReasonRef,
   }), []);
   const historyPersistGenRef = useRef(0);
   /** One queue for history.json writes/reloads so an Off wipe cannot race a restore. */
@@ -224,6 +227,15 @@ export function AppProvider({
     }
   };
 
+  /**
+   * An Off save was requested and settings.json has not confirmed it. Uses the
+   * last requested file, which a failed save resets to the rollback target
+   * (the render-time snapshot can still say Off at that moment).
+   */
+  const offPendingOnSettings = () =>
+    lastRequestedSettingsRef.current?.settings.transcriptRetention === 'off'
+    && lastSavedSettingsRef.current?.settings.transcriptRetention !== 'off';
+
   const reloadHistoryFromDisk = async (retention: typeof state.settings.transcriptRetention) => {
     if (!historyPers.enabled || !historyHydratedRef.current) return;
     // Supersede any in-flight wipe: bump gen, then load after prior jobs finish.
@@ -234,6 +246,13 @@ export function AppProvider({
     try {
       const result = await historyPers.store.load(retention, clock());
       if (gen !== historyPersistGenRef.current) return;
+      if (result.ok && offPendingOnSettings()) {
+        // A newer Off is waiting on settings.json: memory is Off-filtered and
+        // its confirmation wipes (or its failure reloads again). Clearing the
+        // divergence or re-allowing writes now would let a queued snapshot
+        // wipe history.json before that Off is confirmed.
+        return;
+      }
       if (result.ok) {
         // Prefer in-memory for shared ids (live edits / deletes already applied).
         // Drop ids deleted while load was in flight so an explicit Delete is not
@@ -260,11 +279,13 @@ export function AppProvider({
         historySnapshotRef.current = { ...historySnapshotRef.current, records: merged };
         dispatch({ now: clock(), records: merged, type: 'hydrate-records' });
         dispatch({ message: null, type: 'set-history-error' });
+        // Hydrating cleared the error; keep it while writes stay blocked.
+        showHistoryBlockError(historyWriteGate, dispatch);
       } else {
         // Unreadable history.json after boot: never write over it, same as
         // the boot-load failure path (BUS-42). historyDivergedRef stays set;
         // with writes blocked it can no longer trigger a wipe or save.
-        blockHistoryWrites(historyWriteGate, dispatch, result.error);
+        blockHistoryWrites(historyWriteGate, dispatch, result.error, 'load');
       }
     } finally {
       if (reloadDeletedIdsRef.current === deletedDuringReload) {
@@ -286,7 +307,7 @@ export function AppProvider({
       if (gen !== historyPersistGenRef.current) return;
       if (!loaded.ok) {
         // The pending Off save would otherwise wipe the unreadable file.
-        blockHistoryWrites(historyWriteGate, dispatch, loaded.error);
+        blockHistoryWrites(historyWriteGate, dispatch, loaded.error, 'permanent');
         return;
       }
       const next = loaded.records.filter((record) => record.id !== id);
@@ -315,6 +336,13 @@ export function AppProvider({
       return;
     }
     if (retention === 'off') {
+      if (historyBlockReasonRef.current === 'load') {
+        // Off is confirmed but history.json was unreadable: wipe it only once
+        // a reload reads it (that reload clears the divergence).
+        enqueueHistoryJob(() => reloadHistoryFromDisk(retention));
+        enqueueHistoryJob(() => saveHistorySnapshot());
+        return;
+      }
       historyDivergedRef.current = false;
       enqueueHistoryJob(() => saveHistorySnapshot());
     } else {
@@ -475,14 +503,14 @@ export function AppProvider({
         // Any history version: show it, but never rewrite or prune it on
         // default retention while settings writes are blocked.
         dispatch({ records: historyResult.records, now: clock(), type: 'hydrate-records' });
-        allowHistoryPersistRef.current = false;
-        dispatch({
-          message: settingsBlocked
+        blockHistoryWrites(
+          historyWriteGate,
+          dispatch,
+          settingsBlocked
             ? 'History is read-only until settings can be read. Your history file was left untouched.'
             : 'History is read-only because it couldn\'t be backed up after settings were reset. Your history file was left untouched.',
-          sticky: true,
-          type: 'set-history-error',
-        });
+          'permanent',
+        );
       } else if (historyResult.ok) {
         dispatch({ records: historyResult.records, now: clock(), type: 'hydrate-records' });
         allowHistoryPersistRef.current = true;
@@ -491,7 +519,7 @@ export function AppProvider({
         // (the store already tried to back it up). BUS-42. Dictations made
         // before this load stay visible in memory but are never written.
         dispatch({ records: [], now: clock(), type: 'hydrate-records' });
-        blockHistoryWrites(historyWriteGate, dispatch, historyResult.error);
+        blockHistoryWrites(historyWriteGate, dispatch, historyResult.error, 'load');
       }
       historyHydratedRef.current = true;
       historyPersistGenRef.current += 1;
