@@ -76,3 +76,55 @@ fn blips_in_digital_silence_are_not_speech() {
     let clip = clip_with(cat(&[blip(secs(0.5)), blip(secs(0.5)), blip(secs(0.5))]));
     assert_eq!(keep(&clip), LOUD_END + KEPT);
 }
+
+/// A breath: a 0.45 s hann-shaped noise burst about 1 dB over −60 dBFS room
+/// noise (under the 6 dB level, so only trim_soft could keep it), 0.5 s into
+/// `s` seconds of room noise.
+fn breath_tail(s: f32) -> Vec<f32> {
+    let burst = noise(10f32.powf(1.0 / 20.0) * 0.001 * 1.4, 0.45);
+    let n = burst.len() as f32;
+    let burst: Vec<f32> = (burst.iter().enumerate())
+        .map(|(i, x)| x * (std::f32::consts::PI * i as f32 / n).sin().powi(2))
+        .collect();
+    let breath = cat(&[vec![0.0; secs(0.5)], burst, vec![0.0; secs(s - 0.95)]]);
+    mix(&breath, &noise(0.001, s))
+}
+
+/// Key clicks: 50 ms decaying noise bursts, 8 a second, about −46 dBFS in
+/// their first frame, over −60 dBFS room noise, for `s` seconds.
+fn click_tail(s: f32) -> Vec<f32> {
+    let mut clicks = vec![0.0; secs(s)];
+    let bursts = noise(1.0, s);
+    for start in (secs(0.2)..secs(s) - 800).step_by(secs(0.125)) {
+        for k in 0..800 {
+            clicks[start + k] += bursts[start + k] * 0.012 * (-(k as f32) / 400.0).exp();
+        }
+    }
+    mix(&clicks, &noise(0.001, s))
+}
+
+#[test]
+fn a_breath_after_the_speech_is_cut_like_noise() {
+    // e2e7565 kept the breath as soft speech: base.en added "Thank you".
+    let clip = clip_with(breath_tail(2.8));
+    assert_eq!(keep(&clip), LOUD_END + KEPT);
+}
+
+#[test]
+fn key_clicks_after_the_speech_are_cut_like_noise() {
+    let clip = clip_with(click_tail(2.8));
+    assert_eq!(keep(&clip), LOUD_END + KEPT);
+}
+
+#[test]
+fn a_breath_after_soft_syllables_does_not_extend_past_the_syllables() {
+    let speech = soft_syllables(1.2);
+    let end = LOUD_END + speech.len();
+    let clip = clip_with(cat(&[speech, breath_tail(2.8)]));
+    let kept = keep(&clip);
+    assert!(kept >= end, "kept {kept} of speech to {end}");
+    assert!(
+        kept <= end + KEPT + FRAME * 2,
+        "kept {kept}, speech to {end}"
+    );
+}

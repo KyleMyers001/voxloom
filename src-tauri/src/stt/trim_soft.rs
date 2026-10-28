@@ -13,7 +13,13 @@
 //! breath to quiet doesn't give). Room noise, a step or a ramp (AGC raising
 //! the gain after speech) is nearly flat and is still cut, which keeps the
 //! "Thank you." hallucinations suppressed.
+//!
+//! Breaths, key clicks and wandering room noise move the level too, and a
+//! breath kept as speech brought "Thank you" back (BUS-143, QA of e2e7565:
+//! 19 of 20 base.en breath tails). So the window must also hold voiced
+//! speech (`trim_voiced`): a pitch-period repeat that noise does not have.
 
+use super::voiced::{high_pass, is_voiced, MIN_VOICED_FRAMES};
 use super::{percentile, MIN_SPEECH_FRAMES};
 
 /// Floor of the tail: the same low percentile `trim_floor` uses.
@@ -36,9 +42,15 @@ const MIN_EXTENSION_FRAMES: usize = 25;
 const MIN_FLOOR_RMS: f32 = super::floor::MIN_QUIET_RMS;
 
 /// The end frame of speech in `levels[from..]`, at or after `end_frame`.
-/// Only used when the tail does not end in a noise gate (a gate keeps its
-/// own, exact floor).
-pub(super) fn soft_speech_end(levels: &[f32], from: usize, end_frame: usize) -> usize {
+/// `levels` holds the RMS of each `frame` samples of `samples`. Only used
+/// when the tail does not end in a noise gate (a gate keeps its own, exact
+/// floor).
+pub(super) fn soft_speech_end(
+    (samples, rate_hz, frame): (&[f32], u32, usize),
+    levels: &[f32],
+    from: usize,
+    end_frame: usize,
+) -> usize {
     let Some(tail_floor) = percentile(levels[from..].to_vec(), NOISE_PERCENTILE) else {
         return end_frame;
     };
@@ -56,6 +68,16 @@ pub(super) fn soft_speech_end(levels: &[f32], from: usize, end_frame: usize) -> 
         .iter()
         .map(|&r| 20.0 * r.max(floor).log10())
         .collect();
+    // The tail after the loud anchor, high-passed once; `voiced[k]` caches
+    // whether the 40 ms from frame k is voiced.
+    let tail = high_pass(&samples[(from * frame).min(samples.len())..], rate_hz);
+    let mut voiced: Vec<Option<bool>> = vec![None; levels.len()];
+    let mut is_voiced_at = |k: usize| {
+        *voiced[k].get_or_insert_with(|| {
+            let (a, b) = ((k - from) * frame, (k + 2 - from) * frame);
+            tail.get(a..b).is_some_and(|f| is_voiced(f, rate_hz))
+        })
+    };
     for i in (end_frame..levels.len()).rev() {
         if levels[i] < soft {
             continue;
@@ -68,6 +90,7 @@ pub(super) fn soft_speech_end(levels: &[f32], from: usize, end_frame: usize) -> 
         if above.len() >= MIN_ABOVE
             && std_dev(&db[start..=i]) >= MIN_MOVEMENT_DB
             && std_dev(&above) >= MIN_ABOVE_MOVEMENT_DB
+            && (start..i).filter(|&k| is_voiced_at(k)).count() >= MIN_VOICED_FRAMES
         {
             return if i + 1 >= end_frame + MIN_EXTENSION_FRAMES {
                 i + 1
