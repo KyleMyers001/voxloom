@@ -183,3 +183,6 @@ mod gate;
 
 #[path = "trim_soft_tests.rs"]
 mod soft;
+
+#[path = "trim_soft_edge_tests.rs"]
+mod soft_edge;
