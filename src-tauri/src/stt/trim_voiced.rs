@@ -8,6 +8,11 @@
 //! `MIN_PERIODICITY` at some lag from 60 to 400 Hz, after a 150 Hz high-pass
 //! (rumble and 1/f room noise correlate at those lags, and without the
 //! filter pink room noise reached 0.6, as high as speech).
+//!
+//! A thump or a low key click is a decaying 100 to 200 Hz tone: one sine is
+//! as periodic as a voice (88 of 1040 QA noise clips kept a tail as speech).
+//! Speech spreads its energy over many harmonics, so a frame whose energy
+//! sits in one narrow peak is a tone, not a voice (`MAX_PEAK_SHARE`).
 
 /// A frame is voiced from this autocorrelation peak. Measured on the QA
 /// clips (BUS-143): breath and click tails stay under 0.40, the soft words
@@ -18,6 +23,16 @@ const MIN_PERIODICITY: f32 = 0.42;
 pub(super) const MIN_VOICED_FRAMES: usize = 2;
 const PITCH_HZ: (u32, u32) = (60, 400);
 const HIGH_PASS_HZ: f32 = 150.0;
+/// A voiced frame has at most this share of its 70 to 1500 Hz energy within
+/// `PEAK_SPAN_HZ` either side of its strongest line (100 to 500 Hz). The QA
+/// thumps measured 0.5 to 1.0 and the soft words that must stay kept 0.26 or
+/// less; 0.55 and under cut a real trail-off in the corpus, so 0.7 it is.
+const MAX_PEAK_SHARE: f32 = 0.70;
+const PEAK_SPAN_HZ: f32 = 60.0;
+const BAND_HZ: (f32, f32) = (70.0, 1500.0);
+const PEAK_SEARCH_HZ: (f32, f32) = (100.0, 500.0);
+/// Points of the DFT grid (15.6 Hz apart at 16 kHz).
+const GRID: usize = 1024;
 
 /// `samples` after a 2nd-order Butterworth high-pass at `HIGH_PASS_HZ`.
 pub(super) fn high_pass(samples: &[f32], rate_hz: u32) -> Vec<f32> {
@@ -58,9 +73,53 @@ pub(super) fn periodicity(frame: &[f32], rate_hz: u32) -> f32 {
         .fold(0.0, f32::max)
 }
 
-/// Whether the autocorrelation peak of one frame reaches `MIN_PERIODICITY`.
+/// The share of the frame's energy in `BAND_HZ` that lies within
+/// `PEAK_SPAN_HZ` of its strongest line in `PEAK_SEARCH_HZ`, from a Hann
+/// windowed DFT on the `GRID`. 1 for a pure tone, small for many harmonics
+/// or noise.
+pub(super) fn peak_share(frame: &[f32], rate_hz: u32) -> f32 {
+    let n = frame.len();
+    let mean = frame.iter().sum::<f32>() / n as f32;
+    let x: Vec<f32> = frame
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            (s - mean) * (0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / (n - 1) as f32).cos())
+        })
+        .collect();
+    let turn: Vec<(f32, f32)> = (0..GRID)
+        .map(|t| (std::f32::consts::TAU * t as f32 / GRID as f32).sin_cos())
+        .collect();
+    let hz = |j: usize| j as f32 * rate_hz as f32 / GRID as f32;
+    let power = |j: usize| {
+        let (mut re, mut im) = (0.0f32, 0.0f32);
+        for (i, v) in x.iter().enumerate() {
+            let (s, c) = turn[(i * j) % GRID];
+            (re, im) = (re + v * c, im - v * s);
+        }
+        re * re + im * im
+    };
+    let in_band: Vec<(f32, f32)> = (1..GRID / 2)
+        .map(|j| (hz(j), j))
+        .filter(|&(f, _)| f > BAND_HZ.0 && f < BAND_HZ.1)
+        .map(|(f, j)| (f, power(j)))
+        .collect();
+    let line = in_band
+        .iter()
+        .filter(|&&(f, _)| f > PEAK_SEARCH_HZ.0 && f < PEAK_SEARCH_HZ.1)
+        .fold((0.0, 0.0), |m, &(f, p)| if p > m.1 { (f, p) } else { m });
+    let near: f32 = in_band
+        .iter()
+        .filter(|&&(f, _)| (f - line.0).abs() < PEAK_SPAN_HZ)
+        .map(|&(_, p)| p)
+        .sum();
+    near / (in_band.iter().map(|&(_, p)| p).sum::<f32>() + f32::MIN_POSITIVE)
+}
+
+/// Whether one frame repeats at a pitch (autocorrelation peak of at least
+/// `MIN_PERIODICITY`) and is not a single tone (`MAX_PEAK_SHARE`).
 pub(super) fn is_voiced(frame: &[f32], rate_hz: u32) -> bool {
-    periodicity(frame, rate_hz) >= MIN_PERIODICITY
+    periodicity(frame, rate_hz) >= MIN_PERIODICITY && peak_share(frame, rate_hz) < MAX_PEAK_SHARE
 }
 
 #[cfg(test)]

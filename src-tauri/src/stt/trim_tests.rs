@@ -15,6 +15,17 @@ fn tone(amp: f32, s: f32) -> Vec<f32> {
         .collect()
 }
 
+/// A 220 Hz voice for soft speech: six equal harmonics, RMS = `amp` / √2. A
+/// lone sine is a thump to the voicing gate, so soft speech needs this.
+fn voice(amp: f32, s: f32) -> Vec<f32> {
+    (0..secs(s))
+        .map(|i| {
+            let t = i as f32 * 220.0 * std::f32::consts::TAU / RATE as f32;
+            (1..=6).map(|h| (t * h as f32).sin()).sum::<f32>() * amp / 6f32.sqrt()
+        })
+        .collect()
+}
+
 /// Deterministic white noise with the given RMS.
 fn noise(rms: f32, s: f32) -> Vec<f32> {
     let mut x: u32 = 0x1234_5678;

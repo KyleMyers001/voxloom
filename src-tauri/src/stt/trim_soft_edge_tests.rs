@@ -14,14 +14,15 @@ const HI: f32 = 0.0019;
 const MID: f32 = 0.0016;
 const LO: f32 = 0.0013;
 
-/// One 20 ms frame per level: a 200 Hz tone (4 whole cycles per frame, so
-/// the frame RMS is exact, and voiced).
+/// One 20 ms frame per level: a 200 Hz voice of seven equal harmonics (4
+/// whole cycles per frame, so the frame RMS is exact, and voiced).
 fn frames(levels: &[f32]) -> Vec<f32> {
     let per = FRAME;
     (0..levels.len() * per)
         .map(|i| {
             let phase = (i % 80) as f32 * std::f32::consts::TAU / 80.0;
-            levels[i / per] * std::f32::consts::SQRT_2 * phase.sin()
+            let voice: f32 = (1..=7).map(|h| (phase * h as f32).sin()).sum();
+            levels[i / per] * std::f32::consts::SQRT_2 * voice / 7f32.sqrt()
         })
         .collect()
 }

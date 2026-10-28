@@ -14,7 +14,7 @@ fn soft_syllables(s: f32) -> Vec<f32> {
     let mut speech = Vec::new();
     for i in 0..n {
         let amp = [0.0020, 0.0014, 0.0022, 0.0017][i % 4];
-        speech.extend(cat(&[tone(amp, 0.12), vec![0.0; secs(0.06)]]));
+        speech.extend(cat(&[voice(amp, 0.12), vec![0.0; secs(0.06)]]));
     }
     mix(&speech, &noise(0.001, n as f32 * 0.18))
 }
