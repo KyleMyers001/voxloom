@@ -60,6 +60,11 @@ is not a universal no-execution guarantee. Other terminal apps are not enabled
 by this route. See `docs/decisions/apple-terminal-delivery.md` for guards,
 evidence and remaining live checks.
 
+The marketing website is maintained separately in
+[`voxloom-site`](https://github.com/KyleMyers001/voxloom-site) and hosted at
+https://voxloom-site-seven.vercel.app. Website changes and deployments do not
+require a desktop app release.
+
 ## Browser
 
 ```sh
