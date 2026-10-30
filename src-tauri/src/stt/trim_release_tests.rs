@@ -1,10 +1,10 @@
 //! Releasing the shortcut while still trailing off: the clip ends in soft
-//! speech, with no pause before the end. Soft speech that runs to the end
-//! of the clip under the loud threshold is cut as room noise, a known loss
-//! tracked in BUS-143 (comment 10631). Keeping it whole kept room noise
-//! that loud too, and brought back "you" on 61 of 209 changed main QA
-//! clips; a floor from the tail's quietest 200 ms, which kept soft speech
-//! before short room noise, brought it back on 49–77 of 162 focus clips.
+//! speech, with no pause before the end. Soft speech with syllables is kept
+//! (trim_soft_tests, BUS-143). A flat soft tone, which moves no more than
+//! room noise, is still cut as noise here, like room noise that loud: keeping
+//! it brought back "you" on 61 of 209 changed main QA clips, and a floor from
+//! the tail's quietest 200 ms, which kept soft speech before short room
+//! noise, brought it back on 49–77 of 162 focus clips.
 
 use super::*;
 
@@ -17,8 +17,8 @@ fn released_during(tail: Vec<f32>) -> Vec<f32> {
 const LOUD_END: usize = 32_000;
 
 #[test]
-fn a_soft_trail_off_running_to_the_end_is_cut() {
-    // −49 dBFS after −33 dBFS speech, to the end: 1.25 s of it is lost.
+fn a_flat_soft_trail_off_running_to_the_end_is_cut() {
+    // A flat −49 dBFS tone after −33 dBFS speech, to the end: 1.25 s of it is lost.
     let clip = released_during(tone(0.005, 2.0));
     let trim = trailing_trim(&clip, RATE);
     assert_eq!(trim.threshold, 0.006);
@@ -63,7 +63,7 @@ fn a_breath_or_click_at_release_is_cut_with_the_trail_off() {
 fn room_noise_after_the_trail_off_keeps_it_only_when_long() {
     // −60 dBFS room noise before the release sets the floor only once it
     // is over a fifth of the tail: up to 500 ms of it, the 2 s of soft
-    // speech is cut too (known loss, BUS-143 comment 10631).
+    // speech is cut too (a flat tone: known loss).
     let clip = |ms: u32| released_during(cat(&[tone(0.005, 2.0), noise(0.001, ms as f32 / 1e3)]));
     for ms in [20, 60, 100, 200, 300, 500] {
         assert_eq!(keep(&clip(ms)), LOUD_END + KEPT, "{ms} ms of room noise");
