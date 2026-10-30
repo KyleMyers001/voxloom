@@ -14,6 +14,7 @@ pub mod filter_config;
 pub mod gate;
 pub mod pipeline;
 pub mod store;
+pub mod trim;
 
 use std::sync::Arc;
 
