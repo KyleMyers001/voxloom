@@ -60,6 +60,11 @@ is not a universal no-execution guarantee. Other terminal apps are not enabled
 by this route. See `docs/decisions/apple-terminal-delivery.md` for guards,
 evidence and remaining live checks.
 
+The marketing website is maintained separately in
+[`voxloom-site`](https://github.com/KyleMyers001/voxloom-site) and hosted at
+https://voxloom-site-seven.vercel.app. Website changes and deployments do not
+require a desktop app release.
+
 ## Browser
 
 ```sh
@@ -148,8 +153,9 @@ secrets exist in the protected `release` Environment, after which tag pushes
 are Developer ID signed, notarized and stapled automatically:
 `APPLE_CERTIFICATE` (base64 `.p12`), `APPLE_CERTIFICATE_PASSWORD`,
 `APPLE_SIGNING_IDENTITY`, `APPLE_TEAM_ID` (required for every signed build),
-plus either `APPLE_API_KEY` + `APPLE_API_ISSUER` + `APPLE_API_PRIVATE_KEY`
-(`.p8` contents, preferred) or `APPLE_ID` + `APPLE_PASSWORD` (app-specific).
+plus the App Store Connect API key: `APPLE_API_KEY` + `APPLE_API_ISSUER` +
+`APPLE_API_PRIVATE_KEY` (`.p8` contents). Apple ID notarization isn't
+supported.
 Manual workflow runs never receive these secrets and always build ad-hoc.
 Setup steps:
 [docs/macos-signing.md](docs/macos-signing.md).

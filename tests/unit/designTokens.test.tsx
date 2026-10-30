@@ -174,13 +174,6 @@ describe('BUS-51 brand tokens', () => {
     expect(stops).toEqual(['stop-color: var(--brand-a);', 'stop-color: var(--brand-b);']);
   });
 
-  it('uses the brand cyan in the site favicon', () => {
-    const svg = readFileSync(join(__dirname, '../../site/favicon.svg'), 'utf8');
-    expect(svg).toContain('#3cf0ff');
-    expect(svg).not.toContain('#4cf4ff');
-    expect(svg).toContain('#b6ff3c');
-    expect(svg).not.toContain('#c4ff5a');
-  });
 });
 
 describe('BUS-48 contrast tokens', () => {

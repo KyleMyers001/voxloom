@@ -4,7 +4,11 @@
 # partial configuration. Usage: SIGNED="$(scripts/release/signing-env.sh)"
 # APPLE_TEAM_ID is not secret and may be set on its own (BUS-96). It never
 # makes a build signed by itself, but every signed build requires it so the
-# TeamIdentifier check always runs (and Apple ID notarization needs it).
+# TeamIdentifier check always runs.
+# Notarization uses only the App Store Connect API key. Tauri prefers Apple
+# ID credentials (APPLE_ID + APPLE_PASSWORD + APPLE_TEAM_ID) over the key
+# whenever they are set, so any APPLE_ID or APPLE_PASSWORD value is an error.
+# Empty values count as unset (GitHub passes '' for a missing secret).
 set -euo pipefail
 
 has() { [[ -n "${!1:-}" ]]; }
@@ -37,10 +41,13 @@ if $any_cert; then
 else
   errors+=("notarization secrets are set but the Developer ID certificate secrets (${cert_vars[*]}) are missing")
 fi
-$any_id && need "Apple ID notarization is configured" "${id_vars[@]}"
-$any_api && need "App Store Connect API key notarization is configured" "${api_vars[@]}"
-if $any_cert && ! $any_id && ! $any_api; then
-  errors+=("signing without notarization is not supported: set ${id_vars[*]} or ${api_vars[*]}")
+if $any_id; then
+  errors+=("Apple ID notarization is not supported: unset ${id_vars[*]} and use ${api_vars[*]}")
+fi
+if $any_api; then
+  need "App Store Connect API key notarization is configured" "${api_vars[@]}"
+elif $any_cert; then
+  errors+=("signing without notarization is not supported: set ${api_vars[*]}")
 fi
 
 if ((${#errors[@]} > 0)); then

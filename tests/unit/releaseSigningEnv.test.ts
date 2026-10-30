@@ -69,16 +69,34 @@ describe('release signing-env.sh', () => {
     expect(r.stderr).toContain('APPLE_TEAM_ID is required');
   });
 
-  it('signs with a certificate and Apple ID + Team ID', () => {
-    expect(run({ ...CERT, ...APPLE_ID, ...TEAM }).stdout.trim()).toBe('true');
+  // Only the App Store Connect API key notarizes: Tauri prefers Apple ID
+  // credentials over the key, so a set APPLE_ID must stop the build.
+  it('rejects Apple ID notarization, even next to the API key', () => {
+    for (const env of [
+      { ...CERT, ...APPLE_ID, ...TEAM },
+      { ...CERT, ...API_KEY, ...TEAM, APPLE_ID: APPLE_ID.APPLE_ID },
+      { ...CERT, ...API_KEY, ...TEAM, APPLE_PASSWORD: 'app-pw' },
+    ]) {
+      const r = run(env);
+      expect(r.status).not.toBe(0);
+      expect(r.stdout).toBe('');
+      expect(r.stderr).toContain('Apple ID notarization is not supported');
+    }
   });
 
-  it('requires APPLE_TEAM_ID for Apple ID notarization', () => {
-    const r = run({ ...CERT, ...APPLE_ID });
-    expect(r.status).not.toBe(0);
-    expect(r.stderr).toContain('APPLE_TEAM_ID is required');
-    // One clear error, not the same missing variable reported twice.
-    expect(r.stderr.match(/APPLE_TEAM_ID is required/g)).toHaveLength(1);
+  it('ignores an empty APPLE_ID and APPLE_PASSWORD on the API key path', () => {
+    const r = run({ ...CERT, ...API_KEY, ...TEAM, APPLE_ID: '',
+      APPLE_PASSWORD: '' });
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim()).toBe('true');
+  });
+
+  it('requires the whole API key trio', () => {
+    for (const name of Object.keys(API_KEY)) {
+      const r = run({ ...CERT, ...API_KEY, ...TEAM, [name]: '' });
+      expect(r.status, name).not.toBe(0);
+      expect(r.stderr).toContain(`${name} is required`);
+    }
   });
 
   it('rejects signing without notarization credentials', () => {
