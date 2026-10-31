@@ -150,14 +150,19 @@ fn the_app_going_away_after_a_handover_still_ends_the_worker() {
 #[cfg(debug_assertions)]
 #[test]
 fn a_request_preempts_the_warm_up_decode() {
-    // Warm-up: 5 pieces at 200 ms, about 1.2 s if nothing stops it.
-    let mut worker = Worker::spawn(Some("0,200"), None);
+    // Warm-up: 5 pieces at 400 ms, 2 s from its start if nothing stops it.
+    // The request arrives during the first piece, so a preempted warm-up
+    // stops at the next check, about 400 ms in.
+    let mut worker = Worker::spawn(Some("0,400"), None);
     std::thread::sleep(Duration::from_millis(300));
     worker.hand_over(10_000);
     let (first, at) = worker.reply();
     assert_eq!(first["text"], "preempted", "{first}");
-    // Stopped at the next piece after the request arrived.
-    assert!(at < Duration::from_millis(700), "{at:?}");
+    // Well under the 2 s of an unpreempted warm-up, with 800 ms of margin
+    // over the expected 400 ms for a slow shared CI runner (734 ms was seen
+    // against an earlier 700 ms bound, on a 200 ms pace). A warm-up that
+    // ignored the request would reply "warm", no earlier than 2 s.
+    assert!(at < Duration::from_millis(1_200), "{at:?}");
     let (second, _) = worker.reply();
     assert_eq!(second["text"], "xxxxx", "{second}");
     assert!(worker.finish().1.is_empty());
