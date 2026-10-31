@@ -78,7 +78,8 @@ export interface DogfoodResult {
   transcript: Transcript;
 }
 
-function resolvePlatform(
+/** The injected delivery adapter, else the Tauri one, else a Copy-only stub. */
+export function resolvePlatform(
   clipboard: ClipboardAdapter,
   injected?: DeliveryPlatformAdapter,
 ): DeliveryPlatformAdapter {

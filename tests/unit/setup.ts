@@ -24,6 +24,7 @@ vi.mock('@tauri-apps/api/event', () => ({
 vi.mock('../../src/services/capture/useCaptureState', () => ({
   useCaptureState: () => ({
     cancelActiveCapture: vi.fn(),
+    waitForCaptureRelease: vi.fn().mockResolvedValue(undefined),
     captureReady: true,
     captureState: { kind: 'idle' },
     deviceListError: null,

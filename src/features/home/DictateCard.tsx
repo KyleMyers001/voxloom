@@ -1,5 +1,6 @@
 import { useApp } from '../../app/AppContext';
 import { Icon } from '../../components/Icon';
+import { cancelUnavailableHint } from '../../services/shortcut/cancelUnavailable';
 import type { UseDogfoodCaptureResult } from '../../services/stt/useDogfoodCapture';
 
 type Props = {
@@ -15,6 +16,7 @@ export function DictateCard({ dogfood, isNative, onCopy }: Props) {
   const busy = dogfood.phase === 'transcribing' || dogfood.phase === 'cleaning';
   const failed = dogfood.phase === 'error' || dogfood.phase === 'cancelled';
   const transcript = dogfood.transcript?.text;
+  const notice = dogfood.cancelUnavailable;
 
   return (
     <section aria-labelledby="capture-title" className="card home-card">
@@ -70,10 +72,13 @@ export function DictateCard({ dogfood, isNative, onCopy }: Props) {
           <Icon name={failed ? 'warn' : 'check'} size={14} /> {dogfood.message}
         </p>
       )}
-      {dogfood.phase === 'error' && dogfood.message?.startsWith('Escape cancellation unavailable [cancel-') && (
-        <button className="btn" onClick={() => onCopy(dogfood.message!)} type="button">
-          <Icon name="copy" /> Copy error details
-        </button>
+      {notice && (
+        <div className="note" data-code={notice.code}>
+          <p><Icon name="info" size={14} /> {cancelUnavailableHint(notice.code)}</p>
+          <button className="btn" onClick={() => onCopy(notice.details)} type="button">
+            <Icon name="copy" /> Copy error details
+          </button>
+        </div>
       )}
     </section>
   );

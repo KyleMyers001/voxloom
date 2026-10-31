@@ -60,6 +60,7 @@ function stubCapture(state: CaptureState): UseCaptureStateResult {
     startFullCaptureSession: vi.fn().mockResolvedValue('started'),
     stopFullCapture: vi.fn(),
     stopMicTest: vi.fn(),
+    waitForCaptureRelease: vi.fn().mockResolvedValue(undefined),
   };
 }
 

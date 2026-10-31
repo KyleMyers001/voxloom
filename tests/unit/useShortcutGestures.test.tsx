@@ -88,6 +88,7 @@ function makeDogfood(
     ...(overrides.origin === undefined ? {} : { origin: overrides.origin }),
     start: overrides.start ?? vi.fn().mockResolvedValue(undefined),
     stop: overrides.stop ?? vi.fn().mockResolvedValue(undefined),
+    ...(overrides.stopRequested ? { stopRequested: overrides.stopRequested } : {}),
   };
 }
 
@@ -165,6 +166,24 @@ describe('useShortcutGestures', () => {
       expect(overlay.sync).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'processing' }), false, true);
       rerender({ phase: 'cancelled' });
       expect(overlay.sync).toHaveBeenLastCalledWith({ kind: 'ready' });
+    });
+
+    it('Escape-cancel clears a latched gesture even while dictation stays listening', async () => {
+      vi.mocked(isTauri).mockReturnValue(true);
+      const native = makeNativeController();
+      mocks.createNativeShortcutController.mockReturnValue(native);
+      mocks.createOverlayBridge.mockReturnValue(makeOverlay());
+      const state: AppState = {
+        ...createInitialState(0),
+        dictation: { kind: 'listening', runId: 7, waveform: 'silent' },
+      };
+      const { rerender } = renderHook(({ phase }: { phase: DogfoodPhase }) =>
+        useShortcutGestures(makeOptions({ dogfood: makeDogfood({ phase }), state })),
+      { initialProps: { phase: 'recording' as DogfoodPhase } });
+      await waitFor(() => expect(native.setContext).toHaveBeenCalled());
+      native.resetPartial.mockClear();
+      rerender({ phase: 'cancelled' });
+      expect(native.resetPartial).toHaveBeenCalled();
     });
 
     it('shows a plain (non-cancellable) HUD with the waveform when Escape-cancel could not arm', async () => {
@@ -929,6 +948,21 @@ describe('useShortcutGestures', () => {
         state.dictation.kind === 'listening' && state.dictation.runId,
       ).toBe(8);
 
+      unmount();
+    });
+    it.each([true, false])('a re-hold during a recording phase cancels only without a stop (stopped=%s)', (stopped) => {
+      // BUS-91: after a quick tap's stop the re-hold supersedes it (its text
+      // still reaches History); only a never-stopped capture is abandoned.
+      vi.mocked(isTauri).mockReturnValue(false);
+      vi.useFakeTimers();
+      let now = 0;
+      const dogfood = makeDogfood({ phase: 'recording', stopRequested: () => stopped });
+      const { unmount } = renderHook(() => useShortcutGestures(makeOptions({ dogfood, now: () => now })));
+      act(() => { document.dispatchEvent(shortcutEvent('keydown')); });
+      now = 320;
+      act(() => { vi.advanceTimersByTime(320); });
+      expect(vi.mocked(dogfood.cancel).mock.calls.length).toBe(stopped ? 0 : 1);
+      expect(vi.mocked(dogfood.start)).toHaveBeenCalledOnce();
       unmount();
     });
     it('second hold after a delivered session listens and finishes (terminal phase is not re-applied)', async () => {

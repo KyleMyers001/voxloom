@@ -106,6 +106,12 @@ export type CaptureState =
         sample_rate_hz: number;
       };
       kind: 'stopped';
+      /**
+       * The opaque owner token passed to `startFullCaptureSession` for this
+       * capture, so a consumer can bind the stop to the session that
+       * started it even after a newer session has begun.
+       */
+      owner?: unknown;
     }
   | {
       category: CaptureErrorCategory;

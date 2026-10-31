@@ -8,6 +8,7 @@ import {
   MANUAL_RECOVERY_HINT,
   reasonForKind,
   restoreSkippedSuffix,
+  STALE_DELIVERY_DETAIL,
 } from './messages';
 import {
   planDelivery,
@@ -61,7 +62,7 @@ export async function deliverTranscript(
   const now = options.now ?? Date.now;
   const platform = options.platform;
   const current = () => options.isCurrent?.() ?? true;
-  const stale = () => failOutcome(text, 'session cancelled or superseded; delivery skipped');
+  const stale = () => failOutcome(text, STALE_DELIVERY_DETAIL);
 
   // Nothing to deliver: never insert, and never overwrite the clipboard.
   if (text.trim() === '') {
