@@ -65,6 +65,14 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       signed: ${{ steps.package.outputs.signed }}
+    env:
+      # Same as ci.yml's cleanup-worker (#139): the worker never uses
+      # cpp-httplib's HTTPS, but llama.cpp's CMake still probes for OpenSSL,
+      # and a restored rust-cache build dir keeps the old Homebrew Cellar path,
+      # which breaks when the runner image updates OpenSSL. Job-level, not
+      # step-level: rust-cache hashes CMAKE* vars from the env at its own
+      # step into its key, so this also rotates the stale cache.
+      CMAKE_DISABLE_FIND_PACKAGE_OpenSSL: "ON"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
