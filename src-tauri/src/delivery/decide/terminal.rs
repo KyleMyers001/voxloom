@@ -211,7 +211,8 @@ mod tests {
         }
         assert!(!crate::delivery::decide::unicode_typing_supported(
             exe,
-            |_| false
+            |_| false,
+            |_| None
         ));
         let mut t = target("insertable", Some(42), Some("42:AXTextArea:#1"));
         assert!(
