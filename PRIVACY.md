@@ -39,9 +39,14 @@ the final text.
 
 - **One transcript:** History → the row's **Delete transcript** (trash) button.
 - **All transcripts, and stop keeping them:** Settings → Privacy →
-  **Transcript retention → Off**. `history.json` is rewritten with no records
-  right away, and new dictations are not stored. Transcripts already loaded
-  stay visible in History and Home (in memory only) until you restart Voxloom.
+  **Transcript retention → Off**. Transcripts already loaded are cleared
+  from History and Recent right away, and new dictations are not stored.
+  Home's **Last transcript** (DictateCard) stays until the next capture.
+  `history.json` is emptied only after that Off setting is saved successfully.
+  If the Off save fails, `history.json` is left unchanged and the cleared
+  transcripts reload from disk. The one exception is a dictation that
+  failed to insert and still offers recovery on Home; it stays in memory,
+  not written to disk while Retention is Off, until you restart Voxloom.
   If Voxloom couldn't load `history.json` (it shows an error banner), Off
   can't rewrite it; quit Voxloom and delete the files manually as below.
 - **Keep only recent ones:** **30 days** drops older records on every save
@@ -51,7 +56,10 @@ the final text.
   - `history.json`
   - `*.unreadable-*.bak` (upgrade and unreadable-file backups, see below)
   - `history.json.tmp`, a temporary file a crash during save can leave behind.
-    Nothing cleans it up automatically, and it may hold transcripts.
+    It may hold transcripts. Voxloom deletes it on launch once `history.json`
+    loads, but keeps it if `history.json` is missing or damaged, because it
+    may then be the only good copy. If Voxloom crashes after writing the
+    `.tmp` but before renaming it, that newest save is discarded on launch.
 
   A missing `history.json` is treated as empty history on next launch.
 - **Upgrade and unreadable-file backups:** before Voxloom rewrites

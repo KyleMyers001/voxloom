@@ -1,0 +1,157 @@
+import { describe, expect, it } from 'vitest';
+import { appReducer, createInitialState } from '../../src/app/state';
+import type { DictationRecord } from '../../src/domain/types';
+
+function rec(id: string, status: DictationRecord['status'], recovery: number | null) {
+  const base = createInitialState(1_000).records[0];
+  return { ...base, id, recoveryExpiresAt: recovery, status } as DictationRecord;
+}
+
+describe('transcript retention Off (BUS-78)', () => {
+  const start = {
+    ...createInitialState(1_000),
+    records: [rec('a', 'inserted', null), rec('b', 'failed', 9_999), rec('c', 'failed', null)],
+  };
+  const forever = { ...start, settings: { ...start.settings, transcriptRetention: 'forever' as const } };
+
+  it('clears loaded transcripts except a recoverable failed row', () => {
+    const next = appReducer(forever, { key: 'transcriptRetention', now: 5_000, type: 'set-setting', value: 'off' });
+    expect(next.settings.transcriptRetention).toBe('off');
+    expect(next.records.map((r) => r.id)).toEqual(['b']);
+  });
+
+  it('leaves records alone for other retention changes', () => {
+    const next = appReducer(forever, { key: 'transcriptRetention', now: 5_000, type: 'set-setting', value: '30-days' });
+    expect(next.records).toHaveLength(3);
+  });
+});
+
+describe('retention Off: expiry and cross-window (BUS-78)', () => {
+  const now = 5_000;
+  const base = createInitialState(1_000);
+  const forever = {
+    ...base,
+    records: [rec('a', 'inserted', null), rec('b', 'failed', now + 60_000)],
+    settings: { ...base.settings, transcriptRetention: 'forever' as const },
+  };
+
+  it('drops a failed row whose recovery window has ended (expire-recovery)', () => {
+    const expired = appReducer(forever, { now, type: 'expire-recovery' });
+    const next = appReducer(expired, { key: 'transcriptRetention', now, type: 'set-setting', value: 'off' });
+    expect(next.records).toEqual([]);
+  });
+
+  it('clears records when Off arrives from the Settings window (hydrate-settings)', () => {
+    const next = appReducer(forever, {
+      onboardingComplete: true,
+      settings: { ...forever.settings, transcriptRetention: 'off' },
+      now,
+      type: 'hydrate-settings',
+    });
+    expect(next.settings.transcriptRetention).toBe('off');
+    expect(next.records.map((r) => r.id)).toEqual(['b']);
+  });
+
+  it('hydrate-settings with other retention keeps records', () => {
+    const next = appReducer(forever, {
+      onboardingComplete: true,
+      settings: { ...forever.settings, style: 'casual' },
+      now,
+      type: 'hydrate-settings',
+    });
+    expect(next.records).toHaveLength(2);
+  });
+
+  it('confirmed Off stays cleared when hydrate later leaves Off (no stash revive)', () => {
+    const off = appReducer(forever, {
+      onboardingComplete: true,
+      settings: { ...forever.settings, transcriptRetention: 'off' },
+      now,
+      type: 'hydrate-settings',
+    });
+    const back = appReducer(off, {
+      onboardingComplete: true,
+      settings: forever.settings,
+      now,
+      type: 'hydrate-settings',
+    });
+    // Reducer does not resurrect cleared rows; disk reload is AppContext's job
+    // only for a failed *local* Off save.
+    expect(back.records.map((r) => r.id)).toEqual(['b']);
+  });
+});
+
+describe('retention Off uses the action clock (BUS-78)', () => {
+  const base = createInitialState(1_000);
+  const forever = {
+    ...base,
+    records: [rec('b', 'failed', 9_999)],
+    settings: { ...base.settings, transcriptRetention: 'forever' as const },
+  };
+  it('keeps a failed row before its expiry and drops it after', () => {
+    const off = { key: 'transcriptRetention', type: 'set-setting', value: 'off' } as const;
+    expect(appReducer(forever, { ...off, now: 9_998 }).records).toHaveLength(1);
+    expect(appReducer(forever, { ...off, now: 10_000 }).records).toHaveLength(0);
+  });
+});
+
+describe('Off before the first history load (BUS-78)', () => {
+  it('hydrate-records after Off keeps only recoverable failed rows', () => {
+    const base = createInitialState(1_000);
+    const off = appReducer(
+      { ...base, records: [], settings: { ...base.settings, transcriptRetention: 'forever' } },
+      {
+        now: 5_000,
+        onboardingComplete: true,
+        settings: { ...base.settings, transcriptRetention: 'off' },
+        type: 'hydrate-settings',
+      },
+    );
+    const loaded = appReducer(off, {
+      now: 5_000,
+      records: [rec('a', 'inserted', null), rec('b', 'failed', 9_999), rec('c', 'failed', 4_000)],
+      type: 'hydrate-records',
+    });
+    expect(loaded.records.map((r) => r.id)).toEqual(['b']);
+  });
+});
+
+describe('new rows while already Off (BUS-78)', () => {
+  const now = 5_000;
+  const base = createInitialState(1_000);
+  const offState = {
+    ...base,
+    records: [rec('b', 'failed', now + 60_000)],
+    settings: { ...base.settings, transcriptRetention: 'off' as const },
+  };
+
+  it('append-record drops inserted/copied rows; keeps recoverable failed', () => {
+    const afterInsert = appReducer(offState, {
+      now,
+      record: rec('new', 'inserted', null),
+      type: 'append-record',
+    });
+    expect(afterInsert.records.map((r) => r.id)).toEqual(['b']);
+
+    const afterFail = appReducer(offState, {
+      now,
+      record: rec('f2', 'failed', now + 60_000),
+      type: 'append-record',
+    });
+    expect(afterFail.records.map((r) => r.id)).toEqual(['f2', 'b']);
+  });
+
+  it('complete-dictation does not leave a successful row in History/Recent', () => {
+    const started = appReducer(offState, { type: 'start-dictation' });
+    const runId = started.dictation.kind === 'listening' ? started.dictation.runId : 1;
+    const processing = appReducer(started, {
+      completion: 'held',
+      runId,
+      type: 'process-dictation',
+    });
+    const complete = appReducer(processing, { now, runId, type: 'complete-dictation' });
+    expect(complete.records.map((r) => r.id)).toEqual(['b']);
+    expect(complete.records.every((r) => r.status === 'failed')).toBe(true);
+  });
+});
+
