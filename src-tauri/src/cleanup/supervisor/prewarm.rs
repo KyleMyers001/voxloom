@@ -13,24 +13,27 @@
 //! - once the warm-up has replied with no claim, the prewarm worker is
 //!   killed and reaped, and a dictation spawns its own, as before;
 //! - if a dictation's budget runs out or the user cancels it, its handed-over
-//!   load dies with it; the prewarm then starts over (re-arms) once the run
-//!   slot is free, unless Low Power Mode is on;
+//!   load is kept (BUS-120, watch.rs): the next dictation reuses it, and
+//!   with nobody waiting it ends once its last reply is in, or at the
+//!   prewarm's timeout;
 //! - switching cleanup off disarms all of this (disarm.rs).
 
 use std::borrow::Borrow;
 use std::fs::File;
 use std::path::PathBuf;
-use std::process::{ChildStdin, ChildStdout};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::process::ChildStdin;
+use std::sync::mpsc::{self, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::super::protocol::{encode_frame, read_frame, write_encoded_frame};
+use super::super::protocol::{encode_frame, write_encoded_frame};
 use super::super::protocol::{WorkerRequest, WorkerResponse};
 use super::super::worker_process::{ProcessHandle, WorkerProcess};
+use super::watch::{read_replies, Delivery, Event};
 use super::{SharedState, WorkerSupervisor};
 
-/// How long a prewarm may load and warm up with no dictation waiting on it.
+/// How long a prewarm may load and warm up with no dictation waiting on it,
+/// and how long a kept load may run on once nobody waits on it (watch.rs).
 /// Provisional: room for a cold load of Qwen3-1.7B; tuned after BUS-114.
 pub(super) const PREWARM_TIMEOUT: Duration = Duration::from_secs(60);
 /// A fixed tiny prompt; the warm-up reply is discarded.
@@ -46,22 +49,27 @@ pub(super) enum Slot {
     Running {
         process: ProcessHandle,
         stdin: Option<ChildStdin>,
-        handoff: Option<Sender<Reply>>,
-        /// The warm-up has replied (or timed out).
+        handoff: Option<Sender<Delivery>>,
+        /// Closed to claims: the prewarm is ending.
         warmed: bool,
         /// A dictation admitted before then holds the run slot.
         claimed: bool,
+        /// Replies owed to nobody, due before a handed-over dictation's: the
+        /// warm-up's, and those of dictations cut off after their frame.
+        owed: usize,
+        /// Wakes the prewarm's thread when a dictation is cut off.
+        wake: Sender<Event>,
     },
 }
 
 /// The one prewarm; dropping it frees the prewarm slot.
 pub struct PrewarmTicket {
-    shared: Arc<SharedState>,
-    timeout: Duration,
+    pub(super) shared: Arc<SharedState>,
+    pub(super) timeout: Duration,
     worker_path: PathBuf,
 }
 
-/// Whether to skip the prewarm (macOS Low Power Mode), read on a re-arm.
+/// Whether to skip the prewarm (macOS Low Power Mode), read at launch.
 pub type LowPowerMode = fn() -> bool;
 
 impl WorkerSupervisor {
@@ -93,7 +101,7 @@ impl PrewarmTicket {
     /// Spawn the prewarm worker on `model` and leave it to a thread that
     /// keeps `model` until the worker is reaped. False if a dictation came
     /// first or the worker could not start.
-    pub fn start<M>(self, model: M, low_power_mode: LowPowerMode) -> bool
+    pub fn start<M>(self, model: M) -> bool
     where
         M: Borrow<File> + Send + 'static,
     {
@@ -121,80 +129,57 @@ impl PrewarmTicket {
             process.finish();
             return false;
         }
+        let (wake, events) = mpsc::channel();
         state.prewarm = Some(Slot::Running {
             process: process.clone(),
             stdin: Some(stdin),
             handoff: None,
             warmed: false,
             claimed: false,
+            owed: 1,
+            wake: wake.clone(),
         });
         drop(state);
+        read_replies(stdout, wake);
         std::thread::spawn(move || {
-            let cut_off = self.watch(stdout);
+            self.watch(events);
             process.finish();
-            if cut_off && !low_power_mode() && self.rearm() {
-                self.start(model, low_power_mode);
-            }
+            drop(model);
         });
         true
     }
 
-    /// Wait for the prewarm's reply and pass on a handed-over dictation's.
-    /// The caller then kills and reaps the worker: once warm with nobody
-    /// waiting, or stuck past the timeout, it has nothing left to do. True
-    /// if a handed-over dictation was cut off (killed) before its reply.
-    fn watch(&self, stdout: ChildStdout) -> bool {
-        let replies = read_replies(stdout);
-        // The prewarm's own reply first: warm, preempted, or a load error.
-        let first = replies.recv_timeout(self.timeout);
-        let timed_out = matches!(first, Err(RecvTimeoutError::Timeout));
-        let Some(handoff) = self.settle() else {
-            return false;
-        };
-        // A dictation is waiting on this worker; its own deadline bounds it.
-        if timed_out {
-            drop(replies.recv());
-        }
-        let reply = replies
-            .recv()
-            .unwrap_or_else(|_| Err("cleanup worker ended".into()));
-        let cut_off = reply.is_err();
-        let _ = handoff.send(reply);
-        cut_off
-    }
-
-    /// Under the lock: no new handoff from here on. The handed-over
-    /// dictation, if any; a claiming dictation still re-hashing is waited
-    /// for, until it hands over or its reservation ends.
-    pub(super) fn settle(&self) -> Option<Sender<Reply>> {
+    /// Under the lock, once nothing is owed, nobody waits any more or the
+    /// bound ran out (`timed_out`): whether to keep the worker. Kept while a
+    /// dictation is handed over to it; a claiming dictation still re-hashing
+    /// is waited for, until it hands over or its reservation ends. Then kept
+    /// if that dictation was cut off owing a reply, unless the bound ran out
+    /// (watch.rs). Otherwise closed to claims.
+    pub(super) fn settle(&self, timed_out: bool) -> bool {
         let mut state = self.shared.state.lock().unwrap();
         loop {
             let Some(Slot::Running {
                 handoff,
                 warmed,
                 claimed,
+                owed,
                 ..
             }) = state.prewarm.as_mut()
             else {
-                return None;
+                return false;
             };
-            *warmed = true;
-            if handoff.is_some() || !*claimed {
-                return handoff.take();
+            if handoff.is_some() {
+                return true;
+            }
+            if !*claimed {
+                if *owed > 0 && !timed_out {
+                    return true;
+                }
+                *warmed = true;
+                return false;
             }
             state = self.shared.settled.wait(state).unwrap();
         }
-    }
-
-    /// Reserve the slot again once the cut-off dictation's run slot is free,
-    /// so the restarted load is never alongside a dictation's own. False if
-    /// cleanup was switched off meanwhile (disarm.rs).
-    fn rearm(&self) -> bool {
-        let mut state = self.shared.state.lock().unwrap();
-        while state.active.is_some() {
-            state = self.shared.settled.wait(state).unwrap();
-        }
-        super::disarm::may_rearm(&mut state)
     }
 }
 
@@ -203,17 +188,4 @@ impl Drop for PrewarmTicket {
         super::disarm::on_ticket_drop(&mut self.shared.state.lock().unwrap());
         self.shared.settled.notify_all();
     }
-}
-
-/// Every reply frame in order, then the read error that ends them.
-fn read_replies(mut stdout: ChildStdout) -> Receiver<Reply> {
-    let (sender, replies) = mpsc::channel();
-    std::thread::spawn(move || loop {
-        let reply = read_frame::<WorkerResponse>(&mut stdout);
-        let ended = reply.is_err();
-        if sender.send(reply).is_err() || ended {
-            break;
-        }
-    });
-    replies
 }

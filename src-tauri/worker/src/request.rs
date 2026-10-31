@@ -17,14 +17,16 @@ pub fn handle(request: WorkerRequest, started: Instant) -> WorkerResponse {
 }
 
 /// A request handed to a prewarmed worker: the model is already loaded
-/// (prewarm.rs). Its time left counts from when its frame arrived.
+/// (prewarm.rs). Its time left counts from when its frame arrived, and it
+/// stops at the next token once `preempt` says a newer request came.
 pub fn handle_loaded(
     engine: &dyn Generate,
     request: WorkerRequest,
     arrived: Instant,
+    preempt: &mut dyn FnMut() -> bool,
 ) -> WorkerResponse {
     respond(request, arrived, |prompt, deadline| {
-        engine.generate(prompt, deadline, usize::MAX, &mut || false)
+        engine.generate(prompt, deadline, usize::MAX, preempt)
     })
 }
 

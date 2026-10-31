@@ -44,10 +44,11 @@ impl WorkerError {
         Self::output("cleanup output reached the token limit")
     }
 
-    /// A prewarm's warm-up gave way to a real request (prewarm.rs). Never
-    /// sent as a reply.
+    /// A prewarm's warm-up, or a request the app gave up on, gave way to a
+    /// newer request (prewarm.rs). The warm-up replies "preempted" instead;
+    /// the abandoned request gets this, and the app discards it.
     pub fn preempted() -> Self {
-        Self::runtime("cleanup warm-up preempted")
+        Self::runtime("cleanup preempted by a newer request")
     }
 
     /// The reply would not fit the time left (deadline.rs).

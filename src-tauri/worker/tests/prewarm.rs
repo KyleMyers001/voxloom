@@ -1,6 +1,8 @@
 //! BUS-16 3c-2c C2: a prewarm request loads the model once and warms it up;
 //! a request handed over meanwhile reuses that load and preempts the
-//! warm-up. The debug build's fake model (src/test_hook.rs) sets the load
+//! warm-up. BUS-120: the worker serves every request handed over after that,
+//! in turn, and a newer one preempts the one it is serving (the app gave up
+//! on it) until the app closes stdin. The debug build's fake model (src/test_hook.rs) sets the load
 //! time and pace; the ignored test uses a real model.
 
 #[allow(dead_code)] // request() is for the other test binaries
@@ -52,8 +54,12 @@ impl Worker {
     }
 
     fn hand_over(&mut self, time_left_ms: u64) {
+        self.hand_over_as("r-2", time_left_ms);
+    }
+
+    fn hand_over_as(&mut self, request_id: &str, time_left_ms: u64) {
         self.send(json!({
-            "modelPath": "/dev/fd/3", "prompt": "secret words", "requestId": "r-2",
+            "modelPath": "/dev/fd/3", "prompt": "secret words", "requestId": request_id,
             "timeLeftMs": time_left_ms,
         }));
     }
@@ -70,25 +76,9 @@ impl Worker {
         )
     }
 
-    /// The exit status and stderr. After a handed-over reply the worker
-    /// ends by itself, so stdin stays open until it has: closing it first
-    /// races the exit with the app-gone status (4).
-    fn finish(mut self) -> (Option<i32>, Vec<u8>) {
-        let stdin = self.stdin.take();
-        let status = self.child.wait().unwrap();
-        drop(stdin);
-        let mut stderr = Vec::new();
-        self.child
-            .stderr
-            .take()
-            .unwrap()
-            .read_to_end(&mut stderr)
-            .unwrap();
-        (status.code(), stderr)
-    }
-
-    /// Close stdin, as the app does when no dictation came.
-    #[cfg(debug_assertions)]
+    /// Close stdin, as the app does when it is done with the worker: the
+    /// worker never ends by itself after a reply, so another request can
+    /// still come.
     fn close(mut self) -> (Option<i32>, Vec<u8>) {
         drop(self.stdin.take());
         let output = self.child.wait_with_output().unwrap();
@@ -124,8 +114,8 @@ fn a_request_during_the_load_waits_for_it_and_skips_the_warm_up() {
     // One load (500 ms) then the request; no second load, no warm-up.
     assert!(at >= Duration::from_millis(550), "{at:?}");
     assert!(at < Duration::from_millis(1_000), "{at:?}");
-    let (code, stderr) = worker.finish();
-    assert_eq!(code, Some(0));
+    let (code, stderr) = worker.close();
+    assert_eq!(code, Some(4));
     assert!(stderr.is_empty());
 }
 
@@ -160,7 +150,7 @@ fn a_request_preempts_the_warm_up_decode() {
     assert!(at < Duration::from_millis(700), "{at:?}");
     let (second, _) = worker.reply();
     assert_eq!(second["text"], "xxxxx", "{second}");
-    assert!(worker.finish().1.is_empty());
+    assert!(worker.close().1.is_empty());
 }
 
 #[cfg(debug_assertions)]
@@ -175,7 +165,48 @@ fn the_budget_can_run_out_during_the_load() {
     let (second, _) = worker.reply();
     assert_eq!(second["errorCode"], "timeout", "{second}");
     assert_eq!(second["requestId"], "r-2");
-    assert_eq!(worker.finish().0, Some(2));
+    assert_eq!(worker.close().0, Some(4));
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn every_request_after_the_warm_up_is_served_on_the_one_load() {
+    let mut worker = Worker::spawn(Some("300,10"), None);
+    assert_eq!(worker.reply().0["text"], "warm");
+    for id in ["r-2", "r-3"] {
+        worker.hand_over_as(id, 10_000);
+        let (reply, _) = worker.reply();
+        assert_eq!(reply["status"], "ok", "{reply}");
+        assert_eq!(reply["requestId"], id);
+    }
+    let (code, stderr) = worker.close();
+    assert_eq!(code, Some(4), "ended only when stdin closed");
+    assert!(stderr.is_empty());
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn a_newer_request_preempts_the_one_being_served() {
+    // 5 pieces at 300 ms: about 1.5 s per reply if nothing stops it.
+    let mut worker = Worker::spawn(Some("0,300"), None);
+    worker.hand_over_as("r-2", 10_000);
+    assert_eq!(worker.reply().0["text"], "preempted");
+    std::thread::sleep(Duration::from_millis(400));
+    let sent = Instant::now();
+    worker.hand_over_as("r-3", 10_000);
+    let (abandoned, _) = worker.reply();
+    assert_eq!(abandoned["requestId"], "r-2", "{abandoned}");
+    assert_eq!(abandoned["status"], "error", "{abandoned}");
+    // Stopped at its next piece, not after its whole reply.
+    assert!(
+        sent.elapsed() < Duration::from_millis(700),
+        "{:?}",
+        sent.elapsed()
+    );
+    let (served, _) = worker.reply();
+    assert_eq!(served["requestId"], "r-3", "{served}");
+    assert_eq!(served["text"], "xxxxx");
+    assert_eq!(worker.close().0, Some(4));
 }
 
 #[test]
@@ -188,8 +219,8 @@ fn a_failed_load_fails_the_handed_over_request_too() {
     let (second, _) = worker.reply();
     assert_eq!(second["errorCode"], "model-missing", "{second}");
     assert_eq!(second["requestId"], "r-2");
-    let (code, stderr) = worker.finish();
-    assert_eq!(code, Some(2));
+    let (code, stderr) = worker.close();
+    assert_eq!(code, Some(4));
     assert!(stderr.is_empty());
 }
 
@@ -212,5 +243,5 @@ fn a_real_model_prewarms_and_serves_the_handed_over_request() {
         "warm after {warmed:?}, handed-over reply {:?} later",
         done - warmed
     );
-    assert!(worker.finish().1.is_empty());
+    assert!(worker.close().1.is_empty());
 }
