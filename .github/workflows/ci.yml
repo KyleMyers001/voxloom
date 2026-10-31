@@ -94,6 +94,17 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      # The worker never uses cpp-httplib's HTTPS (LLAMA_CURL is off, models
+      # arrive on fd 3), but llama.cpp's CMake still probes for OpenSSL and
+      # links it. cmake-rs skips re-configuring a restored build dir, so a
+      # CMakeCache.txt that remembers a Homebrew Cellar path (openssl@4 4.0.3)
+      # breaks once the macOS image moves on (4.1.0): CMake reports "Found
+      # OpenSSL" from the cached path but never creates OpenSSL::SSL. Turning
+      # the probe off removes the dependency on the runner's OpenSSL; the
+      # CMAKE* prefix is also part of rust-cache's key, so adding it
+      # changes the key once and drops the stale cache.
+      CMAKE_DISABLE_FIND_PACKAGE_OpenSSL: "ON"
     defaults:
       run:
         working-directory: src-tauri/worker
