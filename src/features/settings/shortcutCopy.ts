@@ -3,6 +3,7 @@
  * On macOS modifiers are glyphs (⌃⌥⌘); elsewhere they are words.
  */
 import { comboLabel, isMacPlatform } from '../../components/KeyCombo';
+import { isLoneKey } from '../../services/shortcut/loneKey';
 import type { InvalidCapture } from '../../services/shortcut/shortcutCapture';
 
 export const HELP = 'Click, then press keys. Hold to dictate; double-tap to latch.';
@@ -22,7 +23,11 @@ const L = (combo: string, mac: boolean) => comboLabel(combo, mac);
 export const addAKey = (mac = isMacPlatform()) =>
   `Add a key: hold ${mods(mac)} and press a letter, number or Space.`;
 export const pendingText = (combo: string, mac = isMacPlatform()) => `Setting ${L(combo, mac)}…`;
-export const successText = (combo: string, mac = isMacPlatform()) => `Shortcut set to ${L(combo, mac)}.`;
+/** Shift is held while typing capitals, so a lone Shift shortcut can misfire. */
+const shiftWarning = (mac: boolean) =>
+  ` Right ${mac ? '⇧' : 'Shift'} is also used for typing, so it may start dictation by accident.`;
+export const successText = (combo: string, mac = isMacPlatform()) =>
+  `Shortcut set to ${L(combo, mac)}.${combo === 'ShiftRight' ? shiftWarning(mac) : ''}`;
 export const resetText = (combo: string, mac = isMacPlatform()) => `Shortcut reset to ${L(combo, mac)}.`;
 export const timeoutText = (combo: string, mac = isMacPlatform()) =>
   `Still waiting for ${L(combo, mac)}. Try it, or record again.`;
@@ -64,13 +69,27 @@ export function invalidText(invalid: InvalidCapture, mac = isMacPlatform()): str
       return `Keypad Enter can't be used. Use ${mac ? 'Return' : 'the main Enter key'} instead.`;
     case 'no-modifier':
       return `Add ${mods(mac)} to ${L(invalid.key, mac)}.`;
+    case 'f-key-combo':
+      return `${invalid.key} works on its own. Press it without ${mods(mac)}.`;
+    case 'left-modifier': {
+      const mod = invalid.code.replace(/Left$/, '');
+      const use = invalid.suggest ? ` Use ${L(invalid.suggest, mac)} instead.` : '';
+      return `Left ${L(mod, mac)} can't be used on its own.${use}`;
+    }
     case 'reserved':
       return `macOS uses ${L(invalid.combo, mac)} for ${invalid.feature}. Choose another.`;
   }
 }
 
+/** A lone key was refused because native registration doesn't handle it yet (BUS-46). */
+export const loneUnsupportedText = (combo: string, kept: string, mac = isMacPlatform()) =>
+  `${L(combo, mac)} on its own isn't supported in this build yet. Kept ${L(kept, mac)}.`;
+
 /** Main-window toast when the saved shortcut can't be registered at launch. */
 export function bootRefusedText(combo: string, active: string | null | undefined, mac = isMacPlatform()) {
+  if (isLoneKey(combo)) {
+    return `${L(combo, mac)} on its own isn't supported in this build yet.${active ? ` Using ${L(active, mac)} for now.` : ' No shortcut is active.'} Record one in Settings.`;
+  }
   const now = active ? ` Using ${comboLabel(active, mac)} for now.` : ' No shortcut is active.';
   return `${L(combo, mac)} is in use by another app.${now} Record one in Settings.`;
 }

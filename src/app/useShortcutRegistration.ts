@@ -3,7 +3,8 @@ import { useEffect, useRef, type MutableRefObject } from 'react';
 import type { NativeShortcutController } from '../services/shortcut';
 import { emitShortcutBound } from '../services/shortcut/bindingEvents';
 import { isSettingsWindowOpen } from '../services/settingsWindow';
-import { inUseText, noneActiveText } from '../features/settings/shortcutCopy';
+import { isLoneKey } from '../services/shortcut/loneKey';
+import { inUseText, loneUnsupportedText, noneActiveText } from '../features/settings/shortcutCopy';
 
 interface RegistrationCallbacks {
   onShortcutError?: (message: string) => void;
@@ -62,7 +63,7 @@ export function useShortcutRegistration(
       if (await settingsOpen()) return;
       callbacksRef.current.onShortcutError?.(active === null
         ? noneActiveText(shortcut, previous)
-        : inUseText(shortcut, active));
+        : (isLoneKey(shortcut) ? loneUnsupportedText : inUseText)(shortcut, active));
     })();
     return () => {
       cancelled = true;

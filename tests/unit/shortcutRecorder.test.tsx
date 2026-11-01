@@ -153,14 +153,14 @@ describe('ShortcutRecorder', () => {
     expect(field()).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('a lone modifier shows a preview, then "Add a key" and saves nothing', async () => {
+  it('modifiers released with no key show a preview, then "Add a key" and save nothing', async () => {
     const onChange = vi.fn();
     render(<Harness onChange={onChange} />);
     const user = userEvent.setup();
     await user.click(field());
     await user.keyboard('{Alt>}');
     expect(field()).toHaveTextContent('…');
-    await user.keyboard('{/Alt}');
+    await user.keyboard('{Shift>}{/Shift}{/Alt}');
     expect(screen.getByRole('status')).toHaveTextContent(/Add a key/);
     expect(onChange).not.toHaveBeenCalled();
   });

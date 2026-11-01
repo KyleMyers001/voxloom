@@ -5,6 +5,7 @@ import {
   HOLD_RELEASE_CARBON_GRACE_MS,
 } from './constants';
 import { toPluginHotkey } from './formatHotkey';
+import { isLoneKey, LONE_KEY_UNSUPPORTED } from './loneKey';
 import { createGestureMachine } from './gestureMachine';
 import { createTauriHoldReleaseApi } from './holdReleaseBridge';
 import { createHoldWatch } from './holdWatch';
@@ -93,6 +94,9 @@ export function createNativeShortcutController({
 
   const binder: ShortcutBinder = {
     async register(hotkey) {
+      // BUS-46: no native listener for lone keys yet. Refusing here sends them
+      // through register-or-revert, which restores the previous shortcut.
+      if (isLoneKey(hotkey)) throw new Error(LONE_KEY_UNSUPPORTED);
       const gen = generation;
       await api.register(hotkey, (edge) => {
         if (disposed || gen !== generation) return;
