@@ -11,6 +11,9 @@
 //! `Released` (the gesture machine finishes a hold normally) then
 //! `Cancelled` (slice 3 maps it to `resetPartial`, so the interrupted tap is
 //! not remembered as the first half of a double-tap).
+//!
+//! Other keys still down are tracked (bounded, expiring), so rolling from a
+//! held key into our key (E held, then Option tapped) is a chord too.
 
 use super::LoneKey;
 
@@ -20,6 +23,9 @@ pub const DEBOUNCE_MS: u64 = 80;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     KeyDown,
+    /// An auto-repeat keyDown. Never starts or changes a press of our key,
+    /// so a key repeating across a tap re-enable can't fake one.
+    KeyRepeat,
     KeyUp,
     FlagsChanged,
     MouseDown,
@@ -45,9 +51,17 @@ enum Phase {
     Dirty,
 }
 
+/// Other keys tracked at once; more than a keyboard can really hold.
+const MAX_HELD: usize = 16;
+/// A held key unseen (no repeat, no keyUp) this long is forgotten, so one
+/// lost keyUp can't pin the shortcut as a chord forever.
+const HELD_STALE_MS: u64 = 10_000;
+
 pub struct LoneKeyMachine {
     key: LoneKey,
     phase: Phase,
+    /// Non-target keys currently down, with when each was last seen.
+    held: Vec<(u16, u64)>,
 }
 
 impl LoneKeyMachine {
@@ -55,6 +69,7 @@ impl LoneKeyMachine {
         Self {
             key,
             phase: Phase::Idle,
+            held: Vec::new(),
         }
     }
 
@@ -78,21 +93,34 @@ impl LoneKeyMachine {
     }
 
     pub fn step(&mut self, kind: Kind, keycode: u16, flags: u64, now: u64) -> Vec<Edge> {
+        if kind == Kind::TapDisabled {
+            // Events were lost, so we can't know what is still down. Decide
+            // before any tick: a press merely waiting out the debounce is
+            // dropped, only an emitted Pressed needs closing.
+            let mut out = Vec::new();
+            if self.phase == Phase::Active {
+                out.extend([Edge::Released, Edge::Cancelled]);
+            }
+            self.phase = Phase::Idle;
+            self.held.clear();
+            return out;
+        }
         let mut out = self.tick(now);
         let own = keycode == self.key.keycode;
         match kind {
-            Kind::TapDisabled => {
-                // Events were lost, so we can't know the key is still down.
-                if self.phase == Phase::Active {
-                    out.extend([Edge::Released, Edge::Cancelled]);
-                }
-                self.phase = Phase::Idle;
-            }
+            Kind::TapDisabled => {}
             Kind::MouseDown => self.make_dirty(&mut out),
-            Kind::KeyDown if own && !self.key.is_modifier() => self.press(flags, now),
-            Kind::KeyDown => self.make_dirty(&mut out),
+            Kind::KeyDown | Kind::KeyRepeat if own && !self.key.is_modifier() => {
+                if kind == Kind::KeyDown {
+                    self.press(flags, now);
+                }
+            }
+            Kind::KeyDown | Kind::KeyRepeat => {
+                self.note_held(keycode, now);
+                self.make_dirty(&mut out);
+            }
             Kind::KeyUp if own && !self.key.is_modifier() => self.release(&mut out),
-            Kind::KeyUp => {}
+            Kind::KeyUp => self.held.retain(|&(held, _)| held != keycode),
             Kind::FlagsChanged if own && self.key.is_modifier() => {
                 if flags & self.key.device_mask != 0 {
                     self.press(flags, now);
@@ -109,12 +137,22 @@ impl LoneKeyMachine {
         out
     }
 
+    fn note_held(&mut self, keycode: u16, now: u64) {
+        if let Some(entry) = self.held.iter_mut().find(|(held, _)| *held == keycode) {
+            entry.1 = now;
+        } else if self.held.len() < MAX_HELD {
+            self.held.push((keycode, now));
+        }
+    }
+
     /// Our key went down. Repeats while already down are ignored.
     fn press(&mut self, flags: u64, now: u64) {
         if self.phase != Phase::Idle {
             return;
         }
-        self.phase = if self.key.other_modifiers(flags) != 0 {
+        self.held
+            .retain(|&(_, seen)| now.saturating_sub(seen) < HELD_STALE_MS);
+        self.phase = if self.key.other_modifiers(flags) != 0 || !self.held.is_empty() {
             Phase::Dirty
         } else {
             Phase::Pending(now)

@@ -117,6 +117,7 @@ fn a_dirty_press_ends_cleanly_and_the_next_press_works() {
     let mut m = machine("AltRight");
     m.step(Kind::FlagsChanged, RALT, R_OPT, 0);
     m.step(Kind::KeyDown, KEY_E, R_OPT, 10);
+    m.step(Kind::KeyUp, KEY_E, R_OPT, 15);
     m.step(Kind::FlagsChanged, RALT, 0, 20);
     m.step(Kind::FlagsChanged, RALT, R_OPT, 1000);
     assert_eq!(
@@ -204,7 +205,7 @@ fn tap_disabled_releases_a_hold_and_forgets_a_pending_press() {
 fn f_key_press_hold_and_chord() {
     let mut m = machine("F13");
     m.step(Kind::KeyDown, F13, 0, 0);
-    m.step(Kind::KeyDown, F13, 0, 30); // auto-repeat
+    m.step(Kind::KeyRepeat, F13, 0, 30);
     assert_eq!(m.tick(DEBOUNCE_MS), [Edge::Pressed]);
     assert_eq!(m.step(Kind::KeyUp, F13, 0, 400), [Edge::Released]);
     // Option+F13 is not the lone F13.

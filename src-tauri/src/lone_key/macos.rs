@@ -59,16 +59,28 @@ impl Context {
     /// thread after the debounce (a short-lived thread per press).
     fn queue_tick(&self, wait_ms: u64) {
         let app = self.app.clone();
+        let id = self as *const Context as usize;
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(wait_ms));
-            let _ = app.run_on_main_thread(tick);
+            let _ = app.run_on_main_thread(move || tick(id));
         });
     }
 }
 
-fn tick() {
-    let context = ACTIVE.with(|slot| slot.borrow().as_ref().map(|tap| tap.context.clone()));
-    let Some(context) = context else { return };
+/// The armed context; with `id`, only if it is that one (a wake-up queued
+/// before a re-arm must not touch the new listener).
+fn active_context(id: Option<usize>) -> Option<Rc<Context>> {
+    ACTIVE.with(|slot| {
+        let slot = slot.borrow();
+        let context = &slot.as_ref()?.context;
+        (id.is_none() || id == Some(Rc::as_ptr(context) as usize)).then(|| context.clone())
+    })
+}
+
+fn tick(id: usize) {
+    let Some(context) = active_context(Some(id)) else {
+        return;
+    };
     context.tick_queued.set(false);
     let edges = context.machine.borrow_mut().tick(context.now());
     context.emit(edges);
@@ -89,15 +101,20 @@ unsafe extern "C" fn callback(_: Handle, event_type: u32, event: Handle, info: H
     if info.is_null() {
         return event;
     }
-    // `info` stays valid until the source is removed and the port invalidated.
-    let context = &*(info as *const Context);
-    let Some(kind) = event_kind(event_type) else {
+    // Own an Rc so a sink that re-arms can't free the context under us.
+    let Some(context) = active_context(Some(info as usize)) else {
+        return event;
+    };
+    let Some(mut kind) = event_kind(event_type) else {
         return event;
     };
     let disabled = kind == Kind::TapDisabled;
     let (keycode, flags) = if disabled || event.is_null() {
         (0, 0)
     } else {
+        if kind == Kind::KeyDown && CGEventGetIntegerValueField(event, AUTOREPEAT_FIELD) != 0 {
+            kind = Kind::KeyRepeat;
+        }
         (
             CGEventGetIntegerValueField(event, KEYCODE_FIELD) as u16,
             CGEventGetFlags(event),
@@ -114,7 +131,11 @@ unsafe extern "C" fn callback(_: Handle, event_type: u32, event: Handle, info: H
         #[cfg(debug_assertions)]
         eprintln!("[lone-key] tap disabled (type {event_type:#x}); re-enabling");
         ACTIVE.with(|slot| {
-            if let Some(tap) = slot.borrow().as_ref() {
+            if let Some(tap) = slot
+                .borrow()
+                .as_ref()
+                .filter(|tap| Rc::ptr_eq(&tap.context, &context))
+            {
                 CGEventTapEnable(tap.port, true);
             }
         });

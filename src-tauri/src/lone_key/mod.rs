@@ -13,6 +13,8 @@ mod macos;
 mod tap_ffi;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_edge;
 
 // CGEventFlags: generic modifier bits.
 const FLAG_SHIFT: u64 = 1 << 17;

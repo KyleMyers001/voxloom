@@ -16,6 +16,7 @@ pub(super) const OTHER_MOUSE_DOWN: u32 = 25;
 pub(super) const DISABLED_BY_TIMEOUT: u32 = 0xFFFF_FFFE;
 pub(super) const DISABLED_BY_USER_INPUT: u32 = 0xFFFF_FFFF;
 pub(super) const KEYCODE_FIELD: u32 = 9; // kCGKeyboardEventKeycode
+pub(super) const AUTOREPEAT_FIELD: u32 = 8; // kCGKeyboardEventAutorepeat
 pub(super) const TAP_SESSION: u32 = 1;
 pub(super) const TAP_HEAD: u32 = 0;
 pub(super) const TAP_LISTEN_ONLY: u32 = 1;
