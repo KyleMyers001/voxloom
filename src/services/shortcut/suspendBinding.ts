@@ -16,7 +16,7 @@ export async function runSuspendBinding(
     const active = s.getActive();
     if (!active || s.getSuspendedHotkey()) return;
     try {
-      await s.api.unregister(active);
+      await s.binder.unregister(active);
     } catch (err) {
       // The OS may still hold it: stay bound (gesture state intact, so
       // the shortcut still stops a dictation) and say so, rather than

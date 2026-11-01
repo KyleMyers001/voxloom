@@ -196,7 +196,7 @@ describe('BUS-43 pending acquisition ownership', () => {
       const { result } = renderHook(() => {
         const dogfood = useDogfoodCapture({ captureApi: api, clipboard: { copy: vi.fn() },
           createModelStore: () => store, modelId: 'whisper-tiny.en' });
-        useShortcutGestures({ dogfood: toGestureDogfoodBridge(dogfood), state, now: () => 0,
+        useShortcutGestures({ bootReady: true, dogfood: toGestureDogfoodBridge(dogfood), state, now: () => 0,
           onboardingOpen: false, shortcutOpen: false,
           dictation: { cancel: vi.fn() } as unknown as DictationLifecycle,
           setup: {} as SetupLifecycle });

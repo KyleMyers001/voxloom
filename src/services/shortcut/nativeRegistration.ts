@@ -5,7 +5,9 @@ import {
   HOLD_RELEASE_CARBON_GRACE_MS,
 } from './constants';
 import { toPluginHotkey } from './formatHotkey';
-import { isLoneKey, LONE_KEY_UNSUPPORTED } from './loneKey';
+import { isLoneKey } from './loneKey';
+import { createTauriLoneKeyApi } from './loneKeyBridge';
+import { listenForLoneKey } from './loneKeyListener';
 import { createGestureMachine } from './gestureMachine';
 import { createTauriHoldReleaseApi } from './holdReleaseBridge';
 import { createHoldWatch } from './holdWatch';
@@ -34,6 +36,7 @@ export function createNativeShortcutController({
   doubleTapMs = DOUBLE_TAP_MS,
   holdMs = HOLD_MS,
   holdRelease = createTauriHoldReleaseApi(),
+  loneKey = createTauriLoneKeyApi(),
   onGesture,
   onRegisterFailure,
   onSuspendFailure,
@@ -70,7 +73,8 @@ export function createNativeShortcutController({
       if (gesture === 'hold-start') {
         // Mac: HotKey Released often missing when modifiers lift first.
         // Not while a recorder records: that start is dropped downstream.
-        if (!isDictationSuspended()) holdWatch.arm();
+        // A lone key reports its own release (the tap), so no watch.
+        if (!isDictationSuspended() && !isLoneKey(active ?? '')) holdWatch.arm();
       } else if (
         gesture === 'hold-finish'
         || gesture === 'latch-start'
@@ -94,9 +98,13 @@ export function createNativeShortcutController({
 
   const binder: ShortcutBinder = {
     async register(hotkey) {
-      // BUS-46: no native listener for lone keys yet. Refusing here sends them
-      // through register-or-revert, which restores the previous shortcut.
-      if (isLoneKey(hotkey)) throw new Error(LONE_KEY_UNSUPPORTED);
+      // BUS-46: a lone key is listened for by the native tap, not the plugin.
+      // A refusal (no Input Monitoring, not macOS) goes through
+      // register-or-revert like a combo conflict does.
+      if (isLoneKey(hotkey)) {
+        await loneKey.arm(hotkey);
+        return;
+      }
       const gen = generation;
       await api.register(hotkey, (edge) => {
         if (disposed || gen !== generation) return;
@@ -117,6 +125,10 @@ export function createNativeShortcutController({
       });
     },
     async unregister(hotkey) {
+      if (isLoneKey(hotkey)) {
+        await loneKey.disarm();
+        return;
+      }
       await api.unregister(hotkey);
     },
   };
@@ -133,6 +145,15 @@ export function createNativeShortcutController({
     }
     unlistenHoldRelease = unlisten;
   }).catch(() => undefined);
+
+  // A lone key's edges (from the native tap) drive the same gesture machine.
+  const stopLoneKey = listenForLoneKey({
+    api: loneKey,
+    disarmHoldWatch: () => holdWatch.disarm(),
+    isDisposed: () => disposed,
+    isLoneKeyActive: () => active !== null && isLoneKey(active),
+    machine,
+  });
 
   // Serialize setShortcut / suspendBinding so boot (mount + Settings effects)
   // and Strict Mode cannot race two RegisterEventHotKey calls for the same combo.
@@ -167,10 +188,11 @@ export function createNativeShortcutController({
       holdWatch.disarm();
       unlistenHoldRelease?.();
       unlistenHoldRelease = null;
+      stopLoneKey();
       machine.dispose();
       generation += 1;
       try {
-        if (active) await api.unregister(active);
+        if (active) await binder.unregister(active);
         else await api.unregisterAll();
       } catch {
         // Best-effort shutdown unregister.
@@ -198,9 +220,16 @@ export function createNativeShortcutController({
       setShortcutQueue = pending.catch(() => undefined);
       return pending;
     },
-    async setShortcut(settingsShortcut) {
+    async setShortcut(settingsShortcut, options) {
       const next = toPluginHotkey(settingsShortcut);
-      const run = () => runSetShortcut(next, state);
+      const run = async () => {
+        // A saved lone key may ask for Input Monitoring once. Never at boot,
+        // and not when it is already the active key.
+        if (options?.userInitiated && isLoneKey(next) && active !== next) {
+          await loneKey.requestAccess().catch(() => false);
+        }
+        return runSetShortcut(next, state);
+      };
       const pending = setShortcutQueue.then(run, run);
       setShortcutQueue = pending.then(
         () => undefined,

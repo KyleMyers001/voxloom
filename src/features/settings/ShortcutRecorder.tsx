@@ -4,7 +4,8 @@ import { comboLabel, KeyCombo, spokenCombo } from '../../components/KeyCombo';
 import { captureShortcut } from '../../services/shortcut/shortcutCapture';
 import { isLoneModifier } from '../../services/shortcut/loneKey';
 import { IDLE, keyUp, modifierDown, otherDown, type LoneTracker } from '../../services/shortcut/loneKeyCapture';
-import { useShortcutActive } from '../../services/shortcut/activeShortcut';
+import { getActiveShortcut, useShortcutActive } from '../../services/shortcut/activeShortcut';
+import { emitShortcutRetry } from '../../services/shortcut/bindingEvents';
 import { beginRecordingSuspend } from '../../services/shortcut/recordingSuspend';
 import {
   attachRecorder, beginPending, cancelPending, setRecorderStatus, useRecorderStatus, type Status,
@@ -77,6 +78,14 @@ export function ShortcutRecorder({
   const apply = (combo: string, okText: string) => {
     const changed = combo !== value;
     cancelPending();
+    if (!changed && isTauri() && getActiveShortcut() === null) {
+      // Saved but not active (a refused launch keeps it): the value can't
+      // change, so ask main to try binding it again.
+      beginPending(combo);
+      stop({ text: pendingText(combo), tone: 'info' });
+      emitShortcutRetry(combo);
+      return;
+    }
     if (!changed || !isTauri()) {
       onChange(combo);
       stop({ text: okText, tone: 'ok' });

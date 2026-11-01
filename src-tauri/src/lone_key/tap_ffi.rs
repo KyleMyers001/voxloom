@@ -34,8 +34,10 @@ extern "C" {
     pub(super) fn CGEventTapEnable(tap: Handle, enable: bool);
     pub(super) fn CGEventGetIntegerValueField(event: Handle, field: u32) -> i64;
     pub(super) fn CGEventGetFlags(event: Handle) -> u64;
-    // Preflight only: never call CGRequestListenEventAccess here.
+    // Preflight never prompts. Request prompts (once per install) and is only
+    // called from `macos::request_access`, on a user action.
     pub(super) fn CGPreflightListenEventAccess() -> bool;
+    pub(super) fn CGRequestListenEventAccess() -> bool;
 }
 #[link(name = "CoreFoundation", kind = "framework")]
 extern "C" {

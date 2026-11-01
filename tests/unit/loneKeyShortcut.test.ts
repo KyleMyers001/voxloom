@@ -1,13 +1,12 @@
 // BUS-46 slice 1: lone-key tokens in the stored shortcut string.
 import { readFileSync } from 'node:fs';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { comboLabel, spokenCombo } from '../../src/components/KeyCombo';
 import { initialSettings } from '../../src/domain/fixtures';
-import { loneUnsupportedText, successText } from '../../src/features/settings/shortcutCopy';
+import { successText } from '../../src/features/settings/shortcutCopy';
 import { parseSettingsJson, serializeSettingsFile } from '../../src/services/settings';
 import { matchesShortcut, toPluginHotkey } from '../../src/services/shortcut/formatHotkey';
-import { isLoneKey } from '../../src/services/shortcut/loneKey';
-import { createNativeShortcutController, type NativeShortcutApi } from '../../src/services/shortcut/nativeRegistration';
+import { canonicalLoneKey, isLoneKey } from '../../src/services/shortcut/loneKey';
 import { captureShortcut } from '../../src/services/shortcut/shortcutCapture';
 
 const ev = (code: string, mods: Partial<Record<'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey', boolean>> = {}) => ({
@@ -31,11 +30,36 @@ describe('lone-key tokens', () => {
     expect(toPluginHotkey('Alt + D')).toBe('Alt+D');
   });
 
+  it('treats a hand-edited lowercase token as the same lone key (L3)', () => {
+    expect(canonicalLoneKey('f13')).toBe('F13');
+    expect(canonicalLoneKey(' altright ')).toBe('AltRight');
+    expect(isLoneKey('f13')).toBe(true);
+    expect(toPluginHotkey('f13')).toBe('F13');
+    expect(toPluginHotkey('altright')).toBe('AltRight');
+    expect(canonicalLoneKey('f20')).toBeNull();
+    expect(matchesShortcut(ev('F13'), 'f13')).toBe(true);
+  });
+
   it('matches a lone key by its physical code, left and right apart', () => {
     expect(matchesShortcut(ev('AltRight', { altKey: true }), 'AltRight')).toBe(true);
     expect(matchesShortcut(ev('AltLeft', { altKey: true }), 'AltRight')).toBe(false);
     expect(matchesShortcut(ev('F13'), 'F13')).toBe(true);
     expect(matchesShortcut(ev('F14'), 'F13')).toBe(false);
+  });
+
+  it('a lone key press needs every other modifier up; its release matches by code', () => {
+    expect(matchesShortcut(ev('AltRight', { altKey: true, shiftKey: true }), 'AltRight')).toBe(false);
+    expect(matchesShortcut(ev('AltRight', { altKey: true, metaKey: true }), 'AltRight')).toBe(false);
+    expect(matchesShortcut(ev('ShiftRight', { shiftKey: true }), 'ShiftRight')).toBe(true);
+    expect(matchesShortcut(ev('ControlRight', { ctrlKey: true, altKey: true }), 'ControlRight')).toBe(false);
+    expect(matchesShortcut(ev('F13', { shiftKey: true }), 'F13')).toBe(false);
+    expect(matchesShortcut(ev('F13', { metaKey: true }), 'F13')).toBe(false);
+    // A release ends a hold even if Shift went down meanwhile.
+    expect(matchesShortcut(ev('AltRight', { shiftKey: true }), 'AltRight', 'up')).toBe(true);
+    expect(matchesShortcut(ev('AltLeft'), 'AltRight', 'up')).toBe(false);
+    // Combos are unchanged.
+    expect(matchesShortcut(ev('KeyK', { altKey: true }), 'alt + k', 'up')).toBe(true);
+    expect(matchesShortcut(ev('KeyK', { altKey: true, shiftKey: true }), 'alt + k')).toBe(false);
   });
 
   it('labels and speaks lone keys', () => {
@@ -77,35 +101,5 @@ describe('settings compatibility', () => {
     const raw = serializeSettingsFile({ ...initialSettings, shortcut: 'AltRight' }, true);
     const parsed = parseSettingsJson(raw);
     expect(parsed.ok && parsed.file.settings.shortcut).toBe('AltRight');
-  });
-});
-
-describe('registration of a lone key (until the native listener lands)', () => {
-  it('refuses it, never touches the plugin, and keeps the previous shortcut', async () => {
-    const register = vi.fn<NativeShortcutApi['register']>(async () => undefined);
-    const api: NativeShortcutApi = {
-      isAvailable: () => true,
-      register,
-      unregister: async () => undefined,
-      unregisterAll: async () => undefined,
-    };
-    const onRegisterFailure = vi.fn();
-    const controller = createNativeShortcutController({
-      api,
-      clock: () => 0,
-      holdRelease: { arm: async () => false, disarm: async () => undefined, isAvailable: () => false, listen: async () => () => undefined },
-      onGesture: () => undefined,
-      onRegisterFailure,
-      scheduler: { clear: () => undefined, set: () => 1 },
-    });
-    expect((await controller.setShortcut('Ctrl + Shift + Space')).ok).toBe(true);
-    register.mockClear();
-    const outcome = await controller.setShortcut('AltRight');
-    expect(outcome.ok).toBe(false);
-    expect(register.mock.calls.map(([hotkey]) => hotkey)).toEqual(['Control+Shift+Space']);
-    expect(controller.activeHotkey()).toBe('Control+Shift+Space');
-    expect(onRegisterFailure).toHaveBeenCalledOnce();
-    expect(loneUnsupportedText('AltRight', 'Ctrl + Shift + Space', true))
-      .toBe('⌥ (right) on its own isn\'t supported in this build yet. Kept ⌃⇧Space.');
   });
 });

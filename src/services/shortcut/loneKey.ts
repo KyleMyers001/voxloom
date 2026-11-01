@@ -29,7 +29,7 @@ export function isLoneModifier(code: string): code is LoneModifierCode {
   return Object.hasOwn(MODIFIERS, code);
 }
 
-/** Left-hand counterpart of a right-hand lone modifier, if `code` is one. */
+/** True for a left-hand modifier (Alt/Control/Meta/Shift Left), which can't be a shortcut on its own. */
 export function isLeftModifier(code: string): boolean {
   return ['AltLeft', 'ControlLeft', 'MetaLeft', 'ShiftLeft'].includes(code);
 }
@@ -38,15 +38,26 @@ export function isLoneFKey(code: string): boolean {
   return F_KEY.test(code);
 }
 
+/**
+ * The stored token for a lone key, or null for an "A + B" combo. Case does
+ * not matter ("f13", "altright"): a hand-edited or older file must not slip
+ * past as a plugin chord (BUS-155 L3).
+ */
+export function canonicalLoneKey(shortcut: string): string | null {
+  const code = shortcut.trim();
+  const modifier = Object.keys(MODIFIERS).find((name) => name.toLowerCase() === code.toLowerCase());
+  if (modifier) return modifier;
+  return F_KEY.test(code.toUpperCase()) ? code.toUpperCase() : null;
+}
+
 /** True for a stored shortcut that is a lone key, not an "A + B" combo. */
 export function isLoneKey(shortcut: string): boolean {
-  const code = shortcut.trim();
-  return isLoneModifier(code) || isLoneFKey(code);
+  return canonicalLoneKey(shortcut) !== null;
 }
 
 /** Cap labels: "⌥ (right)" on macOS, "Alt (right)" elsewhere; F-keys as is. */
 export function loneKeyKeys(shortcut: string, mac: boolean): string[] | null {
-  const code = shortcut.trim();
+  const code = canonicalLoneKey(shortcut) ?? shortcut.trim();
   if (isLoneFKey(code)) return [code];
   if (!isLoneModifier(code)) return null;
   const m = MODIFIERS[code];
@@ -55,7 +66,7 @@ export function loneKeyKeys(shortcut: string, mac: boolean): string[] | null {
 
 /** What VoiceOver should say: "Right Option", "Right Alt", "F13". */
 export function spokenLoneKey(shortcut: string, mac: boolean): string | null {
-  const code = shortcut.trim();
+  const code = canonicalLoneKey(shortcut) ?? shortcut.trim();
   if (isLoneFKey(code)) return code;
   if (!isLoneModifier(code)) return null;
   return `Right ${mac ? MODIFIERS[code].mac : MODIFIERS[code].other}`;
@@ -66,6 +77,3 @@ export function rightHandOf(code: string): LoneModifierCode | null {
   const right = code.replace(/Left$/, 'Right');
   return isLoneModifier(right) ? right : null;
 }
-
-/** Why a native registration refuses a lone key until the listener lands. */
-export const LONE_KEY_UNSUPPORTED = 'lone-key shortcuts are not supported in this build yet';

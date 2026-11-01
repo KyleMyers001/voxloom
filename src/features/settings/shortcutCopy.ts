@@ -39,6 +39,7 @@ export const onboardingInUseText = (combo: string, kept: string, mac = isMacPlat
 
 /** The new combo was refused and restoring the previous one failed too. */
 export function noneActiveText(combo: string, previous: string | null | undefined, mac = isMacPlatform()) {
+  if (isLoneKey(combo)) return `${loneReason(combo, mac)} No shortcut is active. Record one.`;
   const restore = previous ? ` or restore ${L(previous, mac)}` : '';
   return `Couldn't set ${L(combo, mac)}${restore}. No shortcut is active. Record one.`;
 }
@@ -81,15 +82,36 @@ export function invalidText(invalid: InvalidCapture, mac = isMacPlatform()): str
   }
 }
 
-/** A lone key was refused because native registration doesn't handle it yet (BUS-46). */
-export const loneUnsupportedText = (combo: string, kept: string, mac = isMacPlatform()) =>
-  `${L(combo, mac)} on its own isn't supported in this build yet. Kept ${L(kept, mac)}.`;
+const INPUT_MONITORING = 'System Settings › Privacy & Security › Input Monitoring';
+
+/** Why a lone key was refused: macOS Input Monitoring is off, or this isn't macOS. */
+function loneReason(combo: string, mac: boolean) {
+  return mac
+    ? `${L(combo, mac)} needs Input Monitoring. Allow Voxloom in ${INPUT_MONITORING}.`
+    : `${L(combo, mac)} on its own only works on macOS.`;
+}
+
+/**
+ * The recorder's line when a lone key was refused and the previous shortcut
+ * stays. macOS asks once on save and answers after we've already refused, so
+ * it says to record the key again; a relaunch is the fallback because whether
+ * a running app sees a fresh grant is not something we can promise.
+ */
+export const loneRefusedText = (combo: string, kept: string, mac = isMacPlatform()) => {
+  const again = mac ? ' Then record it again; relaunch Voxloom if that doesn\'t help.' : '';
+  return `${loneReason(combo, mac)}${again} Kept ${L(kept, mac)}.`;
+};
+
+/** Toast (Settings closed) when the new shortcut was refused and another one is now active. */
+export function usingInsteadText(combo: string, active: string, mac = isMacPlatform()) {
+  const why = isLoneKey(combo) ? loneReason(combo, mac) : `${L(combo, mac)} is in use by another app.`;
+  return `${why} Using ${L(active, mac)} instead.`;
+}
 
 /** Main-window toast when the saved shortcut can't be registered at launch. */
 export function bootRefusedText(combo: string, active: string | null | undefined, mac = isMacPlatform()) {
-  if (isLoneKey(combo)) {
-    return `${L(combo, mac)} on its own isn't supported in this build yet.${active ? ` Using ${L(active, mac)} for now.` : ' No shortcut is active.'} Record one in Settings.`;
-  }
-  const now = active ? ` Using ${comboLabel(active, mac)} for now.` : ' No shortcut is active.';
-  return `${L(combo, mac)} is in use by another app.${now} Record one in Settings.`;
+  const why = isLoneKey(combo) ? loneReason(combo, mac) : `${L(combo, mac)} is in use by another app.`;
+  const now = active ? ` Using ${L(active, mac)} instead.` : ' No shortcut is active.';
+  // The key stays saved, so recording it again retries it.
+  return `${why}${now} Record it again in Settings.`;
 }

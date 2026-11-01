@@ -50,7 +50,7 @@ export function createDocumentShortcutController({
 
   function keyUp(event: Event) {
     const key = event as KeyboardEvent;
-    if (!matchesShortcut(key, shortcut)) return;
+    if (!matchesShortcut(key, shortcut, 'up')) return;
     key.preventDefault();
     machine.handle('released');
   }
