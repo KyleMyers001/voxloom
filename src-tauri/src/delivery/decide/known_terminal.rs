@@ -11,7 +11,7 @@ use crate::delivery::types::TargetSnapshotDto;
 
 /// Third-party terminal bundle names (lowercase, without `.app`).
 /// iTerm2 ships as `iTerm.app`.
-const TERMINAL_BUNDLES: &[&str] = &["iterm", "wezterm", "alacritty", "kitty", "ghostty"];
+const TERMINAL_BUNDLES: &[&str] = &["iterm", "wezterm", "alacritty", "kitty", "ghostty", "warp"];
 
 /// `exe_path` is the frontmost process's executable path.
 pub fn is_known_terminal(exe_path: &str) -> bool {
@@ -90,7 +90,7 @@ mod tests {
     }
 
     #[test]
-    fn apple_terminal_and_the_five_named_terminals_are_known() {
+    fn apple_terminal_and_the_named_terminals_are_known() {
         for exe in [
             "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal",
             "/Applications/iTerm.app/Contents/MacOS/iTerm2",
@@ -98,6 +98,7 @@ mod tests {
             "/Applications/Alacritty.app/Contents/MacOS/alacritty",
             "/Applications/kitty.app/Contents/MacOS/kitty",
             "/Applications/Ghostty.app/Contents/MacOS/ghostty",
+            "/Applications/Warp.app/Contents/MacOS/stable",
             "/opt/apps/Ghostty.app/Contents/MacOS/ghostty",
         ] {
             assert!(is_known_terminal(exe), "{exe}");
