@@ -9,7 +9,10 @@ import { setActiveShortcut } from '../../services/shortcut/activeShortcut';
 import {
   listenShortcutBound, queryShortcutBound, type ShortcutBoundPayload,
 } from '../../services/shortcut/bindingEvents';
-import { inUseText, noneActiveText, successText, timeoutText } from './shortcutCopy';
+import { isLoneKey } from '../../services/shortcut/loneKey';
+import {
+  inUseText, loneUnsupportedText, noneActiveText, successText, timeoutText,
+} from './shortcutCopy';
 
 export type Status = { tone: 'error' | 'info' | 'ok'; text: string } | null;
 
@@ -74,7 +77,9 @@ function onBound({ active, ok, previous, replay, shortcut }: ShortcutBoundPayloa
   const target = kept ?? restore;
   if (target && target !== shortcut) s.onChange?.(target);
   setRecorderStatus({
-    text: kept === null ? noneActiveText(shortcut, restore) : inUseText(shortcut, target ?? shortcut),
+    text: kept === null
+      ? noneActiveText(shortcut, restore)
+      : (isLoneKey(shortcut) ? loneUnsupportedText : inUseText)(shortcut, target ?? shortcut),
     tone: 'error',
   });
 }

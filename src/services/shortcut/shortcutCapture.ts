@@ -6,9 +6,12 @@
  * A–Z, 0–9, Space, Enter, Backspace, Tab, plus at least one modifier
  * (Shift alone is allowed, as decided on #54). Esc is never bindable (BUS-12) and cancels recording.
  * NumpadEnter is rejected: native watches only the main Return key (36).
- * Modifier-only shortcuts (Right Option, Fn) are BUS-46.
+ * Lone keys (BUS-46): F13-F19 are captured here as a whole shortcut; a
+ * right-hand modifier can only be told from a chord on keyup, so it is
+ * decided by loneKeyCapture.ts. Letters, digits and Space still need a modifier.
  */
 import { isMacPlatform } from '../../components/KeyCombo';
+import { isLoneFKey } from './loneKey';
 export type CaptureKeyEvent = Pick<
   KeyboardEvent,
   'altKey' | 'code' | 'ctrlKey' | 'key' | 'metaKey' | 'shiftKey'
@@ -25,6 +28,8 @@ export type InvalidCapture =
   | { reason: 'unsupported'; code: string; key: string }
   | { reason: 'numpad-enter' }
   | { reason: 'no-modifier'; key: string }
+  | { reason: 'f-key-combo'; key: string }
+  | { reason: 'left-modifier'; code: string; suggest: string | null }
   | { reason: 'reserved'; combo: string; feature: string };
 
 const MODIFIER_CODES = new Set([
@@ -95,6 +100,12 @@ export function captureShortcut(event: CaptureKeyEvent, mac = isMacPlatform()): 
   }
   // Detect by code: keypad Enter reports key "Enter" like Return does.
   if (event.code === 'NumpadEnter') return { invalid: { reason: 'numpad-enter' }, kind: 'invalid' };
+  if (isLoneFKey(event.code)) {
+    // Alone only: native hold-release has no F-key chords to watch.
+    return mods.length === 0
+      ? { combo: event.code, kind: 'captured' }
+      : { invalid: { key: event.code, reason: 'f-key-combo' }, kind: 'invalid' };
+  }
   const key = keyName(event.code);
   if (!key) {
     return { invalid: { code: event.code, key: event.key, reason: 'unsupported' }, kind: 'invalid' };

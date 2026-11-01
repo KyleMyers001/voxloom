@@ -1,8 +1,13 @@
+import { isLoneKey } from './loneKey';
+
 /**
  * Convert Settings display shortcut (e.g. "Ctrl + Shift + Space") to the
  * Tauri global-shortcut plugin format ("Control+Shift+Space").
  */
 export function toPluginHotkey(shortcut: string): string {
+  // BUS-46: a lone key ("AltRight", "F13") is not a plugin chord. Hand it back
+  // untouched so the binder can route it; it is never sent to the plugin.
+  if (isLoneKey(shortcut)) return shortcut.trim();
   const parts = shortcut
     .split('+')
     .map((part) => part.trim())
@@ -52,6 +57,8 @@ export function matchesShortcut(
   >,
   shortcut: string,
 ): boolean {
+  // A lone key matches its own physical code, whatever else is held.
+  if (isLoneKey(shortcut)) return event.code === shortcut.trim();
   const parts = shortcut.toLowerCase().split('+').map((part) => part.trim());
   const key = parts.at(-1);
   const physical = physicalKey(event.code);

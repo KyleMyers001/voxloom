@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { comboLabel, KeyCombo, spokenCombo } from '../../components/KeyCombo';
 import { captureShortcut } from '../../services/shortcut/shortcutCapture';
+import { isLoneModifier } from '../../services/shortcut/loneKey';
+import { IDLE, keyUp, modifierDown, otherDown, type LoneTracker } from '../../services/shortcut/loneKeyCapture';
 import { useShortcutActive } from '../../services/shortcut/activeShortcut';
 import { beginRecordingSuspend } from '../../services/shortcut/recordingSuspend';
 import {
@@ -52,6 +54,7 @@ export function ShortcutRecorder({
   const setStatus = setRecorderStatus;
   const active = useShortcutActive();
   const sawKeyRef = useRef(false);
+  const loneRef = useRef<LoneTracker>(IDLE);
   const fieldRef = useRef<HTMLButtonElement>(null);
   const handlersRef = useRef<Record<'down' | 'up', (e: KeyboardEvent) => void>>({ down: () => {}, up: () => {} });
   useEffect(() => attachRecorder(value, onChange));
@@ -88,6 +91,7 @@ export function ShortcutRecorder({
 
   const start = () => {
     sawKeyRef.current = false;
+    loneRef.current = IDLE;
     setPreview('');
     setRecording(true);
     fieldRef.current?.focus();
@@ -112,12 +116,18 @@ export function ShortcutRecorder({
     if (result.kind === 'cancel') {
       stop({ text: CANCELED, tone: 'info' });
     } else if (result.kind === 'modifier-only') {
-      setPreview(result.preview);
+      const lone = modifierDown(loneRef.current, event.code);
+      loneRef.current = lone;
+      // A right-hand modifier held alone previews as itself ("⌥ (right)").
+      const held = lone.held && !lone.dirty ? lone.held : null;
+      setPreview(held && isLoneModifier(held) ? held : result.preview);
     } else if (result.kind === 'invalid') {
+      loneRef.current = otherDown(loneRef.current);
       sawKeyRef.current = true;
       setPreview('');
       setStatus({ text: invalidText(result.invalid), tone: 'error' });
     } else {
+      loneRef.current = otherDown(loneRef.current);
       apply(result.combo, successText(result.combo));
     }
   };
@@ -125,8 +135,21 @@ export function ShortcutRecorder({
   const onKeyUp = (n: KeyboardEvent) => {
     n.stopImmediatePropagation();
     const anyModifier = n.altKey || n.ctrlKey || n.metaKey || n.shiftKey;
+    const { next, release } = keyUp(loneRef.current, n.code, anyModifier);
+    loneRef.current = next;
+    if (release.kind === 'captured') {
+      apply(release.combo, successText(release.combo));
+      return;
+    }
+    if (release.kind === 'left') {
+      setPreview('');
+      const invalid = { code: release.code, reason: 'left-modifier', suggest: release.suggest } as const;
+      setStatus({ text: invalidText(invalid), tone: 'error' });
+      return;
+    }
     if (preview && !anyModifier) {
-      // Released with only modifiers held: lone modifiers are BUS-46.
+      // Released with only modifiers held, in a chord or one we can't bind.
+      loneRef.current = IDLE;
       setPreview('');
       setStatus({ text: addAKey(), tone: 'error' });
     }

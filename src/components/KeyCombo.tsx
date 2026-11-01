@@ -1,3 +1,5 @@
+import { loneKeyKeys, spokenLoneKey } from '../services/shortcut/loneKey';
+
 const symbols: Record<string, string> = {
   ctrl: '⌃', control: '⌃',
   shift: '⇧',
@@ -26,6 +28,8 @@ export function isMacPlatform(): boolean {
  * Shift, Alt, Super). Enter/Backspace read Return/Delete on macOS. CommandOrControl is ⌘ on macOS and "Ctrl" elsewhere.
  */
 export function comboKeys(combo: string, mac = isMacPlatform()): string[] {
+  const lone = loneKeyKeys(combo, mac);
+  if (lone) return lone;
   return combo.split('+').map((part) => part.trim()).filter(Boolean).map((key) => {
     if (cmdOrCtrl.has(key.toLowerCase())) return mac ? '⌘' : 'Ctrl';
     if (!mac && words[key.toLowerCase()]) return words[key.toLowerCase()];
@@ -51,6 +55,8 @@ const spokenOther: Record<string, string> = {
 
 /** "Ctrl + Meta + Space" → "Control Command Space": what VoiceOver should say. */
 export function spokenCombo(combo: string, mac = isMacPlatform()): string {
+  const lone = spokenLoneKey(combo, mac);
+  if (lone) return lone;
   const names = mac ? spokenMac : spokenOther;
   return combo.split('+').map((part) => part.trim()).filter(Boolean)
     .map((part) => names[part.toLowerCase()] ?? (part.length === 1 ? part.toUpperCase() : part)).join(' ');
