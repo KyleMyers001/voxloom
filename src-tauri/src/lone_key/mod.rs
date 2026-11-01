@@ -3,9 +3,18 @@
 //! cannot register these, so a listen-only event tap feeds a pure state
 //! machine that emits the same Pressed/Released edges the plugin does.
 //!
-//! Not wired to the app yet (slice 3), hence the narrow `dead_code` allow on
-//! the `mod` line in lib.rs.
+//! Slice 3 wires it to the app: `commands` (arm / disarm / the edge event),
+//! with edges delivered off the tap callback (`delivery`).
+//!
+//! macOS only. Elsewhere `arm` refuses, and the pure parts below are built
+//! (and tested) but unused, hence the `dead_code` allows.
 
+pub mod commands;
+#[cfg(target_os = "macos")]
+mod context;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod delivery;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub mod machine;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -13,6 +22,10 @@ mod macos;
 mod tap_ffi;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_boundaries;
+#[cfg(test)]
+mod tests_delivery;
 #[cfg(test)]
 mod tests_edge;
 #[cfg(test)]

@@ -32,6 +32,12 @@ fn cleanup_prewarm_disarm() {}
 #[tauri::command]
 fn cleanup_pick_and_import_model() {}
 
+#[tauri::command]
+fn lone_key_arm() {}
+
+#[tauri::command]
+fn lone_key_disarm() {}
+
 fn invoke_from(app: &tauri::App<MockRuntime>, label: &str, page: &str) -> Result<(), String> {
     invoke_command(app, label, page, "store_backup")
 }
@@ -108,4 +114,19 @@ fn store_backup_is_granted_to_main_only() {
     assert!(settings.contains("not allowed"), "{settings}");
     let overlay = invoke_from(&app, OVERLAY, "overlay.html").unwrap_err();
     assert!(overlay.contains("not allowed"), "{overlay}");
+}
+
+#[test]
+fn lone_key_commands_are_main_only() {
+    for command in ["lone_key_arm", "lone_key_disarm"] {
+        let app = mock_builder()
+            .invoke_handler(tauri::generate_handler![lone_key_arm, lone_key_disarm])
+            .build(crate::app_context())
+            .expect("mock app");
+        assert_eq!(invoke_command(&app, "main", "index.html", command), Ok(()));
+        for (label, page) in [("settings", "settings.html"), (OVERLAY, "overlay.html")] {
+            let denied = invoke_command(&app, label, page, command).unwrap_err();
+            assert!(denied.contains("not allowed"), "{label}: {denied}");
+        }
+    }
 }

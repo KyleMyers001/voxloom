@@ -55,6 +55,8 @@
     "allow-history-save",
     "allow-hold-release-arm",
     "allow-hold-release-disarm",
+    "allow-lone-key-arm",
+    "allow-lone-key-disarm",
     "allow-overlay-ensure",
     "allow-overlay-hide",
     "allow-overlay-show",

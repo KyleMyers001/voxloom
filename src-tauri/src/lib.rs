@@ -7,8 +7,6 @@ mod delivery;
 mod dictionary;
 mod history;
 mod hold_release;
-// BUS-46 slice 2: not called until slice 3 wires it up.
-#[allow(dead_code)]
 mod lone_key;
 mod model_fetch;
 mod overlay;
@@ -200,6 +198,8 @@ pub fn run() {
             history::history_save,
             hold_release::hold_release_arm,
             hold_release::hold_release_disarm,
+            lone_key::commands::lone_key_arm,
+            lone_key::commands::lone_key_disarm,
             overlay::overlay_ensure,
             overlay::overlay_hide,
             overlay::overlay_show,

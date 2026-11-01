@@ -146,9 +146,20 @@ impl LoneKeyMachine {
     fn note_held(&mut self, keycode: u16, now: u64) {
         if let Some(entry) = self.held.iter_mut().find(|(held, _)| *held == keycode) {
             entry.1 = now;
-        } else if self.held.len() < MAX_HELD {
+            return;
+        }
+        if self.held.len() >= MAX_HELD {
+            // Full: forget the stale ones so a real key still gets a slot.
+            self.prune(now);
+        }
+        if self.held.len() < MAX_HELD {
             self.held.push((keycode, now));
         }
+    }
+
+    fn prune(&mut self, now: u64) {
+        self.held
+            .retain(|&(_, seen)| now.saturating_sub(seen) < HELD_STALE_MS);
     }
 
     /// Our key went down. Repeats while already down are ignored.
@@ -156,8 +167,7 @@ impl LoneKeyMachine {
         if self.phase != Phase::Idle {
             return;
         }
-        self.held
-            .retain(|&(_, seen)| now.saturating_sub(seen) < HELD_STALE_MS);
+        self.prune(now);
         self.phase = if self.key.other_modifiers(flags) != 0 || !self.held.is_empty() {
             Phase::Dirty
         } else {
