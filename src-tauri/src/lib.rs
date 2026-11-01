@@ -7,6 +7,9 @@ mod delivery;
 mod dictionary;
 mod history;
 mod hold_release;
+// BUS-46 slice 2: not called until slice 3 wires it up.
+#[allow(dead_code)]
+mod lone_key;
 mod model_fetch;
 mod overlay;
 mod settings;
