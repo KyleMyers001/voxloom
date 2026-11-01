@@ -5,6 +5,14 @@ import type { LoneKeyApi } from './loneKeyBridge';
 import type { RegisterOutcome } from './registerOrRevert';
 import type { NativeShortcutApi } from './tauriShortcutApi';
 
+export interface SetShortcutOptions {
+  /**
+   * The user just saved this shortcut. Only then may a lone key ask macOS for
+   * Input Monitoring (a system prompt); boot and revert never do.
+   */
+  userInitiated?: boolean;
+}
+
 export interface NativeShortcutController {
   activeHotkey(): string | null;
   dispose(): Promise<void>;
@@ -13,7 +21,10 @@ export interface NativeShortcutController {
    * Apply a Settings-format shortcut. On failure, re-binds last-known-good
    * and returns an honest outcome for Settings/toast.
    */
-  setShortcut(settingsShortcut: string): Promise<RegisterOutcome>;
+  setShortcut(
+    settingsShortcut: string,
+    options?: SetShortcutOptions,
+  ): Promise<RegisterOutcome>;
   /**
    * BUS-69: unbind the OS hotkey while a recorder records (Carbon hotkeys
    * swallow the keystroke, so the recorder would never see the current

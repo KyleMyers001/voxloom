@@ -69,4 +69,13 @@ describe('useShortcutRegistration', () => {
     await act(async () => hook.rerender({ shortcut: 'Ctrl + Alt + B' }));
     await waitFor(() => expect(errors).toEqual(['⌃⌥B is in use by another app. Using ⌃⇧Space instead.']));
   });
+
+  it('a change is a user save (may ask for Input Monitoring); the first value is not', async () => {
+    const ok: RegisterOutcome = { active: 'F13', lastKnownGood: 'F13', ok: true };
+    const { hook, native } = setup(ok, false);
+    await act(async () => undefined);
+    expect(native.setShortcut).not.toHaveBeenCalled();
+    await act(async () => hook.rerender({ shortcut: 'F13' }));
+    expect(native.setShortcut).toHaveBeenCalledWith('F13', { userInitiated: true });
+  });
 });

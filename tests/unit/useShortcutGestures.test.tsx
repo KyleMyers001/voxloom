@@ -374,7 +374,7 @@ describe('useShortcutGestures', () => {
       await waitFor(() => {
         expect(native.setShortcut).toHaveBeenCalledTimes(2);
       });
-      expect(native.setShortcut).toHaveBeenLastCalledWith('Ctrl + Shift + F');
+      expect(native.setShortcut).toHaveBeenLastCalledWith('Ctrl + Shift + F', { userInitiated: true });
 
       unmount();
     });

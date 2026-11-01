@@ -112,7 +112,7 @@ describe('boot binding waits for the saved shortcut', () => {
     await waitFor(() => expect(native.setShortcut).toHaveBeenCalledTimes(1));
     rerender(options('F13', true));
     await waitFor(() => expect(native.setShortcut).toHaveBeenCalledTimes(2));
-    expect(native.setShortcut).toHaveBeenLastCalledWith('F13');
+    expect(native.setShortcut).toHaveBeenLastCalledWith('F13', { userInitiated: true });
     unmount();
   });
 });

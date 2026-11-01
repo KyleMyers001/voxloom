@@ -200,6 +200,7 @@ pub fn run() {
             hold_release::hold_release_disarm,
             lone_key::commands::lone_key_arm,
             lone_key::commands::lone_key_disarm,
+            lone_key::commands::lone_key_request_access,
             overlay::overlay_ensure,
             overlay::overlay_hide,
             overlay::overlay_show,

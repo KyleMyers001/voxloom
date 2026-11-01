@@ -9,7 +9,7 @@ const IM = 'System Settings › Privacy & Security › Input Monitoring';
 describe('lone key refusal copy', () => {
   it('on macOS names Input Monitoring and where to allow it', () => {
     expect(loneRefusedText('AltRight', 'Ctrl + Shift + Space', true))
-      .toBe(`⌥ (right) needs Input Monitoring. Allow Voxloom in ${IM}. Kept ⌃⇧Space.`);
+      .toBe(`⌥ (right) needs Input Monitoring. Allow Voxloom in ${IM}. Then record it again; relaunch Voxloom if that doesn't help. Kept ⌃⇧Space.`);
   });
 
   it('elsewhere says a lone key only works on macOS', () => {

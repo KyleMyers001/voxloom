@@ -7,6 +7,7 @@ import {
 import { toPluginHotkey } from './formatHotkey';
 import { isLoneKey } from './loneKey';
 import { createTauriLoneKeyApi } from './loneKeyBridge';
+import { listenForLoneKey } from './loneKeyListener';
 import { createGestureMachine } from './gestureMachine';
 import { createTauriHoldReleaseApi } from './holdReleaseBridge';
 import { createHoldWatch } from './holdWatch';
@@ -54,7 +55,6 @@ export function createNativeShortcutController({
   let generation = 0;
   let context: ShortcutContext = 'product';
   let unlistenHoldRelease: (() => void) | null = null;
-  let unlistenLoneKey: (() => void) | null = null;
 
   const holdWatch = createHoldWatch({
     carbonReleaseGraceMs,
@@ -146,26 +146,14 @@ export function createNativeShortcutController({
     unlistenHoldRelease = unlisten;
   }).catch(() => undefined);
 
-  // Edges from the native lone-key tap drive the same gesture machine as the
-  // plugin's Pressed / Released. Dropped unless a lone key is the active
-  // shortcut (an edge already in flight when it was unbound or suspended).
-  void loneKey.listen((edge) => {
-    if (disposed || active === null || !isLoneKey(active)) return;
-    if (edge === 'cancelled') {
-      // An active latch (the double-tap's second press survived the debounce
-      // before a chord key joined it) gets its finish, so capture stops.
-      holdWatch.disarm();
-      machine.finishActive();
-      return;
-    }
-    machine.handle(edge);
-  }).then((unlisten) => {
-    if (disposed) {
-      unlisten();
-      return;
-    }
-    unlistenLoneKey = unlisten;
-  }).catch(() => undefined);
+  // A lone key's edges (from the native tap) drive the same gesture machine.
+  const stopLoneKey = listenForLoneKey({
+    api: loneKey,
+    disarmHoldWatch: () => holdWatch.disarm(),
+    isDisposed: () => disposed,
+    isLoneKeyActive: () => active !== null && isLoneKey(active),
+    machine,
+  });
 
   // Serialize setShortcut / suspendBinding so boot (mount + Settings effects)
   // and Strict Mode cannot race two RegisterEventHotKey calls for the same combo.
@@ -200,8 +188,7 @@ export function createNativeShortcutController({
       holdWatch.disarm();
       unlistenHoldRelease?.();
       unlistenHoldRelease = null;
-      unlistenLoneKey?.();
-      unlistenLoneKey = null;
+      stopLoneKey();
       machine.dispose();
       generation += 1;
       try {
@@ -233,9 +220,16 @@ export function createNativeShortcutController({
       setShortcutQueue = pending.catch(() => undefined);
       return pending;
     },
-    async setShortcut(settingsShortcut) {
+    async setShortcut(settingsShortcut, options) {
       const next = toPluginHotkey(settingsShortcut);
-      const run = () => runSetShortcut(next, state);
+      const run = async () => {
+        // A saved lone key may ask for Input Monitoring once. Never at boot,
+        // and not when it is already the active key.
+        if (options?.userInitiated && isLoneKey(next) && active !== next) {
+          await loneKey.requestAccess().catch(() => false);
+        }
+        return runSetShortcut(next, state);
+      };
       const pending = setShortcutQueue.then(run, run);
       setShortcutQueue = pending.then(
         () => undefined,

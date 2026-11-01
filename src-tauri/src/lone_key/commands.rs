@@ -20,11 +20,33 @@ fn edge_name(edge: Edge) -> &'static str {
 }
 
 /// Listen for the lone key `token` (e.g. `AltRight`, `F13`), replacing any
-/// earlier one. macOS needs Input Monitoring; this only checks, never asks.
+/// earlier one. macOS needs Input Monitoring; this only checks, never asks
+/// (see `lone_key_request_access`).
 #[tauri::command]
 pub fn lone_key_arm(app: AppHandle, token: String) -> Result<(), String> {
     let key = parse_token(&token)?;
     arm_impl(app, key)
+}
+
+/// The user just saved a lone key: ask macOS for Input Monitoring if it is
+/// not granted (this is the only place that prompts). Returns whether access
+/// is granted right now; the prompt is answered later, so the caller still
+/// arms through `lone_key_arm` and reports a refusal in words. Never called
+/// at launch. Async, so a slow system prompt cannot stall the main thread.
+#[tauri::command]
+pub async fn lone_key_request_access() -> bool {
+    tauri::async_runtime::spawn_blocking(request_access_impl)
+        .await
+        .unwrap_or(false)
+}
+
+/// Request only when the preflight says it is not granted yet.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(super) fn request_if_needed(
+    granted: impl FnOnce() -> bool,
+    request: impl FnOnce() -> bool,
+) -> bool {
+    granted() || request()
 }
 
 /// Stop listening. Safe to call when nothing is armed.
@@ -48,6 +70,11 @@ fn arm_impl(app: AppHandle, key: super::LoneKey) -> Result<(), String> {
 }
 
 #[cfg(target_os = "macos")]
+fn request_access_impl() -> bool {
+    super::macos::request_access()
+}
+
+#[cfg(target_os = "macos")]
 fn disarm_impl() -> Result<(), String> {
     super::macos::disarm()
 }
@@ -55,6 +82,11 @@ fn disarm_impl() -> Result<(), String> {
 #[cfg(not(target_os = "macos"))]
 fn arm_impl(_app: AppHandle, _key: super::LoneKey) -> Result<(), String> {
     Err("Using a single key as the shortcut is only supported on macOS".into())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn request_access_impl() -> bool {
+    false // `lone_key_arm` then refuses with the macOS-only message
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -71,5 +103,20 @@ mod tests {
         assert_eq!(edge_name(Edge::Pressed), "pressed");
         assert_eq!(edge_name(Edge::Released), "released");
         assert_eq!(edge_name(Edge::Cancelled), "cancelled");
+    }
+
+    #[test]
+    fn access_is_requested_only_when_not_already_granted() {
+        use std::cell::Cell;
+        let asked = Cell::new(0);
+        let ask = |answer| {
+            asked.set(asked.get() + 1);
+            answer
+        };
+        assert!(request_if_needed(|| true, || ask(false)));
+        assert_eq!(asked.get(), 0, "granted: must not prompt");
+        assert!(!request_if_needed(|| false, || ask(false)));
+        assert_eq!(asked.get(), 1, "denied: asks exactly once");
+        assert!(request_if_needed(|| false, || ask(true)));
     }
 }

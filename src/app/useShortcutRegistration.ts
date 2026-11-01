@@ -19,7 +19,8 @@ interface RegistrationCallbacks {
  * `registeredRef` equal to what the OS actually holds (native re-binds its
  * lastKnownGood on refusal; `active: null` means that failed too). That combo
  * is the revert target, and it is broadcast as `active` so the Settings
- * recorder uses the same truth. The Settings status line reports refusals;
+ * recorder uses the same truth. A change here is a user save, so a lone key may
+ * ask for Input Monitoring (boot never does). The Settings status line reports refusals;
  * main only toasts (in words, never the raw error) when Settings is closed.
  */
 export function useShortcutRegistration(
@@ -43,7 +44,7 @@ export function useShortcutRegistration(
     boundShortcutRef.current = shortcut;
     let cancelled = false;
     void (async () => {
-      const outcome = await native.setShortcut(shortcut);
+      const outcome = await native.setShortcut(shortcut, { userInitiated: true });
       // Record what the OS holds even if a newer change superseded us.
       if (outcome.ok) registeredRef.current = shortcut;
       const previous = registeredRef.current;

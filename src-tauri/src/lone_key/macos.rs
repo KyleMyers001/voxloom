@@ -1,6 +1,8 @@
 //! macOS glue: a listen-only CGEventTap that feeds `LoneKeyMachine`.
-//! Listen-only needs Input Monitoring, not Accessibility. It never prompts:
-//! it preflights and reports (same stance as `cancel_scope::macos`).
+//! Listen-only needs Input Monitoring, not Accessibility. `arm` never prompts:
+//! it preflights and reports (same stance as `cancel_scope::macos`). The one
+//! prompt is `request_access`, which the webview calls when the user saves a
+//! lone key, never at launch.
 //! The tap and `arm` / `disarm` run on the main run loop. The callback never
 //! calls the sink: edges go to a delivery thread (see `delivery`), so
 //! nothing the app does with an edge can re-enter or free the tap.
@@ -71,6 +73,19 @@ fn on_main_thread() -> Result<(), String> {
     } else {
         Err("lone-key listener must run on the main thread".into())
     }
+}
+
+/// Ask for Input Monitoring if it is not granted yet. Returns whether it is
+/// granted *now*: the system prompt answers later, so a first request is
+/// normally `false`. Runs off the main thread (the call may wait on the
+/// system); it touches no tap state.
+pub fn request_access() -> bool {
+    // SAFETY: plain TCC queries; the request shows the system prompt at most
+    // once per install and never changes tap state.
+    super::commands::request_if_needed(
+        || unsafe { CGPreflightListenEventAccess() },
+        || unsafe { CGRequestListenEventAccess() },
+    )
 }
 
 /// Start listening for `key`, replacing any earlier listener.

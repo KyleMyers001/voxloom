@@ -34,6 +34,7 @@ const COMMANDS: &[&str] = &[
     "hold_release_disarm",
     "lone_key_arm",
     "lone_key_disarm",
+    "lone_key_request_access",
     "overlay_ensure",
     "overlay_hide",
     "overlay_show",

@@ -9,7 +9,7 @@ import { beginRecordingSuspend, resetRecordingSuspend } from '../../src/services
 
 afterEach(() => resetRecordingSuspend());
 
-function setup(opts: { armError?: string } = {}) {
+function setup(opts: { armError?: string | ((token: string) => string | undefined); granted?: boolean; requestThrows?: boolean } = {}) {
   const calls: string[] = [];
   const gestures: ShortcutGesture[] = [];
   let pluginEdge: ((edge: 'pressed' | 'released') => void) | null = null;
@@ -23,7 +23,13 @@ function setup(opts: { armError?: string } = {}) {
   const loneKey: LoneKeyApi = {
     async arm(token) {
       calls.push(`arm ${token}`);
-      if (opts.armError) throw new Error(opts.armError);
+      const error = typeof opts.armError === 'function' ? opts.armError(token) : opts.armError;
+      if (error) throw new Error(error);
+    },
+    async requestAccess() {
+      calls.push('requestAccess');
+      if (opts.requestThrows) throw new Error('boom');
+      return opts.granted ?? false;
     },
     async disarm() { calls.push('disarm'); },
     async listen(onEdge) { loneEdge = onEdge; return () => { loneEdge = null; }; },
@@ -212,5 +218,54 @@ describe('a lone key as the shortcut', () => {
     await t.controller.dispose();
     expect(t.calls).toEqual(['disarm']);
     expect(t.listening()).toBe(false);
+  });
+
+  describe('Input Monitoring request', () => {
+    it('is asked for once, before arming, when the user saves a lone key', async () => {
+      const t = setup();
+      await t.controller.setShortcut('AltRight', { userInitiated: true });
+      expect(t.calls).toEqual(['requestAccess', 'arm AltRight']);
+    });
+
+    it('is not asked for at boot (no user action)', async () => {
+      const t = setup();
+      await t.controller.setShortcut('AltRight');
+      await t.controller.setShortcut('F13', { userInitiated: false });
+      expect(t.calls).not.toContain('requestAccess');
+    });
+
+    it('is not asked for when a combo is saved, or the lone key is already active', async () => {
+      const t = setup();
+      await t.controller.setShortcut('Ctrl + Shift + Space', { userInitiated: true });
+      await t.controller.setShortcut('AltRight', { userInitiated: true });
+      t.calls.length = 0;
+      await t.controller.setShortcut('AltRight', { userInitiated: true });
+      expect(t.calls).toEqual([]);
+      await t.controller.setShortcut('Ctrl + Shift + Space', { userInitiated: true });
+      expect(t.calls.filter((c) => c === 'requestAccess')).toEqual([]);
+    });
+
+    it('is not asked for again when a refused save restores the previous lone key', async () => {
+      const t = setup({ armError: (token) => (token === 'F13' ? 'Input Monitoring permission is needed' : undefined) });
+      await t.controller.setShortcut('AltRight');
+      t.calls.length = 0;
+      const outcome = await t.controller.setShortcut('F13', { userInitiated: true });
+      expect(outcome).toMatchObject({ active: 'AltRight', ok: false });
+      expect(t.calls.filter((c) => c === 'requestAccess')).toHaveLength(1);
+    });
+
+    it('still arms (and reports the refusal) when the request says not yet', async () => {
+      const t = setup({ armError: 'Input Monitoring permission is needed', granted: false });
+      const outcome = await t.controller.setShortcut('F13', { userInitiated: true });
+      expect(t.calls).toEqual(['requestAccess', 'arm F13']);
+      expect(outcome).toMatchObject({ ok: false });
+    });
+
+    it('survives a request that throws', async () => {
+      const t = setup({ requestThrows: true });
+      const outcome = await t.controller.setShortcut('AltRight', { userInitiated: true });
+      expect(t.calls).toEqual(['requestAccess', 'arm AltRight']);
+      expect(outcome).toMatchObject({ active: 'AltRight', ok: true });
+    });
   });
 });

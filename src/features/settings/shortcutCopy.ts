@@ -91,9 +91,16 @@ function loneReason(combo: string, mac: boolean) {
     : `${L(combo, mac)} on its own only works on macOS.`;
 }
 
-/** The recorder's line when a lone key was refused and the previous shortcut stays. */
-export const loneRefusedText = (combo: string, kept: string, mac = isMacPlatform()) =>
-  `${loneReason(combo, mac)} Kept ${L(kept, mac)}.`;
+/**
+ * The recorder's line when a lone key was refused and the previous shortcut
+ * stays. macOS asks once on save and answers after we've already refused, so
+ * it says to record the key again; a relaunch is the fallback because whether
+ * a running app sees a fresh grant is not something we can promise.
+ */
+export const loneRefusedText = (combo: string, kept: string, mac = isMacPlatform()) => {
+  const again = mac ? ' Then record it again; relaunch Voxloom if that doesn\'t help.' : '';
+  return `${loneReason(combo, mac)}${again} Kept ${L(kept, mac)}.`;
+};
 
 /** Toast (Settings closed) when the new shortcut was refused and another one is now active. */
 export function usingInsteadText(combo: string, active: string, mac = isMacPlatform()) {
