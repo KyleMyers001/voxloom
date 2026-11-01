@@ -28,6 +28,13 @@ mod tests {
     }
 
     #[test]
+    fn known_terminal_is_false_without_a_resolvable_pid_or_for_this_binary() {
+        assert!(!known_terminal(None));
+        assert!(!known_terminal(Some(-1)));
+        assert!(!known_terminal(Some(std::process::id() as i32)));
+    }
+
+    #[test]
     fn resolved_non_allowlisted_process_is_known_non_terminal_not_unknown() {
         // Query only this test process: no app launch, foreground read or GUI.
         let pid = std::process::id() as i32;

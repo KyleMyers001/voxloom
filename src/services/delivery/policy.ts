@@ -37,7 +37,9 @@ export function planDelivery(
       : 'insert not available');
 
   if (clipboardFallback) {
-    return { action: 'copy', reason, kind, terminal: validated.knownTerminal === true };
+    // A secure field keeps its own reason, even inside a terminal.
+    const terminal = validated.knownTerminal === true && kind !== 'secure';
+    return { action: 'copy', reason, kind, terminal };
   }
   return { action: 'fail', reason, kind };
 }

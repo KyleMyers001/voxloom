@@ -7,6 +7,7 @@
 
 use super::host::app_bundle_root;
 use super::terminal::apple_terminal_host;
+use crate::delivery::types::TargetSnapshotDto;
 
 /// Third-party terminal bundle names (lowercase, without `.app`).
 /// iTerm2 ships as `iTerm.app`.
@@ -29,9 +30,64 @@ pub fn is_known_terminal(exe_path: &str) -> bool {
     TERMINAL_BUNDLES.contains(&name.as_str())
 }
 
+/// Set the display flag on a snapshot. The pid is the focused element's app,
+/// else the frontmost app (AX gave no focus, e.g. no AX text or no permission).
+/// `is_terminal` resolves a pid to an executable and calls `is_known_terminal`.
+pub fn flag_terminal(
+    mut snap: TargetSnapshotDto,
+    frontmost_pid: impl FnOnce() -> Option<i32>,
+    is_terminal: impl FnOnce(Option<i32>) -> bool,
+) -> TargetSnapshotDto {
+    snap.known_terminal = is_terminal(snap.app_pid.or_else(frontmost_pid));
+    snap
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::delivery::decide::test_support::target;
+
+    #[test]
+    fn flag_uses_the_focused_pid_else_the_frontmost_pid() {
+        let seen = |snap, front: Option<i32>| {
+            let mut asked = None;
+            let out = flag_terminal(
+                snap,
+                || front,
+                |pid| {
+                    asked = Some(pid);
+                    pid == Some(7)
+                },
+            );
+            (asked.unwrap(), out.known_terminal)
+        };
+        // Focused app wins over the frontmost one.
+        assert_eq!(
+            seen(target("insertable", Some(7), None), Some(9)),
+            (Some(7), true)
+        );
+        assert_eq!(
+            seen(target("insertable", Some(9), None), Some(7)),
+            (Some(9), false)
+        );
+        // No AX pid: fall back to the frontmost app.
+        assert_eq!(
+            seen(target("unavailable", None, None), Some(7)),
+            (Some(7), true)
+        );
+        assert_eq!(
+            seen(target("unavailable", None, None), Some(9)),
+            (Some(9), false)
+        );
+        assert_eq!(seen(target("unavailable", None, None), None), (None, false));
+    }
+
+    #[test]
+    fn flag_overwrites_a_stale_value() {
+        let mut snap = target("unavailable", None, None);
+        snap.known_terminal = true;
+        assert!(!flag_terminal(snap, || None, |_| false).known_terminal);
+    }
 
     #[test]
     fn apple_terminal_and_the_five_named_terminals_are_known() {

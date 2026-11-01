@@ -4,6 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::ax::*;
 use super::{host, registry, web_ax};
+use crate::delivery::decide::known_terminal::flag_terminal;
 use crate::delivery::decide::{classify_role, effective_role, element_token};
 use crate::delivery::types::TargetSnapshotDto;
 
@@ -106,9 +107,11 @@ pub fn build_snapshot(
 /// unavailable snapshots (no AX focus or permission), where a terminal is the
 /// likeliest reason for Copy and the app pid is not known from AX.
 pub fn snapshot_at(stage: &str, register: bool) -> TargetSnapshotDto {
-    let mut snap = snapshot_unflagged(stage, register);
-    snap.known_terminal = host::known_terminal(snap.app_pid.or_else(host::frontmost_pid));
-    snap
+    flag_terminal(
+        snapshot_unflagged(stage, register),
+        host::frontmost_pid,
+        host::known_terminal,
+    )
 }
 
 fn snapshot_unflagged(stage: &str, register: bool) -> TargetSnapshotDto {

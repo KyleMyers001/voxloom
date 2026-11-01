@@ -81,6 +81,16 @@ describe('terminal Copy hint', () => {
     expect(platform.clipboardWrite).toHaveBeenCalledWith('hello');
   });
 
+  it('a secure field in a known terminal keeps the secure-field message', async () => {
+    const secure = terminal({
+      insertable: false, kind: 'secure', reason: 'secure field — insert skipped',
+    });
+    expect(planDelivery(secure, true)).toMatchObject({ action: 'copy', terminal: false });
+    const outcome = await deliver(secure);
+    expect(outcome.status).toBe('copied');
+    expect(outcome.message).toBe('Copied — secure field — insert skipped');
+  });
+
   it('a terminal whose AX focus is unavailable gets the hint too', async () => {
     const outcome = await deliver(terminal({ kind: 'unavailable', reason: 'Accessibility focus unavailable' }));
     expect(outcome.message).toBe('Copied, press ⌘V');
@@ -130,6 +140,7 @@ describe('terminal Copy hint', () => {
       insertText: vi.fn().mockResolvedValue({ detail: 'read-back differs', typed: false, unverified: true }),
     });
     expect(unverified.message).toBe('May have been inserted — also copied');
+    expect(unverified.message).not.toContain('press ⌘V');
     // Terminal dispatch (Terminal.app Unicode route): unchanged.
     const dispatched = await deliver(snap({ knownTerminal: true }), {
       insertText: vi.fn().mockResolvedValue({
