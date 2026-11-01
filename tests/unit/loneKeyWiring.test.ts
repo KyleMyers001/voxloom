@@ -148,6 +148,18 @@ describe('a lone key as the shortcut', () => {
     expect(t.gestures).toEqual(['hold-start', 'hold-finish']);
   });
 
+  it('cancelled on the second press of a double-tap finishes the latch it started', async () => {
+    const t = setup();
+    await t.controller.setShortcut('AltRight');
+    t.lone('pressed'); t.lone('released');
+    t.advance(100);
+    t.lone('pressed'); // latch-start: dictation is running
+    t.lone('released'); t.lone('cancelled'); // a chord key joined that press
+    expect(t.gestures).toEqual(['latch-start', 'latch-finish']);
+    t.lone('pressed'); t.lone('released'); // the next tap must not think it is a latch
+    expect(t.gestures).toEqual(['latch-start', 'latch-finish']);
+  });
+
   it('ignores edges while a combo, or nothing, is the shortcut', async () => {
     const t = setup();
     await t.controller.setShortcut('Ctrl + Shift + Space');

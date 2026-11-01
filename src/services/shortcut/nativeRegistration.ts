@@ -152,8 +152,10 @@ export function createNativeShortcutController({
   void loneKey.listen((edge) => {
     if (disposed || active === null || !isLoneKey(active)) return;
     if (edge === 'cancelled') {
+      // An active latch (the double-tap's second press survived the debounce
+      // before a chord key joined it) gets its finish, so capture stops.
       holdWatch.disarm();
-      machine.resetPartial();
+      machine.finishActive();
       return;
     }
     machine.handle(edge);
