@@ -9,8 +9,9 @@
 //! button, or a second modifier (or one already held at press time). A dirty
 //! press that never emitted Pressed emits nothing. One that did emits
 //! `Released` (the gesture machine finishes a hold normally) then
-//! `Cancelled` (slice 3 maps it to `resetPartial`, so the interrupted tap is
-//! not remembered as the first half of a double-tap).
+//! `Cancelled` (the app maps it to `finishActive`: an active hold or latch
+//! gets its finish and the rest is reset, so the interrupted tap is not
+//! remembered as the first half of a double-tap).
 //!
 //! Other keys still down are tracked (bounded, expiring), so rolling from a
 //! held key into our key (E held, then Option tapped) is a chord too.

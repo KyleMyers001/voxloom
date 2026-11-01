@@ -5,19 +5,25 @@ import type { MutableRefObject } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 const emitted = vi.hoisted(() => [] as unknown[]);
+const retry = vi.hoisted(() => ({ handler: null as null | ((s: string) => void) }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), isTauri: () => true }));
 vi.mock('../../src/services/shortcut/bindingEvents', () => ({
   emitShortcutBound: (p: unknown) => { emitted.push(p); },
+  listenShortcutRetry: async (handler: (s: string) => void) => {
+    retry.handler = handler;
+    return () => { retry.handler = null; };
+  },
 }));
 
 import { useShortcutRegistration } from '../../src/app/useShortcutRegistration';
 import type { NativeShortcutController, RegisterOutcome } from '../../src/services/shortcut';
 
-function setup(outcome: RegisterOutcome, settingsOpen: boolean) {
+function setup(outcome: RegisterOutcome, settingsOpen: boolean, registered: string | null = 'Ctrl + Shift + Space') {
   emitted.length = 0;
+  retry.handler = null;
   const native = { setShortcut: vi.fn(async () => outcome) } as unknown as NativeShortcutController;
   const nativeRef = { current: native } as MutableRefObject<NativeShortcutController | null>;
-  const registeredRef = { current: 'Ctrl + Shift + Space' } as MutableRefObject<string | null>;
+  const registeredRef = { current: registered } as MutableRefObject<string | null>;
   const errors: string[] = [];
   const reverts: string[] = [];
   const callbacksRef = { current: {
@@ -77,5 +83,37 @@ describe('useShortcutRegistration', () => {
     expect(native.setShortcut).not.toHaveBeenCalled();
     await act(async () => hook.rerender({ shortcut: 'F13' }));
     expect(native.setShortcut).toHaveBeenCalledWith('F13', { userInitiated: true });
+  });
+
+  describe('Settings re-saves a saved shortcut that nothing holds (refused launch)', () => {
+    const refused: RegisterOutcome = {
+      active: null, attempted: 'F13', lastKnownGood: null, message: 'Input Monitoring permission is needed', ok: false,
+    };
+
+    it('tries again as a user save, and says so to every window', async () => {
+      const { native } = setup(refused, true, null);
+      await waitFor(() => expect(retry.handler).not.toBeNull());
+      await act(async () => retry.handler!('Ctrl + Shift + Space'));
+      expect(native.setShortcut).toHaveBeenCalledWith('Ctrl + Shift + Space', { userInitiated: true });
+      expect(emitted).toEqual([expect.objectContaining({ active: null, ok: false, shortcut: 'Ctrl + Shift + Space' })]);
+    });
+
+    it('ignores a retry for a shortcut that is already active, or is not the saved one', async () => {
+      const { native } = setup(refused, true, 'Ctrl + Shift + Space');
+      await waitFor(() => expect(retry.handler).not.toBeNull());
+      await act(async () => retry.handler!('Ctrl + Shift + Space'));
+      await act(async () => retry.handler!('F13'));
+      expect(native.setShortcut).not.toHaveBeenCalled();
+    });
+
+    it('a granted retry makes it active again', async () => {
+      const { native, registeredRef } = setup(
+        { active: 'Ctrl + Shift + Space', lastKnownGood: 'Ctrl + Shift + Space', ok: true }, true, null,
+      );
+      await waitFor(() => expect(retry.handler).not.toBeNull());
+      await act(async () => retry.handler!('Ctrl + Shift + Space'));
+      expect(native.setShortcut).toHaveBeenCalledTimes(1);
+      expect(registeredRef.current).toBe('Ctrl + Shift + Space');
+    });
   });
 });

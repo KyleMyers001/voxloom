@@ -11,6 +11,7 @@ import { setActiveShortcut } from './activeShortcut';
 
 export const SHORTCUT_BOUND_EVENT = 'shortcut:bound';
 export const SHORTCUT_QUERY_EVENT = 'shortcut:query';
+export const SHORTCUT_RETRY_EVENT = 'shortcut:retry';
 
 export interface ShortcutBoundPayload {
   /** Settings-format shortcut that was attempted. */
@@ -55,6 +56,23 @@ export async function answerShortcutQueries(): Promise<() => void> {
 /** Settings window: ask main to replay the last result. */
 export function queryShortcutBound(): void {
   emitEvent(SHORTCUT_QUERY_EVENT, null);
+}
+
+/**
+ * Settings window: the user saved the shortcut that is already saved but not
+ * active (a refused launch keeps it). Settings can't change the value, so ask
+ * main to try binding it again. Main answers with `shortcut:bound` as usual.
+ */
+export function emitShortcutRetry(shortcut: string): void {
+  emitEvent(SHORTCUT_RETRY_EVENT, shortcut);
+}
+
+/** Main window: handle a retry request from Settings. */
+export async function listenShortcutRetry(handler: (shortcut: string) => void): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  return listen<string>(SHORTCUT_RETRY_EVENT, (e) => {
+    if (typeof e.payload === 'string') handler(e.payload);
+  });
 }
 
 export async function listenShortcutBound(

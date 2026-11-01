@@ -29,7 +29,7 @@ export function isLoneModifier(code: string): code is LoneModifierCode {
   return Object.hasOwn(MODIFIERS, code);
 }
 
-/** Left-hand counterpart of a right-hand lone modifier, if `code` is one. */
+/** True for a left-hand modifier (Alt/Control/Meta/Shift Left), which can't be a shortcut on its own. */
 export function isLeftModifier(code: string): boolean {
   return ['AltLeft', 'ControlLeft', 'MetaLeft', 'ShiftLeft'].includes(code);
 }

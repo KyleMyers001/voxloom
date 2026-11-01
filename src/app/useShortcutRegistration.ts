@@ -1,7 +1,7 @@
 import { isTauri } from '@tauri-apps/api/core';
 import { useEffect, useRef, type MutableRefObject } from 'react';
 import type { NativeShortcutController } from '../services/shortcut';
-import { emitShortcutBound } from '../services/shortcut/bindingEvents';
+import { emitShortcutBound, listenShortcutRetry } from '../services/shortcut/bindingEvents';
 import { isSettingsWindowOpen } from '../services/settingsWindow';
 import { noneActiveText, usingInsteadText } from '../features/settings/shortcutCopy';
 
@@ -32,6 +32,40 @@ export function useShortcutRegistration(
   ready = true,
 ) {
   const boundShortcutRef = useRef<string | null>(null);
+  const latestRef = useRef(shortcut);
+  latestRef.current = shortcut;
+
+  /** One bind attempt for `target`; its outcome goes to every window and, if refused, reverts. */
+  const attemptRef = useRef<(target: string, cancelled: () => boolean) => Promise<void>>(async () => {});
+  attemptRef.current = async (target, cancelled) => {
+    const native = nativeRef.current;
+    if (!native) return;
+    // A save by the user (a change here, or Settings asking to retry), so a
+    // lone key may ask for Input Monitoring.
+    const outcome = await native.setShortcut(target, { userInitiated: true });
+    // Record what the OS holds even if a newer change superseded us.
+    if (outcome.ok) registeredRef.current = target;
+    const previous = registeredRef.current;
+    // Refused and restore failed: nothing is registered any more.
+    if (!outcome.ok && outcome.active === null) registeredRef.current = null;
+    const active = registeredRef.current;
+    emitShortcutBound({
+      active, message: outcome.ok ? undefined : outcome.message, ok: outcome.ok, previous, shortcut: target,
+    });
+    if (cancelled() || outcome.ok) return;
+    // Don't keep (or retry next launch) a combo the OS refused. With nothing
+    // active, keep the previous combo so the next launch retries it.
+    const revertTo = active ?? previous;
+    if (revertTo !== null && revertTo !== target) {
+      boundShortcutRef.current = revertTo;
+      callbacksRef.current.onShortcutRevert?.(revertTo);
+    }
+    if (await settingsOpen()) return;
+    callbacksRef.current.onShortcutError?.(active === null
+      ? noneActiveText(target, previous)
+      : usingInsteadText(target, active));
+  };
+
   useEffect(() => {
     const native = nativeRef.current;
     // Not before the saved shortcut loads: the boot bind owns that one.
@@ -43,32 +77,29 @@ export function useShortcutRegistration(
     if (boundShortcutRef.current === shortcut) return;
     boundShortcutRef.current = shortcut;
     let cancelled = false;
-    void (async () => {
-      const outcome = await native.setShortcut(shortcut, { userInitiated: true });
-      // Record what the OS holds even if a newer change superseded us.
-      if (outcome.ok) registeredRef.current = shortcut;
-      const previous = registeredRef.current;
-      // Refused and restore failed: nothing is registered any more.
-      if (!outcome.ok && outcome.active === null) registeredRef.current = null;
-      const active = registeredRef.current;
-      emitShortcutBound({
-        active, message: outcome.ok ? undefined : outcome.message, ok: outcome.ok, previous, shortcut,
-      });
-      if (cancelled || outcome.ok) return;
-      // Don't keep (or retry next launch) a combo the OS refused. With nothing
-      // active, keep the previous combo so the next launch retries it.
-      const target = active ?? previous;
-      if (target !== null && target !== shortcut) {
-        boundShortcutRef.current = target;
-        callbacksRef.current.onShortcutRevert?.(target);
-      }
-      if (await settingsOpen()) return;
-      callbacksRef.current.onShortcutError?.(active === null
-        ? noneActiveText(shortcut, previous)
-        : usingInsteadText(shortcut, active));
-    })();
+    void attemptRef.current(shortcut, () => cancelled);
     return () => {
       cancelled = true;
     };
-  }, [shortcut, nativeRef, registeredRef, callbacksRef, settingsOpen, ready]);
+  }, [shortcut, nativeRef, ready]);
+
+  // Settings re-saved the saved shortcut while nothing holds it (a refused
+  // launch keeps it, and an unchanged value never reaches the effect above).
+  useEffect(() => {
+    if (!isTauri() || !ready) return;
+    let stopped = false;
+    let unlisten: (() => void) | null = null;
+    void listenShortcutRetry((target) => {
+      if (stopped || target !== latestRef.current || registeredRef.current === target) return;
+      boundShortcutRef.current = target;
+      void attemptRef.current(target, () => stopped);
+    }).then((fn) => {
+      if (stopped) fn();
+      else unlisten = fn;
+    }).catch(() => undefined);
+    return () => {
+      stopped = true;
+      unlisten?.();
+    };
+  }, [registeredRef, ready]);
 }

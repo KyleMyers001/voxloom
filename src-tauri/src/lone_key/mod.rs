@@ -1,10 +1,10 @@
-//! BUS-46 slice 2: native detection of a lone key as the whole dictation
+//! BUS-46: native detection of a lone key as the whole dictation
 //! shortcut (a right-hand modifier or F13-F19). The global-shortcut plugin
 //! cannot register these, so a listen-only event tap feeds a pure state
 //! machine that emits the same Pressed/Released edges the plugin does.
 //!
-//! Slice 3 wires it to the app: `commands` (arm / disarm / the edge event),
-//! with edges delivered off the tap callback (`delivery`).
+//! `commands` wire it to the app (arm / disarm / request access / the edge
+//! event), with edges delivered off the tap callback (`delivery`).
 //!
 //! macOS only. Elsewhere `arm` refuses, and the pure parts below are built
 //! (and tested) but unused, hence the `dead_code` allows.

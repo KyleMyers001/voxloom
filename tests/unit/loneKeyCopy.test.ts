@@ -26,13 +26,13 @@ describe('lone key refusal copy', () => {
 
   it('the launch toast covers both branches of a lone key and of a combo', () => {
     expect(bootRefusedText('AltRight', null, true))
-      .toBe(`⌥ (right) needs Input Monitoring. Allow Voxloom in ${IM}. No shortcut is active. Record one in Settings.`);
+      .toBe(`⌥ (right) needs Input Monitoring. Allow Voxloom in ${IM}. No shortcut is active. Record it again in Settings.`);
     expect(bootRefusedText('F13', 'Ctrl + Shift + Space', false))
-      .toBe('F13 on its own only works on macOS. Using Ctrl+Shift+Space instead. Record one in Settings.');
+      .toBe('F13 on its own only works on macOS. Using Ctrl+Shift+Space instead. Record it again in Settings.');
     expect(bootRefusedText('Ctrl + Alt + K', null, true))
-      .toBe('⌃⌥K is in use by another app. No shortcut is active. Record one in Settings.');
+      .toBe('⌃⌥K is in use by another app. No shortcut is active. Record it again in Settings.');
     expect(bootRefusedText('Ctrl + Alt + K', 'Alt + J', true))
-      .toBe('⌃⌥K is in use by another app. Using ⌥J instead. Record one in Settings.');
+      .toBe('⌃⌥K is in use by another app. Using ⌥J instead. Record it again in Settings.');
   });
 
   it('with nothing active, a lone key keeps its reason; a combo keeps the old line', () => {

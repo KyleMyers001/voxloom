@@ -112,5 +112,6 @@ export function usingInsteadText(combo: string, active: string, mac = isMacPlatf
 export function bootRefusedText(combo: string, active: string | null | undefined, mac = isMacPlatform()) {
   const why = isLoneKey(combo) ? loneReason(combo, mac) : `${L(combo, mac)} is in use by another app.`;
   const now = active ? ` Using ${L(active, mac)} instead.` : ' No shortcut is active.';
-  return `${why}${now} Record one in Settings.`;
+  // The key stays saved, so recording it again retries it.
+  return `${why}${now} Record it again in Settings.`;
 }

@@ -98,7 +98,7 @@ describe('boot binding waits for the saved shortcut', () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(native.setShortcut.mock.calls).toEqual([[SAVED]]);
     expect(revert).not.toHaveBeenCalled();
-    expect(errors[0]).toMatch(/No shortcut is active\. Record one in Settings\.$/);
+    expect(errors[0]).toMatch(/No shortcut is active\. Record it again in Settings\.$/);
     expect(errors[0]).toMatch(/Input Monitoring|only works on macOS/);
     unmount();
   });
