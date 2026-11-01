@@ -5,7 +5,8 @@ import {
   HOLD_RELEASE_CARBON_GRACE_MS,
 } from './constants';
 import { toPluginHotkey } from './formatHotkey';
-import { isLoneKey, LONE_KEY_UNSUPPORTED } from './loneKey';
+import { isLoneKey } from './loneKey';
+import { createTauriLoneKeyApi } from './loneKeyBridge';
 import { createGestureMachine } from './gestureMachine';
 import { createTauriHoldReleaseApi } from './holdReleaseBridge';
 import { createHoldWatch } from './holdWatch';
@@ -34,6 +35,7 @@ export function createNativeShortcutController({
   doubleTapMs = DOUBLE_TAP_MS,
   holdMs = HOLD_MS,
   holdRelease = createTauriHoldReleaseApi(),
+  loneKey = createTauriLoneKeyApi(),
   onGesture,
   onRegisterFailure,
   onSuspendFailure,
@@ -52,6 +54,7 @@ export function createNativeShortcutController({
   let generation = 0;
   let context: ShortcutContext = 'product';
   let unlistenHoldRelease: (() => void) | null = null;
+  let unlistenLoneKey: (() => void) | null = null;
 
   const holdWatch = createHoldWatch({
     carbonReleaseGraceMs,
@@ -70,7 +73,8 @@ export function createNativeShortcutController({
       if (gesture === 'hold-start') {
         // Mac: HotKey Released often missing when modifiers lift first.
         // Not while a recorder records: that start is dropped downstream.
-        if (!isDictationSuspended()) holdWatch.arm();
+        // A lone key reports its own release (the tap), so no watch.
+        if (!isDictationSuspended() && !isLoneKey(active ?? '')) holdWatch.arm();
       } else if (
         gesture === 'hold-finish'
         || gesture === 'latch-start'
@@ -94,9 +98,13 @@ export function createNativeShortcutController({
 
   const binder: ShortcutBinder = {
     async register(hotkey) {
-      // BUS-46: no native listener for lone keys yet. Refusing here sends them
-      // through register-or-revert, which restores the previous shortcut.
-      if (isLoneKey(hotkey)) throw new Error(LONE_KEY_UNSUPPORTED);
+      // BUS-46: a lone key is listened for by the native tap, not the plugin.
+      // A refusal (no Input Monitoring, not macOS) goes through
+      // register-or-revert like a combo conflict does.
+      if (isLoneKey(hotkey)) {
+        await loneKey.arm(hotkey);
+        return;
+      }
       const gen = generation;
       await api.register(hotkey, (edge) => {
         if (disposed || gen !== generation) return;
@@ -117,6 +125,10 @@ export function createNativeShortcutController({
       });
     },
     async unregister(hotkey) {
+      if (isLoneKey(hotkey)) {
+        await loneKey.disarm();
+        return;
+      }
       await api.unregister(hotkey);
     },
   };
@@ -132,6 +144,25 @@ export function createNativeShortcutController({
       return;
     }
     unlistenHoldRelease = unlisten;
+  }).catch(() => undefined);
+
+  // Edges from the native lone-key tap drive the same gesture machine as the
+  // plugin's Pressed / Released. Dropped unless a lone key is the active
+  // shortcut (an edge already in flight when it was unbound or suspended).
+  void loneKey.listen((edge) => {
+    if (disposed || active === null || !isLoneKey(active)) return;
+    if (edge === 'cancelled') {
+      holdWatch.disarm();
+      machine.resetPartial();
+      return;
+    }
+    machine.handle(edge);
+  }).then((unlisten) => {
+    if (disposed) {
+      unlisten();
+      return;
+    }
+    unlistenLoneKey = unlisten;
   }).catch(() => undefined);
 
   // Serialize setShortcut / suspendBinding so boot (mount + Settings effects)
@@ -167,10 +198,12 @@ export function createNativeShortcutController({
       holdWatch.disarm();
       unlistenHoldRelease?.();
       unlistenHoldRelease = null;
+      unlistenLoneKey?.();
+      unlistenLoneKey = null;
       machine.dispose();
       generation += 1;
       try {
-        if (active) await api.unregister(active);
+        if (active) await binder.unregister(active);
         else await api.unregisterAll();
       } catch {
         // Best-effort shutdown unregister.

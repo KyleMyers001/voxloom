@@ -3,8 +3,7 @@ import { useEffect, useRef, type MutableRefObject } from 'react';
 import type { NativeShortcutController } from '../services/shortcut';
 import { emitShortcutBound } from '../services/shortcut/bindingEvents';
 import { isSettingsWindowOpen } from '../services/settingsWindow';
-import { isLoneKey } from '../services/shortcut/loneKey';
-import { inUseText, loneUnsupportedText, noneActiveText } from '../features/settings/shortcutCopy';
+import { noneActiveText, usingInsteadText } from '../features/settings/shortcutCopy';
 
 interface RegistrationCallbacks {
   onShortcutError?: (message: string) => void;
@@ -14,7 +13,7 @@ interface RegistrationCallbacks {
 /**
  * BUS-47: re-register when Settings' shortcut *changes* (native only).
  *
- * The mount effect owns the initial bind and seeds `registeredRef` from the
+ * The boot effect owns the initial bind and seeds `registeredRef` from the
  * boot outcome. Native setShortcut calls are serialized, so ok results arrive
  * in order; every ok is recorded *before* the cancelled check, which keeps
  * `registeredRef` equal to what the OS actually holds (native re-binds its
@@ -29,11 +28,13 @@ export function useShortcutRegistration(
   registeredRef: MutableRefObject<string | null>,
   callbacksRef: MutableRefObject<RegistrationCallbacks>,
   settingsOpen: () => Promise<boolean> = isSettingsWindowOpen,
+  ready = true,
 ) {
   const boundShortcutRef = useRef<string | null>(null);
   useEffect(() => {
     const native = nativeRef.current;
-    if (!native || !isTauri()) return;
+    // Not before the saved shortcut loads: the boot bind owns that one.
+    if (!native || !isTauri() || !ready) return;
     if (boundShortcutRef.current === null) {
       boundShortcutRef.current = shortcut;
       return;
@@ -63,10 +64,10 @@ export function useShortcutRegistration(
       if (await settingsOpen()) return;
       callbacksRef.current.onShortcutError?.(active === null
         ? noneActiveText(shortcut, previous)
-        : (isLoneKey(shortcut) ? loneUnsupportedText : inUseText)(shortcut, active));
+        : usingInsteadText(shortcut, active));
     })();
     return () => {
       cancelled = true;
     };
-  }, [shortcut, nativeRef, registeredRef, callbacksRef, settingsOpen]);
+  }, [shortcut, nativeRef, registeredRef, callbacksRef, settingsOpen, ready]);
 }

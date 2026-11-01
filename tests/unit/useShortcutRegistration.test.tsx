@@ -67,6 +67,6 @@ describe('useShortcutRegistration', () => {
       message: 'Could not bind (HotKey already registered)', ok: false,
     }, false);
     await act(async () => hook.rerender({ shortcut: 'Ctrl + Alt + B' }));
-    await waitFor(() => expect(errors).toEqual(['⌃⌥B is in use by another app. Kept ⌃⇧Space.']));
+    await waitFor(() => expect(errors).toEqual(['⌃⌥B is in use by another app. Using ⌃⇧Space instead.']));
   });
 });

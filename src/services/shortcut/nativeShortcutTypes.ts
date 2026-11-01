@@ -1,6 +1,7 @@
 import type { Scheduler, ShortcutGesture } from '../contracts';
 import type { GestureMachine } from './gestureMachine';
 import type { HoldReleaseApi } from './holdReleaseBridge';
+import type { LoneKeyApi } from './loneKeyBridge';
 import type { RegisterOutcome } from './registerOrRevert';
 import type { NativeShortcutApi } from './tauriShortcutApi';
 
@@ -34,6 +35,8 @@ export interface NativeShortcutControllerOptions {
   doubleTapMs?: number;
   holdMs?: number;
   holdRelease?: HoldReleaseApi;
+  /** BUS-46: native listener for a lone key as the shortcut. */
+  loneKey?: LoneKeyApi;
   onGesture: (gesture: ShortcutGesture) => void;
   onRegisterFailure?: (message: string) => void;
   /**

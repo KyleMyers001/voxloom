@@ -71,6 +71,7 @@ export function App() {
   );
 
   useShortcutGestures({
+    bootReady,
     dictation,
     dogfood: toGestureDogfoodBridge(dogfood),
     now,

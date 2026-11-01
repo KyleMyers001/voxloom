@@ -99,6 +99,7 @@ function makeOptions(overrides: {
   state?: AppState;
 } = {}) {
   return {
+    bootReady: true,
     dictation: overrides.dictation ?? makeDictation(),
     dogfood: overrides.dogfood ?? makeDogfood(),
     now: overrides.now ?? (() => 0),
@@ -399,7 +400,7 @@ describe('useShortcutGestures', () => {
       });
       rerender({ ...first, state: withShortcut('Ctrl + Alt + K') });
       await waitFor(() => expect(onShortcutRevert).toHaveBeenCalledWith('Ctrl + Shift + Space'));
-      expect(onShortcutError).toHaveBeenCalledWith('⌃⌥K is in use by another app. Kept ⌃⇧Space.');
+      expect(onShortcutError).toHaveBeenCalledWith('⌃⌥K is in use by another app. Using ⌃⇧Space instead.');
 
       // The reverted value doesn't trigger another registration.
       rerender({ ...first, state: withShortcut('Ctrl + Shift + Space') });
@@ -439,7 +440,7 @@ describe('useShortcutGestures', () => {
           lastKnownGood: 'Control+Shift+Space', message: 'Taken.', ok: false });
       });
       await waitFor(() => expect(reverts).toEqual(['Ctrl + Shift + Space']));
-      expect(errors).toEqual(['⌃⌥K is in use by another app. Kept ⌃⇧Space.']);
+      expect(errors).toEqual(['⌃⌥K is in use by another app. Using ⌃⇧Space instead.']);
       unmount();
     });
     it('BUS-47: fast A then B, A ok lands late, B refused: reverts to A (what native holds)', async () => {

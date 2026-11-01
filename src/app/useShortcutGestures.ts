@@ -61,6 +61,13 @@ export interface GestureDogfoodBridge {
 }
 
 interface GestureOptions {
+  /**
+   * Durable settings have loaded, so `state.settings.shortcut` is the saved
+   * one. Binding waits for it: binding the default first made a refused saved
+   * shortcut get replaced by the default in the settings file (BUS-46 L4).
+   * True from the start when nothing is persisted (Vite).
+   */
+  bootReady: boolean;
   dictation: DictationLifecycle;
   /** Shared Home/gesture dogfood path (BUS-14 follow-up). */
   dogfood: GestureDogfoodBridge;
@@ -218,6 +225,35 @@ export function useShortcutGestures(options: GestureOptions) {
     const overlay = createOverlayBridge();
     overlayRef.current = overlay;
 
+    const update = () =>
+      controller.setContext(interactionContext(optionsRef.current));
+    const unsubscribe = subscribeModal(update);
+    const unanswer = subscribe(answerShortcutQueries);
+    // BUS-69: the OS hotkey would swallow a re-recording of the same combo.
+    const stopUnbind = unbindWhileRecording(controller, { scheduler: browserScheduler });
+
+    // Do NOT resetPartial / clear pending on document visibilitychange.
+    // ADR §3: other-app focus must keep an in-flight native hold alive;
+    // visibility hidden is normal while dictating into another app.
+    // (Document mock still resets on hide — it would miss keyup.)
+
+    return () => {
+      nativeControllerRef.current = null;
+      overlayRef.current = null;
+      unsubscribe();
+      unanswer();
+      stopUnbind();
+      pendingFinishRef.current?.clear();
+      void controller.dispose();
+      void overlay.dispose();
+    };
+  }, [options.now]);
+
+  // Boot bind, once the saved shortcut is known.
+  const { bootReady } = options;
+  useEffect(() => {
+    const controller = nativeControllerRef.current;
+    if (!isTauri() || !controller || !bootReady) return;
     let cancelled = false;
     void (async () => {
       const bootShortcut = optionsRef.current.state.settings.shortcut;
@@ -235,34 +271,13 @@ export function useShortcutGestures(options: GestureOptions) {
       }
       controller.setContext(interactionContext(optionsRef.current));
     })();
-
-    const update = () =>
-      controller.setContext(interactionContext(optionsRef.current));
-    const unsubscribe = subscribeModal(update);
-    const unanswer = subscribe(answerShortcutQueries);
-    // BUS-69: the OS hotkey would swallow a re-recording of the same combo.
-    const stopUnbind = unbindWhileRecording(controller, { scheduler: browserScheduler });
-
-    // Do NOT resetPartial / clear pending on document visibilitychange.
-    // ADR §3: other-app focus must keep an in-flight native hold alive;
-    // visibility hidden is normal while dictating into another app.
-    // (Document mock still resets on hide — it would miss keyup.)
-
     return () => {
       cancelled = true;
-      nativeControllerRef.current = null;
-      overlayRef.current = null;
-      unsubscribe();
-      unanswer();
-      stopUnbind();
-      pendingFinishRef.current?.clear();
-      void controller.dispose();
-      void overlay.dispose();
     };
-  }, [options.now]);
+  }, [options.now, bootReady]);
 
   useShortcutRegistration(
-    options.state.settings.shortcut, nativeControllerRef, registeredRef, optionsRef,
+    options.state.settings.shortcut, nativeControllerRef, registeredRef, optionsRef, isSettingsWindowOpen, bootReady,
   );
 
   useEffect(() => {
