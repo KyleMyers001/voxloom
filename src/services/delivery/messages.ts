@@ -42,6 +42,17 @@ export function deliveryMessage(
   return `${label} — ${detail}`;
 }
 
+/**
+ * Copy result when the frontmost app is a known terminal: nothing was typed,
+ * so say how to finish. (The HUD's own result line already names ⌘V.)
+ */
+export const TERMINAL_COPY_MESSAGE = 'Copied, press ⌘V';
+
+/** The Copied line: the terminal hint, else the generic "Copied — reason". */
+export function copiedMessage(reason: string, terminal: boolean): string {
+  return terminal ? TERMINAL_COPY_MESSAGE : deliveryMessage('copied', reason);
+}
+
 export function restoreSkippedSuffix(reason: string | null): string {
   if (!reason) return '';
   return ` (clipboard not restored: ${reason})`;

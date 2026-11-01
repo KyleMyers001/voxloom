@@ -91,6 +91,7 @@ pub fn build_snapshot(
         element_role: Some(role),
         insertable,
         kind: kind.into(),
+        known_terminal: false,
         reason: reason.map(str::to_string),
     };
     if unsafe { AXIsProcessTrusted() } == 0 {
@@ -101,7 +102,16 @@ pub fn build_snapshot(
     snap
 }
 
+/// Snapshot plus the display-only terminal flag. The flag also covers
+/// unavailable snapshots (no AX focus or permission), where a terminal is the
+/// likeliest reason for Copy and the app pid is not known from AX.
 pub fn snapshot_at(stage: &str, register: bool) -> TargetSnapshotDto {
+    let mut snap = snapshot_unflagged(stage, register);
+    snap.known_terminal = host::known_terminal(snap.app_pid.or_else(host::frontmost_pid));
+    snap
+}
+
+fn snapshot_unflagged(stage: &str, register: bool) -> TargetSnapshotDto {
     if unsafe { AXIsProcessTrusted() } == 0 {
         return TargetSnapshotDto::unavailable(
             &format!("Accessibility permission denied at {stage} — insert skipped"),

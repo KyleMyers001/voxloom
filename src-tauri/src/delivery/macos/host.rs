@@ -58,6 +58,12 @@ pub fn apple_terminal(pid: i32) -> bool {
     apple_terminal_identity(pid) == Some(true)
 }
 
+/// Display only (Copy hint); unknown identity is not a terminal.
+pub fn known_terminal(pid: Option<i32>) -> bool {
+    pid.and_then(executable_path)
+        .is_some_and(|exe| crate::delivery::decide::known_terminal::is_known_terminal(&exe))
+}
+
 pub fn unicode_typing_ok(pid: i32) -> bool {
     executable_path(pid)
         .is_some_and(|exe| unicode_typing_supported(&exe, |p| std::path::Path::new(p).exists()))

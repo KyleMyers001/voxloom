@@ -33,3 +33,17 @@ describe('tauri insertText errors', () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 });
+
+describe('tauri snapshot knownTerminal', () => {
+  const dto = {
+    appName: 'kitty', appPid: 7, capturedAt: 1, elementId: null, elementRole: null,
+    insertable: false, kind: 'unavailable', reason: 'no focus',
+  };
+
+  it('maps knownTerminal, and an older payload without it to false', async () => {
+    invoke.mockResolvedValueOnce({ ...dto, knownTerminal: true });
+    expect((await createTauriDeliveryAdapter(clipboard).snapshotTarget()).knownTerminal).toBe(true);
+    invoke.mockResolvedValueOnce(dto);
+    expect((await createTauriDeliveryAdapter(clipboard).validateTarget(target)).knownTerminal).toBe(false);
+  });
+});

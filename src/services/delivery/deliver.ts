@@ -4,6 +4,7 @@
  */
 
 import {
+  copiedMessage,
   deliveryMessage,
   MANUAL_RECOVERY_HINT,
   reasonForKind,
@@ -115,7 +116,12 @@ export async function deliverTranscript(
       if (!options.clipboardFallback) {
         return failOutcome(text, `insert failed: ${insertFail}`);
       }
-      return copyFallback(platform, text, `insert failed: ${insertFail}`);
+      return copyFallback(
+        platform,
+        text,
+        `insert failed: ${insertFail}`,
+        plan.target.knownTerminal === true,
+      );
     }
     if (report?.terminalDispatch) {
       // Posting is not input-buffer confirmation. Never copy or retry after
@@ -146,7 +152,7 @@ export async function deliverTranscript(
   }
 
   if (plan.action === 'copy') {
-    return copyFallback(platform, text, plan.reason);
+    return copyFallback(platform, text, plan.reason, plan.terminal);
   }
 
   return failOutcome(text, plan.reason);
@@ -185,6 +191,7 @@ async function copyFallback(
   platform: DeliverOptions['platform'],
   text: string,
   reason: string,
+  terminal = false,
 ): Promise<DeliveryOutcome> {
   try {
     await platform.clipboardWrite(text);
@@ -224,7 +231,7 @@ async function copyFallback(
   return {
     clipboardRestored: false,
     detail: reason,
-    message: deliveryMessage('copied', reason),
+    message: copiedMessage(reason, terminal),
     restoreSkippedReason: null,
     status: 'copied',
     text,
