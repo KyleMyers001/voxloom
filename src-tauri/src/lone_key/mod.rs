@@ -15,6 +15,8 @@ mod tap_ffi;
 mod tests;
 #[cfg(test)]
 mod tests_edge;
+#[cfg(test)]
+mod tests_pins;
 
 // CGEventFlags: generic modifier bits.
 const FLAG_SHIFT: u64 = 1 << 17;

@@ -105,34 +105,40 @@ impl LoneKeyMachine {
             self.held.clear();
             return out;
         }
-        let mut out = self.tick(now);
         let own = keycode == self.key.keycode;
-        match kind {
-            Kind::TapDisabled => {}
-            Kind::MouseDown => self.make_dirty(&mut out),
-            Kind::KeyDown | Kind::KeyRepeat if own && !self.key.is_modifier() => {
-                if kind == Kind::KeyDown {
-                    self.press(flags, now);
-                }
-            }
-            Kind::KeyDown | Kind::KeyRepeat => {
+        let own_f_key = own && !self.key.is_modifier();
+        let own_modifier = own && self.key.is_modifier();
+        // Something joined the press: decide before any tick. A press still
+        // waiting out the debounce (even if a stalled tick is late) is simply
+        // dropped; only an emitted Pressed needs closing.
+        let joined = match kind {
+            Kind::MouseDown => true,
+            Kind::KeyDown | Kind::KeyRepeat => !own_f_key,
+            Kind::FlagsChanged => !own_modifier && self.key.other_modifiers(flags) != 0,
+            Kind::KeyUp | Kind::TapDisabled => false,
+        };
+        let mut out = Vec::new();
+        if joined {
+            if matches!(kind, Kind::KeyDown | Kind::KeyRepeat) {
                 self.note_held(keycode, now);
-                self.make_dirty(&mut out);
             }
-            Kind::KeyUp if own && !self.key.is_modifier() => self.release(&mut out),
+            self.make_dirty(&mut out);
+            return out;
+        }
+        out.extend(self.tick(now));
+        match kind {
+            Kind::KeyDown if own_f_key => self.press(flags, now),
+            Kind::KeyUp if own_f_key => self.release(&mut out),
             Kind::KeyUp => self.held.retain(|&(held, _)| held != keycode),
-            Kind::FlagsChanged if own && self.key.is_modifier() => {
+            Kind::FlagsChanged if own_modifier => {
                 if flags & self.key.device_mask != 0 {
                     self.press(flags, now);
                 } else {
                     self.release(&mut out);
                 }
             }
-            Kind::FlagsChanged => {
-                if self.key.other_modifiers(flags) != 0 {
-                    self.make_dirty(&mut out);
-                }
-            }
+            // Own-key repeats, other modifier changes that add nothing.
+            _ => {}
         }
         out
     }
