@@ -1,6 +1,6 @@
 // BUS-47: in the app, the recorder waits for the main window's registration
 // result before announcing, and never keeps a combo the OS refused.
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -52,6 +52,19 @@ describe('ShortcutRecorder waits for native registration', () => {
     expect(field()).toHaveAccessibleName('Dictation shortcut, Control Shift Space');
     expect(status()).toHaveTextContent('⌃⌥K is in use by another app. Kept ⌃⇧Space.');
     expect(status()).not.toHaveTextContent('Control+Alt+K'); // no raw hotkey string
+  });
+
+  it('a refused lone key rolls back and says why, in words', async () => {
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+    const user = userEvent.setup();
+    await user.click(field());
+    act(() => { fireEvent.keyDown(window, { code: 'F13', key: 'F13' }); });
+    expect(onChange).toHaveBeenLastCalledWith('F13');
+    await report({ message: 'Input Monitoring permission is needed', ok: false, shortcut: 'F13' });
+    expect(onChange).toHaveBeenLastCalledWith(DEFAULT);
+    expect(status()).toHaveTextContent(/^F13 (needs Input Monitoring\. Allow Voxloom in System Settings › Privacy & Security › Input Monitoring|on its own only works on macOS)\. Kept /);
+    expect(status()).not.toHaveTextContent('Permission is needed'); // never the raw error
   });
 
   it('announces success only after the main window confirms', async () => {

@@ -1,4 +1,4 @@
-import { isLoneKey } from './loneKey';
+import { canonicalLoneKey } from './loneKey';
 
 /**
  * Convert Settings display shortcut (e.g. "Ctrl + Shift + Space") to the
@@ -7,7 +7,8 @@ import { isLoneKey } from './loneKey';
 export function toPluginHotkey(shortcut: string): string {
   // BUS-46: a lone key ("AltRight", "F13") is not a plugin chord. Hand it back
   // untouched so the binder can route it; it is never sent to the plugin.
-  if (isLoneKey(shortcut)) return shortcut.trim();
+  const lone = canonicalLoneKey(shortcut);
+  if (lone) return lone;
   const parts = shortcut
     .split('+')
     .map((part) => part.trim())
@@ -45,10 +46,22 @@ function physicalKey(code: string): string | null {
   return null;
 }
 
+const OWN_FLAG = {
+  AltRight: 'altKey',
+  ControlRight: 'ctrlKey',
+  MetaRight: 'metaKey',
+  ShiftRight: 'shiftKey',
+} as const;
+const MODIFIER_FLAGS = ['altKey', 'ctrlKey', 'metaKey', 'shiftKey'] as const;
+
 /**
  * Match a KeyboardEvent against a Settings-format shortcut string. The key is
  * compared by physical `code` (as the recorder stores it), so Option+K still
  * matches on layouts where `key` is "å"; `key` is a fallback for other codes.
+ *
+ * A lone key ("AltRight", "F13") matches its own code. A press also needs
+ * every other modifier up, like the native listener, so Shift+Right Option is
+ * not the shortcut. A release matches by code alone: it must always end a hold.
  */
 export function matchesShortcut(
   event: Pick<
@@ -56,9 +69,15 @@ export function matchesShortcut(
     'altKey' | 'code' | 'ctrlKey' | 'key' | 'metaKey' | 'shiftKey'
   >,
   shortcut: string,
+  phase: 'down' | 'up' = 'down',
 ): boolean {
-  // A lone key matches its own physical code, whatever else is held.
-  if (isLoneKey(shortcut)) return event.code === shortcut.trim();
+  const lone = canonicalLoneKey(shortcut);
+  if (lone) {
+    if (event.code !== lone) return false;
+    if (phase === 'up') return true;
+    const own = lone in OWN_FLAG ? OWN_FLAG[lone as keyof typeof OWN_FLAG] : null;
+    return MODIFIER_FLAGS.every((flag) => flag === own || !event[flag]);
+  }
   const parts = shortcut.toLowerCase().split('+').map((part) => part.trim());
   const key = parts.at(-1);
   const physical = physicalKey(event.code);

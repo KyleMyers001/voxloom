@@ -11,7 +11,7 @@ import {
 } from '../../services/shortcut/bindingEvents';
 import { isLoneKey } from '../../services/shortcut/loneKey';
 import {
-  inUseText, loneUnsupportedText, noneActiveText, successText, timeoutText,
+  inUseText, loneRefusedText, noneActiveText, successText, timeoutText,
 } from './shortcutCopy';
 
 export type Status = { tone: 'error' | 'info' | 'ok'; text: string } | null;
@@ -79,7 +79,7 @@ function onBound({ active, ok, previous, replay, shortcut }: ShortcutBoundPayloa
   setRecorderStatus({
     text: kept === null
       ? noneActiveText(shortcut, restore)
-      : (isLoneKey(shortcut) ? loneUnsupportedText : inUseText)(shortcut, target ?? shortcut),
+      : (isLoneKey(shortcut) ? loneRefusedText : inUseText)(shortcut, target ?? shortcut),
     tone: 'error',
   });
 }
