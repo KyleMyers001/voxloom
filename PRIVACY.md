@@ -90,7 +90,8 @@ read it. Turn fallback off in Settings if that matters to you.
 
 **Terminal paste route.** WezTerm, Alacritty, kitty, Ghostty and iTerm2 have no
 field Voxloom can write to, so when clipboard fallback is on and you dictate
-into one of them, Voxloom puts the transcript on the clipboard for about
+into one of them (only the terminal that was in front when you started
+dictating), Voxloom puts the transcript on the clipboard for about
 500 ms (`CLIPBOARD_RESTORE_DELAY_MS`), presses ⌘V, and then puts your previous
 clipboard back (every item and type), unless you copied something in the
 meantime. The transcript is marked transient (`org.nspasteboard.TransientType`),

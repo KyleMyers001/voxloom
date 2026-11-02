@@ -26,7 +26,6 @@ export function failOutcome(
   };
 }
 
-
 /**
  * Native write happened but could not be proven complete: the text may already
  * be (partly) in the field. Never claim Inserted, never imply nothing happened

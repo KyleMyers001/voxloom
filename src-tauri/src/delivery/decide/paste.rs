@@ -33,6 +33,18 @@ pub trait PasteHost {
     fn wait(&self, ms: u64);
 }
 
+/// The transient marker keeps clipboard managers from recording the
+/// transcript. If it cannot be attached, the transcript must not go on the
+/// clipboard at all: `write_transient` returns this `Err` before it touches
+/// the pasteboard, so nothing is pasted and the user's clipboard is untouched.
+pub fn require_marker(attached: bool) -> Result<(), String> {
+    if attached {
+        Ok(())
+    } else {
+        Err("could not mark the clipboard copy as transient — paste skipped".into())
+    }
+}
+
 pub fn paste_text<H: PasteHost>(host: &H, text: &str) -> Result<PasteReport, String> {
     check_terminal_text(text)?;
     host.preflight()?;

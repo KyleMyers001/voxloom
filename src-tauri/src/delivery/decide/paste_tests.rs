@@ -10,6 +10,9 @@ struct Fake {
     can_snapshot: bool,
     preflight_err: Option<&'static str>,
     write_err: bool,
+    /// The transient marker could not be attached (the real glue fails before
+    /// touching the pasteboard).
+    marker_err: bool,
     post_err: bool,
     restore_err: bool,
     /// Simulates the user copying something while ⌘V is being handled.
@@ -25,6 +28,7 @@ impl Fake {
             can_snapshot: true,
             preflight_err: None,
             write_err: false,
+            marker_err: false,
             post_err: false,
             restore_err: false,
             user_copies_during_wait: None,
@@ -54,6 +58,9 @@ impl PasteHost for Fake {
     }
     fn write_transient(&self, text: &str) -> Result<i64, String> {
         self.log("write");
+        if self.marker_err {
+            require_marker(false)?;
+        }
         self.write(text);
         if self.write_err {
             return Err("pasteboard write failed".into());
@@ -210,5 +217,21 @@ fn a_failed_write_is_an_error_and_puts_the_clipboard_back() {
         "pasteboard write failed"
     );
     assert!(!host.calls().contains(&"post".to_string()));
+    assert_eq!(*host.board.borrow(), "my notes");
+}
+
+#[test]
+fn a_transcript_that_cannot_be_marked_transient_is_never_pasted() {
+    assert!(require_marker(true).is_ok());
+    let mut host = Fake::new("my notes");
+    host.marker_err = true;
+    let error = paste_text(&host, "hello").unwrap_err();
+    assert!(
+        error.contains("transient") && error.ends_with("paste skipped"),
+        "{error}"
+    );
+    // No ⌘V, no wait, and the user's clipboard is exactly what it was.
+    assert!(!host.calls().contains(&"post".to_string()));
+    assert!(!host.calls().iter().any(|c| c.starts_with("wait")));
     assert_eq!(*host.board.borrow(), "my notes");
 }

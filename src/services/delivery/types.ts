@@ -42,7 +42,7 @@ export interface TargetSnapshot {
   pasteTerminal?: boolean;
   /**
    * App bundle path of the paste terminal (set iff `pasteTerminal`). With
-   * `appPid` it binds a paste to the terminal dictation started in.
+   * `appPid` it identifies the terminal (the binding itself is `PasteBinding`).
    */
   pasteApp?: string | null;
   /** Human-readable limitation or refusal reason (never empty for refusals). */
@@ -115,6 +115,16 @@ export interface PasteReport {
   restoreSkippedReason: string | null;
 }
 
+/**
+ * The paste terminal that was in front when dictation started (recording
+ * start, not completion): its pid and app bundle path. A paste goes out only
+ * if the terminal in front at delivery is this same process and app.
+ */
+export interface PasteBinding {
+  appPid: number;
+  pasteApp: string;
+}
+
 export interface ClipboardSnapshot {
   /** Plain text when read succeeded; null when unavailable / non-text. */
   text: string | null;
@@ -143,10 +153,17 @@ export interface DeliveryPlatformAdapter {
     intended: TargetSnapshot,
   ): Promise<InsertReport | void>;
   /**
-   * Paste into a terminal via the clipboard + ⌘V, then restore the clipboard
-   * (macOS only; absent elsewhere). Rejects when nothing was pasted.
+   * The paste terminal in front right now, or null when the frontmost app is
+   * not one (or this platform has no paste route). Called when dictation
+   * starts; cheap, never activates anything.
    */
-  pasteText?(text: string, intended: TargetSnapshot): Promise<PasteReport>;
+  pasteBinding?(): Promise<PasteBinding | null>;
+  /**
+   * Paste into the terminal that was in front when you started dictating, via
+   * the clipboard + ⌘V, then restore the clipboard (macOS only; absent
+   * elsewhere). Rejects when nothing was pasted, including when the app in front is not `bound`.
+   */
+  pasteText?(text: string, bound: PasteBinding): Promise<PasteReport>;
   /** Snapshot frontmost app + focused element insertability. */
   snapshotTarget(): Promise<TargetSnapshot>;
   /**
@@ -168,6 +185,11 @@ export interface DeliverOptions {
   platform: DeliveryPlatformAdapter;
   /** Completion-time snapshot; null means none taken (treat as unavailable). */
   intended: TargetSnapshot | null;
+  /**
+   * The paste terminal in front when dictation started. Without it (dictation
+   * started elsewhere, or it was not captured) nothing is ever pasted.
+   */
+  pasteBinding?: PasteBinding | null;
   /** Transcript text to deliver. */
   text: string;
 }

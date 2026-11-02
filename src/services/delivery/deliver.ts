@@ -79,10 +79,10 @@ export async function deliverTranscript(
   }
 
   if (!current()) return stale();
-  const plan = planDelivery(validated, options.clipboardFallback, intended);
+  const plan = planDelivery(validated, options.clipboardFallback, intended, options.pasteBinding);
 
   if (plan.action === 'paste') {
-    return pasteInTerminal(options, intended, current, stale);
+    return pasteInTerminal(options, plan.bound, current, stale);
   }
 
   if (plan.action === 'insert') {

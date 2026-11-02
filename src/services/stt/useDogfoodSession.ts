@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { SYSTEM_DEFAULT_DEVICE_ID } from '../capture/types';
 import type { UseCaptureStateResult } from '../capture/useCaptureState';
+import type { PasteBinding } from '../delivery';
 import { beginCancelScope } from '../shortcut/cancelScope';
 import { errorText } from './dogfoodModel';
 import type { DogfoodOrigin, DogfoodPhase, DogfoodViewActions } from './dogfoodPhase';
@@ -17,6 +18,8 @@ export interface DogfoodSessionInput {
   disposeNativeEngine: () => void;
   /** Resolves the selected model id or throws `model-missing`. */
   ensureModel: () => Promise<string>;
+  /** Looks up the paste terminal in front right now (never rejects). */
+  lookupPasteBinding: () => Promise<PasteBinding | null>;
   live: DogfoodLiveSession;
   phase: DogfoodPhase;
   preferredDeviceId?: string;
@@ -29,7 +32,7 @@ export interface DogfoodSessionControls {
 }
 
 export function useDogfoodSession({
-  actions, capture, disposeNativeEngine, ensureModel, live, phase, preferredDeviceId,
+  actions, capture, disposeNativeEngine, ensureModel, live, lookupPasteBinding, phase, preferredDeviceId,
 }: DogfoodSessionInput): DogfoodSessionControls {
   const captureRef = useRef(capture);
   captureRef.current = capture;
@@ -43,6 +46,9 @@ export function useDogfoodSession({
     // free. It falls back to raw text and still reaches History.
     live.processing?.abort();
     const session = ++live.session;
+    // First thing, before any await: the app in front at hold start is the
+    // only terminal a paste may later go to.
+    live.pasteBinding = lookupPasteBinding();
     const previous = live.cancellation;
     const retire = previous.settle?.() ?? previous.scope?.dispose().catch(() => {});
     const retirement = retire || live.retirement
@@ -122,7 +128,7 @@ export function useDogfoodSession({
       setPhase('error');
       announce(errorText(error));
     }
-  }, [actions, capture, ensureModel, live, preferredDeviceId]);
+  }, [actions, capture, ensureModel, live, lookupPasteBinding, preferredDeviceId]);
 
   const stop = useCallback(async () => {
     const session = live.session;
@@ -145,6 +151,7 @@ export function useDogfoodSession({
     live.processing?.abort();
     void live.cancellation.scope?.dispose().catch(() => {});
     live.session += 1;
+    live.pasteBinding = null;
     live.stopRequested = true;
     live.handledAudioId = null;
     setIntendedTarget(null);

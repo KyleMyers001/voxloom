@@ -24,10 +24,10 @@ use std::sync::Mutex;
 use ax::{copy_string_attr, release, AXIsProcessTrusted, CFTypeRef};
 use focus::{build_snapshot, focused_ui_element, snapshot_at};
 
-use super::decide::paste_target::check_paste_target;
+use super::decide::paste_target::{binding_for, check_paste_target};
 use super::decide::report::PasteReport;
 use super::decide::{check_insert_text, validate_snapshots, InsertPath, InsertReport};
-use super::types::TargetSnapshotDto;
+use super::types::{PasteBindingDto, TargetSnapshotDto};
 
 /// Serializes inserts (commands run off the main thread and may overlap).
 static INSERT_LOCK: Mutex<()> = Mutex::new(());
@@ -124,19 +124,31 @@ pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<InsertRep
     result
 }
 
+/// The paste terminal in front now, for `delivery_paste_binding`.
+pub fn paste_binding() -> Option<PasteBindingDto> {
+    let front = host::frontmost_pid();
+    binding_for(front, front.and_then(host::paste_app))
+}
+
 /// Terminal paste route (WezTerm, iTerm2, ...): clipboard + one ⌘V, then the
-/// user's clipboard back. `intended` is the recording-start snapshot: the
-/// frontmost process must be that same terminal. `Err` = nothing pasted.
-pub fn paste_text(text: &str, intended: &TargetSnapshotDto) -> Result<PasteReport, String> {
-    // Bound to the terminal dictation started in, by pid and app path.
+/// user's clipboard back. `bound` is the terminal that was in front when
+/// dictation started: the frontmost process must be that same terminal (pid
+/// and app path). `Err` = nothing pasted.
+pub fn paste_text(text: &str, bound: &PasteBindingDto) -> Result<PasteReport, String> {
     let front = host::frontmost_pid();
     let front_app = front.and_then(host::paste_app);
-    let pid = check_paste_target(intended, front, front_app.as_deref())?;
+    let pid = check_paste_target(bound, front, front_app.as_deref())?;
     // Held through the clipboard restore, so two inserts never interleave.
     let _serial = INSERT_LOCK
         .lock()
         .map_err(|_| "insert lock poisoned".to_string())?;
-    super::decide::paste::paste_text(&paste::MacPaste { pid }, text)
+    let report = super::decide::paste::paste_text(&paste::MacPaste { pid }, text)?;
+    // Never the transcript: only that a paste went out and what became of the clipboard.
+    eprintln!(
+        "[paste] cmd-v posted to terminal; clipboard_restored={} reason={:?}",
+        report.clipboard_restored, report.restore_skipped_reason
+    );
+    Ok(report)
 }
 
 #[cfg(test)]

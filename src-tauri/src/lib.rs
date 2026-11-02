@@ -190,6 +190,7 @@ pub fn run() {
             cleanup::commands::cleanup_session_open,
             cleanup::commands::cleanup_session_dispose,
             delivery::delivery_insert_text,
+            delivery::delivery_paste_binding,
             delivery::delivery_paste_text,
             delivery::delivery_snapshot_target,
             delivery::delivery_validate_target,

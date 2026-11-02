@@ -2,7 +2,7 @@
  * Pure delivery policy (ADR §§4–6). No I/O — adapters inject evidence.
  */
 
-import type { TargetKind, TargetSnapshot } from './types';
+import type { PasteBinding, TargetKind, TargetSnapshot } from './types';
 
 /** May we attempt insert into this validated completion-time target? */
 export function mayInsert(validated: TargetSnapshot): boolean {
@@ -15,16 +15,15 @@ export function mayInsert(validated: TargetSnapshot): boolean {
  */
 export type DeliveryPlan =
   | { action: 'insert'; target: TargetSnapshot }
-  | { action: 'paste'; target: TargetSnapshot }
+  | { action: 'paste'; target: TargetSnapshot; bound: PasteBinding }
   | { action: 'copy'; reason: string; kind: TargetKind; terminal: boolean }
   | { action: 'fail'; reason: string; kind: TargetKind };
 
 const PASTE_KINDS: readonly TargetKind[] = ['insertable', 'unsupported', 'unavailable'];
 
 /**
- * Same terminal app, by pid and app path, at both ends. The snapshot's own
- * flag only proves what is frontmost now; the binding to where the user
- * started dictating is this comparison. Missing pid or app path fails closed.
+ * Same terminal app, by pid and app path, in both snapshots. A snapshot's own
+ * flag only proves what was frontmost when it was taken.
  */
 function sameTerminal(a: TargetSnapshot, b: TargetSnapshot): boolean {
   return a.pasteTerminal === true && b.pasteTerminal === true
@@ -33,30 +32,41 @@ function sameTerminal(a: TargetSnapshot, b: TargetSnapshot): boolean {
     && !!a.pasteApp && a.pasteApp === b.pasteApp;
 }
 
-/**
- * Terminals take the paste route only when the app dictation started in
- * (`intended`) and the app in front now (`validated`) are the same flagged
- * terminal. Their AX focus says nothing useful (no field, a read-only area,
- * or one that ignores writes), so this is decided before `mayInsert`. A
- * secure field, a changed target or a closed app never pastes; the native
- * paste re-checks pid, app path, Secure Keyboard Entry and permissions.
- */
-export function mayPaste(intended: TargetSnapshot, validated: TargetSnapshot): boolean {
-  return sameTerminal(intended, validated);
+/** The terminal in front now is the one captured when dictation started. */
+function isBoundTerminal(bound: PasteBinding, current: TargetSnapshot): boolean {
+  return current.appPid === bound.appPid && current.pasteApp === bound.pasteApp;
 }
 
 /**
- * `intended` is the recording-start snapshot. Paste needs it, and needs the
- * Clipboard fallback setting on (the route touches the clipboard); without
- * either, a terminal behaves as it did before the paste route existed.
+ * Terminals take the paste route only when the terminal that was in front when
+ * dictation started (`bound`), the completion-time target (`intended`) and the
+ * app in front now (`validated`) are all the same terminal, by pid and app
+ * path. Their AX focus says nothing useful (no field, a read-only area, or one
+ * that ignores writes), so this is decided before `mayInsert`. A secure field,
+ * a changed target or a closed app never pastes; the native paste re-checks the
+ * pid and app path, Secure Keyboard Entry and permissions.
+ */
+export function mayPaste(
+  bound: PasteBinding,
+  intended: TargetSnapshot,
+  validated: TargetSnapshot,
+): boolean {
+  return sameTerminal(intended, validated) && isBoundTerminal(bound, validated);
+}
+
+/**
+ * Paste needs the binding captured at recording start and the Clipboard
+ * fallback setting on (the route touches the clipboard). Without either, a
+ * terminal behaves as it did before the paste route existed.
  */
 export function planDelivery(
   validated: TargetSnapshot,
   clipboardFallback: boolean,
   intended?: TargetSnapshot,
+  bound?: PasteBinding | null,
 ): DeliveryPlan {
-  if (clipboardFallback && intended && mayPaste(intended, validated)) {
-    return { action: 'paste', target: validated };
+  if (clipboardFallback && intended && bound && mayPaste(bound, intended, validated)) {
+    return { action: 'paste', target: validated, bound };
   }
   if (mayInsert(validated)) {
     return { action: 'insert', target: validated };

@@ -20,10 +20,19 @@ pub struct TargetSnapshotDto {
     #[serde(default)]
     pub paste_terminal: bool,
     /// Bundle path of the paste terminal (set iff `paste_terminal`). With
-    /// `app_pid` it binds a paste to the terminal dictation started in.
+    /// `app_pid` it identifies the terminal (the binding itself is `PasteBindingDto`).
     #[serde(default)]
     pub paste_app: Option<String>,
     pub reason: Option<String>,
+}
+
+/// The paste terminal that was in front when dictation started: its pid and
+/// app bundle path. Mirrors TypeScript `PasteBinding`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PasteBindingDto {
+    pub app_pid: i32,
+    pub paste_app: String,
 }
 
 impl TargetSnapshotDto {

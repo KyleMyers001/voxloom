@@ -12,6 +12,7 @@ import {
   createStubDeliveryAdapter,
   createTauriDeliveryAdapter,
   type DeliveryPlatformAdapter,
+  type PasteBinding,
 } from '../delivery';
 import { prepareDogfoodCleanup } from './dogfoodCleanup';
 import { errorText } from './dogfoodModel';
@@ -44,7 +45,7 @@ export interface DogfoodProcessingInput {
 
 export function useDogfoodProcessing({
   actions, captureState, cleanupEngine, ensureModel, live, options,
-}: DogfoodProcessingInput): void {
+}: DogfoodProcessingInput): () => Promise<PasteBinding | null> {
   // Latest render's options, read when each step of a run needs them.
   const optionsRef = useRef(options);
   optionsRef.current = options;
@@ -56,9 +57,20 @@ export function useDogfoodProcessing({
     options.deliveryPlatform,
   );
 
+  // Called by start(): the paste terminal in front right now. Any failure or
+  // missing support reads as "none", so delivery behaves as before the paste route.
+  const lookupPasteBinding = useCallback(async (): Promise<PasteBinding | null> => {
+    try {
+      return (await platformRef.current.pasteBinding?.()) ?? null;
+    } catch {
+      return null;
+    }
+  }, []);
+
   const runDogfood = useCallback(async (audio: CaptureAudioMeta) => {
-    const { announce, setHudResult, setIntendedTarget, setPhase, setTranscript, toast } = actions;
+    const { announce, setHudResult, setIntendedTarget, setMessage, setPhase, setTranscript, toast } = actions;
     const session = live.session;
+    const startBinding = live.pasteBinding;
     const cancellation = live.cancellation;
     const current = () => session === live.session && !cancellation.cancelled;
     const platform = platformRef.current;
@@ -108,6 +120,8 @@ export function useDogfoodProcessing({
     try {
       const modelId = await ensureModel();
       if (cancellation.cancelled) return;
+      const pasteBinding = (await startBinding) ?? null;
+      if (cancellation.cancelled) return;
       const dogfood = optionsRef.current.dogfood ?? dogfoodTranscribeAndCopy;
       const result = await dogfood({
         audio,
@@ -116,6 +130,7 @@ export function useDogfoodProcessing({
         clipboardFallback: optionsRef.current.clipboardFallback !== false,
         deliveryPlatform: platform,
         isCurrent: current,
+        pasteBinding,
         beforeDelivery: settleCancellation,
         snapshotTarget: async () => {
           const target = await platform.snapshotTarget();
@@ -150,8 +165,13 @@ export function useDogfoodProcessing({
         optionsRef.current.onHistoryRecord?.(record);
       }
       // Stale session: evidence still surfaces as a toast, phase untouched.
-      if (current()) announce(result.delivery.message);
-      else toast(result.delivery.message);
+      // An empty message is a clean terminal paste: silent, no status line, no
+      // toast (History keeps the Unverified record). Clear the stale status.
+      const said = result.delivery.message;
+      if (!said) {
+        if (current()) setMessage(null);
+      } else if (current()) announce(said);
+      else toast(said);
     } catch (error: unknown) {
       await settleCancellation();
       if (cancellation.cancelled) return;
@@ -191,4 +211,6 @@ export function useDogfoodProcessing({
     live.handledAudioId = audio.id;
     void runDogfood(audio);
   }, [actions, captureState, live, runDogfood]);
+
+  return lookupPasteBinding;
 }

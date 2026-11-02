@@ -49,8 +49,8 @@ export function deliveryMessage(
 export const TERMINAL_COPY_MESSAGE = 'Copied. Press ⌘V to paste.';
 
 /**
- * A terminal paste went out (⌘V posted). Neutral on purpose: a terminal has no
- * field to read back, so the paste cannot be confirmed, but nothing is wrong.
+ * A terminal paste went out (⌘V posted) but the user's clipboard was not put
+ * back. Only this case speaks; a clean paste is silent (empty message).
  */
 export const TERMINAL_PASTE_MESSAGE = 'Paste sent to terminal';
 

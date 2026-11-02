@@ -2,7 +2,9 @@
 /// Automatic STT + optional local cleanup (BUS-16) + delivery after a clean
 /// stop; cancel discards with no STT, and a cancel during cleanup delivers
 /// nothing either.
-/// Snapshots intended target after final transcription (ADR §4).
+/// Snapshots intended target after final transcription (ADR §4). The one
+/// thing captured at hold start is the paste terminal (pid + app path) a
+/// terminal paste is later bound to.
 /// Shared by Home Start and global hold/latch — start() must not activate
 /// Voxloom; gesture callers rely on the other app still being frontmost.
 /// Never silent-downloads missing models — surfaces a clear UI error instead.
@@ -129,7 +131,7 @@ export function useDogfoodCapture(
     [],
   );
 
-  useDogfoodProcessing({
+  const lookupPasteBinding = useDogfoodProcessing({
     actions, captureState: capture.captureState, cleanupEngine, ensureModel, live, options,
   });
   const { cancel, start, stop } = useDogfoodSession({
@@ -138,6 +140,7 @@ export function useDogfoodCapture(
     disposeNativeEngine,
     ensureModel,
     live,
+    lookupPasteBinding,
     phase: state.phase,
     preferredDeviceId: options.preferredDeviceId,
   });

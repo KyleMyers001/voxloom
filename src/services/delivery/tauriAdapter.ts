@@ -11,6 +11,7 @@ import type {
   ClipboardSnapshot,
   DeliveryPlatformAdapter,
   InsertReport,
+  PasteBinding,
   PasteReport,
   TargetSnapshot,
 } from './types';
@@ -97,17 +98,26 @@ export function createTauriDeliveryAdapter(
         throw new InsertError(error instanceof Error ? error.message : String(error), true);
       }
     },
-    async pasteText(text, intended) {
+    async pasteBinding() {
+      try {
+        if (!isTauri()) return null;
+        return (await invoke<PasteBinding | null>('delivery_paste_binding')) ?? null;
+      } catch {
+        // No binding means no paste: the pre-PR Copy behaviour applies.
+        return null;
+      }
+    },
+    async pasteText(text, bound) {
       // Same contract as insertText: a string error is the command's own Err
       // (⌘V was not posted); anything else may have hit mid-flight.
       try {
         if (!isTauri()) throw new Error('Tauri bridge unavailable');
-        JSON.stringify({ intended, text });
+        JSON.stringify({ bound, text });
       } catch (error: unknown) {
         throw new InsertError(error instanceof Error ? error.message : String(error), false);
       }
       try {
-        return await invoke<PasteReport>('delivery_paste_text', { intended, text });
+        return await invoke<PasteReport>('delivery_paste_text', { bound, text });
       } catch (error: unknown) {
         if (typeof error === 'string') throw new InsertError(error, false);
         throw new InsertError(error instanceof Error ? error.message : String(error), true);

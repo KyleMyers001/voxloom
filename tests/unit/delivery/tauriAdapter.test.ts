@@ -59,25 +59,38 @@ describe('tauri snapshot knownTerminal', () => {
   });
 });
 
+const bound = { appPid: 7, pasteApp: '/Applications/WezTerm.app' };
+
 describe('tauri pasteText', () => {
   it('passes the text and target and returns the native report', async () => {
     invoke.mockClear();
     invoke.mockResolvedValueOnce({ clipboardRestored: true, restoreSkippedReason: null });
-    const report = await createTauriDeliveryAdapter(clipboard).pasteText!('hi', target);
+    const report = await createTauriDeliveryAdapter(clipboard).pasteText!('hi', bound);
     expect(report).toEqual({ clipboardRestored: true, restoreSkippedReason: null });
-    expect(invoke).toHaveBeenCalledWith('delivery_paste_text', { intended: target, text: 'hi' });
+    expect(invoke).toHaveBeenCalledWith('delivery_paste_text', { bound, text: 'hi' });
   });
 
   it('a native Err string means ⌘V was not posted', async () => {
     invoke.mockRejectedValueOnce('Secure Keyboard Entry is on — paste skipped');
-    const error = await createTauriDeliveryAdapter(clipboard).pasteText!('hi', target).catch((e: unknown) => e);
+    const error = await createTauriDeliveryAdapter(clipboard).pasteText!('hi', bound).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(InsertError);
     expect((error as InstanceType<typeof InsertError>).writeStarted).toBe(false);
   });
 
   it('any other failure may have pasted', async () => {
     invoke.mockRejectedValueOnce(new Error('IPC channel closed'));
-    const error = await createTauriDeliveryAdapter(clipboard).pasteText!('hi', target).catch((e: unknown) => e);
+    const error = await createTauriDeliveryAdapter(clipboard).pasteText!('hi', bound).catch((e: unknown) => e);
     expect((error as InstanceType<typeof InsertError>).writeStarted).toBe(true);
+  });
+});
+
+describe('tauri pasteBinding', () => {
+  it('returns the terminal in front, or null for anything else or a failure', async () => {
+    invoke.mockResolvedValueOnce(bound);
+    expect(await createTauriDeliveryAdapter(clipboard).pasteBinding!()).toEqual(bound);
+    invoke.mockResolvedValueOnce(null);
+    expect(await createTauriDeliveryAdapter(clipboard).pasteBinding!()).toBeNull();
+    invoke.mockRejectedValueOnce(new Error('IPC channel closed'));
+    expect(await createTauriDeliveryAdapter(clipboard).pasteBinding!()).toBeNull();
   });
 });

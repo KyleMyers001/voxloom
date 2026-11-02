@@ -66,7 +66,8 @@ WezTerm, Alacritty, kitty, Ghostty and iTerm2 take a clipboard paste instead:
 the transcript goes on the clipboard for about 500 ms (marked transient), Voxloom
 presses ⌘V once, and your previous clipboard is restored unless you copied
 something meanwhile. It runs only when **Clipboard fallback** is on, and only
-into the same terminal app that was in front when you started dictating; with
+into the terminal that was in front when you started dictating (the Voxloom
+window itself never counts); with
 the setting off, terminals behave as before (nothing touches the clipboard, the
 text stays in History). Secure Keyboard Entry, control characters or newlines,
 or a changed frontmost app fall back to Copy ("Copied. Press ⌘V to paste.").

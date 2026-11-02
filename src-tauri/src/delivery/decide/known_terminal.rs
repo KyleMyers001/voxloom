@@ -74,6 +74,10 @@ pub fn flag_terminal(
     frontmost_pid: impl FnOnce() -> Option<i32>,
     flags_for: impl FnOnce(Option<i32>) -> TerminalFlags,
 ) -> TargetSnapshotDto {
+    // Filling `app_pid` only feeds the paste binding. It does not change
+    // `validate_snapshots`, `terminal_still_matches` or the AX insert paths:
+    // those compare AX identity, and the Terminal.app route already requires
+    // a pid from AX itself.
     let pid = snap.app_pid.or_else(frontmost_pid);
     let flags = flags_for(pid);
     snap.app_pid = pid;

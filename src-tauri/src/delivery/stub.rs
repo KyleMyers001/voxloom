@@ -1,6 +1,6 @@
 //! Non-macOS stub — Accessibility insert is not available.
 
-use super::types::TargetSnapshotDto;
+use super::types::{PasteBindingDto, TargetSnapshotDto};
 
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
@@ -40,9 +40,13 @@ pub fn insert_text(
     Err("insert unavailable on this platform (macOS AX adapter required)".into())
 }
 
+pub fn paste_binding() -> Option<PasteBindingDto> {
+    None
+}
+
 pub fn paste_text(
     _text: &str,
-    _intended: &TargetSnapshotDto,
+    _bound: &PasteBindingDto,
 ) -> Result<super::decide::report::PasteReport, String> {
     Err("paste unavailable on this platform (macOS adapter required)".into())
 }

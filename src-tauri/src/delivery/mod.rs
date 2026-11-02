@@ -17,7 +17,7 @@ mod macos;
 #[cfg(not(target_os = "macos"))]
 mod stub;
 
-pub use types::TargetSnapshotDto;
+pub use types::{PasteBindingDto, TargetSnapshotDto};
 
 #[cfg(target_os = "macos")]
 use macos as platform;
@@ -57,16 +57,25 @@ pub fn delivery_insert_text(
     platform::insert_text(&text, &intended)
 }
 
+/// The paste terminal in front right now (pid + app path), taken when
+/// dictation starts. None when the frontmost app is not a paste terminal.
+/// Cheap: no AX reads, never activates anything.
+#[tauri::command(async)]
+pub fn delivery_paste_binding() -> Option<PasteBindingDto> {
+    platform::paste_binding()
+}
+
 /// Paste into a terminal through the clipboard (⌘V), then restore the user's
 /// clipboard. Same contract as `delivery_insert_text`: `Err` means nothing was
 /// pasted; `Ok` means ⌘V was posted, which is not proof the terminal took it.
+/// `bound` is the terminal that was in front when dictation started; the app in front must be it.
 /// Async: the clipboard restore waits, which must not block the UI thread.
 #[tauri::command(async)]
 pub fn delivery_paste_text(
     text: String,
-    intended: TargetSnapshotDto,
+    bound: PasteBindingDto,
 ) -> Result<decide::report::PasteReport, String> {
-    platform::paste_text(&text, &intended)
+    platform::paste_text(&text, &bound)
 }
 
 #[cfg(test)]

@@ -13,7 +13,6 @@ describe('toastTone (toasts board strings)', () => {
     ['Inserted into Notes', 'ok'],
     ['May have been inserted — also copied', 'warn'],
     ['Text sent to Terminal — input not verified. Inspect before retrying.', 'warn'],
-    ['Paste sent to terminal', 'ok'],
     ['Paste sent to terminal (clipboard not restored: clipboard changed during paste — left as-is)', 'warn'],
     ['Paste sent to terminal (clipboard not restored: restore did not complete: pasteboard refused the saved items)', 'warn'],
     ['Copy failed', 'err'],

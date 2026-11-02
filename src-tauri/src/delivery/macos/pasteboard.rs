@@ -10,6 +10,8 @@ use objc2::rc::{autoreleasepool, Retained};
 use objc2::runtime::{AnyObject, Bool};
 use objc2::{class, msg_send};
 
+use crate::delivery::decide::paste::require_marker;
+
 /// NSPasteboardTypeString.
 const TYPE_STRING: &str = "public.utf8-plain-text";
 /// nspasteboard.org marker: clipboard managers skip the entry.
@@ -87,9 +89,11 @@ pub fn write_transient(text: &str) -> Result<i64, String> {
         if !ok.as_bool() {
             return Err("pasteboard item refused the transcript".to_string());
         }
-        // Best effort: the marker only keeps clipboard managers away.
+        // Fail closed: without the marker a clipboard manager would record
+        // the transcript, so the pasteboard is not touched at all.
         let marker = ns_string(&CString::new(TYPE_TRANSIENT).unwrap_or_default());
-        let _: Bool = msg_send![&*item, setData: ns_data(&[]), forType: marker];
+        let marked: Bool = msg_send![&*item, setData: ns_data(&[]), forType: marker];
+        require_marker(marked.as_bool())?;
         let pb = general();
         let _: isize = msg_send![pb, clearContents];
         let array: Retained<AnyObject> = msg_send![class!(NSArray), arrayWithObject: &*item];
