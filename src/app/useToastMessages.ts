@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { toastMs } from '../domain/toastTiming';
 
 const INFO_MS = 1_800;
 const ERROR_MS = 4_000;
 
 /**
- * App toast: info for 1.8 s; errors (announceError, history/settings/dictionary
- * store errors) for 4 s. One timer at a time: a newer toast clears the older
+ * App toast: info for at least 1.8 s; errors (announceError, history/settings/
+ * dictionary store errors) for at least 4 s. Longer text stays long enough
+ * to read (`toastMs`). One timer at a time: a newer toast clears the older
  * timer, so an old timeout can never hide it early.
  */
 export function useToastMessages(errors: (string | null | undefined)[]) {
@@ -16,7 +18,7 @@ export function useToastMessages(errors: (string | null | undefined)[]) {
     window.clearTimeout(timer.current);
     setErrorTone(ms === ERROR_MS);
     setToast(message);
-    timer.current = window.setTimeout(() => setToast(''), ms);
+    timer.current = window.setTimeout(() => setToast(''), toastMs(message, ms));
   }, []);
   useEffect(() => () => window.clearTimeout(timer.current), []);
   const [historyError, settingsError, dictionaryError] = errors;

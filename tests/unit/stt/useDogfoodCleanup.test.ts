@@ -49,6 +49,7 @@ function stubCapture(state: CaptureState): UseCaptureStateResult {
     refreshDevices: vi.fn().mockResolvedValue(undefined), requestMicPermission: vi.fn(),
     runMicTest: vi.fn(), startFullCaptureSession: vi.fn().mockResolvedValue('started'),
     stopFullCapture: vi.fn(), stopMicTest: vi.fn(),
+    waitForCaptureRelease: vi.fn().mockResolvedValue(undefined),
   };
 }
 

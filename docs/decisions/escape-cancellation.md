@@ -4,7 +4,7 @@
 
 Escape cancels **listening and transcription**, including a pending microphone start once the popup is visible. Cancelled dictations do **not** appear in History. They do not insert text, write the clipboard, or surface a late transcription error/result. A new dictation can start normally afterward.
 
-This supersedes the global-Escape rejection in the original BUS-12 ADR only for the visible, session-owned dictation popup. There is no permanent Escape shortcut. Result banners (Copied/failure), idle Voxloom, and a hidden popup do not own Escape.
+This supersedes the global-Escape rejection in the original BUS-12 ADR only for the visible, session-owned dictation popup. There is no permanent Escape shortcut. Result banners (Copied/failure), idle Voxloom, and a hidden popup do not own Escape. A newly armed scope always starts hidden, even if a result banner is still on screen; only the cancellable popup show marks it visible.
 
 ## Implementation boundaries
 
@@ -18,7 +18,7 @@ This supersedes the global-Escape rejection in the original BUS-12 ADR only for 
 
 ## Permissions and failure policy
 
-An active macOS event tap needs the OS permission that permits event interception. The code never prompts, grants or resets permissions. If arming fails (the tap cannot be created or the process is not Accessibility-trusted), a warning is logged and dictation still records and delivers, so Copy-only users without Accessibility permission keep working. The cancellable popup is not shown for that session; in-window Escape still cancels, and the next session re-arms fresh. A disabled/revoked tap cancels its scope fail-closed; it is not silently re-enabled.
+An active macOS event tap needs the OS permission that permits event interception. The code never prompts, grants or resets permissions. If arming fails (the tap cannot be created or the process is not Accessibility-trusted), a warning is logged, Voxloom shows a one-time non-blocking "Escape-cancel is off" hint per app run (with Copy error details on Home, keyed on the native error code), and dictation still records and delivers, so Copy-only users without Accessibility permission keep working. The cancellable popup is not shown for that session; in-window Escape still cancels, and the next session re-arms fresh. A disabled/revoked tap cancels its scope fail-closed; it is not silently re-enabled.
 
 The document Escape handler supports the focused-window/browser path, but is not evidence of cross-app interception. Native acceptance must be performed with the exact packaged app after user-approved permissions.
 

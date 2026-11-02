@@ -8,6 +8,25 @@ mod macos;
 #[cfg(test)]
 mod tests;
 
+/// Structured arm failure; the frontend branches on `code`, never on text.
+#[derive(Debug, serde::Serialize)]
+pub struct ArmError {
+    pub code: &'static str,
+    pub message: String,
+}
+
+#[cfg(target_os = "macos")]
+impl From<String> for ArmError {
+    fn from(message: String) -> Self {
+        Self {
+            code: "cancel-arm-failed",
+            message,
+        }
+    }
+}
+
+// The scope state machine only runs behind the macOS event tap.
+#[cfg(any(target_os = "macos", test))]
 #[derive(Debug, PartialEq, Eq)]
 enum Action {
     Pass,
@@ -15,12 +34,14 @@ enum Action {
     CancelAndSwallow,
 }
 
+#[cfg(any(target_os = "macos", test))]
 struct ScopeState {
     session: String,
     visible: bool,
     cancelled: bool,
 }
 
+#[cfg(any(target_os = "macos", test))]
 impl ScopeState {
     fn new(session: String) -> Self {
         Self {
@@ -54,7 +75,7 @@ impl ScopeState {
 }
 
 #[tauri::command]
-pub fn dictation_cancel_arm(app: tauri::AppHandle, session: String) -> Result<(), String> {
+pub fn dictation_cancel_arm(app: tauri::AppHandle, session: String) -> Result<(), ArmError> {
     #[cfg(target_os = "macos")]
     return macos::arm(app, session);
     #[cfg(not(target_os = "macos"))]

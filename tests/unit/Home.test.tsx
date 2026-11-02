@@ -11,6 +11,7 @@ function stubDogfood(
 ): UseDogfoodCaptureResult {
   return {
     cancel: vi.fn(),
+    cancelUnavailable: null,
     captureState: { kind: 'idle' },
     hudResult: null,
     intendedTarget: null,

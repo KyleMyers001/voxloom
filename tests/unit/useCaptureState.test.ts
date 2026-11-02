@@ -683,4 +683,40 @@ describe('useCaptureState full capture dogfood wiring', () => {
     expect(result.current.captureState).toEqual({ kind: 'cancelled' });
     expect(mocks.stopCapture).not.toHaveBeenCalled();
   });
+
+  it('restart after cancel waits for the owner to release instead of busy', async () => {
+    const { result } = renderHook(() => useCaptureState());
+    await waitFor(() => expect(handler).not.toBeNull());
+    await act(async () => {
+      await result.current.startFullCaptureSession();
+    });
+    const requestId = mocks.startFullCapture.mock.calls[0][0] as string;
+    act(() => { result.current.cancelActiveCapture(); });
+
+    let released = false;
+    const wait = result.current.waitForCaptureRelease()
+      .then(() => { released = true; });
+    await act(async () => { await Promise.resolve(); });
+    expect(released).toBe(false);
+
+    act(() => handler?.({
+      generation: 3,
+      kind: 'capture-cancelled',
+      request_id: requestId,
+    }));
+    await act(async () => { await wait; });
+    await act(async () => {
+      expect(await result.current.startFullCaptureSession()).toBe('started');
+    });
+  });
+
+  it('does not wait on an owner that was never cancelled', async () => {
+    const { result } = renderHook(() => useCaptureState());
+    await waitFor(() => expect(handler).not.toBeNull());
+    await act(async () => {
+      await result.current.startFullCaptureSession();
+    });
+    await act(async () => { await result.current.waitForCaptureRelease(); });
+    await expect(result.current.startFullCaptureSession()).resolves.toBe('busy');
+  });
 });

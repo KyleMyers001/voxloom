@@ -21,6 +21,7 @@ import {
 import type { ClipboardAdapter } from '../clipboard';
 import type { CleanupEngine } from '../cleanup/contracts';
 import type { DeliveryPlatformAdapter, TargetSnapshot } from '../delivery';
+import type { CancelUnavailable } from '../shortcut/cancelUnavailable';
 import type { OverlayResult } from '../shortcut/overlayVisibility';
 import type { SttModelStore } from './contracts';
 import { ensureModelAvailable } from './dogfoodModel';
@@ -58,8 +59,10 @@ export interface UseDogfoodCaptureOptions {
    * Cancel / blank audio / STT errors never call this.
    */
   onHistoryRecord?: (record: DictationRecord) => void;
-  /** Toast / announce callback for loading / success / error. */
+  /** Toast / announce callback for loading / success. */
   onToast?: (message: string) => void;
+  /** Error toast (error tone); falls back to onToast. */
+  onErrorToast?: (message: string) => void;
   /** Preferred mic id; system default means omit and let native pick. */
   preferredDeviceId?: string;
   /** Writing style stamped onto the history row and used by cleanup. */
@@ -87,6 +90,8 @@ export interface UseDogfoodCaptureOptions {
 
 export interface UseDogfoodCaptureResult {
   cancel: () => void;
+  /** Escape-cancel could not arm this app run; dictation still works. */
+  cancelUnavailable: CancelUnavailable | null;
   captureState: CaptureState;
   /** Completion-time target (null until final transcription / if unavailable). */
   intendedTarget: TargetSnapshot | null;
@@ -104,6 +109,8 @@ export interface UseDogfoodCaptureResult {
   hudReady: boolean;
   start: (origin?: DogfoodOrigin) => Promise<void>;
   stop: () => Promise<void>;
+  /** The live session already asked its capture to stop (or was cancelled). */
+  stopRequested?: () => boolean;
   transcript: Transcript | null;
 }
 
@@ -112,7 +119,7 @@ export function useDogfoodCapture(
 ): UseDogfoodCaptureResult {
   const liveCapture = useCaptureState();
   const capture = options.captureApi ?? liveCapture;
-  const { actions, state } = useDogfoodView(options.onToast);
+  const { actions, state } = useDogfoodView(options.onToast, options.onErrorToast);
   const live = useDogfoodLiveSession();
   const { cleanupEngine, disposeNativeEngine } = useCleanupEngine(options.cleanupEngine);
 
@@ -130,9 +137,10 @@ export function useDogfoodCapture(
   );
 
   useDogfoodProcessing({
-    actions, captureState: capture.captureState, cleanupEngine, ensureModel, live, options,
+    actions, captureState: capture.captureState, cleanupEngine, ensureModel, live,
+    onCaptureStopped: capture.onCaptureStopped, options,
   });
-  const { cancel, start, stop } = useDogfoodSession({
+  const { cancel, cancelUnavailable, start, stop } = useDogfoodSession({
     actions,
     capture,
     disposeNativeEngine,
@@ -144,6 +152,7 @@ export function useDogfoodCapture(
 
   return {
     cancel,
+    cancelUnavailable,
     captureState: capture.captureState,
     intendedTarget: state.intendedTarget,
     message: state.message,
@@ -154,6 +163,7 @@ export function useDogfoodCapture(
     hudReady: state.hudReady && cancellablePhase(state.phase),
     start,
     stop,
+    stopRequested: () => live.stopRequested,
     transcript: state.transcript,
   };
 }

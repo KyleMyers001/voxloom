@@ -66,6 +66,10 @@ describe('native cancellation scope', () => {
     expect(native).not.toMatch(/CGRequest(?:Listen|Post)EventAccess\(|AXIsProcessTrustedWithOptions\(/);
     expect(native).not.toContain('Enable Voxloom Accessibility permission');
     expect(native).toContain('let tap = Tap::install(app, session)?;');
+    // BUS-91: a new scope never inherits a passive banner's visibility.
+    const install = native.slice(native.indexOf('fn install('), native.indexOf('let context = Box::into_raw'));
+    expect(install).toContain('let state = ScopeState::new(session);');
+    expect(install).not.toContain('is_visible()');
   });
 
   it('wires native scope and main-window cleanup into the shipped app', () => {
