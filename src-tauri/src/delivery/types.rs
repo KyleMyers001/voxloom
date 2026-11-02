@@ -11,6 +11,10 @@ pub struct TargetSnapshotDto {
     pub element_role: Option<String>,
     pub insertable: bool,
     pub kind: String,
+    /// Frontmost app is a known terminal (copy hint only). Absent in older
+    /// payloads, which read as false.
+    #[serde(default)]
+    pub known_terminal: bool,
     pub reason: Option<String>,
 }
 
@@ -24,7 +28,23 @@ impl TargetSnapshotDto {
             element_role: None,
             insertable: false,
             kind: "unavailable".into(),
+            known_terminal: false,
             reason: Some(reason.into()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_without_known_terminal_reads_as_false() {
+        let older = r#"{"appName":"Notes","appPid":7,"capturedAt":1,"elementId":null,
+            "elementRole":null,"insertable":false,"kind":"unavailable","reason":null}"#;
+        let dto: TargetSnapshotDto = serde_json::from_str(older).unwrap();
+        assert!(!dto.known_terminal);
+        let json = serde_json::to_value(&dto).unwrap();
+        assert_eq!(json["knownTerminal"], false);
     }
 }

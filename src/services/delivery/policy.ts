@@ -15,7 +15,7 @@ export function mayInsert(validated: TargetSnapshot): boolean {
  */
 export type DeliveryPlan =
   | { action: 'insert'; target: TargetSnapshot }
-  | { action: 'copy'; reason: string; kind: TargetKind }
+  | { action: 'copy'; reason: string; kind: TargetKind; terminal: boolean }
   | { action: 'fail'; reason: string; kind: TargetKind };
 
 export function planDelivery(
@@ -37,7 +37,9 @@ export function planDelivery(
       : 'insert not available');
 
   if (clipboardFallback) {
-    return { action: 'copy', reason, kind };
+    // A secure field keeps its own reason, even inside a terminal.
+    const terminal = validated.knownTerminal === true && kind !== 'secure';
+    return { action: 'copy', reason, kind, terminal };
   }
   return { action: 'fail', reason, kind };
 }

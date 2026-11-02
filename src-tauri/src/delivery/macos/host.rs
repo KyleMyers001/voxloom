@@ -28,6 +28,13 @@ mod tests {
     }
 
     #[test]
+    fn known_terminal_is_false_without_a_resolvable_pid_or_for_this_binary() {
+        assert!(!known_terminal(None));
+        assert!(!known_terminal(Some(-1)));
+        assert!(!known_terminal(Some(std::process::id() as i32)));
+    }
+
+    #[test]
     fn resolved_non_allowlisted_process_is_known_non_terminal_not_unknown() {
         // Query only this test process: no app launch, foreground read or GUI.
         let pid = std::process::id() as i32;
@@ -56,6 +63,12 @@ pub fn apple_terminal_identity(pid: i32) -> Option<bool> {
 
 pub fn apple_terminal(pid: i32) -> bool {
     apple_terminal_identity(pid) == Some(true)
+}
+
+/// Display only (Copy hint); unknown identity is not a terminal.
+pub fn known_terminal(pid: Option<i32>) -> bool {
+    pid.and_then(executable_path)
+        .is_some_and(|exe| crate::delivery::decide::known_terminal::is_known_terminal(&exe))
 }
 
 pub fn unicode_typing_ok(pid: i32) -> bool {

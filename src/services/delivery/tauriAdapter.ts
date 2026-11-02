@@ -23,6 +23,7 @@ interface NativeTargetDto {
   elementRole: string | null;
   insertable: boolean;
   kind: TargetSnapshot['kind'];
+  knownTerminal?: boolean;
   reason: string | null;
 }
 
@@ -35,6 +36,7 @@ function fromDto(dto: NativeTargetDto): TargetSnapshot {
     elementRole: dto.elementRole,
     insertable: dto.insertable,
     kind: dto.kind,
+    knownTerminal: dto.knownTerminal ?? false,
     reason: dto.reason,
   };
 }

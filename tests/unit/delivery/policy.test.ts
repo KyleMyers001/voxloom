@@ -40,6 +40,7 @@ describe('mayInsert / planDelivery', () => {
     expect(planDelivery(secure, true)).toEqual({
       action: 'copy',
       kind: 'secure',
+      terminal: false,
       reason: 'secure field — insert skipped',
     });
   });

@@ -2,6 +2,7 @@
 //! The macOS adapter gathers AX facts and delegates every policy choice here.
 
 pub mod host;
+pub mod known_terminal;
 pub mod report;
 pub mod retry;
 pub mod target;
@@ -31,6 +32,7 @@ pub(crate) mod test_support {
             element_role: Some("AXTextArea".into()),
             insertable: kind == "insertable",
             kind: kind.into(),
+            known_terminal: false,
             reason: if kind == "unavailable" {
                 Some("Accessibility permission denied — insert skipped".into())
             } else {

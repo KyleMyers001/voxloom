@@ -28,6 +28,11 @@ export interface TargetSnapshot {
   /** True only when the element looked safely insertable at snapshot time. */
   insertable: boolean;
   kind: TargetKind;
+  /**
+   * Frontmost app is a known terminal (decided natively). Display only: it
+   * picks the Copy message and never allows an insert. Absent means false.
+   */
+  knownTerminal?: boolean;
   /** Human-readable limitation or refusal reason (never empty for refusals). */
   reason: string | null;
   /** Epoch ms when the snapshot was taken. */
