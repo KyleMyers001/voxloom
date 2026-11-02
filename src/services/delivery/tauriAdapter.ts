@@ -26,6 +26,7 @@ interface NativeTargetDto {
   kind: TargetSnapshot['kind'];
   knownTerminal?: boolean;
   pasteTerminal?: boolean;
+  pasteApp?: string | null;
   reason: string | null;
 }
 
@@ -40,6 +41,7 @@ function fromDto(dto: NativeTargetDto): TargetSnapshot {
     kind: dto.kind,
     knownTerminal: dto.knownTerminal ?? false,
     pasteTerminal: dto.pasteTerminal ?? false,
+    pasteApp: dto.pasteApp ?? null,
     reason: dto.reason,
   };
 }

@@ -40,6 +40,11 @@ export interface TargetSnapshot {
    * means false.
    */
   pasteTerminal?: boolean;
+  /**
+   * App bundle path of the paste terminal (set iff `pasteTerminal`). With
+   * `appPid` it binds a paste to the terminal dictation started in.
+   */
+  pasteApp?: string | null;
   /** Human-readable limitation or refusal reason (never empty for refusals). */
   reason: string | null;
   /** Epoch ms when the snapshot was taken. */
@@ -106,7 +111,7 @@ export interface InsertReport {
 export interface PasteReport {
   /** The user's prior clipboard is back after the paste. */
   clipboardRestored: boolean;
-  /** Why it is not (changed meanwhile, could not be saved, restore failed). */
+  /** Why it is not (changed meanwhile, could not be saved, restore did not complete). */
   restoreSkippedReason: string | null;
 }
 

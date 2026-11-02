@@ -4,15 +4,16 @@ WezTerm, Alacritty, kitty, Ghostty and iTerm2 expose no AX text field that accep
 
 ## Route
 
-- Native flags the snapshot `pasteTerminal` from the frontmost process's executable bundle name (`decide/known_terminal.rs`). TS plans `paste` before it considers AX insertability, except for a secure, changed or closed target.
-- `delivery_paste_text` re-resolves the frontmost app itself: same PID as the snapshot, still on the allowlist, Accessibility and event-posting permission granted, Secure Keyboard Entry off. Any failure is an `Err` and nothing was pasted; TS then copies with the terminal hint.
+- Native flags every snapshot `pasteTerminal`, with the terminal's app path (`pasteApp`) and pid (`appPid`, taken from the frontmost app when AX gave none), from the process's executable bundle name (`decide/known_terminal.rs`).
+- TS plans `paste` only when Clipboard fallback is on and the snapshot from recording start and the current one are both paste terminals with the same pid and app path (and neither is a secure, changed or closed target). Otherwise nothing changes from before the route existed: Copy with the hint, or Failed when fallback is off.
+- `delivery_paste_text` receives the recording-start snapshot and re-resolves the frontmost app: same pid and app path, still on the allowlist, Accessibility and event-posting permission granted, Secure Keyboard Entry off (`decide/paste_target.rs`). A missing pid or app path fails closed. Any failure is an `Err` and nothing was pasted; TS then copies with the terminal hint.
 - The transcript must pass the same checks as Terminal dispatch (no control characters, newline or tab, at most 4096 UTF-16 units). A paste can run a command in a shell, so a transcript that could is refused and copied instead.
 - ⌘V is posted as one flagged key press, using the keycode that types "v" in the current ASCII-capable layout (fallback: the ANSI V key). The layout lookup hops to the main thread.
 - The sequence and the restore rules are in `decide/paste.rs`, tested with a fake host; `macos/pasteboard.rs` and `macos/paste.rs` are the OS glue.
 
 ## Clipboard restore
 
-Before writing, every pasteboard item and type is copied out. The transcript is written with the `org.nspasteboard.TransientType` marker so clipboard managers skip it. After `CLIPBOARD_RESTORE_DELAY_MS` the saved items go back, but only if the pasteboard change count is still the one our write produced: a copy the user made meanwhile is never overwritten. If the old clipboard could not be saved in full, or the restore fails, the paste still stands and the report says the clipboard was not restored.
+Before writing, every pasteboard item and type is copied out. The transcript is written as a single pasteboard item carrying both the string and the `org.nspasteboard.TransientType` marker, in one call, so clipboard managers that honor the convention never see it unmarked. After `CLIPBOARD_RESTORE_DELAY_MS` the saved items go back, but only if the pasteboard change count is still the one our write produced: a copy the user made meanwhile is never overwritten. If the old clipboard could not be saved in full, or the restore fails, the paste still stands and the report says the clipboard was not restored.
 
 ## Outcomes
 

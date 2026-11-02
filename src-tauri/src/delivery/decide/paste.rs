@@ -77,7 +77,7 @@ fn restore_if_unchanged<H: PasteHost>(
         return Err("clipboard changed during paste — left as-is".into());
     }
     host.restore(&saved)
-        .map_err(|e| format!("restore failed: {e}"))
+        .map_err(|e| format!("restore did not complete: {e}"))
 }
 
 #[cfg(test)]

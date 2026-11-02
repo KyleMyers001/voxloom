@@ -3,7 +3,7 @@
 
 use std::ffi::c_void;
 
-use crate::delivery::decide::known_terminal::{is_paste_terminal, TerminalFlags};
+use crate::delivery::decide::known_terminal::{paste_app as paste_app_of, TerminalFlags};
 use crate::delivery::decide::unicode_typing_supported;
 
 extern "C" {
@@ -34,8 +34,8 @@ mod tests {
         assert_eq!(terminal_flags(None), none);
         assert_eq!(terminal_flags(Some(-1)), none);
         assert_eq!(terminal_flags(Some(std::process::id() as i32)), none);
-        assert!(!paste_terminal(-1));
-        assert!(!paste_terminal(std::process::id() as i32));
+        assert_eq!(paste_app(-1), None);
+        assert_eq!(paste_app(std::process::id() as i32), None);
     }
 
     #[test]
@@ -76,9 +76,9 @@ pub fn terminal_flags(pid: Option<i32>) -> TerminalFlags {
         .unwrap_or_default()
 }
 
-/// The paste route's identity check, by bundle name (see `known_terminal`).
-pub fn paste_terminal(pid: i32) -> bool {
-    executable_path(pid).is_some_and(|exe| is_paste_terminal(&exe))
+/// App bundle path when `pid` is a paste terminal (see `known_terminal`).
+pub fn paste_app(pid: i32) -> Option<String> {
+    executable_path(pid).and_then(|exe| paste_app_of(&exe))
 }
 
 pub fn unicode_typing_ok(pid: i32) -> bool {

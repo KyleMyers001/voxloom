@@ -18,7 +18,7 @@ export function toastTone(message: string): ToastTone {
   if (/fail|couldn|can’t|can't|error|expired|in use|finish the current|unable|denied|nothing transcribed/i.test(message)) {
     return 'err';
   }
-  if (/not verified|unverified|may have|also copied|^copied —|inspect/i.test(message)) return 'warn';
+  if (/not verified|unverified|may have|also copied|^copied —|inspect|clipboard not restored/i.test(message)) return 'warn';
   return 'ok';
 }
 

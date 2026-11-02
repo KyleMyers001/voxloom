@@ -41,10 +41,14 @@ describe('tauri snapshot knownTerminal', () => {
   };
 
   it('maps pasteTerminal, and an older payload without it to false', async () => {
-    invoke.mockResolvedValueOnce({ ...dto, pasteTerminal: true });
-    expect((await createTauriDeliveryAdapter(clipboard).snapshotTarget()).pasteTerminal).toBe(true);
+    invoke.mockResolvedValueOnce({ ...dto, pasteApp: '/Applications/kitty.app', pasteTerminal: true });
+    const paste = await createTauriDeliveryAdapter(clipboard).snapshotTarget();
+    expect(paste.pasteTerminal).toBe(true);
+    expect(paste.pasteApp).toBe('/Applications/kitty.app');
     invoke.mockResolvedValueOnce({ ...dto });
-    expect((await createTauriDeliveryAdapter(clipboard).snapshotTarget()).pasteTerminal).toBe(false);
+    const older = await createTauriDeliveryAdapter(clipboard).snapshotTarget();
+    expect(older.pasteTerminal).toBe(false);
+    expect(older.pasteApp).toBeNull();
   });
 
   it('maps knownTerminal, and an older payload without it to false', async () => {

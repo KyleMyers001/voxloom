@@ -16,6 +16,12 @@ extern "C" {
     fn CGEventPost(tap: u32, event: CFTypeRef);
 }
 
+/// Whether this process may post synthetic input events.
+pub fn can_post_events() -> bool {
+    // SAFETY: no arguments, no side effects.
+    unsafe { CGPreflightPostEventAccess() }
+}
+
 const HID_EVENT_TAP: u32 = 0;
 /// kCGEventSourceStatePrivate: not affected by physically held modifiers.
 const SOURCE_PRIVATE_STATE: i32 = -1;
@@ -35,7 +41,7 @@ trait Events {
 struct NativeEvents;
 impl Events for NativeEvents {
     fn post_access(&self) -> bool {
-        unsafe { CGPreflightPostEventAccess() }
+        can_post_events()
     }
     fn source(&self, state: i32) -> CFTypeRef {
         unsafe { CGEventSourceCreate(state) }

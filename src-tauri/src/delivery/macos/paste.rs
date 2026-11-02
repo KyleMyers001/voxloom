@@ -5,11 +5,6 @@ use super::ax::AXIsProcessTrusted;
 use super::{host, keylayout, pasteboard, typing};
 use crate::delivery::decide::paste::PasteHost;
 
-#[link(name = "ApplicationServices", kind = "framework")]
-extern "C" {
-    fn CGPreflightPostEventAccess() -> bool;
-}
-
 #[link(name = "Carbon", kind = "framework")]
 extern "C" {
     fn IsSecureEventInputEnabled() -> u8;
@@ -37,7 +32,7 @@ impl PasteHost for MacPaste {
         if unsafe { AXIsProcessTrusted() } == 0 {
             return Err("Accessibility permission denied at paste — paste skipped".into());
         }
-        if !unsafe { CGPreflightPostEventAccess() } {
+        if !typing::can_post_events() {
             return Err("event-posting permission denied — paste skipped".into());
         }
         if unsafe { IsSecureEventInputEnabled() } != 0 {

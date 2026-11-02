@@ -155,7 +155,7 @@ fn a_failed_restore_is_reported_not_hidden() {
     assert!(!report.clipboard_restored);
     assert_eq!(
         report.restore_skipped_reason.as_deref(),
-        Some("restore failed: pasteboard busy")
+        Some("restore did not complete: pasteboard busy")
     );
 }
 

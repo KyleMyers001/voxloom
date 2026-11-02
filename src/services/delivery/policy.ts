@@ -19,25 +19,43 @@ export type DeliveryPlan =
   | { action: 'copy'; reason: string; kind: TargetKind; terminal: boolean }
   | { action: 'fail'; reason: string; kind: TargetKind };
 
+const PASTE_KINDS: readonly TargetKind[] = ['insertable', 'unsupported', 'unavailable'];
+
 /**
- * Terminals the native side flagged for the paste route. Their AX focus says
- * nothing useful (no field, a read-only text area, or one that ignores
- * writes), so this is decided before `mayInsert`. A secure field, a changed
- * target or a closed app never pastes; the native paste re-checks the
- * frontmost app and Secure Keyboard Entry itself.
+ * Same terminal app, by pid and app path, at both ends. The snapshot's own
+ * flag only proves what is frontmost now; the binding to where the user
+ * started dictating is this comparison. Missing pid or app path fails closed.
  */
-export function mayPaste(validated: TargetSnapshot): boolean {
-  return validated.pasteTerminal === true
-    && (validated.kind === 'insertable'
-      || validated.kind === 'unsupported'
-      || validated.kind === 'unavailable');
+function sameTerminal(a: TargetSnapshot, b: TargetSnapshot): boolean {
+  return a.pasteTerminal === true && b.pasteTerminal === true
+    && PASTE_KINDS.includes(a.kind) && PASTE_KINDS.includes(b.kind)
+    && typeof a.appPid === 'number' && a.appPid === b.appPid
+    && !!a.pasteApp && a.pasteApp === b.pasteApp;
 }
 
+/**
+ * Terminals take the paste route only when the app dictation started in
+ * (`intended`) and the app in front now (`validated`) are the same flagged
+ * terminal. Their AX focus says nothing useful (no field, a read-only area,
+ * or one that ignores writes), so this is decided before `mayInsert`. A
+ * secure field, a changed target or a closed app never pastes; the native
+ * paste re-checks pid, app path, Secure Keyboard Entry and permissions.
+ */
+export function mayPaste(intended: TargetSnapshot, validated: TargetSnapshot): boolean {
+  return sameTerminal(intended, validated);
+}
+
+/**
+ * `intended` is the recording-start snapshot. Paste needs it, and needs the
+ * Clipboard fallback setting on (the route touches the clipboard); without
+ * either, a terminal behaves as it did before the paste route existed.
+ */
 export function planDelivery(
   validated: TargetSnapshot,
   clipboardFallback: boolean,
+  intended?: TargetSnapshot,
 ): DeliveryPlan {
-  if (mayPaste(validated)) {
+  if (clipboardFallback && intended && mayPaste(intended, validated)) {
     return { action: 'paste', target: validated };
   }
   if (mayInsert(validated)) {

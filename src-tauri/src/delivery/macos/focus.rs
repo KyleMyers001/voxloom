@@ -94,6 +94,7 @@ pub fn build_snapshot(
         kind: kind.into(),
         known_terminal: false,
         paste_terminal: false,
+        paste_app: None,
         reason: reason.map(str::to_string),
     };
     if unsafe { AXIsProcessTrusted() } == 0 {

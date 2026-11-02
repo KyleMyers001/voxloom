@@ -22,6 +22,7 @@ function wezterm(partial: Partial<TargetSnapshot> = {}): TargetSnapshot {
     insertable: false,
     kind: 'unsupported',
     knownTerminal: true,
+    pasteApp: '/Applications/WezTerm.app',
     pasteTerminal: true,
     reason: 'unsupported or unknown AX role',
     ...partial,
@@ -44,41 +45,95 @@ function adapter(
   };
 }
 
+/** `intended` is the recording-start snapshot; it defaults to the validated one. */
 const run = (
   validated: TargetSnapshot,
   overrides: Partial<DeliveryPlatformAdapter> = {},
   clipboardFallback = true,
   isCurrent = () => true,
+  intended: TargetSnapshot = validated,
 ) => {
   const platform = adapter(validated, overrides);
   return deliverTranscript({
-    clipboardFallback, intended: validated, isCurrent, platform, text: 'hello',
+    clipboardFallback, intended, isCurrent, platform, text: 'hello',
   }).then((outcome) => ({ outcome, platform }));
 };
+
+/** Notes, as dictation started there. */
+const notes = (partial: Partial<TargetSnapshot> = {}): TargetSnapshot => ({
+  appName: 'Notes',
+  appPid: 11,
+  capturedAt: 1,
+  elementId: '11:AXTextArea:#1',
+  elementRole: 'AXTextArea',
+  insertable: true,
+  kind: 'insertable',
+  pasteApp: null,
+  pasteTerminal: false,
+  reason: null,
+  ...partial,
+});
+
+const ghostty = (partial: Partial<TargetSnapshot> = {}) => wezterm({
+  appName: 'Ghostty', appPid: 88, pasteApp: '/Applications/Ghostty.app', ...partial,
+});
 
 describe('terminal paste plan', () => {
   it('a flagged terminal pastes whatever AX says about its focus', () => {
     for (const kind of ['unsupported', 'unavailable', 'insertable'] as const) {
-      expect(planDelivery(wezterm({ insertable: kind === 'insertable', kind }), true))
-        .toMatchObject({ action: 'paste' });
+      const here = wezterm({ insertable: kind === 'insertable', kind });
+      expect(planDelivery(here, true, here)).toMatchObject({ action: 'paste' });
     }
-    // Even with Copy fallback off: paste is the primary route.
-    expect(planDelivery(wezterm(), false)).toMatchObject({ action: 'paste' });
+  });
+
+  it('same terminal at hold start with no AX focus now still pastes', () => {
+    const intended = wezterm({ kind: 'insertable', insertable: true, elementId: '77:AXTextArea:#1' });
+    const now = wezterm({ kind: 'unavailable', reason: 'Accessibility focus unavailable' });
+    expect(planDelivery(now, true, intended)).toMatchObject({ action: 'paste' });
   });
 
   it('never pastes into a secure field, a changed target or a closed app', () => {
     for (const kind of ['secure', 'changed', 'closed'] as const) {
-      expect(planDelivery(wezterm({ kind }), true).action).not.toBe('paste');
+      const here = wezterm({ kind });
+      expect(planDelivery(here, true, wezterm()).action).not.toBe('paste');
+      expect(planDelivery(wezterm(), true, here).action).not.toBe('paste');
     }
   });
 
+  it('is bound to where dictation started', () => {
+    // Notes at hold start, WezTerm now: the old behaviour (Copy + hint).
+    expect(planDelivery(wezterm(), true, notes())).toMatchObject({ action: 'copy', terminal: true });
+    // WezTerm at hold start, Ghostty now.
+    expect(planDelivery(ghostty(), true, wezterm())).toMatchObject({ action: 'copy', terminal: true });
+    // Same app path, another process (a second instance).
+    expect(planDelivery(wezterm({ appPid: 78 }), true, wezterm())).toMatchObject({ action: 'copy' });
+    // Same pid, another app (a reused pid).
+    expect(planDelivery(wezterm({ pasteApp: '/Applications/Ghostty.app' }), true, wezterm()))
+      .toMatchObject({ action: 'copy' });
+    // No intended snapshot at all.
+    expect(planDelivery(wezterm(), true)).toMatchObject({ action: 'copy' });
+  });
+
+  it('fails closed without a pid or app path at either end', () => {
+    for (const lacking of [{ appPid: null }, { pasteApp: null }, { pasteApp: '' }] as const) {
+      expect(planDelivery(wezterm(lacking), true, wezterm())).toMatchObject({ action: 'copy' });
+      expect(planDelivery(wezterm(), true, wezterm(lacking))).toMatchObject({ action: 'copy' });
+    }
+  });
+
+  it('needs the Clipboard fallback setting: off is the behaviour from before the paste route', () => {
+    expect(planDelivery(wezterm(), false, wezterm())).toMatchObject({ action: 'fail', kind: 'unsupported' });
+  });
+
   it('an unflagged or older snapshot keeps the old plans', () => {
-    expect(planDelivery(wezterm({ pasteTerminal: false }), true))
+    expect(planDelivery(wezterm({ pasteTerminal: false }), true, wezterm()))
       .toMatchObject({ action: 'copy', terminal: true });
     const older = wezterm();
     delete older.pasteTerminal;
-    expect(planDelivery(older, true)).toMatchObject({ action: 'copy', terminal: true });
-    expect(planDelivery(wezterm({ insertable: true, kind: 'insertable', pasteTerminal: false }), true))
+    delete older.pasteApp;
+    expect(planDelivery(older, true, older)).toMatchObject({ action: 'copy', terminal: true });
+    const insertable = { insertable: true, kind: 'insertable', pasteApp: null, pasteTerminal: false } as const;
+    expect(planDelivery(wezterm(insertable), true, wezterm(insertable)))
       .toMatchObject({ action: 'insert' });
   });
 });
@@ -98,10 +153,58 @@ describe('terminal paste delivery', () => {
     });
   });
 
-  it('is silent on the HUD and not an amber toast', async () => {
+  it('hands native the recording-start snapshot, not the current one', async () => {
+    const intended = wezterm({ kind: 'insertable', insertable: true, elementId: '77:AXTextArea:#1' });
+    const now = wezterm({ kind: 'unavailable', reason: 'no focus' });
+    const { platform } = await run(now, {}, true, () => true, intended);
+    expect(platform.pasteText).toHaveBeenCalledWith('hello', intended);
+  });
+
+  it('Notes then WezTerm copies, as before: no paste, nothing touched but the Copy', async () => {
+    const { outcome, platform } = await run(wezterm(), {}, true, () => true, notes());
+    expect(platform.pasteText).not.toHaveBeenCalled();
+    expect(outcome.status).toBe('copied');
+    expect(outcome.message).toBe(TERMINAL_COPY_MESSAGE);
+  });
+
+  it('WezTerm then Ghostty copies', async () => {
+    const { outcome, platform } = await run(ghostty(), {}, true, () => true, wezterm());
+    expect(platform.pasteText).not.toHaveBeenCalled();
+    expect(outcome.status).toBe('copied');
+  });
+
+  it('a terminal with no recorded pid copies', async () => {
+    const { outcome, platform } = await run(wezterm(), {}, true, () => true, wezterm({ appPid: null }));
+    expect(platform.pasteText).not.toHaveBeenCalled();
+    expect(outcome.status).toBe('copied');
+  });
+
+  it('Clipboard fallback off: no paste, nothing on the clipboard, text stays in History', async () => {
+    const { outcome, platform } = await run(wezterm(), {}, false);
+    expect(platform.pasteText).not.toHaveBeenCalled();
+    expect(platform.clipboardWrite).not.toHaveBeenCalled();
+    expect(platform.clipboardRestore).not.toHaveBeenCalled();
+    expect(outcome.status).toBe('failed');
+    expect(outcome.text).toBe('hello');
+  });
+
+  it('a successful paste is as quiet as an insert: no HUD result, ok-toned toast', async () => {
     const { outcome } = await run(wezterm());
     expect(hudResultFor(outcome)).toBeNull();
     expect(toastTone(outcome.message)).toBe('ok');
+  });
+
+  it('a clipboard that was not put back is a warn toast, not ok and not an error', async () => {
+    for (const reason of [
+      'clipboard changed during paste — left as-is',
+      'prior clipboard could not be saved',
+      'restore did not complete: pasteboard refused the saved items',
+    ]) {
+      const { outcome } = await run(wezterm(), {
+        pasteText: vi.fn().mockResolvedValue({ clipboardRestored: false, restoreSkippedReason: reason }),
+      });
+      expect(toastTone(outcome.message), reason).toBe('warn');
+    }
   });
 
   it('says so when the clipboard could not be put back', async () => {
@@ -127,14 +230,6 @@ describe('terminal paste delivery', () => {
     expect(outcome.detail).toBe('paste skipped: Secure Keyboard Entry is on — paste skipped');
     expect(platform.clipboardWrite).toHaveBeenCalledWith('hello');
     expect(hudResultFor(outcome)).toBe('copied');
-  });
-
-  it('a refusal with Copy fallback off is a failure, nothing copied', async () => {
-    const { outcome, platform } = await run(wezterm(), {
-      pasteText: vi.fn().mockRejectedValue(new InsertError('text contains control characters', false)),
-    }, false);
-    expect(outcome.status).toBe('failed');
-    expect(platform.clipboardWrite).not.toHaveBeenCalled();
   });
 
   it('a missing paste adapter falls back to Copy', async () => {

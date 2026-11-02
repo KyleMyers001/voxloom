@@ -4,13 +4,12 @@
  */
 
 import {
-  copiedMessage,
   deliveryMessage,
-  MANUAL_RECOVERY_HINT,
   reasonForKind,
   restoreSkippedSuffix,
 } from './messages';
-import { pastedOutcome } from './paste';
+import { copyFallback, failOutcome, mayHaveInserted } from './fallback';
+import { pasteInTerminal } from './paste';
 import {
   planDelivery,
   shouldRestoreClipboard,
@@ -34,22 +33,6 @@ async function readClipboardText(
   } catch {
     return null;
   }
-}
-
-function failOutcome(
-  text: string,
-  detail: string,
-  extras?: Partial<DeliveryOutcome>,
-): DeliveryOutcome {
-  return {
-    clipboardRestored: false,
-    detail,
-    message: deliveryMessage('failed', `${detail}. ${MANUAL_RECOVERY_HINT}`),
-    restoreSkippedReason: extras?.restoreSkippedReason ?? null,
-    status: 'failed',
-    text,
-    ...extras,
-  };
 }
 
 /**
@@ -96,10 +79,10 @@ export async function deliverTranscript(
   }
 
   if (!current()) return stale();
-  const plan = planDelivery(validated, options.clipboardFallback);
+  const plan = planDelivery(validated, options.clipboardFallback, intended);
 
   if (plan.action === 'paste') {
-    return pasteInTerminal(options, plan.target, current, stale);
+    return pasteInTerminal(options, intended, current, stale);
   }
 
   if (plan.action === 'insert') {
@@ -161,116 +144,6 @@ export async function deliverTranscript(
   }
 
   return failOutcome(text, plan.reason);
-}
-
-/**
- * Terminal paste: clipboard + ⌘V, the user's clipboard restored natively.
- * A refusal before ⌘V (Secure Keyboard Entry, control characters, the
- * frontmost app changed, permissions) copies with the terminal hint, exactly
- * like the old terminal behaviour. After ⌘V went out nothing is retried or
- * copied: the clipboard was just restored on purpose.
- */
-async function pasteInTerminal(
-  options: DeliverOptions,
-  target: TargetSnapshot,
-  current: () => boolean,
-  stale: () => DeliveryOutcome,
-): Promise<DeliveryOutcome> {
-  const { platform, text } = options;
-  try {
-    if (!platform.pasteText) throw new Error('paste unavailable on this platform');
-    return pastedOutcome(text, await platform.pasteText(text, target));
-  } catch (error: unknown) {
-    const detail = error instanceof Error ? error.message : String(error);
-    if (error instanceof InsertError && error.writeStarted) {
-      // The IPC died after dispatch: ⌘V may have gone out.
-      const report = { detail: `paste error after dispatch: ${detail}`, typed: false, unverified: true };
-      return mayHaveInserted(platform, text, current() && options.clipboardFallback, report);
-    }
-    if (!current()) return stale();
-    if (!options.clipboardFallback) return failOutcome(text, `paste failed: ${detail}`);
-    return copyFallback(platform, text, `paste skipped: ${detail}`, true);
-  }
-}
-
-/**
- * Native write happened but could not be proven complete: the text may already
- * be (partly) in the field. Never claim Inserted, never imply nothing happened
- * — including when the Copy fallback itself fails or is disabled.
- */
-async function mayHaveInserted(
-  platform: DeliverOptions['platform'],
-  text: string,
-  clipboardFallback: boolean,
-  report: InsertReport,
-): Promise<DeliveryOutcome> {
-  const detail = `unverified insert: ${report.detail ?? 'read-back failed'}`;
-  if (!clipboardFallback) {
-    const failed = failOutcome(text, detail);
-    return { ...failed, mayHaveInserted: true, message: `May have been inserted — ${failed.message}` };
-  }
-  const copied = await copyFallback(platform, text, detail);
-  if (copied.status === 'copied') {
-    return { ...copied, mayHaveInserted: true, message: 'May have been inserted — also copied' };
-  }
-  return { ...copied, mayHaveInserted: true, message: `May have been inserted — ${copied.message}` };
-}
-
-/**
- * Copy fallback: leave transcript on clipboard (intentional — not a temp paste).
- * No restore of prior clipboard on the Copy-as-delivery path (ADR: user needs
- * the transcript). Restore applies only to temporary paste-during-insert,
- * which lives inside the platform insertText implementation when needed.
- */
-async function copyFallback(
-  platform: DeliverOptions['platform'],
-  text: string,
-  reason: string,
-  terminal = false,
-): Promise<DeliveryOutcome> {
-  try {
-    await platform.clipboardWrite(text);
-  } catch (error: unknown) {
-    const detail = error instanceof Error ? error.message : String(error);
-    return failOutcome(
-      text,
-      `clipboard unavailable: ${detail}`,
-    );
-  }
-
-  // Conflict check: confirm our text landed; if not, be honest.
-  let conflict = false;
-  try {
-    const snap = await platform.clipboardRead();
-    if (snap.ok && snap.text !== null && snap.text !== text) {
-      conflict = true;
-    }
-  } catch {
-    // Read failure: cannot prove conflict; treat write as Copied.
-  }
-
-  if (conflict) {
-    return {
-      clipboardRestored: false,
-      detail: reason,
-      message: deliveryMessage(
-        'failed',
-        `clipboard changed after write — ${MANUAL_RECOVERY_HINT}`,
-      ),
-      restoreSkippedReason: 'clipboard changed after our write',
-      status: 'failed',
-      text,
-    };
-  }
-
-  return {
-    clipboardRestored: false,
-    detail: reason,
-    message: copiedMessage(reason, terminal),
-    restoreSkippedReason: null,
-    status: 'copied',
-    text,
-  };
 }
 
 /**

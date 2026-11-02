@@ -36,11 +36,22 @@ pub fn is_known_terminal(exe_path: &str) -> bool {
         || bundle_name(exe_path).is_some_and(|name| HINT_ONLY_BUNDLES.contains(&name.as_str()))
 }
 
+/// App bundle path of a paste terminal (`/Applications/WezTerm.app`), else
+/// None. With the pid it identifies the terminal a paste is bound to.
+pub fn paste_app(exe_path: &str) -> Option<String> {
+    if !is_paste_terminal(exe_path) {
+        return None;
+    }
+    app_bundle_root(exe_path).map(str::to_string)
+}
+
 /// What the snapshot records about the frontmost terminal.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TerminalFlags {
     pub known: bool,
     pub paste: bool,
+    /// Set iff `paste`.
+    pub paste_app: Option<String>,
 }
 
 impl TerminalFlags {
@@ -48,21 +59,27 @@ impl TerminalFlags {
         Self {
             known: is_known_terminal(exe_path),
             paste: is_paste_terminal(exe_path),
+            paste_app: paste_app(exe_path),
         }
     }
 }
 
 /// Set the terminal flags on a snapshot. The pid is the focused element's app,
-/// else the frontmost app (AX gave no focus, e.g. no AX text or no permission).
-/// `flags_for` resolves a pid to an executable and calls `TerminalFlags::from_exe`.
+/// else the frontmost app (AX gave no focus, e.g. no AX text or no permission);
+/// a snapshot without an app pid takes the frontmost one, so a later paste can
+/// be bound to it. `flags_for` resolves a pid to an executable and calls
+/// `TerminalFlags::from_exe`.
 pub fn flag_terminal(
     mut snap: TargetSnapshotDto,
     frontmost_pid: impl FnOnce() -> Option<i32>,
     flags_for: impl FnOnce(Option<i32>) -> TerminalFlags,
 ) -> TargetSnapshotDto {
-    let flags = flags_for(snap.app_pid.or_else(frontmost_pid));
+    let pid = snap.app_pid.or_else(frontmost_pid);
+    let flags = flags_for(pid);
+    snap.app_pid = pid;
     snap.known_terminal = flags.known;
     snap.paste_terminal = flags.paste;
+    snap.paste_app = flags.paste_app;
     snap
 }
 
@@ -83,10 +100,12 @@ mod tests {
                     TerminalFlags {
                         known: pid == Some(7),
                         paste: pid == Some(7),
+                        paste_app: (pid == Some(7)).then(|| "/Applications/W.app".into()),
                     }
                 },
             );
             assert_eq!(out.known_terminal, out.paste_terminal);
+            assert_eq!(out.paste_terminal, out.paste_app.is_some());
             (asked.unwrap(), out.known_terminal)
         };
         // Focused app wins over the frontmost one.
@@ -111,12 +130,41 @@ mod tests {
     }
 
     #[test]
+    fn flag_records_the_frontmost_pid_when_the_snapshot_has_none() {
+        let flags = |_: Option<i32>| TerminalFlags::default();
+        let filled = flag_terminal(target("unavailable", None, None), || Some(5), flags);
+        assert_eq!(filled.app_pid, Some(5));
+        let kept = flag_terminal(target("insertable", Some(7), None), || Some(5), flags);
+        assert_eq!(kept.app_pid, Some(7));
+        let none = flag_terminal(target("unavailable", None, None), || None, flags);
+        assert_eq!(none.app_pid, None);
+    }
+
+    #[test]
+    fn paste_app_is_the_bundle_path_of_paste_terminals_only() {
+        assert_eq!(
+            paste_app("/Applications/WezTerm.app/Contents/MacOS/wezterm-gui").as_deref(),
+            Some("/Applications/WezTerm.app")
+        );
+        assert_eq!(
+            paste_app("/Applications/Warp.app/Contents/MacOS/stable"),
+            None
+        );
+        assert_eq!(
+            paste_app("/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal"),
+            None
+        );
+        assert_eq!(paste_app("/usr/bin/zsh"), None);
+    }
+
+    #[test]
     fn flag_overwrites_a_stale_value() {
         let mut snap = target("unavailable", None, None);
         snap.known_terminal = true;
         snap.paste_terminal = true;
+        snap.paste_app = Some("/Applications/Stale.app".into());
         let out = flag_terminal(snap, || None, |_| TerminalFlags::default());
-        assert!(!out.known_terminal && !out.paste_terminal);
+        assert!(!out.known_terminal && !out.paste_terminal && out.paste_app.is_none());
     }
 
     #[test]
@@ -163,13 +211,10 @@ mod tests {
             "/Applications/Ghostty.app/Contents/MacOS/ghostty",
         ] {
             assert!(is_paste_terminal(exe), "{exe}");
-            assert_eq!(
-                TerminalFlags::from_exe(exe),
-                TerminalFlags {
-                    known: true,
-                    paste: true
-                }
-            );
+            let flags = TerminalFlags::from_exe(exe);
+            assert!(flags.known && flags.paste, "{exe}");
+            let app = flags.paste_app.expect("paste terminals record their app");
+            assert!(app.ends_with(".app") && exe.starts_with(&app), "{exe}");
         }
         // Known for the hint, but never pasted into.
         for exe in [
@@ -181,7 +226,8 @@ mod tests {
                 TerminalFlags::from_exe(exe),
                 TerminalFlags {
                     known: true,
-                    paste: false
+                    paste: false,
+                    paste_app: None
                 }
             );
         }

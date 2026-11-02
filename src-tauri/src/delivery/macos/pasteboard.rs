@@ -74,22 +74,29 @@ pub fn snapshot() -> Option<Snapshot> {
     })
 }
 
-/// Replace the clipboard with `text`, flagged transient. Returns the change
-/// count right after our write, for the restore guard.
+/// Replace the clipboard with `text`, flagged transient. One item carries both
+/// the string and the marker, written in a single call, so a clipboard manager
+/// never sees the transcript without the marker. Returns the change count right
+/// after our write, for the restore guard.
 pub fn write_transient(text: &str) -> Result<i64, String> {
     let text = CString::new(text).map_err(|_| "transcript contains NUL".to_string())?;
     autoreleasepool(|_| unsafe {
-        let pb = general();
-        let _: isize = msg_send![pb, clearContents];
-        let string = ns_string(&text);
+        let item: Retained<AnyObject> = msg_send![class!(NSPasteboardItem), new];
         let ty = ns_string(&CString::new(TYPE_STRING).unwrap_or_default());
-        let ok: Bool = msg_send![pb, setString: string, forType: ty];
+        let ok: Bool = msg_send![&*item, setString: ns_string(&text), forType: ty];
         if !ok.as_bool() {
-            return Err("pasteboard refused the transcript".to_string());
+            return Err("pasteboard item refused the transcript".to_string());
         }
         // Best effort: the marker only keeps clipboard managers away.
         let marker = ns_string(&CString::new(TYPE_TRANSIENT).unwrap_or_default());
-        let _: Bool = msg_send![pb, setData: ns_data(&[]), forType: marker];
+        let _: Bool = msg_send![&*item, setData: ns_data(&[]), forType: marker];
+        let pb = general();
+        let _: isize = msg_send![pb, clearContents];
+        let array: Retained<AnyObject> = msg_send![class!(NSArray), arrayWithObject: &*item];
+        let wrote: Bool = msg_send![pb, writeObjects: &*array];
+        if !wrote.as_bool() {
+            return Err("pasteboard refused the transcript".to_string());
+        }
         Ok(change_count())
     })
 }
@@ -116,7 +123,7 @@ pub fn restore(saved: &Snapshot) -> Result<(), String> {
         let ptrs: Vec<*const AnyObject> = items.iter().map(|i| &**i as *const AnyObject).collect();
         let array: *mut AnyObject =
             msg_send![class!(NSArray), arrayWithObjects: ptrs.as_ptr(), count: ptrs.len()];
-        let ok: Bool = msg_send![pb, writeObjects: array];
+        let ok: Bool = msg_send![pb, writeObjects: &*array];
         if ok.as_bool() {
             Ok(())
         } else {

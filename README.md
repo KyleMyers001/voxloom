@@ -56,9 +56,24 @@ never sends Enter or uses clipboard transport, and never automatically copies
 or retries after any events are posted. Complete/partial dispatch stays
 **Unverified** in the result and History; inspect the prompt before using Copy.
 Printable text can still trigger actions in terminal modes or TUIs: no Enter
-is not a universal no-execution guarantee. Other terminal apps are not enabled
-by this route. See `docs/decisions/apple-terminal-delivery.md` for guards,
-evidence and remaining live checks.
+is not a universal no-execution guarantee. See
+`docs/decisions/apple-terminal-delivery.md` for guards, evidence and remaining
+live checks.
+
+### Other terminals (paste route)
+
+WezTerm, Alacritty, kitty, Ghostty and iTerm2 take a clipboard paste instead:
+the transcript goes on the clipboard for about 500 ms (marked transient), Voxloom
+presses ⌘V once, and your previous clipboard is restored unless you copied
+something meanwhile. It runs only when **Clipboard fallback** is on, and only
+into the same terminal app that was in front when you started dictating; with
+the setting off, terminals behave as before (nothing touches the clipboard, the
+text stays in History). Secure Keyboard Entry, control characters or newlines,
+or a changed frontmost app fall back to Copy ("Copied. Press ⌘V to paste.").
+The result is recorded **Unverified**: a terminal has no field to read back. A
+password prompt that does not enable Secure Keyboard Entry (for example `sudo`)
+cannot be detected. See `docs/decisions/terminal-paste-delivery.md`. Other
+terminals, including Warp, are not on this route.
 
 The marketing website is maintained separately in
 [`voxloom-site`](https://github.com/KyleMyers001/voxloom-site) and hosted at
