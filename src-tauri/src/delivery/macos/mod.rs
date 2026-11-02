@@ -8,6 +8,9 @@
 mod ax;
 mod ax_insert;
 mod focus;
+mod focus_fallback;
+mod focus_walk;
+mod focus_warm;
 mod host;
 mod registry;
 mod typing;
@@ -30,13 +33,23 @@ pub fn snapshot_target() -> Result<TargetSnapshotDto, String> {
 }
 
 pub fn validate_target(intended: TargetSnapshotDto) -> Result<TargetSnapshotDto, String> {
-    Ok(validate_snapshots(
-        &intended,
-        snapshot_at("delivery validation", false),
-    ))
+    let checked = validate_snapshots(&intended, snapshot_at("delivery validation", false));
+    if !checked.insertable {
+        focus_warm::clear(); // delivery ends here (copy-only)
+    }
+    Ok(checked)
 }
 
 /// Re-read focus and require it to still be the validated, insertable field.
+/// Uses the frontmost-app fallback on purpose: apps such as ChatGPT leave the
+/// system-wide focus empty mid-insert, and without the fallback every
+/// per-chunk check would abort typing there. Still fails closed: the fallback
+/// never returns Voxloom's own pid, and the element must re-validate against
+/// `intended` (same app, same element, insertable) before anything is posted.
+/// The first fallback of a delivery may take ~0.5 s (activation + retry +
+/// walk); later chunks reuse the warm, re-verified element (one cheap AX
+/// round-trip set). The warm cache is cleared when `insert_text` returns. Only runs off the main thread: every caller is reached
+/// from `#[tauri::command(async)]` delivery commands.
 fn focus_still_matches(intended: &TargetSnapshotDto) -> Result<(), String> {
     let (element, app_name) =
         focused_ui_element("typing").map_err(|e| format!("typing aborted — {e}"))?;
@@ -83,7 +96,14 @@ fn terminal_still_matches(
     Ok(())
 }
 
+/// Delivery end: the warm focus cache is cleared on every outcome.
 pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<InsertReport, String> {
+    let result = insert_inner(text, intended);
+    focus_warm::clear();
+    result
+}
+
+fn insert_inner(text: &str, intended: &TargetSnapshotDto) -> Result<InsertReport, String> {
     check_insert_text(text)?;
     if !intended.insertable || intended.kind != "insertable" {
         return Err(format!(
