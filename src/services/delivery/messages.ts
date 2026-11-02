@@ -43,10 +43,16 @@ export function deliveryMessage(
 }
 
 /**
- * Copy result when the frontmost app is a known terminal: nothing was typed,
- * so say how to finish. (The HUD's own result line already names ⌘V.)
+ * Copy result when the frontmost app is a known terminal: nothing was typed
+ * or pasted, so say how to finish. Matches the HUD's screen-reader line.
  */
-export const TERMINAL_COPY_MESSAGE = 'Copied, press ⌘V';
+export const TERMINAL_COPY_MESSAGE = 'Copied. Press ⌘V to paste.';
+
+/**
+ * A terminal paste went out (⌘V posted). Neutral on purpose: a terminal has no
+ * field to read back, so the paste cannot be confirmed, but nothing is wrong.
+ */
+export const TERMINAL_PASTE_MESSAGE = 'Paste sent to terminal';
 
 /** The Copied line: the terminal hint, else the generic "Copied — reason". */
 export function copiedMessage(reason: string, terminal: boolean): string {

@@ -15,6 +15,10 @@ pub struct TargetSnapshotDto {
     /// payloads, which read as false.
     #[serde(default)]
     pub known_terminal: bool,
+    /// Frontmost app is a terminal the paste route supports (a subset of
+    /// `known_terminal`). Absent in older payloads, which read as false.
+    #[serde(default)]
+    pub paste_terminal: bool,
     pub reason: Option<String>,
 }
 
@@ -29,6 +33,7 @@ impl TargetSnapshotDto {
             insertable: false,
             kind: "unavailable".into(),
             known_terminal: false,
+            paste_terminal: false,
             reason: Some(reason.into()),
         }
     }
@@ -44,7 +49,9 @@ mod tests {
             "elementRole":null,"insertable":false,"kind":"unavailable","reason":null}"#;
         let dto: TargetSnapshotDto = serde_json::from_str(older).unwrap();
         assert!(!dto.known_terminal);
+        assert!(!dto.paste_terminal);
         let json = serde_json::to_value(&dto).unwrap();
         assert_eq!(json["knownTerminal"], false);
+        assert_eq!(json["pasteTerminal"], false);
     }
 }

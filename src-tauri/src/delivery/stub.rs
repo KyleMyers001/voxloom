@@ -39,3 +39,10 @@ pub fn insert_text(
 ) -> Result<super::decide::InsertReport, String> {
     Err("insert unavailable on this platform (macOS AX adapter required)".into())
 }
+
+pub fn paste_text(
+    _text: &str,
+    _intended: &TargetSnapshotDto,
+) -> Result<super::decide::report::PasteReport, String> {
+    Err("paste unavailable on this platform (macOS adapter required)".into())
+}

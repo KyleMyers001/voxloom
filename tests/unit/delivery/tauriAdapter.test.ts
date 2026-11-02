@@ -40,10 +40,40 @@ describe('tauri snapshot knownTerminal', () => {
     insertable: false, kind: 'unavailable', reason: 'no focus',
   };
 
+  it('maps pasteTerminal, and an older payload without it to false', async () => {
+    invoke.mockResolvedValueOnce({ ...dto, pasteTerminal: true });
+    expect((await createTauriDeliveryAdapter(clipboard).snapshotTarget()).pasteTerminal).toBe(true);
+    invoke.mockResolvedValueOnce({ ...dto });
+    expect((await createTauriDeliveryAdapter(clipboard).snapshotTarget()).pasteTerminal).toBe(false);
+  });
+
   it('maps knownTerminal, and an older payload without it to false', async () => {
     invoke.mockResolvedValueOnce({ ...dto, knownTerminal: true });
     expect((await createTauriDeliveryAdapter(clipboard).snapshotTarget()).knownTerminal).toBe(true);
     invoke.mockResolvedValueOnce(dto);
     expect((await createTauriDeliveryAdapter(clipboard).validateTarget(target)).knownTerminal).toBe(false);
+  });
+});
+
+describe('tauri pasteText', () => {
+  it('passes the text and target and returns the native report', async () => {
+    invoke.mockClear();
+    invoke.mockResolvedValueOnce({ clipboardRestored: true, restoreSkippedReason: null });
+    const report = await createTauriDeliveryAdapter(clipboard).pasteText!('hi', target);
+    expect(report).toEqual({ clipboardRestored: true, restoreSkippedReason: null });
+    expect(invoke).toHaveBeenCalledWith('delivery_paste_text', { intended: target, text: 'hi' });
+  });
+
+  it('a native Err string means ⌘V was not posted', async () => {
+    invoke.mockRejectedValueOnce('Secure Keyboard Entry is on — paste skipped');
+    const error = await createTauriDeliveryAdapter(clipboard).pasteText!('hi', target).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(InsertError);
+    expect((error as InstanceType<typeof InsertError>).writeStarted).toBe(false);
+  });
+
+  it('any other failure may have pasted', async () => {
+    invoke.mockRejectedValueOnce(new Error('IPC channel closed'));
+    const error = await createTauriDeliveryAdapter(clipboard).pasteText!('hi', target).catch((e: unknown) => e);
+    expect((error as InstanceType<typeof InsertError>).writeStarted).toBe(true);
   });
 });

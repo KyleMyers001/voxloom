@@ -33,6 +33,13 @@ export interface TargetSnapshot {
    * picks the Copy message and never allows an insert. Absent means false.
    */
   knownTerminal?: boolean;
+  /**
+   * Frontmost app is a terminal that takes the clipboard paste route (WezTerm,
+   * Alacritty, kitty, Ghostty, iTerm2; never Terminal.app). Decided natively
+   * by bundle name; the native paste re-checks the frontmost app. Absent
+   * means false.
+   */
+  pasteTerminal?: boolean;
   /** Human-readable limitation or refusal reason (never empty for refusals). */
   reason: string | null;
   /** Epoch ms when the snapshot was taken. */
@@ -92,6 +99,17 @@ export interface InsertReport {
   detail: string | null;
 }
 
+/**
+ * Native paste result (macOS terminal route). ⌘V was posted; whether the
+ * terminal took it is unknown, so this is never proof of delivery.
+ */
+export interface PasteReport {
+  /** The user's prior clipboard is back after the paste. */
+  clipboardRestored: boolean;
+  /** Why it is not (changed meanwhile, could not be saved, restore failed). */
+  restoreSkippedReason: string | null;
+}
+
 export interface ClipboardSnapshot {
   /** Plain text when read succeeded; null when unavailable / non-text. */
   text: string | null;
@@ -119,6 +137,11 @@ export interface DeliveryPlatformAdapter {
     text: string,
     intended: TargetSnapshot,
   ): Promise<InsertReport | void>;
+  /**
+   * Paste into a terminal via the clipboard + ⌘V, then restore the clipboard
+   * (macOS only; absent elsewhere). Rejects when nothing was pasted.
+   */
+  pasteText?(text: string, intended: TargetSnapshot): Promise<PasteReport>;
   /** Snapshot frontmost app + focused element insertability. */
   snapshotTarget(): Promise<TargetSnapshot>;
   /**

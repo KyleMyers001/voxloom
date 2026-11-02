@@ -1,9 +1,11 @@
 //! BUS-14 insertion delivery — platform adapter boundary.
 //! macOS: Accessibility (AX) snapshot + insert. Other OS: honest stubs.
-//! Never synthesizes Enter / Tab / command chords as product submit.
+//! Never synthesizes Enter / Tab as product submit. Command chords: only the
+//! terminal paste route's ⌘V.
 //! macOS inserts via verified AXSelectedText; web fields that ignore it fall back
-//! to Unicode key events (no clipboard, no command chords). Failures use the TS
-//! Copy policy.
+//! to Unicode key events (no clipboard, no command chords). Terminals without
+//! an insertable AX field take a separate clipboard + ⌘V route (`paste`). Failures
+//! use the TS Copy policy.
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod decide;
@@ -53,6 +55,18 @@ pub fn delivery_insert_text(
     intended: TargetSnapshotDto,
 ) -> Result<decide::InsertReport, String> {
     platform::insert_text(&text, &intended)
+}
+
+/// Paste into a terminal through the clipboard (⌘V), then restore the user's
+/// clipboard. Same contract as `delivery_insert_text`: `Err` means nothing was
+/// pasted; `Ok` means ⌘V was posted, which is not proof the terminal took it.
+/// Async: the clipboard restore waits, which must not block the UI thread.
+#[tauri::command(async)]
+pub fn delivery_paste_text(
+    text: String,
+    intended: TargetSnapshotDto,
+) -> Result<decide::report::PasteReport, String> {
+    platform::paste_text(&text, &intended)
 }
 
 #[cfg(test)]

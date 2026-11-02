@@ -10,6 +10,7 @@ import {
   reasonForKind,
   restoreSkippedSuffix,
 } from './messages';
+import { pastedOutcome } from './paste';
 import {
   planDelivery,
   shouldRestoreClipboard,
@@ -97,6 +98,10 @@ export async function deliverTranscript(
   if (!current()) return stale();
   const plan = planDelivery(validated, options.clipboardFallback);
 
+  if (plan.action === 'paste') {
+    return pasteInTerminal(options, plan.target, current, stale);
+  }
+
   if (plan.action === 'insert') {
     let report: InsertReport | void;
     try {
@@ -156,6 +161,36 @@ export async function deliverTranscript(
   }
 
   return failOutcome(text, plan.reason);
+}
+
+/**
+ * Terminal paste: clipboard + ⌘V, the user's clipboard restored natively.
+ * A refusal before ⌘V (Secure Keyboard Entry, control characters, the
+ * frontmost app changed, permissions) copies with the terminal hint, exactly
+ * like the old terminal behaviour. After ⌘V went out nothing is retried or
+ * copied: the clipboard was just restored on purpose.
+ */
+async function pasteInTerminal(
+  options: DeliverOptions,
+  target: TargetSnapshot,
+  current: () => boolean,
+  stale: () => DeliveryOutcome,
+): Promise<DeliveryOutcome> {
+  const { platform, text } = options;
+  try {
+    if (!platform.pasteText) throw new Error('paste unavailable on this platform');
+    return pastedOutcome(text, await platform.pasteText(text, target));
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    if (error instanceof InsertError && error.writeStarted) {
+      // The IPC died after dispatch: ⌘V may have gone out.
+      const report = { detail: `paste error after dispatch: ${detail}`, typed: false, unverified: true };
+      return mayHaveInserted(platform, text, current() && options.clipboardFallback, report);
+    }
+    if (!current()) return stale();
+    if (!options.clipboardFallback) return failOutcome(text, `paste failed: ${detail}`);
+    return copyFallback(platform, text, `paste skipped: ${detail}`, true);
+  }
 }
 
 /**

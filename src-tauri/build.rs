@@ -24,6 +24,7 @@ const COMMANDS: &[&str] = &[
     "cleanup_model_status",
     "cleanup_pick_and_import_model",
     "delivery_insert_text",
+    "delivery_paste_text",
     "delivery_snapshot_target",
     "delivery_validate_target",
     "dictionary_load",

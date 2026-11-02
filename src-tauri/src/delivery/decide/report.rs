@@ -17,6 +17,16 @@ pub struct InsertReport {
     pub detail: Option<String>,
 }
 
+/// Result of the clipboard paste route. ⌘V was posted; whether the terminal
+/// took it is unknown (no AX oracle), so this is never proof of delivery.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PasteReport {
+    pub clipboard_restored: bool,
+    /// Why the user's prior clipboard was not put back (None when it was).
+    pub restore_skipped_reason: Option<String>,
+}
+
 #[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum TerminalDispatch {
@@ -50,5 +60,16 @@ mod tests {
         let v = serde_json::to_value(&terminal).unwrap();
         assert_eq!(v["terminalDispatch"], "complete");
         assert_eq!(v["unverified"], true);
+    }
+
+    #[test]
+    fn paste_report_serializes_camel_case() {
+        let r = PasteReport {
+            clipboard_restored: false,
+            restore_skipped_reason: Some("why".into()),
+        };
+        let v = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["clipboardRestored"], false);
+        assert_eq!(v["restoreSkippedReason"], "why");
     }
 }

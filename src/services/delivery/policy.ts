@@ -15,13 +15,31 @@ export function mayInsert(validated: TargetSnapshot): boolean {
  */
 export type DeliveryPlan =
   | { action: 'insert'; target: TargetSnapshot }
+  | { action: 'paste'; target: TargetSnapshot }
   | { action: 'copy'; reason: string; kind: TargetKind; terminal: boolean }
   | { action: 'fail'; reason: string; kind: TargetKind };
+
+/**
+ * Terminals the native side flagged for the paste route. Their AX focus says
+ * nothing useful (no field, a read-only text area, or one that ignores
+ * writes), so this is decided before `mayInsert`. A secure field, a changed
+ * target or a closed app never pastes; the native paste re-checks the
+ * frontmost app and Secure Keyboard Entry itself.
+ */
+export function mayPaste(validated: TargetSnapshot): boolean {
+  return validated.pasteTerminal === true
+    && (validated.kind === 'insertable'
+      || validated.kind === 'unsupported'
+      || validated.kind === 'unavailable');
+}
 
 export function planDelivery(
   validated: TargetSnapshot,
   clipboardFallback: boolean,
 ): DeliveryPlan {
+  if (mayPaste(validated)) {
+    return { action: 'paste', target: validated };
+  }
   if (mayInsert(validated)) {
     return { action: 'insert', target: validated };
   }

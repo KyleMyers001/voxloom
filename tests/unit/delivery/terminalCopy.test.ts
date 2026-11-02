@@ -57,7 +57,7 @@ const deliver = (validated: TargetSnapshot, overrides = {}, clipboardFallback = 
 
 describe('terminal Copy hint', () => {
   it('the exact string', () => {
-    expect(TERMINAL_COPY_MESSAGE).toBe('Copied, press ⌘V');
+    expect(TERMINAL_COPY_MESSAGE).toBe('Copied. Press ⌘V to paste.');
   });
 
   it('plan carries the terminal flag; absent or false is not a terminal', () => {
@@ -69,13 +69,13 @@ describe('terminal Copy hint', () => {
     expect(planDelivery(older, true)).toMatchObject({ action: 'copy', terminal: false });
   });
 
-  it('Copy in a known terminal says "Copied, press ⌘V"; the clipboard and detail are unchanged', async () => {
+  it('Copy in a known terminal says "Copied. Press ⌘V to paste."; the clipboard and detail are unchanged', async () => {
     const platform = adapter(terminal());
     const outcome = await deliverTranscript({
       clipboardFallback: true, intended: terminal(), platform, text: 'hello',
     });
     expect(outcome.status).toBe('copied');
-    expect(outcome.message).toBe('Copied, press ⌘V');
+    expect(outcome.message).toBe('Copied. Press ⌘V to paste.');
     expect(outcome.detail).toBe('unsupported or unknown AX role');
     expect(outcome.text).toBe('hello');
     expect(platform.clipboardWrite).toHaveBeenCalledWith('hello');
@@ -93,7 +93,7 @@ describe('terminal Copy hint', () => {
 
   it('a terminal whose AX focus is unavailable gets the hint too', async () => {
     const outcome = await deliver(terminal({ kind: 'unavailable', reason: 'Accessibility focus unavailable' }));
-    expect(outcome.message).toBe('Copied, press ⌘V');
+    expect(outcome.message).toBe('Copied. Press ⌘V to paste.');
   });
 
   it('Copy in any other app keeps the generic message', async () => {
@@ -111,7 +111,7 @@ describe('terminal Copy hint', () => {
       insertText: vi.fn().mockRejectedValue(new Error('AX write ignored')),
     });
     expect(outcome.status).toBe('copied');
-    expect(outcome.message).toBe('Copied, press ⌘V');
+    expect(outcome.message).toBe('Copied. Press ⌘V to paste.');
     expect(outcome.detail).toBe('insert failed: AX write ignored');
     const elsewhere = await deliver(snap(), {
       insertText: vi.fn().mockRejectedValue(new Error('AX write ignored')),

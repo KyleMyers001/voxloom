@@ -4,11 +4,16 @@
 //! uses a separate guarded Unicode-only path with explicit unverified dispatch
 //! reporting: never AX-first, never scrollback verification, never auto-copy or
 //! retry after events are posted. Secure/changed targets always refuse.
+//! Other known terminals (WezTerm, iTerm2, ...) take the clipboard paste route
+//! (`paste_text`) instead of any AX write.
 
 mod ax;
 mod ax_insert;
 mod focus;
 mod host;
+mod keylayout;
+mod paste;
+mod pasteboard;
 mod registry;
 mod typing;
 mod web_ax;
@@ -19,6 +24,7 @@ use std::sync::Mutex;
 use ax::{copy_string_attr, release, AXIsProcessTrusted, CFTypeRef};
 use focus::{build_snapshot, focused_ui_element, snapshot_at};
 
+use super::decide::report::PasteReport;
 use super::decide::{check_insert_text, validate_snapshots, InsertPath, InsertReport};
 use super::types::TargetSnapshotDto;
 
@@ -115,6 +121,27 @@ pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<InsertRep
     };
     release(element as CFTypeRef);
     result
+}
+
+/// Terminal paste route (WezTerm, iTerm2, ...): clipboard + one ⌘V, then the
+/// user's clipboard back. Identity is re-resolved here from the frontmost
+/// process; the snapshot's flag only chose the route. `Err` = nothing pasted.
+pub fn paste_text(text: &str, intended: &TargetSnapshotDto) -> Result<PasteReport, String> {
+    if intended.kind == "secure" {
+        return Err("refusing paste into a secure field".into());
+    }
+    let pid = host::frontmost_pid().ok_or("frontmost app unavailable — paste skipped")?;
+    if intended.app_pid.is_some_and(|p| p != pid) {
+        return Err("frontmost app changed — paste skipped".into());
+    }
+    if !host::paste_terminal(pid) {
+        return Err("frontmost app is not a supported terminal — paste skipped".into());
+    }
+    // Held through the clipboard restore, so two inserts never interleave.
+    let _serial = INSERT_LOCK
+        .lock()
+        .map_err(|_| "insert lock poisoned".to_string())?;
+    super::decide::paste::paste_text(&paste::MacPaste { pid }, text)
 }
 
 #[cfg(test)]

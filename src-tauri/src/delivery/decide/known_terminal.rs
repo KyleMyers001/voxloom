@@ -1,44 +1,68 @@
-//! Which frontmost apps are terminals, for the "Copied, press ⌘V" hint.
+//! Which frontmost apps are terminals: for the "Copied. Press ⌘V to paste."
+//! hint, and for the clipboard paste route (`paste`).
 //!
-//! Display only: this never authorizes a transport. Apple Terminal is matched
-//! by its exact system path (as `terminal::apple_terminal_host` does); the
-//! others by `.app` bundle name, as `host` matches browsers. A bundle name is
-//! not an identity, so a mismatch costs a generic message, never an insert.
+//! Apple Terminal is matched by its exact system path (as
+//! `terminal::apple_terminal_host` does); the others by `.app` bundle name, as
+//! `host` matches browsers. A bundle name is not an identity: a lookalike app
+//! costs a wrong hint, or a ⌘V into an app that shares a terminal's name.
+//! Apple Terminal never takes the paste route (it has its own Unicode route).
 
 use super::host::app_bundle_root;
 use super::terminal::apple_terminal_host;
 use crate::delivery::types::TargetSnapshotDto;
 
-/// Third-party terminal bundle names (lowercase, without `.app`).
+/// Terminals the paste route supports (lowercase bundle name without `.app`).
 /// iTerm2 ships as `iTerm.app`.
-const TERMINAL_BUNDLES: &[&str] = &["iterm", "wezterm", "alacritty", "kitty", "ghostty", "warp"];
+const PASTE_BUNDLES: &[&str] = &["iterm", "wezterm", "alacritty", "kitty", "ghostty"];
 
-/// `exe_path` is the frontmost process's executable path.
-pub fn is_known_terminal(exe_path: &str) -> bool {
-    if apple_terminal_host(exe_path) {
-        return true;
-    }
-    let Some(bundle) = app_bundle_root(exe_path) else {
-        return false;
-    };
-    let name = bundle
-        .rsplit('/')
-        .next()
-        .unwrap_or_default()
-        .trim_end_matches(".app")
-        .to_lowercase();
-    TERMINAL_BUNDLES.contains(&name.as_str())
+/// Recognised for the hint only. Warp has its own input editor and the paste
+/// route has not been tried there.
+const HINT_ONLY_BUNDLES: &[&str] = &["warp"];
+
+fn bundle_name(exe_path: &str) -> Option<String> {
+    let bundle = app_bundle_root(exe_path)?;
+    let name = bundle.rsplit('/').next().unwrap_or_default();
+    Some(name.trim_end_matches(".app").to_lowercase())
 }
 
-/// Set the display flag on a snapshot. The pid is the focused element's app,
+/// `exe_path` is the frontmost process's executable path.
+pub fn is_paste_terminal(exe_path: &str) -> bool {
+    bundle_name(exe_path).is_some_and(|name| PASTE_BUNDLES.contains(&name.as_str()))
+}
+
+pub fn is_known_terminal(exe_path: &str) -> bool {
+    apple_terminal_host(exe_path)
+        || is_paste_terminal(exe_path)
+        || bundle_name(exe_path).is_some_and(|name| HINT_ONLY_BUNDLES.contains(&name.as_str()))
+}
+
+/// What the snapshot records about the frontmost terminal.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TerminalFlags {
+    pub known: bool,
+    pub paste: bool,
+}
+
+impl TerminalFlags {
+    pub fn from_exe(exe_path: &str) -> Self {
+        Self {
+            known: is_known_terminal(exe_path),
+            paste: is_paste_terminal(exe_path),
+        }
+    }
+}
+
+/// Set the terminal flags on a snapshot. The pid is the focused element's app,
 /// else the frontmost app (AX gave no focus, e.g. no AX text or no permission).
-/// `is_terminal` resolves a pid to an executable and calls `is_known_terminal`.
+/// `flags_for` resolves a pid to an executable and calls `TerminalFlags::from_exe`.
 pub fn flag_terminal(
     mut snap: TargetSnapshotDto,
     frontmost_pid: impl FnOnce() -> Option<i32>,
-    is_terminal: impl FnOnce(Option<i32>) -> bool,
+    flags_for: impl FnOnce(Option<i32>) -> TerminalFlags,
 ) -> TargetSnapshotDto {
-    snap.known_terminal = is_terminal(snap.app_pid.or_else(frontmost_pid));
+    let flags = flags_for(snap.app_pid.or_else(frontmost_pid));
+    snap.known_terminal = flags.known;
+    snap.paste_terminal = flags.paste;
     snap
 }
 
@@ -56,9 +80,13 @@ mod tests {
                 || front,
                 |pid| {
                     asked = Some(pid);
-                    pid == Some(7)
+                    TerminalFlags {
+                        known: pid == Some(7),
+                        paste: pid == Some(7),
+                    }
                 },
             );
+            assert_eq!(out.known_terminal, out.paste_terminal);
             (asked.unwrap(), out.known_terminal)
         };
         // Focused app wins over the frontmost one.
@@ -86,7 +114,9 @@ mod tests {
     fn flag_overwrites_a_stale_value() {
         let mut snap = target("unavailable", None, None);
         snap.known_terminal = true;
-        assert!(!flag_terminal(snap, || None, |_| false).known_terminal);
+        snap.paste_terminal = true;
+        let out = flag_terminal(snap, || None, |_| TerminalFlags::default());
+        assert!(!out.known_terminal && !out.paste_terminal);
     }
 
     #[test]
@@ -120,6 +150,51 @@ mod tests {
             "",
         ] {
             assert!(!is_known_terminal(exe), "{exe}");
+        }
+    }
+
+    #[test]
+    fn only_the_supported_terminals_take_the_paste_route() {
+        for exe in [
+            "/Applications/iTerm.app/Contents/MacOS/iTerm2",
+            "/Applications/WezTerm.app/Contents/MacOS/wezterm-gui",
+            "/Applications/Alacritty.app/Contents/MacOS/alacritty",
+            "/Applications/kitty.app/Contents/MacOS/kitty",
+            "/Applications/Ghostty.app/Contents/MacOS/ghostty",
+        ] {
+            assert!(is_paste_terminal(exe), "{exe}");
+            assert_eq!(
+                TerminalFlags::from_exe(exe),
+                TerminalFlags {
+                    known: true,
+                    paste: true
+                }
+            );
+        }
+        // Known for the hint, but never pasted into.
+        for exe in [
+            "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal",
+            "/Applications/Warp.app/Contents/MacOS/stable",
+        ] {
+            assert!(!is_paste_terminal(exe), "{exe}");
+            assert_eq!(
+                TerminalFlags::from_exe(exe),
+                TerminalFlags {
+                    known: true,
+                    paste: false
+                }
+            );
+        }
+        for exe in [
+            "/Applications/Notes.app/Contents/MacOS/Notes",
+            "/usr/bin/zsh",
+            "",
+        ] {
+            assert_eq!(
+                TerminalFlags::from_exe(exe),
+                TerminalFlags::default(),
+                "{exe}"
+            );
         }
     }
 }
