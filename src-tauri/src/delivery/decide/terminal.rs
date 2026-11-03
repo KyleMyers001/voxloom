@@ -30,7 +30,7 @@ pub fn choose_path(
 }
 
 /// Whole-payload guard shared by every terminal route (Unicode typing and
-/// paste). A newline or tab can run a command or complete a word in a
+/// paste, which Messages also takes). A newline or tab can run a command or complete a word in a
 /// terminal, so such text is refused, never sanitized.
 pub fn check_terminal_text(text: &str) -> Result<(), String> {
     super::check_insert_text(text)?;
@@ -38,10 +38,10 @@ pub fn check_terminal_text(text: &str) -> Result<(), String> {
         .chars()
         .any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}'))
     {
-        return Err("Terminal transcript contains control or line separator — nothing sent".into());
+        return Err("Transcript contains control or line separator — nothing sent".into());
     }
     if text.encode_utf16().count() > 4096 {
-        return Err("Terminal transcript exceeds 4096 UTF-16 units — nothing sent".into());
+        return Err("Transcript exceeds 4096 UTF-16 units — nothing sent".into());
     }
     Ok(())
 }

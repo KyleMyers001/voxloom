@@ -15,8 +15,8 @@ pub struct TargetSnapshotDto {
     /// payloads, which read as false.
     #[serde(default)]
     pub known_terminal: bool,
-    /// Frontmost app is a terminal the paste route supports (a subset of
-    /// `known_terminal`). Absent in older payloads, which read as false.
+    /// Frontmost app is a terminal (or Apple Messages) the paste route
+    /// supports (a subset of `known_terminal`). Absent in older payloads, which read as false.
     #[serde(default)]
     pub paste_terminal: bool,
     /// Bundle path of the paste terminal (set iff `paste_terminal`). With

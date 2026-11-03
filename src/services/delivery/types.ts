@@ -29,20 +29,20 @@ export interface TargetSnapshot {
   insertable: boolean;
   kind: TargetKind;
   /**
-   * Frontmost app is a known terminal (decided natively). Display only: it
+   * Frontmost app is a known terminal or Messages (decided natively). Display only: it
    * picks the Copy message and never allows an insert. Absent means false.
    */
   knownTerminal?: boolean;
   /**
-   * Frontmost app is a terminal that takes the clipboard paste route (WezTerm,
-   * Alacritty, kitty, Ghostty, iTerm2; never Terminal.app). Decided natively
-   * by bundle name; the native paste re-checks the frontmost app. Absent
+   * Frontmost app takes the clipboard paste route (WezTerm, Alacritty, kitty,
+   * Ghostty, iTerm2, Apple Messages; never Terminal.app). Decided natively
+   * by bundle name (Messages: exact system path); the name predates Messages; the native paste re-checks the frontmost app. Absent
    * means false.
    */
   pasteTerminal?: boolean;
   /**
-   * App bundle path of the paste terminal (set iff `pasteTerminal`). With
-   * `appPid` it identifies the terminal (the binding itself is `PasteBinding`).
+   * App bundle path of the paste-route app (set iff `pasteTerminal`). With
+   * `appPid` it identifies the app (the binding itself is `PasteBinding`).
    */
   pasteApp?: string | null;
   /** Human-readable limitation or refusal reason (never empty for refusals). */
@@ -105,8 +105,8 @@ export interface InsertReport {
 }
 
 /**
- * Native paste result (macOS terminal route). ⌘V was posted; whether the
- * terminal took it is unknown, so this is never proof of delivery.
+ * Native paste result (macOS paste route). ⌘V was posted; whether the
+ * app took it is unknown, so this is never proof of delivery.
  */
 export interface PasteReport {
   /** The user's prior clipboard is back after the paste. */
@@ -116,9 +116,9 @@ export interface PasteReport {
 }
 
 /**
- * The paste terminal that was in front when dictation started (recording
+ * The paste-route app that was in front when dictation started (recording
  * start, not completion): its pid and app bundle path. A paste goes out only
- * if the terminal in front at delivery is this same process and app.
+ * if the app in front at delivery is this same process and app.
  */
 export interface PasteBinding {
   appPid: number;
@@ -153,13 +153,13 @@ export interface DeliveryPlatformAdapter {
     intended: TargetSnapshot,
   ): Promise<InsertReport | void>;
   /**
-   * The paste terminal in front right now, or null when the frontmost app is
+   * The paste-route app in front right now, or null when the frontmost app is
    * not one (or this platform has no paste route). Called when dictation
    * starts; cheap, never activates anything.
    */
   pasteBinding?(): Promise<PasteBinding | null>;
   /**
-   * Paste into the terminal that was in front when you started dictating, via
+   * Paste into the app that was in front when you started dictating, via
    * the clipboard + ⌘V, then restore the clipboard (macOS only; absent
    * elsewhere). Rejects when nothing was pasted, including when the app in front is not `bound`.
    */
@@ -186,7 +186,7 @@ export interface DeliverOptions {
   /** Completion-time snapshot; null means none taken (treat as unavailable). */
   intended: TargetSnapshot | null;
   /**
-   * The paste terminal in front when dictation started. Without it (dictation
+   * The paste-route app in front when dictation started. Without it (dictation
    * started elsewhere, or it was not captured) nothing is ever pasted.
    */
   pasteBinding?: PasteBinding | null;
