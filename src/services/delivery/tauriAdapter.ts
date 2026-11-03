@@ -11,6 +11,8 @@ import type {
   ClipboardSnapshot,
   DeliveryPlatformAdapter,
   InsertReport,
+  PasteBinding,
+  PasteReport,
   TargetSnapshot,
 } from './types';
 import { InsertError } from './types';
@@ -24,6 +26,8 @@ interface NativeTargetDto {
   insertable: boolean;
   kind: TargetSnapshot['kind'];
   knownTerminal?: boolean;
+  pasteTerminal?: boolean;
+  pasteApp?: string | null;
   reason: string | null;
 }
 
@@ -37,6 +41,8 @@ function fromDto(dto: NativeTargetDto): TargetSnapshot {
     insertable: dto.insertable,
     kind: dto.kind,
     knownTerminal: dto.knownTerminal ?? false,
+    pasteTerminal: dto.pasteTerminal ?? false,
+    pasteApp: dto.pasteApp ?? null,
     reason: dto.reason,
   };
 }
@@ -88,6 +94,31 @@ export function createTauriDeliveryAdapter(
         // A string is the command's own Err, which by contract (see
         // delivery_insert_text) means nothing was written. Anything else is an
         // IPC failure after dispatch, which may have hit mid-write.
+        if (typeof error === 'string') throw new InsertError(error, false);
+        throw new InsertError(error instanceof Error ? error.message : String(error), true);
+      }
+    },
+    async pasteBinding() {
+      try {
+        if (!isTauri()) return null;
+        return (await invoke<PasteBinding | null>('delivery_paste_binding')) ?? null;
+      } catch {
+        // No binding means no paste: the pre-PR Copy behaviour applies.
+        return null;
+      }
+    },
+    async pasteText(text, bound) {
+      // Same contract as insertText: a string error is the command's own Err
+      // (⌘V was not posted); anything else may have hit mid-flight.
+      try {
+        if (!isTauri()) throw new Error('Tauri bridge unavailable');
+        JSON.stringify({ bound, text });
+      } catch (error: unknown) {
+        throw new InsertError(error instanceof Error ? error.message : String(error), false);
+      }
+      try {
+        return await invoke<PasteReport>('delivery_paste_text', { bound, text });
+      } catch (error: unknown) {
         if (typeof error === 'string') throw new InsertError(error, false);
         throw new InsertError(error instanceof Error ? error.message : String(error), true);
       }

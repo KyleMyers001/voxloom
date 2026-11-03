@@ -473,3 +473,35 @@ fn callback_panic_releases_private_source() {
     assert!(result.is_err());
     api.assert_released();
 }
+
+#[test]
+fn key_chord_posts_one_flagged_press_and_releases_everything() {
+    let api = FakeEvents::default();
+    post_key_chord_with(&api, 9, FLAG_COMMAND).unwrap();
+    api.assert_released();
+    let calls = api.calls.borrow().clone();
+    for (down, id) in [(true, 2), (false, 3)] {
+        assert!(calls.contains(&Call::Keyboard(1, 9, down, id)), "{calls:?}");
+        assert!(calls.contains(&Call::Flags(id, FLAG_COMMAND)), "{calls:?}");
+        assert!(calls.contains(&Call::Post(HID_EVENT_TAP, id)), "{calls:?}");
+    }
+    assert_eq!(api.posted(), 2);
+    assert!(!calls.iter().any(|c| matches!(c, Call::Unicode(..))));
+}
+
+#[test]
+fn key_chord_posts_nothing_when_an_event_cannot_be_created() {
+    let no_source = FakeEvents {
+        fail_source: true,
+        ..Default::default()
+    };
+    assert!(post_key_chord_with(&no_source, 9, FLAG_COMMAND).is_err());
+    assert_eq!(*no_source.calls.borrow(), [Call::Source(-1)]);
+    let no_event = FakeEvents {
+        fail_event: 2,
+        ..Default::default()
+    };
+    assert!(post_key_chord_with(&no_event, 9, FLAG_COMMAND).is_err());
+    assert_eq!(no_event.posted(), 0);
+    no_event.assert_released();
+}

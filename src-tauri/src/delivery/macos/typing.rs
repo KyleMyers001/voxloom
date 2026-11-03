@@ -1,5 +1,6 @@
 //! Unicode key-event typing (ADR §6): no clipboard, no layout-dependent
-//! keycodes, no modifier flags. Web fallback verifies read-back; the separate
+//! keycodes, no modifier flags (`post_key_chord` is the one exception, used
+//! by the terminal paste route for ⌘V). Web fallback verifies read-back; the separate
 //! Apple Terminal path only reports events posted, never input confirmation.
 
 use super::ax::{release, CFTypeRef};
@@ -13,6 +14,12 @@ extern "C" {
     fn CGEventKeyboardSetUnicodeString(event: CFTypeRef, len: usize, chars: *const u16);
     fn CGEventSetFlags(event: CFTypeRef, flags: u64);
     fn CGEventPost(tap: u32, event: CFTypeRef);
+}
+
+/// Whether this process may post synthetic input events.
+pub fn can_post_events() -> bool {
+    // SAFETY: no arguments, no side effects.
+    unsafe { CGPreflightPostEventAccess() }
 }
 
 const HID_EVENT_TAP: u32 = 0;
@@ -34,7 +41,7 @@ trait Events {
 struct NativeEvents;
 impl Events for NativeEvents {
     fn post_access(&self) -> bool {
-        unsafe { CGPreflightPostEventAccess() }
+        can_post_events()
     }
     fn source(&self, state: i32) -> CFTypeRef {
         unsafe { CGEventSourceCreate(state) }
@@ -117,6 +124,32 @@ fn type_terminal_with(
         },
     );
     result
+}
+
+/// kCGEventFlagMaskCommand.
+pub const FLAG_COMMAND: u64 = 0x0010_0000;
+
+/// One key press (down, up) with `flags` held, from a private event source so
+/// physically held modifiers do not leak in. The caller picks the keycode.
+pub fn post_key_chord(keycode: u16, flags: u64) -> Result<(), String> {
+    post_key_chord_with(&NativeEvents, keycode, flags)
+}
+
+fn post_key_chord_with(api: &impl Events, keycode: u16, flags: u64) -> Result<(), String> {
+    let source = OwnedEvent(api, api.source(SOURCE_PRIVATE_STATE));
+    if source.1.is_null() {
+        return Err("could not create private event source".into());
+    }
+    let down = OwnedEvent(api, api.keyboard(source.1, keycode, true));
+    let up = OwnedEvent(api, api.keyboard(source.1, keycode, false));
+    if down.1.is_null() || up.1.is_null() {
+        return Err("could not create key events".into());
+    }
+    api.flags(down.1, flags);
+    api.flags(up.1, flags);
+    api.post(HID_EVENT_TAP, down.1);
+    api.post(HID_EVENT_TAP, up.1);
+    Ok(())
 }
 
 /// Type `text`, re-checking focus before every chunk and confirming each

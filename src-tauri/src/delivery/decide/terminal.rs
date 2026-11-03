@@ -29,11 +29,10 @@ pub fn choose_path(
     }
 }
 
-pub fn dispatch(
-    text: &str,
-    mut still_target: impl FnMut() -> Result<(), String>,
-    mut post: impl FnMut(&[u16]) -> Result<(), String>,
-) -> Result<super::InsertReport, String> {
+/// Whole-payload guard shared by every terminal route (Unicode typing and
+/// paste). A newline or tab can run a command or complete a word in a
+/// terminal, so such text is refused, never sanitized.
+pub fn check_terminal_text(text: &str) -> Result<(), String> {
     super::check_insert_text(text)?;
     if text
         .chars()
@@ -44,6 +43,15 @@ pub fn dispatch(
     if text.encode_utf16().count() > 4096 {
         return Err("Terminal transcript exceeds 4096 UTF-16 units — nothing sent".into());
     }
+    Ok(())
+}
+
+pub fn dispatch(
+    text: &str,
+    mut still_target: impl FnMut() -> Result<(), String>,
+    mut post: impl FnMut(&[u16]) -> Result<(), String>,
+) -> Result<super::InsertReport, String> {
+    check_terminal_text(text)?;
     use super::report::TerminalDispatch;
     let start = std::time::Instant::now();
     let mut posted = 0;

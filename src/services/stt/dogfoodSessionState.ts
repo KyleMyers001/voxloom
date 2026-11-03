@@ -3,6 +3,7 @@
 /// values across awaits.
 
 import { useRef } from 'react';
+import type { PasteBinding } from '../delivery';
 import type { CancelScope } from '../shortcut/cancelScope';
 
 /** Per-session lease: cancellation discards results, unlike supersession. */
@@ -35,6 +36,13 @@ export interface DogfoodLiveSession {
   stopRequested: boolean;
   /** Stopped audio already handed to processing. */
   handledAudioId: string | null;
+  /**
+   * The paste terminal in front when this session started (null: dictation
+   * started elsewhere, or the lookup failed). Set by start(); the run that
+   * owns the session reads it at delivery, so a terminal switched to during
+   * transcription never receives a paste.
+   */
+  pasteBinding: Promise<PasteBinding | null> | null;
 }
 
 /** One stable object for the hook's lifetime. */
@@ -44,6 +52,7 @@ export function useDogfoodLiveSession(): DogfoodLiveSession {
     cancelAction: () => {},
     cancellation: { cancelled: false },
     handledAudioId: null,
+    pasteBinding: null,
     processing: null,
     retirement: undefined,
     session: 0,

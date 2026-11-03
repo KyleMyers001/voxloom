@@ -40,10 +40,57 @@ describe('tauri snapshot knownTerminal', () => {
     insertable: false, kind: 'unavailable', reason: 'no focus',
   };
 
+  it('maps pasteTerminal, and an older payload without it to false', async () => {
+    invoke.mockResolvedValueOnce({ ...dto, pasteApp: '/Applications/kitty.app', pasteTerminal: true });
+    const paste = await createTauriDeliveryAdapter(clipboard).snapshotTarget();
+    expect(paste.pasteTerminal).toBe(true);
+    expect(paste.pasteApp).toBe('/Applications/kitty.app');
+    invoke.mockResolvedValueOnce({ ...dto });
+    const older = await createTauriDeliveryAdapter(clipboard).snapshotTarget();
+    expect(older.pasteTerminal).toBe(false);
+    expect(older.pasteApp).toBeNull();
+  });
+
   it('maps knownTerminal, and an older payload without it to false', async () => {
     invoke.mockResolvedValueOnce({ ...dto, knownTerminal: true });
     expect((await createTauriDeliveryAdapter(clipboard).snapshotTarget()).knownTerminal).toBe(true);
     invoke.mockResolvedValueOnce(dto);
     expect((await createTauriDeliveryAdapter(clipboard).validateTarget(target)).knownTerminal).toBe(false);
+  });
+});
+
+const bound = { appPid: 7, pasteApp: '/Applications/WezTerm.app' };
+
+describe('tauri pasteText', () => {
+  it('passes the text and target and returns the native report', async () => {
+    invoke.mockClear();
+    invoke.mockResolvedValueOnce({ clipboardRestored: true, restoreSkippedReason: null });
+    const report = await createTauriDeliveryAdapter(clipboard).pasteText!('hi', bound);
+    expect(report).toEqual({ clipboardRestored: true, restoreSkippedReason: null });
+    expect(invoke).toHaveBeenCalledWith('delivery_paste_text', { bound, text: 'hi' });
+  });
+
+  it('a native Err string means ⌘V was not posted', async () => {
+    invoke.mockRejectedValueOnce('Secure Keyboard Entry is on — paste skipped');
+    const error = await createTauriDeliveryAdapter(clipboard).pasteText!('hi', bound).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(InsertError);
+    expect((error as InstanceType<typeof InsertError>).writeStarted).toBe(false);
+  });
+
+  it('any other failure may have pasted', async () => {
+    invoke.mockRejectedValueOnce(new Error('IPC channel closed'));
+    const error = await createTauriDeliveryAdapter(clipboard).pasteText!('hi', bound).catch((e: unknown) => e);
+    expect((error as InstanceType<typeof InsertError>).writeStarted).toBe(true);
+  });
+});
+
+describe('tauri pasteBinding', () => {
+  it('returns the terminal in front, or null for anything else or a failure', async () => {
+    invoke.mockResolvedValueOnce(bound);
+    expect(await createTauriDeliveryAdapter(clipboard).pasteBinding!()).toEqual(bound);
+    invoke.mockResolvedValueOnce(null);
+    expect(await createTauriDeliveryAdapter(clipboard).pasteBinding!()).toBeNull();
+    invoke.mockRejectedValueOnce(new Error('IPC channel closed'));
+    expect(await createTauriDeliveryAdapter(clipboard).pasteBinding!()).toBeNull();
   });
 });

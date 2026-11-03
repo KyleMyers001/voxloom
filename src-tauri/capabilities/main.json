@@ -47,6 +47,8 @@
     "allow-cleanup-model-status",
     "allow-cleanup-pick-and-import-model",
     "allow-delivery-insert-text",
+    "allow-delivery-paste-binding",
+    "allow-delivery-paste-text",
     "allow-delivery-snapshot-target",
     "allow-delivery-validate-target",
     "allow-dictionary-load",

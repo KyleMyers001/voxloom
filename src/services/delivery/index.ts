@@ -26,6 +26,7 @@ export type {
   DeliveryPlatformAdapter,
   DeliveryStatus,
   InsertReport,
+  PasteBinding,
   TargetKind,
   TargetSnapshot,
 } from './types';

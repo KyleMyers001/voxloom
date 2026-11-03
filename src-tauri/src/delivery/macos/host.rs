@@ -3,6 +3,7 @@
 
 use std::ffi::c_void;
 
+use crate::delivery::decide::known_terminal::{paste_app as paste_app_of, TerminalFlags};
 use crate::delivery::decide::unicode_typing_supported;
 
 extern "C" {
@@ -28,10 +29,13 @@ mod tests {
     }
 
     #[test]
-    fn known_terminal_is_false_without_a_resolvable_pid_or_for_this_binary() {
-        assert!(!known_terminal(None));
-        assert!(!known_terminal(Some(-1)));
-        assert!(!known_terminal(Some(std::process::id() as i32)));
+    fn terminal_flags_are_false_without_a_resolvable_pid_or_for_this_binary() {
+        let none = TerminalFlags::default();
+        assert_eq!(terminal_flags(None), none);
+        assert_eq!(terminal_flags(Some(-1)), none);
+        assert_eq!(terminal_flags(Some(std::process::id() as i32)), none);
+        assert_eq!(paste_app(-1), None);
+        assert_eq!(paste_app(std::process::id() as i32), None);
     }
 
     #[test]
@@ -65,10 +69,16 @@ pub fn apple_terminal(pid: i32) -> bool {
     apple_terminal_identity(pid) == Some(true)
 }
 
-/// Display only (Copy hint); unknown identity is not a terminal.
-pub fn known_terminal(pid: Option<i32>) -> bool {
+/// Hint flag and paste-route flag for a snapshot; unknown identity is no terminal.
+pub fn terminal_flags(pid: Option<i32>) -> TerminalFlags {
     pid.and_then(executable_path)
-        .is_some_and(|exe| crate::delivery::decide::known_terminal::is_known_terminal(&exe))
+        .map(|exe| TerminalFlags::from_exe(&exe))
+        .unwrap_or_default()
+}
+
+/// App bundle path when `pid` is a paste terminal (see `known_terminal`).
+pub fn paste_app(pid: i32) -> Option<String> {
+    executable_path(pid).and_then(|exe| paste_app_of(&exe))
 }
 
 pub fn unicode_typing_ok(pid: i32) -> bool {

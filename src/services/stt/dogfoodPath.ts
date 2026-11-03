@@ -13,6 +13,7 @@ import {
   deliverTranscript,
   type DeliveryOutcome,
   type DeliveryPlatformAdapter,
+  type PasteBinding,
   type TargetSnapshot,
 } from '../delivery';
 import type { SttEngine } from './contracts';
@@ -42,6 +43,11 @@ export interface DogfoodTranscribeOptions {
    * Defaults to the platform snapshot. Null means unavailable → Copy/Fail.
    */
   snapshotTarget?: () => Promise<TargetSnapshot | null>;
+  /**
+   * The paste terminal in front when dictation started (captured at hold
+   * start, not here). Null: nothing may be pasted.
+   */
+  pasteBinding?: PasteBinding | null;
   /** False after cancel/supersession: no new target lookup or delivery writes. */
   isCurrent?: () => boolean;
   /**
@@ -150,6 +156,7 @@ export async function dogfoodTranscribeAndCopy(
         clipboardFallback,
         isCurrent: options.isCurrent,
         intended,
+        pasteBinding: options.pasteBinding,
         platform,
         text: transcript.text,
       }),

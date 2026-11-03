@@ -93,6 +93,8 @@ pub fn build_snapshot(
         insertable,
         kind: kind.into(),
         known_terminal: false,
+        paste_terminal: false,
+        paste_app: None,
         reason: reason.map(str::to_string),
     };
     if unsafe { AXIsProcessTrusted() } == 0 {
@@ -103,14 +105,14 @@ pub fn build_snapshot(
     snap
 }
 
-/// Snapshot plus the display-only terminal flag. The flag also covers
+/// Snapshot plus the terminal flags (Copy hint, paste route). They also cover
 /// unavailable snapshots (no AX focus or permission), where a terminal is the
 /// likeliest reason for Copy and the app pid is not known from AX.
 pub fn snapshot_at(stage: &str, register: bool) -> TargetSnapshotDto {
     flag_terminal(
         snapshot_unflagged(stage, register),
         host::frontmost_pid,
-        host::known_terminal,
+        host::terminal_flags,
     )
 }
 
