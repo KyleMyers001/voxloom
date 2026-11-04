@@ -1,6 +1,6 @@
 import { touchesCode } from '../dictionary/codeContext';
 import { isCommonWord } from '../dictionary/commonWords';
-import type { Token } from './tokens';
+import { ARTICLES, FILLERS, type Token } from './tokens';
 
 // Dictionary words in a transcript (BUS-138 PR B2). Speech recognition may
 // hear a dictionary word as a similar-sounding word or split it ("box loom"
@@ -41,9 +41,7 @@ export function dictionarySpellings(
   for (const term of dictionary) {
     const exact = term.trim().normalize('NFC');
     const key = exact.toLowerCase();
-    // An entry that is itself a plain common word (Apple, Sky) is only ever a
-    // case change, as in replace.ts: apply is never Apple.
-    if (/^[\p{L}\p{M}]{5,}$/u.test(key) && !isCommonWord(key) && !spellings.has(key)) {
+    if (/^[\p{L}\p{M}]{5,}$/u.test(key) && !spellings.has(key)) {
       spellings.set(key, exact);
     }
   }
@@ -145,7 +143,18 @@ export function findSpan(
     .filter((run) => run.length === 1 || joinable(text, run));
   const spoken = (run: readonly Token[]) => run.map(({ word }) => word).join('');
   // An exact join (vox loom → voxloom) is a spelling of the word, longest first.
-  for (const run of runs.filter((r) => r.length > 1).reverse()) {
+  // Two words join exactly as on main, whatever sits between or around them
+  // (an thropic, an article, still reads Anthropic): the guard is never
+  // stricter than main here. The new three-word join needs plain adjacent
+  // letters and no article or filler word, judged by the word itself so the
+  // source and the output always agree.
+  const three = tokens.slice(at, at + 3);
+  const exact = [
+    ...(three.length === 3 && three.every(({ word }) => LETTERS.test(word)
+      && !ARTICLES.has(word) && !FILLERS.has(word)) && adjacent(text, three) ? [three] : []),
+    ...(at + 2 <= tokens.length ? [tokens.slice(at, at + 2)] : []),
+  ];
+  for (const run of exact) {
     const key = spoken(run);
     if (!spellings.has(key)) continue;
     // One spoken word that expands to a dictionary word (can't, cannot →
@@ -168,6 +177,10 @@ export function findSpan(
       || touchesCode(text, first.start, last.end))) continue;
     const bag = letterBag(joined);
     for (const key of spellings.keys()) {
+      // An entry that is itself a plain common word (Apple, Sky) is never the
+      // repair of another word, as in replace.ts: apply is never Apple. An
+      // exact join (ap ple) still spells it, as on main.
+      if (isCommonWord(key)) continue;
       const max = allowedEdits(key, run.length);
       if (Math.abs(joined.length - key.length) > max
         || !bagsAreClose(bag, keyBag(key), max)

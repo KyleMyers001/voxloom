@@ -267,6 +267,10 @@ in two ways, and the file format (`dictionary.json`) is unchanged:
 The dictionary holds at most 64 words, 2 KB in total and 128 bytes per word for
 the cleanup prompt. It never leaves the Mac.
 
+With an empty dictionary the cleanup prompt is exactly the text it was before
+the context-aware dictionary (prompt version `cleanup-v2`); the dictionary
+paragraph and version `cleanup-v3` apply only once the dictionary has words.
+
 ## Verification
 
 Pull requests targeting `main` run GitHub Actions CI on Node 24 and Ubuntu:
