@@ -1,47 +1,23 @@
 //! Desktop dictation waveform overlay window (BUS-13).
-//! Transparent, always-on-top, non-focusable, bottom-center.
+//! Transparent, always-on-top, non-focusable, bottom-center of the work area
+//! (above a visible Dock; see overlay_placement.rs).
 //! Delivery/insert is out of scope — this window must never steal focus.
 
+use crate::overlay_placement::{place, work_area_logical};
 use tauri::{
-    AppHandle, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow,
+    AppHandle, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder,
 };
 
 const OVERLAY_URL: &str = "overlay.html";
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn retina_overlay_position_uses_physical_window_size() {
-        let physical = LogicalSize::new(164.0, 48.0).to_physical::<u32>(2.0);
-        assert_eq!(physical, PhysicalSize::new(328, 96));
-        let position = bottom_center_position(
-            PhysicalSize::new(2880, 1800),
-            PhysicalPosition::new(0, 0),
-            physical,
-            2.0,
-            28,
-        );
-        assert_eq!(position.x, 1276);
-        assert_eq!(position.y, 1648);
-    }
-}
-
-fn bottom_center_position(
-    screen: PhysicalSize<u32>,
-    origin: PhysicalPosition<i32>,
-    window_size: PhysicalSize<u32>,
-    scale_factor: f64,
-    margin_bottom: i32,
-) -> PhysicalPosition<i32> {
-    let x = origin.x + ((screen.width as i32 - window_size.width as i32) / 2);
-    let margin = (margin_bottom as f64 * scale_factor).round() as i32;
-    let y = origin.y + screen.height as i32 - window_size.height as i32 - margin;
-    PhysicalPosition::new(x, y)
-}
-
+/// Place the pill bottom-center of the monitor's work area (BUS-177).
+///
+/// `work_area()` is `NSScreen.visibleFrame` on macOS, so a visible Dock (bottom,
+/// left or right) and the menu bar are excluded. It is computed fresh on every
+/// call. Everything is converted to logical points with the *same* monitor's
+/// scale factor and applied as a `LogicalPosition`, so tao does not re-scale it
+/// with the window's current screen.
 fn position_bottom_center(
     window: &WebviewWindow,
     width: u32,
@@ -59,15 +35,18 @@ fn position_bottom_center(
     window
         .set_size(LogicalSize::new(width as f64, height as f64))
         .map_err(|e| e.to_string())?;
-    let actual_size = window.outer_size().map_err(|e| e.to_string())?;
-    let position = bottom_center_position(
-        *monitor.size(),
-        *monitor.position(),
-        actual_size,
+    let area = monitor.work_area();
+    let work = work_area_logical(
+        area.position.x,
+        area.position.y,
+        area.size.width,
+        area.size.height,
         monitor.scale_factor(),
-        margin_bottom,
     );
-    window.set_position(position).map_err(|e| e.to_string())?;
+    let (x, y) = place(work, width as f64, height as f64, margin_bottom as f64);
+    window
+        .set_position(LogicalPosition::new(x, y))
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
