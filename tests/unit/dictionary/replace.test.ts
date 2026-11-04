@@ -271,6 +271,14 @@ describe('code-like text', () => {
     expect(fix('really? voxloom...', dictionary)).toBe('really? Voxloom...');
   });
 
+  it('fixes a word before a colon in prose, not before "::" or glued text', () => {
+    expect(fix('tauri: a framework', dictionary)).toBe('Tauri: a framework');
+    expect(fix('say tauri:', dictionary)).toBe('say Tauri:');
+    expect(fix('tauri:\nnext line', dictionary)).toBe('Tauri:\nnext line');
+    expect(fix('tauri::new and tauri:x', dictionary)).toBe('tauri::new and tauri:x');
+    expect(fix('note:tauri', dictionary)).toBe('note:tauri');
+  });
+
   it('does not treat a hyphen as code punctuation', () => {
     expect(fix('a github-hosted repo and macos-only', dictionary))
       .toBe('a GitHub-hosted repo and macOS-only');
@@ -285,5 +293,50 @@ describe('code-like text', () => {
   it('still fixes the other words in a line that has a skipped one', () => {
     expect(fix('src/voxloom and voxloom on macos', dictionary))
       .toBe('src/voxloom and Voxloom on macOS');
+  });
+});
+
+describe('overlapping entries settle', () => {
+  it('does not chain on the second pass (entries that overlap each other)', () => {
+    const words = ['Chat GPT', 'AskChat'];
+    const once = fix('ask chatgpt', words);
+    expect(once).toBe('AskChat GPT');
+    expect(fix(once, words)).toBe(once);
+  });
+
+  it('settles a longer chain and stays put', () => {
+    const words = ['Four Seasons', 'GPT Four', 'AskGPT'];
+    for (const text of ['ask gpt four seasons', 'askgpt four seasons now']) {
+      const once = fix(text, words);
+      expect(fix(once, words), text).toBe(once);
+    }
+  });
+
+  it('still leaves one replacement alone when another entry only touches it', () => {
+    expect(fix('in new york city', ['New York', 'York City'])).toBe('in New York city');
+  });
+
+  it('run twice equals once over generated text and random overlapping entry sets', () => {
+    const pool = [
+      'Chat GPT', 'AskChat', 'ChatGPT', 'Ask Chat', 'GPT Four', 'Four Seasons',
+      'GPT-4', 'New York', 'York City', 'NewYork', 'Open AI', 'AI Studio',
+      'OpenAI Studio', 'a b', 'b c', 'ab c', 'AskGPT', 'GPT', 'Studio X',
+    ];
+    // Heard forms of every entry (as said, run together, hyphenated) plus
+    // filler, so entries often land next to each other.
+    const heard = pool.flatMap((entry) => {
+      const lower = entry.toLowerCase();
+      return [lower, lower.replace(/[\s-]+/gu, ''), lower.replace(/\s+/gu, '-')];
+    });
+    const vocabulary = [...heard, ...heard, 'x', '-', ',', '.', 'the'];
+    let seed = 99;
+    const next = () => (seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
+    const pick = <T,>(items: T[]) => items[Math.floor(next() * items.length)];
+    for (let run = 0; run < 5000; run += 1) {
+      const words = Array.from({ length: 2 + Math.floor(next() * 6) }, () => pick(pool));
+      const text = Array.from({ length: 2 + Math.floor(next() * 9) }, () => pick(vocabulary)).join(' ');
+      const once = fix(text, words);
+      expect(fix(once, words), `${JSON.stringify(words)} ${text}`).toBe(once);
+    }
   });
 });

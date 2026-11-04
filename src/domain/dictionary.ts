@@ -3,14 +3,18 @@ export type WordResult =
   | { ok: true; word: string };
 
 /**
- * Tabs, line breaks and other control characters (the same set cleanup output
- * rejects: below space, DEL). A trimmed word never starts or ends with one, so
- * this is about a character in the middle.
+ * Tabs, line breaks and other control characters: below space, DEL, the C1
+ * controls (U+0080 to U+009F) and the Unicode line and paragraph separators
+ * (U+2028, U+2029). Wider than the cleanup output check, which allows tab and
+ * line breaks in prose. Trimming already removes a leading or trailing tab,
+ * line break or separator, so this mostly catches one in the middle.
  */
 export function hasControlCharacter(word: string): boolean {
   for (const character of word) {
     const point = character.codePointAt(0)!;
-    if (point < 32 || point === 127) return true;
+    if (point < 32 || (point >= 127 && point <= 159) || point === 0x2028 || point === 0x2029) {
+      return true;
+    }
   }
   return false;
 }

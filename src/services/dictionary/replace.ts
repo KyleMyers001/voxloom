@@ -74,11 +74,38 @@ function matcherFor(entries: readonly Entry[]): RegExp {
   );
 }
 
+// One pass over the text with every entry at once (longest entry wins at a
+// position), so within a pass a replacement is never rewritten.
+function replaceOnce(
+  text: string,
+  matcher: RegExp,
+  byKey: ReadonlyMap<string, string>,
+): string {
+  return text.replace(
+    matcher,
+    (match: string, lead: string, heard: string, offset: number) => {
+      const spelled = byKey.get(foldKey(heard));
+      const start = offset + lead.length;
+      if (spelled === undefined || touchesCode(text, start, start + heard.length)) {
+        return match;
+      }
+      return lead + spelled;
+    },
+  );
+}
+
+/** Most passes that may change the text before it must have settled. */
+const MAX_PASSES = 3;
+
 /**
- * Returns `text` with each dictionary entry spelled as saved. One pass over
- * the text with every entry at once (longest entry wins at a position), so a
- * replacement is never rewritten again. Text with nothing to change is
- * returned as it came in.
+ * Returns `text` with each dictionary entry spelled as saved. Passes repeat
+ * until one changes nothing, so a spelling that lines up with a neighbouring
+ * entry ("Chat GPT" next to "AskChat") settles instead of changing again on
+ * the next call: the result is always a fixpoint, and running this twice
+ * gives the same text as running it once (the dictation path runs it after
+ * the engine and again after cleanup). If the text has not settled after
+ * `MAX_PASSES` changing passes it is returned as it came in. Text with
+ * nothing to change is returned as it came in.
  */
 export function replaceDictionaryTerms(
   text: string,
@@ -87,17 +114,13 @@ export function replaceDictionaryTerms(
   const entries = usableEntries(words);
   if (entries.length === 0 || !text) return text;
   const byKey = new Map(entries.map((entry) => [entry.key, entry.text]));
+  const matcher = matcherFor(entries);
   const normalized = text.normalize('NFC');
-  const replaced = normalized.replace(
-    matcherFor(entries),
-    (match: string, lead: string, heard: string, offset: number) => {
-      const spelled = byKey.get(foldKey(heard));
-      const start = offset + lead.length;
-      if (spelled === undefined || touchesCode(normalized, start, start + heard.length)) {
-        return match;
-      }
-      return lead + spelled;
-    },
-  );
-  return replaced === normalized ? text : replaced;
+  let current = normalized;
+  for (let pass = 0; pass <= MAX_PASSES; pass += 1) {
+    const next = replaceOnce(current, matcher, byKey);
+    if (next === current) return current === normalized ? text : current;
+    current = next;
+  }
+  return text;
 }
