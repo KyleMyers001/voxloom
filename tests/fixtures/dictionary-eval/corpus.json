@@ -201,6 +201,51 @@
    "id": "keep-16",
    "kind": "keep",
    "raw": "The old fox looms in the story and the box is empty."
+  },
+  {
+   "id": "keep-17",
+   "kind": "keep",
+   "raw": "We visited Granada last spring and loved the old town."
+  },
+  {
+   "id": "keep-18",
+   "kind": "keep",
+   "raw": "The city skyline looked great at dusk."
+  },
+  {
+   "id": "keep-19",
+   "kind": "keep",
+   "raw": "Use atom, not ion."
+  },
+  {
+   "id": "keep-20",
+   "kind": "keep",
+   "raw": "It is no tion of mine to leave."
+  },
+  {
+   "id": "keep-21",
+   "kind": "keep",
+   "raw": "Do not ion it before the test."
+  },
+  {
+   "id": "keep-22",
+   "kind": "keep",
+   "raw": "Open box-loom now."
+  },
+  {
+   "id": "keep-23",
+   "kind": "keep",
+   "raw": "The box-loom tool is on the shelf."
+  },
+  {
+   "id": "keep-24",
+   "kind": "keep",
+   "raw": "Run vox-loom-cli now."
+  },
+  {
+   "id": "keep-25",
+   "kind": "keep",
+   "raw": "Run `vox loom` now."
   }
  ]
 }

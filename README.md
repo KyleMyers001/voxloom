@@ -240,14 +240,24 @@ in two ways, and the file format (`dictionary.json`) is unchanged:
 - **Always, with cleanup on or off:** a transcript word is respelled as saved
   (`voxloom` → `Voxloom`), and words the recognizer split are joined when their
   letters spell the saved word exactly (`vox loom`, `vox-loom` → `Voxloom`).
-  Whole words only, longest match first, and code, paths, URLs and flags are
-  left alone.
+  Whole words only, longest match first, and code, backticked text, hyphenated
+  identifiers (`vox-loom-cli`), paths, URLs and flags are left alone. A run that
+  contains a negation or a pronoun (`not`, `no`, `my`, ...) is never joined, so
+  what was said does not change meaning.
+  Real phrases join too when their entry is in the dictionary: with `Salesforce`
+  saved, `sales force` becomes `Salesforce`, and `git hub` becomes `GitHub`. That
+  is by design; removing the word from the dictionary is the opt-out. For the
+  same reason a saved word that starts or ends with a pronoun or negation
+  (`YouTube`) is not joined from `you tube`.
 - **With local cleanup on:** the cleanup model also sees the dictionary and may
   fix a near miss or a split from context (`Notian` → `Notion`). A fix is
   kept only if the output check allows it: the spoken words are 1 to 3
-  adjacent words that sound close to one saved word (within 1 edit for 5 to 6
-  letters, 2 for 7 or more), they are not a plain real word, only an ending
-  or inflection differs, and no other dictionary word matches equally well.
+  adjacent words that sound close to one saved word. A single spoken word may
+  differ by 1 letter only; 2 letters are allowed only for 2 or 3 spoken words
+  that stand for a saved word of 7 or more letters. They must not be a plain
+  real word, a saved word that is itself a common word is never a fix target,
+  an ending or inflection alone is not a fix, and no other dictionary word
+  matches equally well.
   Otherwise the unchanged transcript is used. The model can still decline a
   fix, so near misses are fixed on a best-effort basis.
 
