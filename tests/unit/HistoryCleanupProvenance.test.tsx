@@ -58,6 +58,8 @@ describe('History cleanup provenance', () => {
     ['timeout', 'cleanup timed out'],
     ['model-missing', 'cleanup model missing'],
     ['runtime-error', 'cleanup failed'],
+    // BUS-135: a build without the worker is not a failure.
+    ['worker-missing', 'cleanup unavailable'],
     ['context-overflow', 'too long to clean up'],
     ['cancelled', 'cleanup was interrupted'],
     ['something-new', 'cleanup failed'],

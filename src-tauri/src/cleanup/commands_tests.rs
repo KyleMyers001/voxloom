@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
 
-use super::start_run;
+use super::{begin_acquire, start_run};
 use crate::cleanup::artifact::ArtifactSpec;
 use crate::cleanup::model_store::{CleanupModelStore, MODEL_ID};
 use crate::cleanup::ownership::RequestRegistry;
@@ -76,4 +76,25 @@ fn cleanup_run_sends_the_worker_its_time_left() {
 #[test]
 fn cleanup_run_without_time_left_sends_none() {
     assert_eq!(worker_time_left("no-time-left", None), "absent");
+}
+
+/// BUS-135: a build without a worker refuses the lease before it hashes the
+/// model, with its own reason rather than a generic runtime error.
+#[test]
+fn acquire_without_a_worker_is_worker_missing_and_reserves_nothing() {
+    let root = test_root().join("commands-no-worker");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let worker = root.join("worker.sh");
+    let supervisor = Arc::new(WorkerSupervisor::new(worker.clone()));
+    let registry = RequestRegistry::new(Arc::clone(&supervisor));
+    let (owner, _) = registry.open_session();
+    let error = begin_acquire(&registry, &supervisor, owner, "r")
+        .err()
+        .unwrap();
+    assert_eq!(error.code, "worker-missing");
+    // Nothing was reserved: once a worker is installed, the same ID acquires.
+    write_executable(&worker, "#!/bin/sh\n");
+    assert!(begin_acquire(&registry, &supervisor, owner, "r").is_ok());
+    let _ = fs::remove_dir_all(root);
 }

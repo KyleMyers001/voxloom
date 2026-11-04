@@ -60,6 +60,15 @@ impl SupervisorError {
             message: message.into(),
         }
     }
+
+    /// Its own reason, so the renderer labels it "cleanup unavailable"
+    /// rather than a failure (BUS-135).
+    fn worker_missing() -> Self {
+        Self {
+            code: "worker-missing",
+            message: "cleanup worker is not installed or not executable in this build".into(),
+        }
+    }
 }
 
 pub struct WorkerSupervisor {
@@ -85,6 +94,15 @@ impl WorkerSupervisor {
 
     pub fn available(&self) -> bool {
         Self::path_available(&self.worker_path)
+    }
+
+    /// `available`, as the error a lease or run refuses with (BUS-135).
+    pub fn require_worker(&self) -> Result<(), SupervisorError> {
+        if self.available() {
+            Ok(())
+        } else {
+            Err(SupervisorError::worker_missing())
+        }
     }
 
     fn path_available(path: &std::path::Path) -> bool {

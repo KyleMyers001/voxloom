@@ -8,6 +8,9 @@ const FALLBACK_REASONS: ReadonlyMap<string, string> = new Map([
   ['model-missing', 'cleanup model missing'],
   ['runtime-error', 'cleanup failed'],
   ['timeout', 'cleanup timed out'],
+  // BUS-135: a build without the cleanup worker. Not a failure: cleanup stays
+  // on and resumes once a build with the worker is installed.
+  ['worker-missing', 'cleanup unavailable'],
 ]);
 
 /**

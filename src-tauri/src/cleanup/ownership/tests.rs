@@ -247,7 +247,7 @@ fn attempt_identity_requires_verified_descriptor_and_successful_spawn() {
     let registry = RequestRegistry::new(Arc::new(WorkerSupervisor::new(path.clone())));
     let (owner, _) = registry.open_session();
     for (id, prompt, expected_code) in [
-        ("missing", "p".into(), "runtime-error"),
+        ("missing", "p".into(), "worker-missing"),
         ("oversize", "x".repeat(128 * 1024), "context-overflow"),
     ] {
         acquire(&registry, &store, spec, owner, id);

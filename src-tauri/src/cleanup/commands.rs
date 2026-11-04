@@ -7,7 +7,8 @@ use tauri::{AppHandle, Runtime, State, Webview};
 
 use super::auth::{authorize_model_manager, owner, require_main, validate_request_id};
 use super::model_store::{CleanupModelStore, ModelStatus};
-use super::ownership::{OwnedRun, RequestRegistry};
+use super::ownership::{Acquisition, OwnedRun, RequestRegistry};
+use super::supervisor::WorkerSupervisor;
 use super::{
     picker, CleanupAttempt, CleanupCommandError, CleanupRequestDto, CleanupRunOutput, CleanupState,
 };
@@ -111,13 +112,25 @@ pub async fn cleanup_acquire<R: Runtime>(
     validate_request_id(&request_id)?;
     let owner = owner(&session_id)?;
     let requests = state.requests.clone();
-    let token = requests.begin_acquire(owner, &request_id)?;
+    let token = begin_acquire(&requests, &state.supervisor, owner, &request_id)?;
     let models = Arc::clone(&state.models);
     tauri::async_runtime::spawn_blocking(move || {
         requests.complete_acquire(token, models.lease(&model_id))
     })
     .await
     .map_err(|error| CleanupCommandError::runtime(format!("cleanup lease task failed: {error}")))?
+}
+
+/// Reserve the lease slot for a request. A build without a worker refuses
+/// first, so the lease never hashes a model it can't run (BUS-135).
+fn begin_acquire(
+    requests: &RequestRegistry,
+    supervisor: &WorkerSupervisor,
+    owner: u64,
+    request_id: &str,
+) -> Result<Acquisition, CleanupCommandError> {
+    supervisor.require_worker()?;
+    requests.begin_acquire(owner, request_id)
 }
 
 #[tauri::command]
