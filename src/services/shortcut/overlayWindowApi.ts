@@ -1,5 +1,13 @@
 import { isTauri } from '@tauri-apps/api/core';
-import { OVERLAY_BOTTOM_MARGIN, OVERLAY_HEIGHT, OVERLAY_WIDTH, OVERLAY_WINDOW_LABEL } from './constants';
+import {
+  OVERLAY_BOTTOM_MARGIN,
+  OVERLAY_HEIGHT,
+  OVERLAY_RESULT_BOTTOM_MARGIN,
+  OVERLAY_RESULT_HEIGHT,
+  OVERLAY_RESULT_WIDTH,
+  OVERLAY_WIDTH,
+  OVERLAY_WINDOW_LABEL,
+} from './constants';
 import type { OverlayWindowApi } from './overlayBridge';
 
 /** Live overlay window (Tauri WebviewWindow). Never focuses it. */
@@ -37,7 +45,8 @@ export function createTauriOverlayApi(): OverlayWindowApi {
         cancellable,
         height: size.height,
         label: OVERLAY_WINDOW_LABEL,
-        marginBottom: OVERLAY_BOTTOM_MARGIN,
+        marginBottom: size.width === OVERLAY_RESULT_WIDTH && size.height === OVERLAY_RESULT_HEIGHT
+          ? OVERLAY_RESULT_BOTTOM_MARGIN : OVERLAY_BOTTOM_MARGIN,
         width: size.width,
       });
     },

@@ -1,7 +1,8 @@
 import { Icon } from '../components/Icon';
 import { isMacPlatform } from '../components/KeyCombo';
-import { Waveform } from '../components/Waveform';
+import { Waveform, WAVEFORM_BARS } from '../components/Waveform';
 import type { OverlayResult, OverlayWaveform } from '../services/shortcut/overlayVisibility';
+import { AuroraListeningEffect } from './AuroraListeningEffect';
 
 interface Props {
   levels: readonly number[];
@@ -42,6 +43,12 @@ const isResult = (w: OverlayWaveform) => w.startsWith('result-');
  * One permanent role=status node announces "Transcribing" and results.
  */
 export function OverlayWaveformView({ levels, waveform, result = null, mac = isMacPlatform() }: Props) {
+  // Display metadata only: keep both the bars and decorative light finite and bounded.
+  const displayLevels = Array.from({ length: WAVEFORM_BARS }, (_, index) => {
+    const level = levels[index] ?? 0;
+    return Number.isFinite(level) ? Math.min(1, Math.max(0, level)) : 0;
+  });
+  const energy = displayLevels.reduce((sum, level) => sum + level, 0) / WAVEFORM_BARS;
   const text = isResult(waveform) ? resultText(result, mac) : '';
   const spoken = waveform === 'processing' ? 'Transcribing' : isResult(waveform) ? spokenResultText(result, mac) : '';
   const kind = waveform === 'result-copied' ? 'copied' : waveform === 'result-unverified' ? 'unverified' : 'failed';
@@ -55,9 +62,10 @@ export function OverlayWaveformView({ levels, waveform, result = null, mac = isM
         </div>
       ) : (
         <div className="recording recording--overlay" data-waveform={waveform}>
+          {(waveform === 'silent' || waveform === 'speaking') && <AuroraListeningEffect energy={energy} />}
           {waveform === 'processing'
             ? <div aria-hidden="true" className="hud-transcribing"><i /></div>
-            : <Waveform levels={levels} waveform={waveform} />}
+            : <Waveform levels={displayLevels} waveform={waveform} />}
         </div>
       )}
     </>

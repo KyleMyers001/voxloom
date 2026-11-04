@@ -6,6 +6,7 @@ import { OverlayWaveformView, resultText, spokenResultText } from '../../src/ove
 import { createOverlayBridge } from '../../src/services/shortcut/overlayBridge';
 import { resultWaveform } from '../../src/services/shortcut/overlayVisibility';
 import { hudResultFor } from '../../src/services/stt/useDogfoodCapture';
+import { OVERLAY_HEIGHT, OVERLAY_WIDTH } from '../../src/services/shortcut/constants';
 
 const levels = Array<number>(24).fill(0.5);
 
@@ -120,7 +121,7 @@ describe('overlayBridge.showResult', () => {
     await bridge.showResult('copied');
     await bridge.sync({ kind: 'listening', runId: 2, waveform: 'silent' });
     expect(window.setWaveform).toHaveBeenLastCalledWith('silent');
-    expect(window.showBottomCenter).toHaveBeenLastCalledWith({ height: 28, width: 142 });
+    expect(window.showBottomCenter).toHaveBeenLastCalledWith({ height: OVERLAY_HEIGHT, width: OVERLAY_WIDTH });
     await vi.advanceTimersByTimeAsync(3000);
     expect(window.hide).not.toHaveBeenCalled();
   });
