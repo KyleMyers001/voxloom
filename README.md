@@ -210,7 +210,7 @@ in the background. A file that opens but can't be read during the check stays
 failed until Retry download or the next launch.
 
 Your Word dictionary also biases recognition: the saved words are passed to
-whisper.cpp as its initial prompt (a plain `Word, Word.` list, in saved order,
+whisper.cpp as its initial prompt (`Glossary: Word, Word.`, in saved order,
 cut at a whole entry to stay within about 220 tokens). An empty dictionary sets
 no prompt at all. Whisper can echo a prompt back on near-silence, so a quiet
 clip whose whole transcript is just dictionary words is dropped as "no speech

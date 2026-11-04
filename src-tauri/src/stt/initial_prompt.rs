@@ -35,8 +35,11 @@ pub fn usable_words(dictionary: &[String]) -> Vec<&str> {
         .collect()
 }
 
+/// Word that opens the prompt. A bare list scored lower in the corpus eval.
+pub const LABEL: &str = "Glossary:";
+
 fn render(words: &[&str]) -> String {
-    format!("{}.", words.join(", "))
+    format!("{LABEL} {}.", words.join(", "))
 }
 
 /// The prompt for `dictionary`, or `None` when it has no usable entry (then
@@ -95,7 +98,7 @@ mod tests {
     fn words_go_in_saved_order() {
         assert_eq!(
             prompt(&["Voxloom", "Notion", "Kubernetes"]).as_deref(),
-            Some("Voxloom, Notion, Kubernetes.")
+            Some("Glossary: Voxloom, Notion, Kubernetes.")
         );
     }
 
@@ -109,14 +112,14 @@ mod tests {
             "VOXLOOM",
             "Notion",
         ]);
-        assert_eq!(got.as_deref(), Some("Voxloom, Notion."));
+        assert_eq!(got.as_deref(), Some("Glossary: Voxloom, Notion."));
     }
 
     #[test]
     fn keeps_the_spelling_as_saved() {
         assert_eq!(
             prompt(&["iPhone", "OAuth"]).as_deref(),
-            Some("iPhone, OAuth.")
+            Some("Glossary: iPhone, OAuth.")
         );
     }
 
@@ -135,7 +138,7 @@ mod tests {
     fn truncation_cuts_at_a_whole_entry_and_keeps_the_first_ones() {
         let many: Vec<String> = (0..200).map(|i| format!("Word{i:03}")).collect();
         let got = build_initial_prompt(&many, per_three_bytes).unwrap();
-        assert!(got.starts_with("Word000, Word001, "));
+        assert!(got.starts_with("Glossary: Word000, Word001, "));
         let last = got.trim_end_matches('.').rsplit(", ").next().unwrap();
         assert_eq!(last.len(), "Word000".len(), "no entry is cut short: {last}");
     }

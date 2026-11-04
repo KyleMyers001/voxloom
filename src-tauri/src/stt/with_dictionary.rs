@@ -14,7 +14,7 @@ use super::engine::{self, TranscriptDto};
 use super::error::SttErrorDto;
 use super::filter_config::SpeechFilterConfig;
 use super::gate::{AudioStats, NoVad};
-use super::initial_prompt::usable_words;
+use super::initial_prompt::{usable_words, LABEL};
 use super::pipeline;
 
 fn words_of(text: &str) -> impl Iterator<Item = String> + '_ {
@@ -26,9 +26,13 @@ fn words_of(text: &str) -> impl Iterator<Item = String> + '_ {
 /// True when `text` is made only of dictionary words, which is what an echo
 /// of the prompt looks like. Empty text is not an echo.
 pub fn echoes_dictionary(text: &str, dictionary: &[String]) -> bool {
-    let known: HashSet<String> = usable_words(dictionary)
-        .into_iter()
+    let usable = usable_words(dictionary);
+    if usable.is_empty() {
+        return false; // no prompt was set, so there is nothing to echo
+    }
+    let known: HashSet<String> = (usable.into_iter())
         .flat_map(words_of)
+        .chain(words_of(LABEL))
         .collect();
     let mut heard = words_of(text).peekable();
     heard.peek().is_some() && heard.all(|w| known.contains(&w))
@@ -79,6 +83,7 @@ mod tests {
         assert!(echoes_dictionary("Voxloom, Notion.", &d));
         assert!(echoes_dictionary("notion voxloom notion", &d));
         assert!(echoes_dictionary("Open AI.", &d));
+        assert!(echoes_dictionary("Glossary: Voxloom, Notion.", &d));
         assert!(!echoes_dictionary("Voxloom is down.", &d));
         assert!(!echoes_dictionary("Thank you.", &d));
         assert!(!echoes_dictionary("", &d));
@@ -88,6 +93,7 @@ mod tests {
     #[test]
     fn an_empty_dictionary_echoes_nothing() {
         assert!(!echoes_dictionary("Voxloom", &[]));
+        assert!(!echoes_dictionary("Glossary", &[]));
     }
 
     #[test]
