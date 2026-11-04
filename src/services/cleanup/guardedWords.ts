@@ -3,7 +3,8 @@
 /// never reads them as part of a longer word ("not ion" is not Notion).
 
 export const NEGATION = new Set([
-  'not', 'no', 'never', 'without', 'ne', 'pas', 'jamais', 'ni', 'non',
+  'not', 'no', 'never', 'without', 'nor', 'neither', 'nothing', 'none',
+  'cannot', 'ne', 'pas', 'jamais', 'ni', 'non',
 ]);
 export const PRONOUNS = new Set([
   'i', 'we', 'you', 'he', 'she', 'they', 'it', 'me', 'us', 'him', 'her',

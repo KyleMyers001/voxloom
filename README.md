@@ -246,9 +246,11 @@ in two ways, and the file format (`dictionary.json`) is unchanged:
   what was said does not change meaning.
   Real phrases join too when their entry is in the dictionary: with `Salesforce`
   saved, `sales force` becomes `Salesforce`, and `git hub` becomes `GitHub`. That
-  is by design; removing the word from the dictionary is the opt-out. For the
-  same reason a saved word that starts or ends with a pronoun or negation
-  (`YouTube`) is not joined from `you tube`.
+  is by design; removing the word from the dictionary is the opt-out. The
+  pronoun and negation skip protects a saved word written as one piece
+  (`Mycell`, `Hermes`): `my cell` and `her mes` stay as said. A saved word with
+  an inner capital or a separator (`YouTube`) is matched by its parts, as before
+  this change, so `you tube` still becomes `YouTube`.
 - **With local cleanup on:** the cleanup model also sees the dictionary and may
   fix a near miss or a split from context (`Notian` → `Notion`). A fix is
   kept only if the output check allows it: the spoken words are 1 to 3

@@ -42,9 +42,19 @@ function isRun(text: string, run: readonly Word[]): boolean {
 
 const HYPHEN_THEN_LETTER = /^-[\p{L}\p{M}\p{N}]/u;
 
-/** Inside a backtick pair (inline or fenced code): an odd number before it. */
+/**
+ * Inside inline or fenced code. Backtick runs pair up by length, as in
+ * CommonMark: a run opens a span, the next run of the same length closes it,
+ * runs of other lengths inside are text. An opener never closed counts as
+ * code to the end, which leaves the rest alone.
+ */
 function inCode(text: string, start: number): boolean {
-  return (text.slice(0, start).match(/`/gu)?.length ?? 0) % 2 === 1;
+  let open = 0;
+  for (const run of text.slice(0, start).matchAll(/`+/gu)) {
+    if (open === 0) open = run[0].length;
+    else if (run[0].length === open) open = 0;
+  }
+  return open !== 0;
 }
 
 /**
