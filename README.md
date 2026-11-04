@@ -60,21 +60,23 @@ is not a universal no-execution guarantee. See
 `docs/decisions/apple-terminal-delivery.md` for guards, evidence and remaining
 live checks.
 
-### Other terminals (paste route)
+### Other terminals and Messages (paste route)
 
-WezTerm, Alacritty, kitty, Ghostty and iTerm2 take a clipboard paste instead:
+WezTerm, Alacritty, kitty, Ghostty, iTerm2 and Apple Messages take a clipboard
+paste instead:
 the transcript goes on the clipboard for about 500 ms (marked transient), Voxloom
 presses ⌘V once, and your previous clipboard is restored unless you copied
 something meanwhile. It runs only when **Clipboard fallback** is on, and only
-into the terminal that was in front when you started dictating (the Voxloom
+into the app that was in front when you started dictating (the Voxloom
 window itself never counts); with
-the setting off, terminals behave as before (nothing touches the clipboard, the
+the setting off, these apps behave as before (nothing touches the clipboard, the
 text stays in History). Secure Keyboard Entry, control characters or newlines,
 or a changed frontmost app fall back to Copy ("Copied. Press ⌘V to paste.").
-The result is recorded **Unverified**: a terminal has no field to read back. A
+The result is recorded **Unverified**: these apps have no field to read back. A
 password prompt that does not enable Secure Keyboard Entry (for example `sudo`)
 cannot be detected. See `docs/decisions/terminal-paste-delivery.md`. Other
-terminals, including Warp, are not on this route.
+terminals, including Warp, are not on this route. Messages is matched by its
+system app path, and a paste lands wherever Messages has keyboard focus.
 
 The marketing website is maintained separately in
 [`voxloom-site`](https://github.com/KyleMyers001/voxloom-site) and hosted at

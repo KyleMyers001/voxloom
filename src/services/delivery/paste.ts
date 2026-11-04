@@ -1,7 +1,7 @@
 /**
- * Outcome of a terminal paste (clipboard + ⌘V). A terminal has no field to
- * read back, so a posted paste is recorded `unverified` (History keeps the
- * badge). A clean paste is silent: its message is empty, so no status line and
+ * Outcome of a paste (clipboard + ⌘V) into a terminal or Messages. Neither
+ * has a field to read back, so a posted paste is recorded `unverified`
+ * (History keeps the badge). A clean paste is silent: its message is empty, so no status line and
  * no toast, and the HUD shows nothing (as for any successful insert). Only a
  * paste whose clipboard was not restored says so.
  */
@@ -17,7 +17,7 @@ export function pastedOutcome(text: string, report: PasteReport): DeliveryOutcom
     : report.restoreSkippedReason ?? 'prior clipboard not restored';
   return {
     clipboardRestored: report.clipboardRestored,
-    detail: 'Pasted with ⌘V through the clipboard; terminal input not verified',
+    detail: 'Pasted with ⌘V through the clipboard; input not verified',
     message: skipped ? TERMINAL_PASTE_MESSAGE + restoreSkippedSuffix(skipped) : '',
     restoreSkippedReason: skipped,
     status: 'unverified',
@@ -26,13 +26,13 @@ export function pastedOutcome(text: string, report: PasteReport): DeliveryOutcom
 }
 
 /**
- * Paste into the terminal that was in front when you started dictating, then
- * let native put the user's clipboard back. `bound` is that terminal's pid and
+ * Paste into the terminal (or Messages) that was in front when you started
+ * dictating, then let native put the user's clipboard back. `bound` is that app's pid and
  * app path, captured at recording start: native re-checks both against the app
  * in front right now. Only
  * reached with Clipboard fallback on (`planDelivery`). A refusal before ⌘V
  * (Secure Keyboard Entry, control characters, the app changed, permissions)
- * copies with the terminal hint. After ⌘V went out nothing is retried or
+ * copies with the "Press ⌘V" hint. After ⌘V went out nothing is retried or
  * copied: the clipboard was just restored on purpose.
  */
 export async function pasteInTerminal(

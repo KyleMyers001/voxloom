@@ -3,6 +3,7 @@
 
 pub mod host;
 pub mod known_terminal;
+pub mod messages_app;
 pub mod paste;
 pub mod paste_key;
 pub mod paste_target;

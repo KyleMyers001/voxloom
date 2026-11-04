@@ -1,5 +1,6 @@
-//! Which frontmost apps are terminals: for the "Copied. Press ⌘V to paste."
-//! hint, and for the clipboard paste route (`paste`).
+//! Which frontmost apps are terminals or other paste-route apps (Apple
+//! Messages, `messages_app`): for the "Copied. Press ⌘V to paste." hint, and
+//! for the clipboard paste route (`paste`).
 //!
 //! Apple Terminal is matched by its exact system path (as
 //! `terminal::apple_terminal_host` does); the others by `.app` bundle name, as
@@ -8,10 +9,11 @@
 //! Apple Terminal never takes the paste route (it has its own Unicode route).
 
 use super::host::app_bundle_root;
+use super::messages_app::apple_messages_host;
 use super::terminal::apple_terminal_host;
 use crate::delivery::types::TargetSnapshotDto;
 
-/// Terminals the paste route supports (lowercase bundle name without `.app`).
+/// Terminals the paste route supports by bundle name (lowercase bundle name without `.app`).
 /// iTerm2 ships as `iTerm.app`.
 const PASTE_BUNDLES: &[&str] = &["iterm", "wezterm", "alacritty", "kitty", "ghostty"];
 
@@ -25,9 +27,12 @@ fn bundle_name(exe_path: &str) -> Option<String> {
     Some(name.trim_end_matches(".app").to_lowercase())
 }
 
-/// `exe_path` is the frontmost process's executable path.
+/// Whether the app takes the paste route: a listed terminal, or Apple Messages.
+/// `exe_path` is the frontmost process's executable path. (The name and the
+/// `paste_terminal` flag predate Messages and are kept for the IPC contract.)
 pub fn is_paste_terminal(exe_path: &str) -> bool {
-    bundle_name(exe_path).is_some_and(|name| PASTE_BUNDLES.contains(&name.as_str()))
+    apple_messages_host(exe_path)
+        || bundle_name(exe_path).is_some_and(|name| PASTE_BUNDLES.contains(&name.as_str()))
 }
 
 pub fn is_known_terminal(exe_path: &str) -> bool {
@@ -36,8 +41,8 @@ pub fn is_known_terminal(exe_path: &str) -> bool {
         || bundle_name(exe_path).is_some_and(|name| HINT_ONLY_BUNDLES.contains(&name.as_str()))
 }
 
-/// App bundle path of a paste terminal (`/Applications/WezTerm.app`), else
-/// None. With the pid it identifies the terminal a paste is bound to.
+/// App bundle path of a paste-route app (`/Applications/WezTerm.app`), else
+/// None. With the pid it identifies the app a paste is bound to.
 pub fn paste_app(exe_path: &str) -> Option<String> {
     if !is_paste_terminal(exe_path) {
         return None;
@@ -45,7 +50,7 @@ pub fn paste_app(exe_path: &str) -> Option<String> {
     app_bundle_root(exe_path).map(str::to_string)
 }
 
-/// What the snapshot records about the frontmost terminal.
+/// What the snapshot records about the frontmost terminal or paste-route app.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TerminalFlags {
     pub known: bool,

@@ -49,10 +49,10 @@ export function deliveryMessage(
 export const TERMINAL_COPY_MESSAGE = 'Copied. Press ⌘V to paste.';
 
 /**
- * A terminal paste went out (⌘V posted) but the user's clipboard was not put
+ * A paste (terminal or Messages) went out (⌘V posted) but the user's clipboard was not put
  * back. Only this case speaks; a clean paste is silent (empty message).
  */
-export const TERMINAL_PASTE_MESSAGE = 'Paste sent to terminal';
+export const TERMINAL_PASTE_MESSAGE = 'Paste sent';
 
 /** The Copied line: the terminal hint, else the generic "Copied — reason". */
 export function copiedMessage(reason: string, terminal: boolean): string {
