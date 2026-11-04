@@ -98,6 +98,10 @@ impl CleanupModelStore {
         fs::create_dir_all(&self.root).map_err(|error| {
             DownloadError::Failed(format!("create cleanup model directory: {error}"))
         })?;
+        // model_fetch opens the partial with File::create, which truncates an
+        // existing file and keeps its mode: pre-create it 0600 so the bytes
+        // are private for the whole download, like Import's copy.
+        create_private(&model_fetch::partial_path(&destination)).map_err(DownloadError::Failed)?;
         let pinned = PinnedArtifact {
             size_bytes: artifact.size,
             sha256: artifact.sha256,
@@ -140,7 +144,23 @@ fn progress(received: u64, total: u64) -> DownloadProgress {
     }
 }
 
-/// Same 0600 mode an imported model gets.
+/// Empty 0600 partial file (replacing any stale one), before any bytes land.
+fn create_private(path: &Path) -> Result<(), String> {
+    let _ = fs::remove_file(path);
+    let mut options = fs::OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options
+        .open(path)
+        .map(drop)
+        .map_err(|error| format!("create partial cleanup model: {error}"))
+}
+
+/// Re-asserts the 0600 mode on the installed file (umask-proof).
 fn make_private(path: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {

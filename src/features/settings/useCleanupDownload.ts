@@ -51,6 +51,7 @@ async function start(
   store: CleanupModelStore,
   apply: (status: CleanupModelStatus) => void,
   clearImportError: () => void,
+  refresh: () => Promise<void>,
 ) {
   if (snapshot.downloading || !store.download) return;
   clearImportError();
@@ -61,6 +62,9 @@ async function start(
     publish({ downloading: false });
   } catch (reason: unknown) {
     publish({ downloading: false, note: downloadNote(reason) });
+    // A failure after the rename (permissions, directory sync) can leave a
+    // verified model installed: re-read the status so it matches the disk.
+    void refresh();
   }
 }
 
@@ -79,15 +83,15 @@ if (import.meta.env.MODE === 'test') {
  * BUS-181: one-click download state for the Cleanup model row. A failure
  * leaves nothing on disk natively, so Import and a retry both work.
  */
-export function useCleanupDownload(model: Pick<CleanupModel, 'apply' | 'clearImportError' | 'store'>): CleanupDownload {
-  const { apply, clearImportError, store } = model;
+export function useCleanupDownload(model: Pick<CleanupModel, 'apply' | 'clearImportError' | 'refresh' | 'store'>): CleanupDownload {
+  const { apply, clearImportError, refresh, store } = model;
   const current = useSyncExternalStore(subscribe, () => snapshot);
   return {
     ...current,
     // The pending download rejects as cancelled; that sets the note.
     cancel: () => { void store().cancelDownload?.().catch(() => {}); },
     clearNote: () => { if (snapshot.note !== null) publish({ note: null }); },
-    start: () => start(store(), apply, clearImportError),
+    start: () => start(store(), apply, clearImportError, refresh),
     supported: typeof store().download === 'function',
   };
 }

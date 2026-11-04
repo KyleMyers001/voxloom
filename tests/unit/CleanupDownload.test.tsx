@@ -128,4 +128,14 @@ describe('Cleanup model download', () => {
     expect(note()).toBe('Qwen3 0.6B is installed.');
     expect(store.download).toHaveBeenCalledTimes(1);
   });
+
+  it('re-reads the status after a failure, so a model installed before the error shows', async () => {
+    const { pending, store } = downloadingStore();
+    await startDownload(store);
+    store.status.mockResolvedValue(ready);
+    await act(async () => { pending[0].reject(new CleanupDownloadError('failed', 'sync cleanup model directory: EIO')); });
+    await waitFor(() => expect(note()).toMatch(/^Qwen3 0\.6B is installed\. Couldn't download the model: sync cleanup model directory: EIO\./));
+    expect(store.status).toHaveBeenCalledTimes(2);
+    expect(downloadButton()).toBeNull();
+  });
 });

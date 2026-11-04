@@ -161,13 +161,17 @@ fn cancel_mid_stream_removes_everything_and_blocks_import_meanwhile() {
         thread::spawn(move || run(&store, &url, artifact).0)
     };
     let started = Instant::now();
-    while !partial_path(&store.model_path()).exists() {
+    let partial = partial_path(&store.model_path());
+    while fs::metadata(&partial).map_or(true, |meta| meta.len() == 0) {
         assert!(
             started.elapsed() < Duration::from_secs(5),
             "download never started"
         );
         thread::sleep(Duration::from_millis(5));
     }
+    use std::os::unix::fs::PermissionsExt;
+    let mode = fs::metadata(&partial).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o600, "partial is private while bytes land");
     let source = base.join("source.gguf");
     fs::write(&source, BODY).unwrap();
     let import = store.import_artifact(&source, spec(BODY)).unwrap_err();
