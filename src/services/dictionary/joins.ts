@@ -3,6 +3,7 @@
 /// Runs with or without cleanup. It only joins what the entry spells out: no
 /// sound-alike guessing, that is the cleanup model's job.
 
+import { isGuardedWord } from '../cleanup/guardedWords';
 import { endsCleanly, startsInsideWord } from './boundary';
 import { touchesCode } from './codeContext';
 import { isCommonWord } from './commonWords';
@@ -33,13 +34,27 @@ function isRun(text: string, run: readonly Word[]): boolean {
     && joined.length >= MIN_LETTERS
     // Plain common words together ("any one", "to day") are never one word.
     && !run.every((word) => isCommonWord(word.text))
+    // "not ion", "no tion", "I on" change what was said if joined.
+    && !run.some((word) => isGuardedWord(word.text))
     && run.every((word, index) => index === 0
       || GAP.test(text.slice(run[index - 1].end, word.start)));
 }
 
-/** A flag (--vox-loom), path, URL or identifier, or the middle of a word. */
+const HYPHEN_THEN_LETTER = /^-[\p{L}\p{M}\p{N}]/u;
+
+/** Inside a backtick pair (inline or fenced code): an odd number before it. */
+function inCode(text: string, start: number): boolean {
+  return (text.slice(0, start).match(/`/gu)?.length ?? 0) % 2 === 1;
+}
+
+/**
+ * A flag (--vox-loom), path, URL, identifier (vox-loom-cli), code in
+ * backticks, or the middle of a word.
+ */
 function isSeparateText(text: string, start: number, end: number): boolean {
   return text[start - 1] !== '-'
+    && !HYPHEN_THEN_LETTER.test(text.slice(end, end + 2))
+    && !inCode(text, start)
     && !startsInsideWord(text[start - 1] ?? '', text[start - 2] ?? '')
     && endsCleanly(text.slice(end))
     && !touchesCode(text, start, end);

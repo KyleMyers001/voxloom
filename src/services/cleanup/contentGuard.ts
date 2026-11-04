@@ -1,4 +1,5 @@
 import { dictionarySpellings, findSpan } from './dictionarySpans';
+import { NEGATION, PRONOUNS } from './guardedWords';
 import { tokenize, type Token } from './tokens';
 
 // Conservative lexical checks, not a semantic-equivalence guarantee.
@@ -7,15 +8,6 @@ import { tokenize, type Token } from './tokens';
 // and narrowly marked source corrections.
 export const CLEANUP_MIN_CONTENT_RETENTION = 1;
 export const CLEANUP_MIN_CANDIDATE_COVERAGE = 1;
-
-const NEGATION = new Set([
-  'not', 'no', 'never', 'without', 'ne', 'pas', 'jamais', 'ni', 'non',
-]);
-const PRONOUNS = new Set([
-  'i', 'we', 'you', 'he', 'she', 'they', 'it', 'me', 'us', 'him', 'her',
-  'them', 'my', 'our', 'your', 'his', 'their', 'mine', 'ours', 'yours',
-  'theirs', 'je', 'tu', 'nous', 'vous', 'il', 'elle', 'ils', 'elles',
-]);
 
 function words(text: string): string[] {
   return tokenize(text).map(({ word }) => word);
@@ -30,6 +22,8 @@ export interface SourceWord extends Token {
   canonical?: string;
   /** The spoken words when `word` is their dictionary repair. */
   spoken?: string[];
+  /** Where each spoken word sits, for a repair of several words (box-loom). */
+  parts?: { end: number; start: number }[];
 }
 
 /**
@@ -62,8 +56,10 @@ export function contentWords(
     canonical.push({
       canonical: span.canonical,
       continuesWord: span.length === 1 && continuesWord,
-      end: last.end, skippable: false, spoken: span.spoken, start,
-      word: span.word,
+      end: last.end, parts: span.spoken && span.length > 1
+        ? tokens.slice(i, i + span.length).map((part) => ({ end: part.end, start: part.start }))
+        : undefined,
+      skippable: false, spoken: span.spoken, start, word: span.word,
     });
     i += span.length - 1;
   }
