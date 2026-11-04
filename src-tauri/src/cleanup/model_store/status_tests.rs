@@ -2,6 +2,7 @@
 
 use super::*;
 use sha2::{Digest, Sha256};
+use std::fs;
 
 fn temp_root(name: &str) -> PathBuf {
     let root = crate::cleanup::test_support::test_root().join(format!("model-status-{name}"));

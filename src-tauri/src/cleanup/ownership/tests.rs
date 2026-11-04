@@ -19,7 +19,7 @@ fn fixture(name: &str) -> (RequestRegistry, CleanupModelStore, PathBuf, Artifact
         size: 8,
     };
     let store = CleanupModelStore::new(root.join("models"));
-    store.import_artifact(&source, spec).unwrap();
+    store.install_fixture(&source, spec).unwrap();
     let registry =
         RequestRegistry::new(Arc::new(WorkerSupervisor::new(root.join("missing-worker"))));
     (registry, store, source, spec)
@@ -47,7 +47,7 @@ fn retirement_reclaims_pending_and_invalidates_late_acquisition() {
     let late_lease = store.lease_artifact(MODEL_ID, spec).unwrap();
     registry.retire(None).finish();
     assert!(store
-        .import_artifact(&source, spec)
+        .install_fixture(&source, spec)
         .unwrap_err()
         .contains("in use"));
     assert_eq!(
@@ -57,7 +57,7 @@ fn retirement_reclaims_pending_and_invalidates_late_acquisition() {
             .code,
         "cancelled"
     );
-    assert!(store.import_artifact(&source, spec).is_ok());
+    assert!(store.install_fixture(&source, spec).is_ok());
     let (new_owner, _) = registry.open_session();
     assert_ne!(owner, new_owner);
     assert!(registry.begin_acquire(owner, "stale").is_err());
@@ -79,11 +79,11 @@ fn cancel_during_acquire_cannot_attach_to_a_later_same_id_request() {
         .complete_acquire(next, store.lease_artifact(MODEL_ID, spec))
         .unwrap();
     assert!(store
-        .import_artifact(&source, spec)
+        .install_fixture(&source, spec)
         .unwrap_err()
         .contains("in use"));
     assert!(registry.settle(owner, "same").unwrap());
-    assert!(store.import_artifact(&source, spec).is_ok());
+    assert!(store.install_fixture(&source, spec).is_ok());
 }
 
 #[test]
@@ -98,13 +98,13 @@ fn active_a_survives_queued_b_release_and_blocks_import_until_task_settles() {
     assert!(!registry.settle(owner, "b").unwrap());
     assert!(!active.cancelled());
     assert!(store
-        .import_artifact(&source, spec)
+        .install_fixture(&source, spec)
         .unwrap_err()
         .contains("in use"));
     let retirement = registry.retire(None);
     assert!(active.cancelled());
     assert!(store
-        .import_artifact(&source, spec)
+        .install_fixture(&source, spec)
         .unwrap_err()
         .contains("in use"));
     let (next_owner, _) = registry.open_session();
@@ -115,7 +115,7 @@ fn active_a_survives_queued_b_release_and_blocks_import_until_task_settles() {
     // Same supervisor can reserve the new generation once A is fully settled.
     let next = registry.start_run(next_owner, "next", MODEL_ID).unwrap();
     drop(next);
-    assert!(store.import_artifact(&source, spec).is_ok());
+    assert!(store.install_fixture(&source, spec).is_ok());
 }
 
 #[test]
@@ -129,12 +129,12 @@ fn stale_owner_cannot_release_run_or_dispose_the_new_owner() {
     assert!(registry.start_run(old_owner, "same", MODEL_ID).is_err());
     registry.retire(Some(old_owner)).finish();
     assert!(store
-        .import_artifact(&source, spec)
+        .install_fixture(&source, spec)
         .unwrap_err()
         .contains("in use"));
     assert!(registry.start_run(owner, "same", "wrong-model").is_err());
     assert!(registry.settle(owner, "same").unwrap());
-    assert!(store.import_artifact(&source, spec).is_ok());
+    assert!(store.install_fixture(&source, spec).is_ok());
 }
 
 #[test]
@@ -163,7 +163,7 @@ fn tampering_after_admission_is_rejected_before_worker_spawn() {
     assert!(error.attempt.is_none());
     assert!(error.message.contains("SHA-256 mismatch"));
     assert!(!marker.exists());
-    assert!(store.import_artifact(&source, spec).is_ok());
+    assert!(store.install_fixture(&source, spec).is_ok());
 }
 
 #[test]
@@ -223,7 +223,7 @@ sys.stdout.buffer.flush()
         wait_until(Duration::from_secs(5), || !process_exists(pid)),
         "retired worker {pid} still exists five seconds after retirement"
     );
-    assert!(store.import_artifact(&source, spec).is_ok());
+    assert!(store.install_fixture(&source, spec).is_ok());
     let (next_owner, _) = registry.open_session();
     acquire(&registry, &store, spec, next_owner, "after-retirement");
     let next = registry
@@ -237,7 +237,7 @@ sys.stdout.buffer.flush()
     assert_eq!(result.attempt.model_id, MODEL_ID);
     assert_eq!(result.attempt.model_digest, spec.sha256);
     assert_eq!(emitted.unwrap().model_digest, spec.sha256);
-    assert!(store.import_artifact(&source, spec).is_ok());
+    assert!(store.install_fixture(&source, spec).is_ok());
 }
 
 #[test]
@@ -281,7 +281,7 @@ fn attempt_identity_requires_verified_descriptor_and_successful_spawn() {
     assert_eq!(attempt.model_id, MODEL_ID);
     assert_eq!(attempt.model_digest, spec.sha256);
     assert_eq!(error.attempt.unwrap().model_digest, spec.sha256);
-    assert!(store.import_artifact(&source, spec).is_ok());
+    assert!(store.install_fixture(&source, spec).is_ok());
 }
 
 #[test]

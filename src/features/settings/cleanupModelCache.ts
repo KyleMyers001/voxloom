@@ -1,7 +1,7 @@
 /// One cleanup model status per window (BUS-16 PR 2c). `cleanup_model_status`
 /// hashes the whole 397 MB GGUF, so it is read once, on first use, and again
-/// only on an explicit action (Check again). An import applies the status the
-/// import itself returns. Remounting Home or switching tabs never re-reads it.
+/// only on an explicit action (Check again). A download applies the status the
+/// download itself returns. Remounting Home or switching tabs never re-reads it.
 /// A #77-style native verified marker that makes the read cheap is a PR 3/4
 /// target (BUS-16 comment 10486).
 
@@ -15,8 +15,6 @@ export interface CleanupModelSnapshot {
   view: CleanupModelView;
   /** Last known `runtimeAvailable`; unknown counts as false. */
   workerAvailable: boolean;
-  /** BUS-101: last import failure; cleared on Check again or the next import. */
-  importError: string | null;
 }
 
 const message = (reason: unknown): string => {
@@ -35,14 +33,12 @@ function checkedStatus(status: CleanupModelStatus | undefined): CleanupModelStat
 }
 
 let snapshot: CleanupModelSnapshot = {
-  view: { kind: 'checking' }, workerAvailable: false, importError: null,
+  view: { kind: 'checking' }, workerAvailable: false,
 };
 let generation = 0;
 let requested = false;
 /** A status has been read or applied at least once in this window. */
 let loaded = false;
-/** Last verified status; kept across checking/error so import failure can restore it. */
-let lastStatus: CleanupModelStatus | null = null;
 /** BUS-106: one in-flight status read; overlapping Check again reuses it. */
 let reading: Promise<void> | null = null;
 /** Generation that owns `reading`; apply/fail bump generation so refresh starts fresh. */
@@ -53,22 +49,6 @@ const listeners = new Set<() => void>();
 function publish(next: Partial<CleanupModelSnapshot>) {
   snapshot = { ...snapshot, ...next };
   for (const listener of listeners) listener();
-}
-
-/**
- * An import failure never replaces what the view says with a check failure
- * (BUS-112 item 4). With a known status: restore it, and drop a pending read
- * so it can't clear the import line. Nothing known yet: keep the view; a
- * first read still in flight stays valid and lands normally.
- */
-function publishImportFailure(reason: unknown) {
-  const text = message(reason);
-  if (lastStatus) {
-    generation++;
-    publish({ view: { kind: 'status', status: lastStatus }, importError: text });
-    return;
-  }
-  publish({ importError: text });
 }
 
 export const cleanupModelCache = {
@@ -90,15 +70,15 @@ export const cleanupModelCache = {
   },
   /**
    * Explicit re-read (Check again). Overlapping calls share one status() only
-   * when that read still belongs to the current generation. apply()/fail()
-   * bump generation so a cancelled in-flight read is not reused (Codex
+   * when that read still belongs to the current generation. apply() bumps
+   * generation so a cancelled in-flight read is not reused (Codex
    * 4316214003).
    */
   refresh(): Promise<void> {
     if (reading !== null && readingGeneration === generation) return reading;
     requested = true;
     const request = ++generation;
-    publish({ view: { kind: 'checking' }, importError: null });
+    publish({ view: { kind: 'checking' } });
     // Reserve the slot before calling status(), so a sync throw's finally can
     // clear the same promise we return (finally would otherwise run before a
     // direct `reading = (async () => …)()` assignment).
@@ -114,9 +94,6 @@ export const cleanupModelCache = {
         const status = checkedStatus(await cleanupModelCache.store().status());
         if (request !== generation) return;
         loaded = true;
-        lastStatus = status;
-        // importError was cleared when this read started; a newer import
-        // failure set during the read is kept.
         publish({ view: { kind: 'status', status }, workerAvailable: status.runtimeAvailable });
       } catch (reason: unknown) {
         if (request !== generation) return;
@@ -131,39 +108,25 @@ export const cleanupModelCache = {
     })();
     return pending;
   },
-  /** Clears the import-failure line (start of a new import attempt). */
-  clearImportError() {
-    if (snapshot.importError !== null) publish({ importError: null });
-  },
-  /** A status from somewhere else (the import result); supersedes pending reads. */
+  /**
+   * A status from the download result; supersedes pending reads. A malformed
+   * status throws, so the caller reports it as a failed download.
+   */
   apply(status: CleanupModelStatus) {
-    try {
-      const checked = checkedStatus(status);
-      generation++;
-      loaded = true;
-      requested = true;
-      lastStatus = checked;
-      publish({
-        view: { kind: 'status', status: checked },
-        workerAvailable: checked.runtimeAvailable,
-        importError: null,
-      });
-    } catch (reason: unknown) {
-      publishImportFailure(reason);
-    }
-  },
-  fail(reason: unknown) {
-    publishImportFailure(reason);
+    const checked = checkedStatus(status);
+    generation++;
+    loaded = true;
+    requested = true;
+    publish({ view: { kind: 'status', status: checked }, workerAvailable: checked.runtimeAvailable });
   },
 };
 
 /** Tests only: forget the cached status and store. */
 export function resetCleanupModelCacheForTests() {
-  snapshot = { view: { kind: 'checking' }, workerAvailable: false, importError: null };
+  snapshot = { view: { kind: 'checking' }, workerAvailable: false };
   generation++;
   requested = false;
   loaded = false;
-  lastStatus = null;
   reading = null;
   readingGeneration = 0;
   modelStore = null;

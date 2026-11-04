@@ -1,93 +1,16 @@
 use super::*;
 use sha2::{Digest, Sha256};
+use std::fs;
 
 fn temp_root(name: &str) -> PathBuf {
     crate::cleanup::test_support::test_root().join(format!("model-store-{name}"))
 }
 
 #[test]
-fn imports_atomically_with_private_permissions() {
-    let root = temp_root("import");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).unwrap();
-    let source = root.join("source.gguf");
-    fs::write(&source, b"GGUFtest").unwrap();
-    let digest = Box::leak(format!("{:x}", Sha256::digest(b"GGUFtest")).into_boxed_str());
-    let installed = root.join("installed");
-    let store = CleanupModelStore::new(installed.clone());
-    store
-        .import_artifact(
-            &source,
-            ArtifactSpec {
-                sha256: digest,
-                size: 8,
-            },
-        )
-        .unwrap();
-    let destination = installed.join(MODEL_FILE);
-    assert_eq!(fs::read(&destination).unwrap(), b"GGUFtest");
-    assert!(!installed.join(format!("{MODEL_FILE}.partial")).exists());
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mode = fs::metadata(destination).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o600);
-    }
-    let _ = fs::remove_dir_all(root);
-}
-
-#[test]
-fn sync_failure_is_reported_after_rename_and_retry_syncs_existing_model() {
-    let root = temp_root("directory-sync");
-    fs::create_dir_all(&root).unwrap();
-    let source = root.join("source.gguf");
-    fs::write(&source, b"GGUFtest").unwrap();
-    let spec = ArtifactSpec {
-        sha256: Box::leak(format!("{:x}", Sha256::digest(b"GGUFtest")).into_boxed_str()),
-        size: 8,
-    };
-    let installed = root.join("installed");
-    let store = CleanupModelStore::new(installed.clone());
-    let error = store
-        .import_artifact_with_sync(&source, spec, |parent| {
-            assert_eq!(parent, installed);
-            assert_eq!(fs::read(parent.join(MODEL_FILE)).unwrap(), b"GGUFtest");
-            assert!(!parent.join(format!("{MODEL_FILE}.partial")).exists());
-            Err("directory sync failed".into())
-        })
-        .unwrap_err();
-    assert_eq!(error, "directory sync failed");
-    // The valid renamed file remains, but success is not claimed. Neither
-    // the import guard nor retry may suppress another directory sync.
-    let mut synced = false;
-    store
-        .import_artifact_with_sync(&source, spec, |parent| {
-            assert_eq!(parent, installed);
-            synced = true;
-            Ok(())
-        })
-        .unwrap();
-    assert!(synced);
-    assert!(store.lease_artifact(MODEL_ID, spec).is_ok());
-    let _ = fs::remove_dir_all(root);
-}
-
-#[test]
-fn refuses_import_while_a_model_is_leased() {
-    let root = temp_root("leased");
-    let store = CleanupModelStore::new(root.clone());
+fn refuses_a_write_while_a_model_is_leased() {
+    let store = CleanupModelStore::new(temp_root("leased"));
     store.inner.lock().unwrap().leases = 1;
-    let error = store
-        .import_artifact(
-            Path::new("unused"),
-            ArtifactSpec {
-                sha256: "",
-                size: 0,
-            },
-        )
-        .unwrap_err();
-    assert!(error.contains("in use"));
-    let _ = fs::remove_dir_all(root);
+    assert!(store.begin_write().err().unwrap().contains("in use"));
 }
 
 #[test]
@@ -187,30 +110,37 @@ fn verification_uses_the_reserved_descriptor_without_store_lock() {
 }
 
 #[test]
-fn verified_lease_blocks_concurrent_import_until_drop() {
-    let root = temp_root("lease-import");
+fn verified_lease_blocks_a_write_until_drop() {
+    let root = temp_root("lease-write");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let store = CleanupModelStore::new(root.clone());
+    fs::write(store.model_path(), b"GGUFtest").unwrap();
+    let first = store.lease(MODEL_ID).unwrap();
+    let queued = store.lease(MODEL_ID).unwrap();
+    assert!(store.begin_write().err().unwrap().contains("in use"));
+    drop(first);
+    assert!(store.begin_write().err().unwrap().contains("in use"));
+    drop(queued);
+    assert!(store.begin_write().is_ok());
+    let _ = fs::remove_dir_all(root);
+}
+
+/// BUS-186: a model an earlier version imported is the same pinned file at
+/// the same path, so it still counts as installed and can be leased.
+#[test]
+fn a_previously_imported_model_still_shows_as_installed() {
+    let root = temp_root("previously-imported");
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
     let bytes = b"GGUFtest";
-    let digest = Box::leak(format!("{:x}", Sha256::digest(bytes)).into_boxed_str());
     let artifact = ArtifactSpec {
-        sha256: digest,
+        sha256: Box::leak(format!("{:x}", Sha256::digest(bytes)).into_boxed_str()),
         size: bytes.len() as u64,
     };
     let store = CleanupModelStore::new(root.clone());
-    fs::write(store.model_path(), bytes).unwrap();
-    let first = store.lease_artifact(MODEL_ID, artifact).unwrap();
-    let queued = store.lease_artifact(MODEL_ID, artifact).unwrap();
-    assert!(store
-        .import_artifact(&store.model_path(), artifact)
-        .unwrap_err()
-        .contains("in use"));
-    drop(first);
-    assert!(store
-        .import_artifact(&store.model_path(), artifact)
-        .unwrap_err()
-        .contains("in use"));
-    drop(queued);
-    assert!(store.import_artifact(&store.model_path(), artifact).is_ok());
+    fs::write(root.join("qwen3-0.6b-q4-k-m.gguf"), bytes).unwrap();
+    assert!(store.status_available_for(artifact));
+    assert!(store.lease_artifact(MODEL_ID, artifact).is_ok());
     let _ = fs::remove_dir_all(root);
 }

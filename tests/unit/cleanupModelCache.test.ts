@@ -4,7 +4,7 @@ import { cleanupModelCache } from '../../src/features/settings/cleanupModelCache
 import type { CleanupModelStore } from '../../src/services/cleanup/contracts';
 import { CleanupEngineError, type CleanupModelStatus } from '../../src/services/cleanup/types';
 import {
-  deferredStore, flush, importError, noWorker, ready, view, worker,
+  deferredStore, flush, noWorker, ready, view, worker,
 } from './cleanupModelCacheFixtures';
 describe('cleanupModelCache', () => {
   it('a failed first read is retried by the next consumer', async () => {
@@ -46,36 +46,6 @@ describe('cleanupModelCache', () => {
     expect(worker()).toBe(true);
   });
 
-  it('an import failure keeps a known status and sets importError (BUS-101)', async () => {
-    const { answers } = deferredStore();
-    cleanupModelCache.ensureLoaded();
-    answers[0].resolve(ready);
-    await flush();
-    void cleanupModelCache.refresh();
-    cleanupModelCache.fail(new Error('picker exploded'));
-    answers[1].resolve(noWorker);
-    await flush();
-    expect(view()).toEqual({ kind: 'status', status: ready });
-    expect(importError()).toBe('picker exploded');
-    expect(worker()).toBe(true);
-  });
-
-  it('Check again and a new import clear the import-failure line', async () => {
-    const { answers } = deferredStore();
-    cleanupModelCache.ensureLoaded();
-    answers[0].resolve(ready);
-    await flush();
-    cleanupModelCache.fail(new Error('bad file'));
-    expect(importError()).toBe('bad file');
-    cleanupModelCache.clearImportError();
-    expect(importError()).toBeNull();
-    cleanupModelCache.fail(new Error('bad file'));
-    void cleanupModelCache.refresh();
-    expect(importError()).toBeNull();
-    answers[1].resolve(ready);
-    await flush();
-  });
-
   it('overlapping refresh calls share one status read (BUS-106)', async () => {
     const { answers, store } = deferredStore();
     const first = cleanupModelCache.refresh();
@@ -98,21 +68,20 @@ describe('cleanupModelCache', () => {
     answers[1].reject(new Error('stale'));
     await flush();
     expect(view()).toEqual({ kind: 'status', status: ready });
-    expect(importError()).toBeNull();
   });
 
   it.each([
     ['no runtime flag', { ...ready, runtimeAvailable: undefined }],
     ['a non-string id', { ...ready, id: 7 }],
     ['nothing', null],
-  ])('apply rejects a malformed import status (%s) and keeps the worker flag', async (_label, bad) => {
+  ])('apply throws on a malformed download status (%s) and keeps the worker flag', async (_label, bad) => {
     const { answers } = deferredStore();
     cleanupModelCache.ensureLoaded();
     answers[0].resolve(ready);
     await flush();
-    cleanupModelCache.apply(bad as unknown as CleanupModelStatus);
+    expect(() => cleanupModelCache.apply(bad as unknown as CleanupModelStatus))
+      .toThrow('unexpected status from the app');
     expect(view()).toEqual({ kind: 'status', status: ready });
-    expect(importError()).toBe('unexpected status from the app');
     expect(worker()).toBe(true);
   });
 
@@ -142,26 +111,6 @@ describe('cleanupModelCache', () => {
     cleanupModelCache.ensureLoaded();
     // If apply skipped `requested = true`, ensureLoaded would hash again.
     expect(store.status).not.toHaveBeenCalled();
-  });
-
-  // Codex 4316214003: apply/fail bump generation but must not leave refresh
-  // reusing the cancelled in-flight read.
-  it('refresh after fail (status known) during an in-flight read starts a new status call', async () => {
-    const { answers, store } = deferredStore();
-    cleanupModelCache.apply(noWorker);
-    void cleanupModelCache.refresh();
-    expect(store.status).toHaveBeenCalledTimes(1);
-    cleanupModelCache.fail(new Error('picker cancelled'));
-    expect(view()).toEqual({ kind: 'status', status: noWorker });
-    expect(importError()).toBe('picker cancelled');
-    // Stale read still pending; Check again must not reuse it.
-    void cleanupModelCache.refresh();
-    expect(store.status).toHaveBeenCalledTimes(2);
-    answers[0].resolve(noWorker); // cancelled; ignored
-    answers[1].resolve(ready);
-    await flush();
-    expect(view()).toEqual({ kind: 'status', status: ready });
-    expect(importError()).toBeNull();
   });
 
   // BUS-112 item 1: a cancelled read finishing must not free the newer slot.
@@ -199,7 +148,7 @@ describe('cleanupModelCache', () => {
   // CR Low #3: status() throwing sync must not stick a settled promise in `reading`.
   it('a sync throw from status() still lets the next refresh call status again', async () => {
     const store: CleanupModelStore = {
-      importModel: vi.fn(),
+      
       status: vi.fn()
         .mockImplementationOnce(() => { throw new Error('sync boom'); })
         .mockResolvedValueOnce(ready),
@@ -210,23 +159,6 @@ describe('cleanupModelCache', () => {
     await cleanupModelCache.refresh();
     expect(store.status).toHaveBeenCalledTimes(2);
     expect(view()).toEqual({ kind: 'status', status: ready });
-  });
-
-  // CR Low #4 mutant: apply() must update lastStatus so a later fail keeps it.
-  it('a later import failure keeps the status from a successful apply', async () => {
-    cleanupModelCache.useStore({
-      importModel: vi.fn(),
-      status: vi.fn(),
-    });
-    cleanupModelCache.apply(ready);
-    expect(view()).toEqual({ kind: 'status', status: ready });
-    cleanupModelCache.apply(noWorker);
-    expect(view()).toEqual({ kind: 'status', status: noWorker });
-    cleanupModelCache.fail(new Error('second import bad'));
-    // If apply skipped lastStatus = checked, fail would restore the first ready.
-    expect(view()).toEqual({ kind: 'status', status: noWorker });
-    expect(importError()).toBe('second import bad');
-    expect(worker()).toBe(false);
   });
 
 });

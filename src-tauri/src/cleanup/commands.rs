@@ -1,15 +1,14 @@
 //! Tauri commands for cleanup sessions, model management and worker runs.
 
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use tauri::{AppHandle, Runtime, State, Webview};
+use tauri::{Runtime, State, Webview};
 
 use super::auth::{authorize_model_manager, owner, require_main, validate_request_id};
-use super::model_store::{CleanupModelStore, ModelStatus};
+use super::model_store::ModelStatus;
 use super::ownership::{OwnedRun, RequestRegistry};
 use super::{
-    picker, CleanupAttempt, CleanupCommandError, CleanupRequestDto, CleanupRunOutput, CleanupState,
+    CleanupAttempt, CleanupCommandError, CleanupRequestDto, CleanupRunOutput, CleanupState,
 };
 
 #[tauri::command]
@@ -36,51 +35,6 @@ pub async fn cleanup_session_dispose<R: Runtime>(
         .map_err(|error| {
             CleanupCommandError::runtime(format!("cleanup disposal task failed: {error}"))
         })
-}
-
-#[tauri::command]
-pub async fn cleanup_pick_and_import_model<R: Runtime>(
-    app: AppHandle<R>,
-    webview: Webview<R>,
-    state: State<'_, CleanupState>,
-) -> Result<Option<ModelStatus>, CleanupCommandError> {
-    authorize_model_manager(webview.label(), webview.window().label())?;
-    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-    app.run_on_main_thread(move || {
-        let _ = sender.send(picker::pick_model_path());
-    })
-    .map_err(|error| CleanupCommandError::runtime(format!("open cleanup model picker: {error}")))?;
-    let source = tauri::async_runtime::spawn_blocking(move || receiver.recv())
-        .await
-        .map_err(|error| {
-            CleanupCommandError::runtime(format!("model picker task failed: {error}"))
-        })?
-        .map_err(|error| {
-            CleanupCommandError::runtime(format!("model picker closed unexpectedly: {error}"))
-        })?
-        .map_err(CleanupCommandError::runtime)?;
-    let Some(source_path) = source else {
-        return Ok(None);
-    };
-    let models = Arc::clone(&state.models);
-    let mut status = tauri::async_runtime::spawn_blocking(move || {
-        import_model(&models, PathBuf::from(source_path).as_path())
-    })
-    .await
-    .map_err(|error| {
-        CleanupCommandError::runtime(format!("model import task failed: {error}"))
-    })??;
-    status.runtime_available = state.supervisor.available();
-    Ok(Some(status))
-}
-
-/// Import failures (in use, SHA mismatch, copy) are runtime errors. The
-/// renderer reserves model-missing for "no usable model" from admission.
-fn import_model(
-    models: &CleanupModelStore,
-    source: &Path,
-) -> Result<ModelStatus, CleanupCommandError> {
-    models.import(source).map_err(CleanupCommandError::runtime)
 }
 
 #[tauri::command]
@@ -196,26 +150,3 @@ pub async fn cleanup_release<R: Runtime>(
 #[cfg(all(test, unix))]
 #[path = "commands_tests.rs"]
 mod run_tests;
-
-#[cfg(all(test, unix))]
-mod tests {
-    use std::fs;
-
-    use super::{import_model, CleanupModelStore};
-
-    #[test]
-    fn import_failures_are_runtime_errors_not_model_missing() {
-        let root = crate::cleanup::test_support::test_root().join("commands-import");
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
-        let store = CleanupModelStore::new(root.join("installed"));
-        let wrong = root.join("wrong.gguf");
-        fs::write(&wrong, b"GGUFevil").unwrap();
-        for source in [root.join("absent.gguf"), wrong] {
-            let error = import_model(&store, &source).unwrap_err();
-            assert_eq!(error.code, "runtime-error", "{source:?}: {}", error.message);
-            assert!(!error.message.is_empty());
-        }
-        let _ = fs::remove_dir_all(root);
-    }
-}

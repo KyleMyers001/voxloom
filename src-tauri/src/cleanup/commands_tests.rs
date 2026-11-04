@@ -39,7 +39,7 @@ fn worker_time_left(name: &str, time_left_ms: Option<u64>) -> String {
         size: 8,
     };
     let store = CleanupModelStore::new(root.join("models"));
-    store.import_artifact(&source, spec).unwrap();
+    store.install_fixture(&source, spec).unwrap();
     let registry = RequestRegistry::new(Arc::new(WorkerSupervisor::new(worker)));
     let (owner, _) = registry.open_session();
     let token = registry.begin_acquire(owner, "run").unwrap();

@@ -1,8 +1,8 @@
 //! One-click download of the pinned cleanup model (BUS-181).
 //!
 //! Reuses `crate::model_fetch` (HTTPS-only agent, `<file>.partial`, size and
-//! SHA-256 check before the atomic rename) under the store's import guard, so
-//! a download never overlaps an import or a lease. A failed, cancelled or
+//! SHA-256 check before the atomic rename) under the store's write guard, so
+//! two downloads never overlap and a download never overlaps a lease. A failed, cancelled or
 //! mismatched download leaves no partial file and never touches an installed
 //! model. There is no resume: a retry starts from zero.
 
@@ -67,7 +67,7 @@ impl CleanupModelStore {
         mut on_progress: impl FnMut(DownloadProgress),
         sync_parent: impl FnOnce(&Path) -> Result<(), String>,
     ) -> Result<(), DownloadError> {
-        let _guard = self.begin_import().map_err(DownloadError::Failed)?;
+        let _guard = self.begin_write().map_err(DownloadError::Failed)?;
         let cancel = Arc::new(AtomicBool::new(false));
         self.inner.lock().unwrap().download = Some(Arc::clone(&cancel));
         let result = self.fetch_into_place(agent, url, artifact, &cancel, &mut on_progress);
@@ -100,7 +100,7 @@ impl CleanupModelStore {
         })?;
         // model_fetch opens the partial with File::create, which truncates an
         // existing file and keeps its mode: pre-create it 0600 so the bytes
-        // are private for the whole download, like Import's copy.
+        // are private for the whole download.
         create_private(&model_fetch::partial_path(&destination)).map_err(DownloadError::Failed)?;
         let pinned = PinnedArtifact {
             size_bytes: artifact.size,

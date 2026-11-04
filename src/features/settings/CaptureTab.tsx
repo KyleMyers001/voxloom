@@ -20,7 +20,7 @@ const styles: { value: WritingStyle; label: string }[] = [
 
 /** Capture & Output tab (S1–S11). Browser-only rows are gated per CHECKLIST § Hidden in the native app. */
 export function CaptureTab({ cleanupModelStore, onSetup }: {
-  /** Test seam: cleanup model status/import (defaults to native). */
+  /** Test seam: cleanup model status/download (defaults to native). */
   cleanupModelStore?: CleanupModelStore;
   onSetup: (opener: HTMLElement) => void;
 }) {
