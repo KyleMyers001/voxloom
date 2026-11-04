@@ -12,10 +12,13 @@ const WORD_CHAR = String.raw`[\p{L}\p{M}\p{N}_]`;
 // Between two chunks: a run of spaces or tabs, or one hyphen, or nothing.
 // Never a newline, comma or other punctuation.
 const SEPARATOR = String.raw`(?:[^\S\r\n]+|-)?`;
-// A match ends at a word edge. A trailing 's is left alone, but a contraction
-// ("don't") is not a match for "Don". Lookbehind is avoided on purpose: the
-// start edge is a captured character that is put back.
-const END = String.raw`(?!${WORD_CHAR})(?!['\u2019](?!s(?!${WORD_CHAR}))\p{L})`;
+// An apostrophe with a letter or digit on both sides ("we're", "it\u2019s")
+// is part of the word, so a match can neither start nor end at one. Lookbehind
+// is avoided on purpose: the start edge is a captured character that is put
+// back and checked in replaceOnce.
+const APOSTROPHE = /^['\u2019]$/u;
+const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
+const END = String.raw`(?!${WORD_CHAR})(?!['\u2019][\p{L}\p{N}])`;
 const SEPARATORS = /[\s-]+/gu;
 const SYNTAX_CHARS = /[\\^$.*+?()[\]{}|/]/gu;
 
@@ -86,7 +89,8 @@ function replaceOnce(
     (match: string, lead: string, heard: string, offset: number) => {
       const spelled = byKey.get(foldKey(heard));
       const start = offset + lead.length;
-      if (spelled === undefined || touchesCode(text, start, start + heard.length)) {
+      const insideWord = APOSTROPHE.test(lead) && LETTER_OR_DIGIT.test(text[offset - 1] ?? '');
+      if (spelled === undefined || insideWord || touchesCode(text, start, start + heard.length)) {
         return match;
       }
       return lead + spelled;
@@ -94,7 +98,11 @@ function replaceOnce(
   );
 }
 
-/** Most passes that may change the text before it must have settled. */
+/**
+ * Most passes that may change the text before it must have settled. Hitting
+ * the cap fails closed: the input is returned unchanged, including any
+ * unrelated matches that would otherwise have been fixed.
+ */
 const MAX_PASSES = 3;
 
 /**
