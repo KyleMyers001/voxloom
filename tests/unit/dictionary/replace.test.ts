@@ -25,9 +25,9 @@ describe('whole-word, case-insensitive replacement', () => {
     expect(fix('voxloom\nvoxloom', ['Voxloom'])).toBe('Voxloom\nVoxloom');
   });
 
-  it('treats an inside-word apostrophe as part of the word, so a possessive is not matched', () => {
+  it('leaves a trailing possessive alone', () => {
     expect(fix('voxloom\'s menu and voxloom\u2019s icon', ['Voxloom']))
-      .toBe('voxloom\'s menu and voxloom\u2019s icon');
+      .toBe('Voxloom\'s menu and Voxloom\u2019s icon');
   });
 
   it('does not split contractions', () => {

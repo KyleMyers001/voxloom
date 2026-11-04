@@ -12,13 +12,15 @@ const WORD_CHAR = String.raw`[\p{L}\p{M}\p{N}_]`;
 // Between two chunks: a run of spaces or tabs, or one hyphen, or nothing.
 // Never a newline, comma or other punctuation.
 const SEPARATOR = String.raw`(?:[^\S\r\n]+|-)?`;
-// An apostrophe with a letter or digit on both sides ("we're", "it\u2019s")
-// is part of the word, so a match can neither start nor end at one. Lookbehind
-// is avoided on purpose: the start edge is a captured character that is put
-// back and checked in replaceOnce.
+// A match can't start right after an apostrophe inside a word (a letter or
+// digit before it: "we're", "it\u2019s", "l'iphone"); it may end before one,
+// so possessives work ("Voxloom's"), except before another contraction tail
+// ("don't" is not a match for "Don"). Lookbehind is avoided on purpose: the
+// start edge is a captured character that is put back and checked in
+// replaceOnce.
 const APOSTROPHE = /^['\u2019]$/u;
 const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
-const END = String.raw`(?!${WORD_CHAR})(?!['\u2019][\p{L}\p{N}])`;
+const END = String.raw`(?!${WORD_CHAR})(?!['\u2019](?!s(?!${WORD_CHAR}))\p{L})`;
 const SEPARATORS = /[\s-]+/gu;
 const SYNTAX_CHARS = /[\\^$.*+?()[\]{}|/]/gu;
 
