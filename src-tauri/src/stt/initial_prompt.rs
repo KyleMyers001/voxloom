@@ -25,7 +25,7 @@ fn usable(entry: &str) -> Option<&str> {
 }
 
 /// Usable entries in saved order, without repeats (case-insensitive).
-pub fn usable_words(dictionary: &[String]) -> Vec<&str> {
+fn usable_words(dictionary: &[String]) -> Vec<&str> {
     let mut seen = std::collections::HashSet::new();
     dictionary
         .iter()
@@ -35,8 +35,8 @@ pub fn usable_words(dictionary: &[String]) -> Vec<&str> {
         .collect()
 }
 
-/// Word that opens the prompt. A bare list scored lower in the corpus eval.
-pub const LABEL: &str = "Glossary:";
+/// Word that opens the prompt. A bare list fixed fewer words in the corpus eval.
+const LABEL: &str = "Glossary:";
 
 fn render(words: &[&str]) -> String {
     format!("{LABEL} {}.", words.join(", "))
