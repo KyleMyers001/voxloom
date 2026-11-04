@@ -1,4 +1,4 @@
-use std::fs::{self, File};
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager};
 
 use super::artifact::{
-    copy_private, open_regular, validate as validate_artifact, validate_file_while, ArtifactSpec,
+    open_regular, validate as validate_artifact, validate_file_while, ArtifactSpec,
 };
 
 pub mod download;
@@ -33,7 +33,8 @@ pub struct ModelStatus {
 
 #[derive(Debug)]
 struct StoreInner {
-    importing: bool,
+    /// A download (or test install) is replacing the file.
+    writing: bool,
     leases: usize,
     /// Cancel flag of the running download (BUS-181), if any.
     download: Option<Arc<AtomicBool>>,
@@ -110,7 +111,7 @@ impl CleanupModelStore {
         Self {
             inner: Arc::new(Mutex::new(StoreInner {
                 download: None,
-                importing: false,
+                writing: false,
                 leases: 0,
                 verified: None,
             })),
@@ -132,61 +133,6 @@ impl CleanupModelStore {
         self.available_for(artifact)
     }
 
-    pub fn import(&self, source: &Path) -> Result<ModelStatus, String> {
-        self.import_artifact(source, ARTIFACT)?;
-        Ok(self.status())
-    }
-
-    pub(super) fn import_artifact(
-        &self,
-        source: &Path,
-        artifact: ArtifactSpec,
-    ) -> Result<(), String> {
-        self.import_artifact_with_sync(source, artifact, |parent| {
-            File::open(parent)
-                .and_then(|directory| directory.sync_all())
-                .map_err(|error| format!("sync cleanup model directory: {error}"))
-        })
-    }
-
-    fn import_artifact_with_sync(
-        &self,
-        source: &Path,
-        artifact: ArtifactSpec,
-        sync_parent: impl FnOnce(&Path) -> Result<(), String>,
-    ) -> Result<(), String> {
-        let _guard = self.begin_import()?;
-        validate_artifact(source, artifact)?;
-        fs::create_dir_all(&self.root)
-            .map_err(|error| format!("create cleanup model directory: {error}"))?;
-        let destination = self.model_path();
-        if validate_artifact(&destination, artifact).is_ok() {
-            // Also retry durability after a prior post-rename sync failure.
-            sync_parent(&self.root)?;
-            self.remember_verified(&destination);
-            return Ok(());
-        }
-        let temporary = self.root.join(format!("{MODEL_FILE}.partial"));
-        if temporary.exists() {
-            fs::remove_file(&temporary)
-                .map_err(|error| format!("remove stale partial model: {error}"))?;
-        }
-        let result = copy_private(source, &temporary)
-            .and_then(|()| validate_artifact(&temporary, artifact))
-            .and_then(|()| {
-                fs::rename(&temporary, &destination)
-                    .map_err(|error| format!("finalize cleanup model: {error}"))?;
-                sync_parent(&self.root)
-            });
-        if result.is_err() {
-            let _ = fs::remove_file(&temporary);
-            self.clear_verified();
-        } else {
-            self.remember_verified(&destination);
-        }
-        result
-    }
-
     pub fn lease(&self, model_id: &str) -> Result<ModelLease, String> {
         self.lease_artifact(model_id, ARTIFACT)
     }
@@ -200,8 +146,8 @@ impl CleanupModelStore {
             return Err(format!("unknown cleanup model: {model_id}"));
         }
         let mut inner = self.inner.lock().unwrap();
-        if inner.importing {
-            return Err("cleanup model is being imported".into());
+        if inner.writing {
+            return Err("cleanup model is being installed".into());
         }
         if inner.leases >= 2 {
             return Err("cleanup model descriptor capacity is full".into());
@@ -220,7 +166,7 @@ impl CleanupModelStore {
     }
 
     /// Cheap status path: skip a full re-hash when the fingerprint matches.
-    /// Hashing runs without the store lock so lease/import are not blocked.
+    /// Hashing runs without the store lock so lease/download are not blocked.
     fn available_for(&self, artifact: ArtifactSpec) -> bool {
         self.available_with(|path| validate_artifact(path, artifact).is_ok())
     }
@@ -263,12 +209,10 @@ impl CleanupModelStore {
             self.inner.lock().unwrap().verified = Some(fp);
         }
     }
-
-    fn clear_verified(&self) {
-        self.inner.lock().unwrap().verified = None;
-    }
 }
 
+#[cfg(test)]
+mod fixture;
 #[cfg(test)]
 mod status_tests;
 #[cfg(test)]

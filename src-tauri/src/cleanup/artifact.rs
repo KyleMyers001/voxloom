@@ -1,5 +1,5 @@
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 use sha2::{Digest, Sha256};
@@ -8,33 +8,6 @@ use sha2::{Digest, Sha256};
 pub struct ArtifactSpec {
     pub sha256: &'static str,
     pub size: u64,
-}
-
-pub fn copy_private(source: &Path, destination: &Path) -> Result<(), String> {
-    let mut input = open_regular(source)?;
-    copy_private_from(&mut input, destination)
-}
-
-fn copy_private_from(input: &mut impl Read, destination: &Path) -> Result<(), String> {
-    let mut options = OpenOptions::new();
-    options.create_new(true).write(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        // Privacy applies while copying, not just after the file is complete.
-        options.mode(0o600);
-    }
-    let mut output = options
-        .open(destination)
-        .map_err(|error| format!("create partial model: {error}"))?;
-    std::io::copy(input, &mut output).map_err(|error| format!("copy imported model: {error}"))?;
-    output
-        .flush()
-        .map_err(|error| format!("flush imported model: {error}"))?;
-    output
-        .sync_all()
-        .map_err(|error| format!("sync imported model: {error}"))?;
-    Ok(())
 }
 
 pub fn validate(path: &Path, spec: ArtifactSpec) -> Result<(), String> {
@@ -171,45 +144,6 @@ mod tests {
         )
         .unwrap_err()
         .contains("size mismatch"));
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn partial_is_private_before_the_first_byte_is_copied() {
-        use std::os::unix::fs::PermissionsExt;
-        struct Inspect<'a>(&'a Path);
-        impl Read for Inspect<'_> {
-            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
-                assert_eq!(
-                    fs::metadata(self.0)?.permissions().mode() & 0o077,
-                    0,
-                    "partial must not grant group/other access during copying"
-                );
-                Ok(0)
-            }
-        }
-        let root = scratch("partial-private");
-        let destination = root.join("new.partial");
-        copy_private_from(&mut Inspect(&destination), &destination).unwrap();
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn copying_rejects_symlink_sources_and_existing_destinations() {
-        use std::os::unix::fs::symlink;
-        let root = scratch("copy-private");
-        let source = root.join("source");
-        let link = root.join("link");
-        let destination = root.join("partial");
-        fs::write(&source, b"GGUFtest").unwrap();
-        symlink(&source, &link).unwrap();
-        assert!(copy_private(&link, &destination).is_err());
-        assert!(!destination.exists());
-        fs::write(&destination, b"keep existing").unwrap();
-        assert!(copy_private(&source, &destination).is_err());
-        assert_eq!(fs::read(&destination).unwrap(), b"keep existing");
         let _ = fs::remove_dir_all(root);
     }
 

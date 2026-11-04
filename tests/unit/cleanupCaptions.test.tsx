@@ -28,7 +28,7 @@ const status = (runtimeAvailable: boolean): CleanupModelStatus => ({
   available: true, id: CLEANUP_MODEL_ID, runtimeAvailable, sha256: CLEANUP_MODEL_SHA256,
 });
 const store = (next: CleanupModelStatus): CleanupModelStore => ({
-  importModel: vi.fn(), status: vi.fn().mockResolvedValue(next),
+  status: vi.fn().mockResolvedValue(next),
 });
 const activeSettings = { cleanupEnabled: true, cleanupModelId: CLEANUP_MODEL_ID, cleanupOptIn: true };
 
@@ -68,7 +68,7 @@ describe('writing-style captions, production build', () => {
 
   it('while the status is unreadable: same as no worker', async () => {
     vi.stubEnv('DEV', false);
-    const failing: CleanupModelStore = { importModel: vi.fn(), status: vi.fn().mockRejectedValue(new Error('denied')) };
+    const failing: CleanupModelStore = { status: vi.fn().mockRejectedValue(new Error('denied')) };
     await renderBoth(failing);
     expect(screen.getByText('Style preference · cleanup not available yet')).toBeInTheDocument();
     expect(settingsHelp()).not.toBeInTheDocument();

@@ -1,4 +1,4 @@
-// BUS-181: one-click download in Settings > Cleanup model, next to Import.
+// BUS-181: one-click download in Settings > Cleanup model (BUS-186: the only install path).
 import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -29,7 +29,7 @@ function downloadingStore(status: CleanupModelStatus = missing) {
       new Promise<CleanupModelStatus>((resolve, reject) => {
         pending.push({ progress: (p) => onProgress?.(p), reject, resolve });
       })),
-    importModel: vi.fn().mockResolvedValue(null),
+    
     status: vi.fn().mockResolvedValue(status),
   } satisfies CleanupModelStore;
   return { pending, store };
@@ -40,14 +40,13 @@ function Harness({ modelStore }: { modelStore: CleanupModelStore }) {
 }
 
 const downloadButton = () => screen.queryByRole('button', { name: 'Download (397 MB)' });
-const importButton = () => screen.getByRole('button', { name: 'Import model…' });
 const note = () => document.getElementById('settings-cleanup-model-note')?.textContent;
 
 async function startDownload(store: CleanupModelStore) {
   const user = userEvent.setup();
   renderWithApp(<Harness modelStore={store} />);
   await waitFor(() => expect(downloadButton()).toBeInTheDocument());
-  expect(note()).toBe('Not installed. Download it, or import the Qwen3 0.6B (Q4_K_M) GGUF file.');
+  expect(note()).toBe('Not installed. Download it to use local cleanup.');
   await user.click(downloadButton()!);
   return user;
 }
@@ -61,21 +60,22 @@ describe('Cleanup model download', () => {
     expect(downloadButton()).toBeNull();
     installed.unmount();
     resetCleanupModelCacheForTests();
-    renderWithApp(<Harness modelStore={{ importModel: vi.fn(), status: vi.fn().mockResolvedValue(missing) }} />);
+    renderWithApp(<Harness modelStore={{ status: vi.fn().mockResolvedValue(missing) }} />);
     await waitFor(() => expect(note()).toMatch(/^Not installed/));
     expect(downloadButton()).toBeNull();
-    expect(importButton()).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Import model…' })).toBeNull();
   });
 
-  it('shows progress and Cancel, blocks Import meanwhile, then applies the verified status', async () => {
+  it('shows progress and Cancel, blocks Check again meanwhile, then applies the verified status', async () => {
     const { pending, store } = downloadingStore();
     const user = await startDownload(store);
     act(() => { pending[0].progress({ bytesReceived: 42, bytesTotal: 100, ratio: 0.42 }); });
     expect(screen.getByRole('button', { name: 'Downloading… 42%' })).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
-    expect(importButton()).toHaveAttribute('aria-disabled', 'true');
-    await user.click(importButton());
-    expect(store.importModel).not.toHaveBeenCalled();
+    const check = screen.getByRole('button', { name: 'Check again' });
+    expect(check).toHaveAttribute('aria-disabled', 'true');
+    await user.click(check);
+    expect(store.status).toHaveBeenCalledTimes(1);
     await act(async () => { pending[0].resolve(ready); });
     expect(note()).toBe('Qwen3 0.6B is installed.');
     expect(downloadButton()).toBeNull();
@@ -89,8 +89,8 @@ describe('Cleanup model download', () => {
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(store.cancelDownload).toHaveBeenCalledTimes(1);
     await act(async () => { pending[0].reject(new CleanupDownloadError('cancelled', 'download cancelled')); });
-    expect(note()).toBe('Not installed. Download it, or import the Qwen3 0.6B (Q4_K_M) GGUF file. Download cancelled.');
-    expect(importButton()).toHaveAttribute('aria-disabled', 'false');
+    expect(note()).toBe('Not installed. Download it to use local cleanup. Download cancelled.');
+    expect(screen.getByRole('button', { name: 'Check again' })).toHaveAttribute('aria-disabled', 'false');
     await user.click(downloadButton()!);
     expect(store.download).toHaveBeenCalledTimes(2);
     expect(note()).not.toMatch(/cancelled/);
@@ -99,14 +99,14 @@ describe('Cleanup model download', () => {
   it.each([
     [new CleanupDownloadError('checksum', 'x'), 'The downloaded file didn\'t match the expected checksum and was deleted. Try again.'],
     [new CleanupDownloadError('failed', 'request failed: offline'),
-      'Couldn\'t download the model: request failed: offline. Check your connection and try again, or import the file.'],
-  ])('a failure shows its line and leaves Import usable (%s)', async (error, line) => {
+      'Couldn\'t download the model: request failed: offline. Check your connection and try again.'],
+  ])('a failure shows its line and Download can be retried (%s)', async (error, line) => {
     const { pending, store } = downloadingStore();
     const user = await startDownload(store);
     await act(async () => { pending[0].reject(error); });
-    expect(note()).toBe(`Not installed. Download it, or import the Qwen3 0.6B (Q4_K_M) GGUF file. ${line}`);
-    await user.click(importButton());
-    expect(store.importModel).toHaveBeenCalledTimes(1);
+    expect(note()).toBe(`Not installed. Download it to use local cleanup. ${line}`);
+    await user.click(downloadButton()!);
+    expect(store.download).toHaveBeenCalledTimes(2);
     await waitFor(() => expect(note()).not.toContain(line));
   });
 
@@ -121,7 +121,7 @@ describe('Cleanup model download', () => {
     expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
     renderWithApp(<Harness modelStore={store} />);
     expect(screen.getByRole('button', { name: 'Downloading… 30%' })).toHaveAttribute('aria-disabled', 'true');
-    expect(importButton()).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('button', { name: 'Check again' })).toHaveAttribute('aria-disabled', 'true');
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(store.cancelDownload).toHaveBeenCalledTimes(1);
     await act(async () => { pending[0].resolve(ready); });
