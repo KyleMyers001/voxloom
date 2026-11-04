@@ -33,7 +33,7 @@ fn silent_tail_adds_no_trailing_hallucination() {
     samples.extend(std::iter::repeat_n(0.0, 40_000)); // 2.5 s
     let cfg = SpeechFilterConfig::default();
     let out = pipeline::transcribe_filtered(&samples, 16_000, &cfg, &NoVad, |pcm| {
-        engine::transcribe_pcm(&model, pcm, 16_000, &cfg)
+        engine::transcribe_pcm(&model, pcm, 16_000, &cfg, &[])
     })
     .unwrap();
     let tail = out

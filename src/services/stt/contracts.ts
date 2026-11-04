@@ -33,6 +33,15 @@ export interface SttModelStore {
   status(modelId: string): Promise<SttModelInfo | null>;
 }
 
+/** Per-call hints for `SttEngine.transcribe`. */
+export interface SttTranscribeOptions {
+  /**
+   * The user's dictionary words (BUS-138). A native engine passes them to
+   * Whisper as its initial prompt; empty or missing sets no prompt.
+   */
+  readonly dictionary?: readonly string[];
+}
+
 /**
  * Transcribes a local audio buffer to text.
  * Does not upload audio or transcripts; cloud paths are out of scope.
@@ -44,5 +53,8 @@ export interface SttModelStore {
 export interface SttEngine {
   /** Selected model for transcription; never empty; never auto-downloaded. */
   readonly modelId: string;
-  transcribe(audio: AudioBufferHandle): Promise<Transcript>;
+  transcribe(
+    audio: AudioBufferHandle,
+    options?: SttTranscribeOptions,
+  ): Promise<Transcript>;
 }

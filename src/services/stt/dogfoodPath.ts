@@ -129,7 +129,7 @@ export async function dogfoodTranscribeAndCopy(
   const engine = (options.createEngine ?? createSttEngine)(modelId);
   const handle = audioHandleFromCapture(options.audio);
   const sttTranscript = withDictionary(
-    await engine.transcribe(handle),
+    await engine.transcribe(handle, { dictionary: options.dictionary }),
     options.dictionary,
   );
   const cleanup = await cleanUp(options, sttTranscript);

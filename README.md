@@ -209,6 +209,15 @@ each time and uses it once it opens, and that file is then checked once more
 in the background. A file that opens but can't be read during the check stays
 failed until Retry download or the next launch.
 
+Your Word dictionary also biases recognition: the saved words are passed to
+whisper.cpp as its initial prompt (a plain `Word, Word.` list, in saved order,
+cut at a whole entry to stay within about 220 tokens). An empty dictionary sets
+no prompt at all. Whisper can echo a prompt back on near-silence, so a quiet
+clip whose whole transcript is just dictionary words is dropped as "no speech
+detected" (a loud clip is never touched). The words stay on the device; this
+adds no network use. Nothing about `dictionary.json`, Settings or History
+changes.
+
 Real whisper.cpp linkage is **opt-in** on macOS:
 
 ```sh

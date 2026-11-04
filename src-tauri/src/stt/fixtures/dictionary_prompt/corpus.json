@@ -1,0 +1,266 @@
+{
+ "note": "BUS-138 PR C eval corpus: the sentences of the PR B2 dictionary eval. `said` is what the speaker says (the dictionary spelling spoken aloud for a fix sentence); `heard_by_b2` is B2's text-level mishearing of it. Text only; audio is made with scripts/dictionary-prompt-eval-tts.py.",
+ "dictionary": [
+  "Voxloom",
+  "Notion",
+  "Kubernetes",
+  "Zentrix",
+  "Anthropic",
+  "Grafana",
+  "Skylane"
+ ],
+ "items": [
+  {
+   "id": "fix-split-1",
+   "kind": "fix",
+   "said": "Please send the build to Voxloom today.",
+   "heard_by_b2": "Please send the build to box loom today.",
+   "expect": [
+    "Voxloom"
+   ]
+  },
+  {
+   "id": "fix-split-2",
+   "kind": "fix",
+   "said": "I think Voxloom crashed again after the update.",
+   "heard_by_b2": "I think vox loom crashed again after the update.",
+   "expect": [
+    "Voxloom"
+   ]
+  },
+  {
+   "id": "fix-split-3",
+   "kind": "fix",
+   "said": "Can you open Voxloom and check the settings?",
+   "heard_by_b2": "Can you open box loom and check the settings?",
+   "expect": [
+    "Voxloom"
+   ]
+  },
+  {
+   "id": "fix-near-1",
+   "kind": "fix",
+   "said": "Ask Voxloom to export the file.",
+   "heard_by_b2": "Ask Voxlom to export the file.",
+   "expect": [
+    "Voxloom"
+   ]
+  },
+  {
+   "id": "fix-near-2",
+   "kind": "fix",
+   "said": "We keep our meeting notes in Notion and our code in Git.",
+   "heard_by_b2": "We keep our meeting notes in Notian and our code in Git.",
+   "expect": [
+    "Notion"
+   ]
+  },
+  {
+   "id": "fix-near-3",
+   "kind": "fix",
+   "said": "I wrote the project plan in Notion last night.",
+   "heard_by_b2": "I wrote the project plan in motion last night.",
+   "expect": [
+    "Notion"
+   ]
+  },
+  {
+   "id": "fix-near-4",
+   "kind": "fix",
+   "said": "The deploy runs on Kubernetes in the staging cluster.",
+   "heard_by_b2": "The deploy runs on Kubernetis in the staging cluster.",
+   "expect": [
+    "Kubernetes"
+   ]
+  },
+  {
+   "id": "fix-split-4",
+   "kind": "fix",
+   "said": "Our Zentrix dashboard is down again.",
+   "heard_by_b2": "Our zen tricks dashboard is down again.",
+   "expect": [
+    "Zentrix"
+   ]
+  },
+  {
+   "id": "fix-near-5",
+   "kind": "fix",
+   "said": "Anthropic released a new model this week.",
+   "heard_by_b2": "Anthropik released a new model this week.",
+   "expect": [
+    "Anthropic"
+   ]
+  },
+  {
+   "id": "fix-split-5",
+   "kind": "fix",
+   "said": "The Grafana dashboard shows the latency.",
+   "heard_by_b2": "The Graf Anna dashboard shows the latency.",
+   "expect": [
+    "Grafana"
+   ]
+  },
+  {
+   "id": "fix-split-6",
+   "kind": "fix",
+   "said": "Please check Kubernetes before the release.",
+   "heard_by_b2": "Please check Kuber netes before the release.",
+   "expect": [
+    "Kubernetes"
+   ]
+  },
+  {
+   "id": "fix-near-6",
+   "kind": "fix",
+   "said": "The Skylane service went down at noon.",
+   "heard_by_b2": "The Skylene service went down at noon.",
+   "expect": [
+    "Skylane"
+   ]
+  },
+  {
+   "id": "fix-two-1",
+   "kind": "fix",
+   "said": "I opened Voxloom and then wrote it up in Notion.",
+   "heard_by_b2": "I opened box loom and then wrote it up in Notian.",
+   "expect": [
+    "Voxloom",
+    "Notion"
+   ]
+  },
+  {
+   "id": "fix-split-7",
+   "kind": "fix",
+   "said": "Is Voxloom ready for the demo on Friday?",
+   "heard_by_b2": "Is box loom ready for the demo on Friday?",
+   "expect": [
+    "Voxloom"
+   ]
+  },
+  {
+   "id": "keep-1",
+   "kind": "keep",
+   "said": "Put the motion on the agenda for Tuesday."
+  },
+  {
+   "id": "keep-2",
+   "kind": "keep",
+   "said": "The motion picture won three awards."
+  },
+  {
+   "id": "keep-3",
+   "kind": "keep",
+   "said": "She put lotion on her hands before leaving."
+  },
+  {
+   "id": "keep-4",
+   "kind": "keep",
+   "said": "He drank a magic potion in the story."
+  },
+  {
+   "id": "keep-5",
+   "kind": "keep",
+   "said": "The box looms large over the room."
+  },
+  {
+   "id": "keep-6",
+   "kind": "keep",
+   "said": "He bought a wooden loom at the market."
+  },
+  {
+   "id": "keep-7",
+   "kind": "keep",
+   "said": "Zen tricks are a fun way to relax after work."
+  },
+  {
+   "id": "keep-8",
+   "kind": "keep",
+   "said": "The sky looked clear and a lark sang."
+  },
+  {
+   "id": "keep-9",
+   "kind": "keep",
+   "said": "A matrix of numbers fills the whole table."
+  },
+  {
+   "id": "keep-10",
+   "kind": "keep",
+   "said": "The graph and the stats looked fine to me."
+  },
+  {
+   "id": "keep-11",
+   "kind": "keep",
+   "said": "Their motion to dismiss was denied by the judge."
+  },
+  {
+   "id": "keep-12",
+   "kind": "keep",
+   "said": "That nation has a long and proud history."
+  },
+  {
+   "id": "keep-13",
+   "kind": "keep",
+   "said": "The weaver sat at the loom with a box of wool."
+  },
+  {
+   "id": "keep-14",
+   "kind": "keep",
+   "said": "The cooper made barrels for the cellar all winter."
+  },
+  {
+   "id": "keep-15",
+   "kind": "keep",
+   "said": "Please buy a box of tissues and some lotion."
+  },
+  {
+   "id": "keep-16",
+   "kind": "keep",
+   "said": "The old fox looms in the story and the box is empty."
+  },
+  {
+   "id": "keep-17",
+   "kind": "keep",
+   "said": "We visited Granada last spring and loved the old town."
+  },
+  {
+   "id": "keep-18",
+   "kind": "keep",
+   "said": "The city skyline looked great at dusk."
+  },
+  {
+   "id": "keep-19",
+   "kind": "keep",
+   "said": "Use atom, not ion."
+  },
+  {
+   "id": "keep-20",
+   "kind": "keep",
+   "said": "It is no tion of mine to leave."
+  },
+  {
+   "id": "keep-21",
+   "kind": "keep",
+   "said": "Do not ion it before the test."
+  },
+  {
+   "id": "keep-22",
+   "kind": "keep",
+   "said": "Open box-loom now."
+  },
+  {
+   "id": "keep-23",
+   "kind": "keep",
+   "said": "The box-loom tool is on the shelf."
+  },
+  {
+   "id": "keep-24",
+   "kind": "keep",
+   "said": "Run vox-loom-cli now."
+  },
+  {
+   "id": "keep-25",
+   "kind": "keep",
+   "said": "Run `vox loom` now."
+  }
+ ]
+}
