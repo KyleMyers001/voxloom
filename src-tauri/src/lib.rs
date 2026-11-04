@@ -10,6 +10,7 @@ mod hold_release;
 mod lone_key;
 mod model_fetch;
 mod overlay;
+mod overlay_placement;
 mod settings;
 mod settings_window;
 mod store_backup;
