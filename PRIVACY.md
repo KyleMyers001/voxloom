@@ -18,7 +18,8 @@ The desktop app keeps its data as **unencrypted JSON** in its app data folder:
 │                     status, duration, model, timestamp, delivery outcome
 ├── *.json.unreadable-*.bak  backups of a store file before an upgrade, or one
 │                     Voxloom couldn't read (see below)
-├── dictionary.json   your custom words
+├── dictionary.json   your custom words (also given to the on-device cleanup
+│                     model in its prompt; nothing is sent over the network)
 ├── settings.json     preferences
 ├── models/           downloaded Whisper model files (*.bin), and *.bin.verified
                       markers (pinned SHA-256, size, modified time; no user data)

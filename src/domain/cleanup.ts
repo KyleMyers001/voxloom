@@ -5,7 +5,7 @@ import type { CleanupProvenance, Settings } from './types';
  * cleanup service and skipped dogfood rows share it so one build never
  * writes two versions for the same prompt.
  */
-export const CLEANUP_PROMPT_VERSION = 'cleanup-v2';
+export const CLEANUP_PROMPT_VERSION = 'cleanup-v3';
 
 /** Provenance for a row whose transcript did not go through model cleanup. */
 export function skippedCleanupProvenance(): CleanupProvenance {

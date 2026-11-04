@@ -232,6 +232,28 @@ file chosen by hand and checks it the same way.
 Credit: Qwen3 by Alibaba Cloud (Qwen team), Apache-2.0; GGUF by Unsloth.
 License: <https://huggingface.co/Qwen/Qwen3-0.6B/blob/main/LICENSE>.
 
+## Word dictionary
+
+Add a word once, in its correct spelling (for example `Voxloom`). Voxloom uses it
+in two ways, and the file format (`dictionary.json`) is unchanged:
+
+- **Always, with cleanup on or off:** a transcript word is respelled as saved
+  (`voxloom` → `Voxloom`), and words the recognizer split are joined when their
+  letters spell the saved word exactly (`vox loom`, `vox-loom` → `Voxloom`).
+  Whole words only, longest match first, and code, paths, URLs and flags are
+  left alone.
+- **With local cleanup on:** the cleanup model also sees the dictionary and may
+  fix a near miss or a split from context (`Notian` → `Notion`). A fix is
+  kept only if the output check allows it: the spoken words are 1 to 3
+  adjacent words that sound close to one saved word (within 1 edit for 5 to 6
+  letters, 2 for 7 or more), they are not a plain real word, only an ending
+  or inflection differs, and no other dictionary word matches equally well.
+  Otherwise the unchanged transcript is used. The model can still decline a
+  fix, so near misses are fixed on a best-effort basis.
+
+The dictionary holds at most 64 words, 2 KB in total and 128 bytes per word for
+the cleanup prompt. It never leaves the Mac.
+
 ## Verification
 
 Pull requests targeting `main` run GitHub Actions CI on Node 24 and Ubuntu:
