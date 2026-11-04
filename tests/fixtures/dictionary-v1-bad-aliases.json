@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "words": [
+    "Kubernetes",
+    "Postgres",
+    "Skyloom",
+    "Voxloom"
+  ],
+  "aliases": {
+    "Voxloom": [
+      "box loom",
+      42,
+      "  ",
+      "vox\tloom",
+      "VOXLOOM",
+      "vox-loom",
+      "Postgres",
+      "sky",
+      "Box  Loom",
+      "voks loom"
+    ],
+    "voxloom": ["ignored duplicate key"],
+    "Kubernetes": "cooper netties",
+    "Postgres": ["post gress", "voks loom"],
+    "Skyloom": ["sky", "sky loom", "-sky"],
+    "Missing": ["no such word"],
+    "Tabbed": null
+  }
+}

@@ -8,16 +8,16 @@
 import type { CleanupOutcome } from '../cleanup/types';
 import type { ClipboardAdapter } from '../clipboard';
 import {
-  createStubDeliveryAdapter,
-  createTauriDeliveryAdapter,
   deliverTranscript,
   type DeliveryOutcome,
   type DeliveryPlatformAdapter,
   type PasteBinding,
   type TargetSnapshot,
 } from '../delivery';
+import type { DictionaryAliases } from '../dictionary';
 import type { SttEngine } from './contracts';
 import { withDictionary } from './dogfoodDictionary';
+import { cleanUp, resolvePlatform } from './dogfoodSteps';
 import { audioHandleFromCapture } from './fromCapture';
 import { createSttEngine } from './factory';
 import { explainEmptyTranscript } from './noSpeech';
@@ -63,6 +63,11 @@ export interface DogfoodTranscribeOptions {
    * keeps the engine output as `rawText`. Empty or missing: no change.
    */
   dictionary?: readonly string[];
+  /**
+   * What each dictionary word is also heard as, by word: an alias is replaced
+   * by its word's spelling in the same two places. Never sent to cleanup.
+   */
+  dictionaryAliases?: DictionaryAliases;
   /** Close the native cancellation window before target lookup or delivery. */
   beforeDelivery?: () => Promise<void>;
   /**
@@ -91,32 +96,6 @@ export interface DogfoodResult {
   transcript: Transcript;
 }
 
-function resolvePlatform(
-  clipboard: ClipboardAdapter,
-  injected?: DeliveryPlatformAdapter,
-): DeliveryPlatformAdapter {
-  if (injected) return injected;
-  try {
-    return createTauriDeliveryAdapter(clipboard);
-  } catch {
-    return createStubDeliveryAdapter({ clipboard });
-  }
-}
-
-async function cleanUp(
-  options: DogfoodTranscribeOptions,
-  transcript: Transcript,
-): Promise<CleanupOutcome | undefined> {
-  if (!options.cleanup || !transcript.text.trim()) return undefined;
-  if (!(options.isCurrent?.() ?? true)) return undefined;
-  try {
-    return await options.cleanup(transcript.text);
-  } catch {
-    // The stage must not throw; if it does, deliver the raw transcript.
-    return { finalText: transcript.text, reason: 'runtime-error', status: 'fallback' };
-  }
-}
-
 /**
  * Transcribe a deposited capture buffer with the **selected** model and
  * deliver via insert-preferring policy (Copy floor). Soft-fails delivery:
@@ -131,6 +110,7 @@ export async function dogfoodTranscribeAndCopy(
   const sttTranscript = withDictionary(
     await engine.transcribe(handle),
     options.dictionary,
+    options.dictionaryAliases,
   );
   const cleanup = await cleanUp(options, sttTranscript);
   if (cleanup?.status === 'cancelled') {
@@ -143,7 +123,7 @@ export async function dogfoodTranscribeAndCopy(
         ...sttTranscript,
         rawText: sttTranscript.rawText ?? sttTranscript.text,
         text: cleanup.finalText,
-      }, options.dictionary)
+      }, options.dictionary, options.dictionaryAliases)
     : sttTranscript;
   if (options.isCurrent?.() ?? true) await options.beforeDelivery?.();
 

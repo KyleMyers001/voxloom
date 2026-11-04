@@ -1,19 +1,22 @@
 /// Applies the user's dictionary spellings to a transcript (BUS-138).
 
+import type { DictionaryAliases } from '../dictionary/aliases';
 import { replaceDictionaryTerms } from '../dictionary/replace';
 import type { Transcript } from './types';
 
 /**
  * The transcript with dictionary entries spelled as saved. The engine output
  * is kept as `rawText` (History), so only `text` carries the spellings.
- * Returns the same object when nothing changed.
+ * Aliases ("also heard as") are replaced by their word. Returns the same
+ * object when nothing changed.
  */
 export function withDictionary(
   transcript: Transcript,
   words: readonly string[] | undefined,
+  aliases?: DictionaryAliases,
 ): Transcript {
   if (!words?.length) return transcript;
-  const text = replaceDictionaryTerms(transcript.text, words);
+  const text = replaceDictionaryTerms(transcript.text, words, aliases);
   if (text === transcript.text) return transcript;
   return { ...transcript, rawText: transcript.rawText ?? transcript.text, text };
 }

@@ -21,7 +21,8 @@ export interface DictationLifecycle {
 
 export interface DictionaryCrud {
   delete(word: string): void;
-  save(word: string, editing?: string): void;
+  /** `aliases`: what the word is also heard as; omitted keeps the current ones. */
+  save(word: string, editing?: string, aliases?: string[]): void;
 }
 
 export interface HistoryDeletion {

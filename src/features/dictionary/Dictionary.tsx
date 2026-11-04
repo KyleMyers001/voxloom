@@ -14,8 +14,10 @@ export function Dictionary() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const opener = useRef<HTMLElement | null>(null);
+  const needle = query.toLowerCase();
   const words = state.words.filter((word) =>
-    word.toLowerCase().includes(query.toLowerCase())
+    word.toLowerCase().includes(needle)
+    || (state.aliases[word] ?? []).some((alias) => alias.toLowerCase().includes(needle))
   );
 
   function edit(word: string | undefined, element: HTMLElement) {
@@ -44,7 +46,12 @@ export function Dictionary() {
       <div className="term-grid">
         {words.map((word) => (
           <div className="term-row" key={word} tabIndex={0}>
-            <strong>{word}</strong>
+            <div className="term-row__text">
+              <strong>{word}</strong>
+              {state.aliases[word] && (
+                <span className="fine term-row__aliases">Also heard as: {state.aliases[word].join(', ')}</span>
+              )}
+            </div>
             <div className="action-group term-row__actions">
               <IconButton icon="edit" label={`Edit ${word}`} onClick={(event) => edit(word, event.currentTarget)} />
               <IconButton icon="trash" label={`Delete ${word}`} onClick={() => dictionary.delete(word)} tone="danger" />
@@ -61,8 +68,9 @@ export function Dictionary() {
         <WordDialog
           editing={editing}
           onClose={() => setOpen(false)}
-          onSave={(word, previous) => {
-            dictionary.save(word, previous);
+          aliases={state.aliases}
+          onSave={(word, previous, aliases) => {
+            dictionary.save(word, previous, aliases);
             setOpen(false);
           }}
           opener={opener.current}

@@ -1,12 +1,13 @@
 /// Deterministic dictionary spelling (BUS-138): once the transcript exists,
 /// every dictionary entry is written exactly as saved wherever it was heard
 /// differing only in case or in spacing/hyphens ("chat gpt" -> "ChatGPT").
-/// No model, no sound-alike guessing (that is the optional aliases, later),
-/// and nothing is rewritten that the entry does not spell out.
+/// No model, no sound-alike guessing. The only different-letter rewrites are
+/// the aliases the user states ("box loom" -> "Voxloom"); nothing else is
+/// rewritten that an entry does not spell out.
 
-import { entryChunks } from './chunks';
+import type { DictionaryAliases } from './aliases';
 import { touchesCode } from './codeContext';
-import { isCommonWord } from './commonWords';
+import { type Entry, foldKey, usableEntries } from './entries';
 
 const WORD_CHAR = String.raw`[\p{L}\p{M}\p{N}_]`;
 // Between two chunks: a run of spaces or tabs, or one hyphen, or nothing.
@@ -21,54 +22,7 @@ const SEPARATOR = String.raw`(?:[^\S\r\n]+|-)?`;
 const APOSTROPHE = /^['\u2019]$/u;
 const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
 const END = String.raw`(?!${WORD_CHAR})(?!['\u2019](?!s(?!${WORD_CHAR}))\p{L})`;
-const SEPARATORS = /[\s-]+/gu;
 const SYNTAX_CHARS = /[\\^$.*+?()[\]{}|/]/gu;
-
-interface Entry {
-  chunks: string[];
-  key: string;
-  text: string;
-}
-
-// Final sigma: "ΠΑΎΛΟΥΣ" lowercases to ς at the end of a word but σ inside one,
-// so both sides of a lookup are folded to σ.
-const foldKey = (spelled: string) =>
-  spelled.replace(SEPARATORS, '').toLowerCase().replace(/ς/gu, 'σ');
-
-/**
- * Entry text the matcher reads back as itself: whitespace runs only of spaces
- * or tabs, a single hyphen between chunks, and no hyphen at either end. Other
- * entries ("--verbose", "chat - gpt") would not match their own output, so a
- * second pass would grow or rewrite them. They are left out.
- */
-function readsBackAsItself(text: string): boolean {
-  if (text.startsWith('-') || text.endsWith('-')) return false;
-  return (text.match(SEPARATORS) ?? []).every((run) => /^(?:[^\S\r\n]+|-)$/u.test(run));
-}
-
-/**
- * A plain common word on its own ("Will", "Sky", "IT") can only be a case
- * change, and forcing it would recapitalise every ordinary use. Phrases,
- * hyphenated words and entries with digits or internal capitals are kept.
- */
-function isPlainCommonWord({ chunks }: Entry): boolean {
-  return chunks.length === 1 && /^\p{L}+$/u.test(chunks[0]) && isCommonWord(chunks[0]);
-}
-
-/** Usable entries, longest first. A repeated spelling keeps its first entry. */
-function usableEntries(words: readonly string[]): Entry[] {
-  const seen = new Set<string>();
-  const entries: Entry[] = [];
-  for (const word of words) {
-    const chunks = entryChunks(word);
-    if (chunks.length === 0) continue;
-    const entry = { chunks, key: foldKey(chunks.join('')), text: word.trim().normalize('NFC') };
-    if (!readsBackAsItself(entry.text) || seen.has(entry.key)) continue;
-    seen.add(entry.key);
-    if (!isPlainCommonWord(entry)) entries.push(entry);
-  }
-  return entries.sort((a, b) => b.key.length - a.key.length);
-}
 
 function matcherFor(entries: readonly Entry[]): RegExp {
   const alternatives = entries.map(({ chunks }) =>
@@ -108,7 +62,10 @@ function replaceOnce(
 const MAX_PASSES = 3;
 
 /**
- * Returns `text` with each dictionary entry spelled as saved. Passes repeat
+ * Returns `text` with each dictionary entry spelled as saved, and each alias
+ * (what the engine tends to hear instead, stated per word) replaced by its
+ * word. An alias may differ in letters; everything else (boundaries, code-like
+ * text, apostrophes, longest first) is the same for words and aliases. Passes repeat
  * until one changes nothing, so a spelling that lines up with a neighbouring
  * entry ("Chat GPT" next to "AskChat") settles instead of changing again on
  * the next call: the result is always a fixpoint, and running this twice
@@ -120,8 +77,9 @@ const MAX_PASSES = 3;
 export function replaceDictionaryTerms(
   text: string,
   words: readonly string[],
+  aliases?: DictionaryAliases,
 ): string {
-  const entries = usableEntries(words);
+  const entries = usableEntries(words, aliases);
   if (entries.length === 0 || !text) return text;
   const byKey = new Map(entries.map((entry) => [entry.key, entry.text]));
   const matcher = matcherFor(entries);

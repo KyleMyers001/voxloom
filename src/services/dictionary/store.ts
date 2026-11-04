@@ -1,3 +1,4 @@
+import type { DictionaryAliases } from './aliases';
 import {
   DICTIONARY_FILE_VERSION,
   defaultDictionaryFile,
@@ -32,8 +33,8 @@ export interface DurableDictionaryStore {
    * settings.json or history.json).
    */
   load(): Promise<DictionaryLoadResult>;
-  /** Persist full words snapshot. */
-  save(words: string[]): Promise<void>;
+  /** Persist the full words snapshot, with each word's aliases (BUS-138). */
+  save(words: string[], aliases?: DictionaryAliases): Promise<void>;
 }
 
 /** Shown after an unreadable dictionary.json was backed up and reset. */
@@ -83,8 +84,8 @@ export function createDictionaryStore(
       }
       return { file: parsed.file, ok: true };
     },
-    async save(words) {
-      const contents = serializeDictionaryFile(words);
+    async save(words, aliases) {
+      const contents = serializeDictionaryFile(words, aliases);
       await io.write(contents);
     },
   };

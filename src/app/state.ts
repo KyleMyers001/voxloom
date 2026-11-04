@@ -12,6 +12,7 @@ import type {
   Screen,
   Settings,
 } from '../domain/types';
+import type { DictionaryAliases } from '../services/dictionary';
 import type { AppAction } from './actions';
 import { createInitialState } from './initialState';
 import {
@@ -40,7 +41,13 @@ export interface AppState {
   records: DictationRecord[];
   screen: Screen;
   settings: Settings;
+  /** Per-word "also heard as" spellings, keyed by the word (BUS-138). */
+  aliases: DictionaryAliases;
   words: string[];
+}
+
+function withoutKey(aliases: DictionaryAliases, key: string): DictionaryAliases {
+  return Object.fromEntries(Object.entries(aliases).filter(([word]) => word !== key));
 }
 
 export function appReducer(state: AppState, action: AppAction): AppState {
@@ -74,7 +81,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     if (persistDictionary) {
       // Keep durable dictionary words so dictionary.json is not overwritten
       // with fixture seed data on DEV Reset.
-      result = { ...result, words: state.words };
+      result = { ...result, aliases: state.aliases, words: state.words };
     }
     // wipeHistory + persistHistory → empty records (persist effect saves []).
     // Non-persist → fixture seed via createInitialState (browser / unit).
@@ -110,7 +117,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     return { ...state, clipboardFailure: action.value };
   }
   if (action.type === 'scenario-empty') {
-    return { ...state, records: [], words: [] };
+    return { ...state, aliases: {}, records: [], words: [] };
   }
   if (action.type === 'expire-recovery') {
     return {
@@ -124,11 +131,16 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     const remaining = action.editing
       ? state.words.filter((word) => word !== action.editing)
       : state.words;
-    return { ...state, words: [...remaining, action.word].sort() };
+    // No list given (older callers): the word's current aliases move along.
+    const list = action.aliases ?? state.aliases[action.editing ?? action.word] ?? [];
+    const aliases = withoutKey(state.aliases, action.editing ?? action.word);
+    if (list.length > 0) aliases[action.word] = list;
+    return { ...state, aliases, words: [...remaining, action.word].sort() };
   }
   if (action.type === 'delete-word') {
     return {
       ...state,
+      aliases: withoutKey(state.aliases, action.word),
       words: state.words.filter((word) => word !== action.word),
     };
   }
@@ -176,6 +188,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
   if (action.type === 'hydrate-words') {
     return {
       ...state,
+      aliases: action.aliases ?? {},
       dictionaryError: null,
       words: action.words,
     };

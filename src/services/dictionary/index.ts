@@ -9,6 +9,7 @@ import { createTauriDictionaryIo } from './tauriIo';
 
 export type { DictionaryFileIo } from './io';
 export type { DictionaryLoadResult, DurableDictionaryStore } from './store';
+export type { DictionaryAliases } from './aliases';
 export type { DictionaryFile, ParseDictionaryResult } from './format';
 export {
   DICTIONARY_FILE_VERSION,

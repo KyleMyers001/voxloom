@@ -43,6 +43,7 @@ export function App() {
     cleanupActive: isCleanupActive(state.settings),
     cleanupModelId: state.settings.cleanupModelId,
     dictionary: state.words,
+    dictionaryAliases: state.aliases,
     modelId: state.settings.transcriptionModel,
     now,
     onHistoryRecord: (record) => dispatch({ record, type: 'append-record' }),

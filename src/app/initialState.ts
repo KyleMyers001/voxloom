@@ -30,6 +30,7 @@ export function createInitialState(
   options: InitialStateOptions = {},
 ): AppState {
   return {
+    aliases: {},
     clipboardFailure: false,
     dictation: { kind: 'ready' },
     dictionaryError: null,

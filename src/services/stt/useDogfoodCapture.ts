@@ -22,6 +22,7 @@ import {
 } from '../capture/useCaptureState';
 import type { ClipboardAdapter } from '../clipboard';
 import type { CleanupEngine } from '../cleanup/contracts';
+import type { DictionaryAliases } from '../dictionary';
 import type { DeliveryPlatformAdapter, TargetSnapshot } from '../delivery';
 import type { OverlayResult } from '../shortcut/overlayVisibility';
 import type { SttModelStore } from './contracts';
@@ -75,6 +76,8 @@ export interface UseDogfoodCaptureOptions {
   cleanupModelId?: string | null;
   /** Dictionary words sent to cleanup as canonical spellings. */
   dictionary?: readonly string[];
+  /** What each word is also heard as (BUS-138); replaced after STT, never sent to cleanup. */
+  dictionaryAliases?: DictionaryAliases;
   /** Test seam: cleanup engine (defaults to the native worker). */
   cleanupEngine?: CleanupEngine;
   /** Test seam: inject capture API instead of the live hook result. */

@@ -21,6 +21,7 @@ import type {
 } from '../services/contracts';
 import {
   createDefaultDictionaryStore,
+  type DictionaryAliases,
   type DurableDictionaryStore,
 } from '../services/dictionary';
 import {
@@ -95,6 +96,12 @@ interface AppProviderProps {
   settingsPersistence?: { enabled: boolean; store: DurableSettingsStore };
 }
 
+/** What dictionary.json holds, as the app keeps it. */
+interface DictionarySnapshot {
+  aliases: DictionaryAliases;
+  words: string[];
+}
+
 export function AppProvider({
   children,
   clock = Date.now,
@@ -152,8 +159,8 @@ export function AppProvider({
   const dictionaryHydratedRef = useRef(!dictionaryPers.enabled);
   const allowDictionaryPersistRef = useRef(!dictionaryPers.enabled);
   const dictionaryPersistGenRef = useRef(0);
-  /** Last successfully saved words — roll back UI on save failure. */
-  const lastSavedWordsRef = useRef<string[] | null>(null);
+  /** Last successfully saved words and aliases — roll back UI on save failure. */
+  const lastSavedWordsRef = useRef<DictionarySnapshot | null>(null);
 
   const needsBootHydrate = settingsPers.enabled
     || historyPers.enabled
@@ -244,15 +251,19 @@ export function AppProvider({
         const dictResult = await dictionaryPers.store.load();
         if (cancelled) return;
         if (dictResult.ok) {
-          dispatch({ type: 'hydrate-words', words: dictResult.file.words });
-          lastSavedWordsRef.current = dictResult.file.words;
+          dispatch({
+            aliases: dictResult.file.aliases,
+            type: 'hydrate-words',
+            words: dictResult.file.words,
+          });
+          lastSavedWordsRef.current = { aliases: dictResult.file.aliases, words: dictResult.file.words };
           allowDictionaryPersistRef.current = true;
         } else {
           // Safe empty already in state; surface error; still allow first
           // successful write so the user can recover without touching
           // settings.json / history.json.
           allowDictionaryPersistRef.current = !dictResult.writeBlocked;
-          lastSavedWordsRef.current = dictResult.file.words;
+          lastSavedWordsRef.current = { aliases: dictResult.file.aliases, words: dictResult.file.words };
           dispatch({
             message: dictResult.error,
             type: 'set-dictionary-error',
@@ -261,7 +272,7 @@ export function AppProvider({
             // Unreadable file already backed up: replace it with a valid
             // empty file now so the error does not recur every launch.
             try {
-              await dictionaryPers.store.save(dictResult.file.words);
+              await dictionaryPers.store.save(dictResult.file.words, dictResult.file.aliases);
             } catch {
               // Original is backed up; the next edit retries the write.
             }
@@ -363,14 +374,14 @@ export function AppProvider({
       return;
     }
     const last = lastSavedWordsRef.current;
-    if (last && JSON.stringify(last) === JSON.stringify(state.words)) {
+    const snapshot: DictionarySnapshot = { aliases: state.aliases, words: [...state.words] };
+    if (last && JSON.stringify(last) === JSON.stringify(snapshot)) {
       return;
     }
-    const snapshot = [...state.words];
     const gen = dictionaryPersistGenRef.current;
     void (async () => {
       try {
-        await dictionaryPers.store.save(snapshot);
+        await dictionaryPers.store.save(snapshot.words, snapshot.aliases);
         if (gen !== dictionaryPersistGenRef.current) return;
         lastSavedWordsRef.current = snapshot;
         dispatch({ message: null, type: 'set-dictionary-error' });
@@ -379,7 +390,7 @@ export function AppProvider({
         const message = error instanceof Error ? error.message : String(error);
         const rollback = lastSavedWordsRef.current;
         if (rollback) {
-          dispatch({ type: 'hydrate-words', words: rollback });
+          dispatch({ aliases: rollback.aliases, type: 'hydrate-words', words: rollback.words });
         }
         dispatch({
           message: `Failed to save dictionary: ${message}`,
@@ -387,7 +398,7 @@ export function AppProvider({
         });
       }
     })();
-  }, [dictionaryPers, state.words]);
+  }, [dictionaryPers, state.aliases, state.words]);
 
   // Persist history after a successful hydrate whenever records or retention
   // change.

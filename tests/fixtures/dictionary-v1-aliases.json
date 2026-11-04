@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "words": [
+    "Kubernetes",
+    "Postgres",
+    "Voxloom"
+  ],
+  "aliases": {
+    "Kubernetes": [
+      "cooper netties"
+    ],
+    "Voxloom": [
+      "box loom",
+      "voks loom"
+    ]
+  }
+}

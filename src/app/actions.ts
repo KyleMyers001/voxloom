@@ -5,6 +5,7 @@ import type {
   Settings,
   SettingUpdate,
 } from '../domain/types';
+import type { DictionaryAliases } from '../services/dictionary';
 
 export type SettingAction = SettingUpdate & { type: 'set-setting' };
 
@@ -17,7 +18,7 @@ export type AppAction =
   | { type: 'expire-recovery'; now: number }
   | { type: 'fail-dictation'; now: number; runId: number }
   | { type: 'hydrate-records'; records: DictationRecord[] }
-  | { type: 'hydrate-words'; words: string[] }
+  | { aliases?: DictionaryAliases; type: 'hydrate-words'; words: string[] }
   | {
       onboardingComplete: boolean;
       settings: Settings;
@@ -57,5 +58,5 @@ export type AppAction =
   | { type: 'set-screen'; screen: Screen }
   | SettingAction
   | { type: 'set-waveform'; value: 'silent' | 'speaking' }
-  | { editing?: string; type: 'save-word'; word: string }
+  | { aliases?: string[]; editing?: string; type: 'save-word'; word: string }
   | { type: 'start-dictation' };

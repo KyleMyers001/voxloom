@@ -11,7 +11,7 @@ type Dispatch = (action: AppAction) => void;
 export function createDictionaryService(dispatch: Dispatch): DictionaryCrud {
   return {
     delete: (word) => dispatch({ type: 'delete-word', word }),
-    save: (word, editing) => dispatch({ editing, type: 'save-word', word }),
+    save: (word, editing, aliases) => dispatch({ aliases, editing, type: 'save-word', word }),
   };
 }
 
