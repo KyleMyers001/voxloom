@@ -3,10 +3,11 @@ import { useApp } from '../../app/AppContext';
 import { Switch } from '../../components/Switch';
 import { isCleanupActive } from '../../domain/cleanup';
 import {
-  CLEANUP_HELP, CLEANUP_IMPORT, CLEANUP_IMPORTING, CLEANUP_LABEL,
-  CLEANUP_MODEL_LABEL, CLEANUP_REFRESH, CLEANUP_SWITCH, CLEANUP_TAG,
-  cleanupImportNote, cleanupModelNote, cleanupReady,
+  CLEANUP_DOWNLOAD, CLEANUP_DOWNLOAD_CANCEL, CLEANUP_HELP, CLEANUP_IMPORT, CLEANUP_IMPORTING,
+  CLEANUP_LABEL, CLEANUP_MODEL_LABEL, CLEANUP_REFRESH, CLEANUP_SWITCH, CLEANUP_TAG,
+  cleanupDownloadingLabel, cleanupImportNote, cleanupModelNote, cleanupReady,
 } from './cleanupCopy';
+import { useCleanupDownload } from './useCleanupDownload';
 import { cleanupShown, type CleanupModel } from './useCleanupModel';
 
 const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex="0"]';
@@ -27,6 +28,8 @@ export function CleanupSettings({ isNative, model }: { isNative: boolean; model:
   const active = isCleanupActive(state.settings);
   const { apply, clearImportError, fail, importError, refresh, store, view } = model;
   const [importing, setImporting] = useState(false);
+  const download = useCleanupDownload(model);
+  const busy = importing || download.downloading;
   const shown = cleanupShown(model, active);
   const firstRow = useRef<HTMLDivElement>(null);
   const lastRow = useRef<HTMLDivElement>(null);
@@ -42,8 +45,9 @@ export function CleanupSettings({ isNative, model }: { isNative: boolean; model:
   }, [shown]);
 
   const importModel = async () => {
-    if (importing) return;
+    if (busy) return;
     clearImportError();
+    download.clearNote();
     setImporting(true);
     try {
       // The import verifies the file and returns the new status, so there is
@@ -77,6 +81,9 @@ export function CleanupSettings({ isNative, model }: { isNative: boolean; model:
   // Import failures use their own line (BUS-101), next to the status note.
   const statusNote = cleanupModelNote(view);
   const importNote = importError ? cleanupImportNote(importError, modelInstalled) : null;
+  const notes = [statusNote, importNote, download.note].filter(Boolean).join(' ');
+  // BUS-181: offered only once the status says the model is missing.
+  const offerDownload = download.supported && view.kind === 'status' && !view.status.available;
   const noteId = 'settings-cleanup-model-note';
   return <>
     <div className="frow" ref={firstRow}>
@@ -98,21 +105,32 @@ export function CleanupSettings({ isNative, model }: { isNative: boolean; model:
       <span className="frow__label">
         <span>{CLEANUP_MODEL_LABEL}</span>
         <small className="frow__help" id={noteId} role="status">
-          {statusNote}
-          {statusNote && importNote ? ' ' : null}
-          {importNote}
+          {notes}
         </small>
       </span>
       {isNative && (
         <span className="frow__control">
           {/* aria-disabled, not disabled: a disabled button drops focus to the body. */}
-          <button aria-disabled={importing} className="btn" onClick={() => { void importModel(); }} type="button">
+          {(offerDownload || download.downloading) && (
+            <button
+              aria-disabled={busy}
+              className="btn"
+              onClick={() => { if (!busy) void download.start(); }}
+              type="button"
+            >
+              {download.downloading ? cleanupDownloadingLabel(download.ratio) : CLEANUP_DOWNLOAD}
+            </button>
+          )}
+          {download.downloading && (
+            <button className="btn" onClick={download.cancel} type="button">{CLEANUP_DOWNLOAD_CANCEL}</button>
+          )}
+          <button aria-disabled={busy} className="btn" onClick={() => { if (!busy) void importModel(); }} type="button">
             {importing ? CLEANUP_IMPORTING : CLEANUP_IMPORT}
           </button>
           <button
-            aria-disabled={importing || checking}
+            aria-disabled={busy || checking}
             className="btn"
-            onClick={() => { if (!importing && !checking) void refresh(); }}
+            onClick={() => { if (!busy && !checking) void refresh(); }}
             type="button"
           >
             {CLEANUP_REFRESH}

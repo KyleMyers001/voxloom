@@ -23,6 +23,8 @@
     "allow-capture-cancel",
     "allow-cleanup-model-status",
     "allow-cleanup-pick-and-import-model",
+    "allow-cleanup-download-model",
+    "allow-cleanup-cancel-download",
     "allow-stt-list-models",
     "allow-stt-model-status",
     "allow-stt-download-model",
