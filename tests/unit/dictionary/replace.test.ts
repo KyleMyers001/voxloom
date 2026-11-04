@@ -181,22 +181,109 @@ describe('idempotency', () => {
   const words = [
     'Voxloom', 'ChatGPT', 'GPT-3.5', 'New York', 'New York City', 'iPhone',
     'Node.js', 'Skyloom', 'Café', 'Will', 'Open AI',
+    '--verbose', '-v', 'trailing-', 'Foo - bar', 'Bar', 'a--b', 'Θεσσαλονίκης Λιμάνι',
+    'GitHub', 'src',
   ];
   const vocabulary = [
     'voxloom', 'chat', 'gpt', 'gpt-3.5', 'chat-gpt', 'new', 'york', 'city',
     'iphone', 'i', 'phone', 'node.js', 'skyloom', 'café', 'will', 'open', 'ai',
     'openai', 'the', 'and', 'sky', ',', '.', '-', 'voxloom\'s', 'GPT', '3.5',
+    '--verbose', '--', '-v', 'trailing-', 'foo', 'bar', 'a', 'b', '/', 'src/gpt',
+    'github.com', 'a.gpt', 'gpt.b', ':', '@', '=', '~', 'ΘΕΣΣΑΛΟΝΊΚΗΣ', 'λιμάνι', 'run',
   ];
 
-  it('gives the same result when run twice over generated sentences', () => {
+  it('gives the same result when run twice over generated sentences (500 -> 3000 runs, edge-hyphen and code-like entries included)', () => {
     let seed = 7;
     const next = () => (seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
-    for (let run = 0; run < 500; run += 1) {
+    for (let run = 0; run < 3000; run += 1) {
       const length = 3 + Math.floor(next() * 14);
       const text = Array.from({ length }, () =>
         vocabulary[Math.floor(next() * vocabulary.length)]).join(' ');
       const once = fix(text, words);
       expect(fix(once, words), text).toBe(once);
     }
+  });
+});
+
+describe('entries the matcher cannot read back as themselves', () => {
+  it('skips an entry that starts or ends with a hyphen (run twice equals once)', () => {
+    for (const entry of ['--verbose', '-v', 'verbose-', 'a-', '--']) {
+      const text = 'run --verbose now, then -v, verbose- and a-';
+      const once = fix(text, [entry]);
+      expect(once, entry).toBe(text);
+      expect(fix(once, [entry]), entry).toBe(once);
+    }
+  });
+
+  it('does not grow the --verbose flag on a second pass', () => {
+    const once = fix('run --verbose and verbose', ['--verbose', 'Verbose']);
+    // The hyphen is a word edge, so the plain word still applies after it.
+    expect(once).toBe('run --Verbose and Verbose');
+    expect(fix(once, ['--verbose', 'Verbose'])).toBe(once);
+    expect(fix('run --verbose', ['--verbose'])).toBe('run --verbose');
+  });
+
+  it('skips entries with spaced or doubled hyphens, which never match their own text', () => {
+    const text = 'foo bar and a b';
+    expect(fix(text, ['Foo - bar', 'a--b'])).toBe(text);
+  });
+
+  it('keeps entries with a single inner hyphen or spaces', () => {
+    expect(fix('use gpt-4 and open ai', ['GPT-4', 'Open  AI'])).toBe('use GPT-4 and Open  AI');
+    expect(fix('x open  ai', ['Open  AI'])).toBe('x Open  AI');
+  });
+});
+
+describe('final sigma', () => {
+  it('matches a Greek phrase whatever the case of its final letters', () => {
+    const entry = 'Θεσσαλονίκης Λιμάνι';
+    expect(fix('στο ΘΕΣΣΑΛΟΝΊΚΗΣ ΛΙΜΆΝΙ σήμερα', [entry])).toBe(`στο ${entry} σήμερα`);
+    expect(fix('θεσσαλονίκης λιμάνι', [entry])).toBe(entry);
+  });
+
+  it('matches a single word that ends in a final sigma', () => {
+    expect(fix('η ΑΚΡΌΠΟΛΙΣ είναι', ['Ακρόπολις'])).toBe('η Ακρόπολις είναι');
+  });
+
+  it('is stable on a second pass', () => {
+    const once = fix('ΘΕΣΣΑΛΟΝΊΚΗΣ ΛΙΜΆΝΙ', ['Θεσσαλονίκης Λιμάνι']);
+    expect(fix(once, ['Θεσσαλονίκης Λιμάνι'])).toBe(once);
+  });
+});
+
+describe('code-like text', () => {
+  const dictionary = ['Voxloom', 'GitHub', 'macOS', 'Tauri'];
+
+  it.each([
+    'src/voxloom/main', 'a\\voxloom', 'me@voxloom', 'my_voxloom', 'note:voxloom',
+    '~voxloom', '$voxloom', '#voxloom', 'a=voxloom', '100%voxloom',
+    'voxloom/main', 'voxloom\\x', 'voxloom@home', 'voxloom:run', 'voxloom=1',
+    'com.voxloom.app', 'voxloom.app', 'github.com', 'voxloom.json', 'x.voxloom',
+  ])('leaves %s alone', (text) => {
+    expect(fix(text, dictionary)).toBe(text);
+  });
+
+  it('still fixes prose around punctuation and a plain sentence end', () => {
+    expect(fix('voxloom. then voxloom, and voxloom! (voxloom) "voxloom"', dictionary))
+      .toBe('Voxloom. then Voxloom, and Voxloom! (Voxloom) "Voxloom"');
+    expect(fix('I like github.', dictionary)).toBe('I like GitHub.');
+    expect(fix('.voxloom and ...voxloom', dictionary)).toBe('.Voxloom and ...Voxloom');
+    expect(fix('really? voxloom...', dictionary)).toBe('really? Voxloom...');
+  });
+
+  it('does not treat a hyphen as code punctuation', () => {
+    expect(fix('a github-hosted repo and macos-only', dictionary))
+      .toBe('a GitHub-hosted repo and macOS-only');
+    expect(fix('src-tauri', dictionary)).toBe('src-Tauri');
+  });
+
+  it('fixes a phrase entry in prose but not inside a path', () => {
+    expect(fix('ask chat gpt now', ['ChatGPT'])).toBe('ask ChatGPT now');
+    expect(fix('docs/chat gpt/x', ['ChatGPT'])).toBe('docs/chat gpt/x');
+  });
+
+  it('still fixes the other words in a line that has a skipped one', () => {
+    expect(fix('src/voxloom and voxloom on macos', dictionary))
+      .toBe('src/voxloom and Voxloom on macOS');
   });
 });

@@ -3,6 +3,7 @@ import {
   createDictionaryStore,
   createMemoryDictionaryIo,
   defaultDictionaryFile,
+  normalizeWords,
   parseDictionaryJson,
   serializeDictionaryFile,
 } from '../../src/services/dictionary';
@@ -39,6 +40,23 @@ describe('parseDictionaryJson', () => {
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     expect(parsed.file.words).toEqual(['Postgres', 'Vite']);
+  });
+});
+
+describe('dictionary entries with control characters', () => {
+  it('still loads an old file, minus the bad entries', () => {
+    const parsed = parseDictionaryJson(JSON.stringify({
+      version: 1,
+      words: ['Vite', 'Two\nLines', 'Tab\tbed', 'Nul\u0000l', 'Del\u007f', '\tPostgres\n'],
+    }));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.file.words).toEqual(['Postgres', 'Vite']);
+  });
+
+  it('normalizeWords drops them and serialising never writes them', () => {
+    expect(normalizeWords(['A\u0007B', 'Vite'])).toEqual(['Vite']);
+    expect(JSON.parse(serializeDictionaryFile(['A\u0007B', 'Vite'])).words).toEqual(['Vite']);
   });
 });
 

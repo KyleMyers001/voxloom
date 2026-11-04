@@ -5,6 +5,7 @@
 /// and nothing is rewritten that the entry does not spell out.
 
 import { entryChunks } from './chunks';
+import { touchesCode } from './codeContext';
 import { isCommonWord } from './commonWords';
 
 const WORD_CHAR = String.raw`[\p{L}\p{M}\p{N}_]`;
@@ -24,7 +25,21 @@ interface Entry {
   text: string;
 }
 
-const keyOf = (spelled: string) => spelled.replace(SEPARATORS, '').toLowerCase();
+// Final sigma: "ΠΑΎΛΟΥΣ" lowercases to ς at the end of a word but σ inside one,
+// so both sides of a lookup are folded to σ.
+const foldKey = (spelled: string) =>
+  spelled.replace(SEPARATORS, '').toLowerCase().replace(/ς/gu, 'σ');
+
+/**
+ * Entry text the matcher reads back as itself: whitespace runs only of spaces
+ * or tabs, a single hyphen between chunks, and no hyphen at either end. Other
+ * entries ("--verbose", "chat - gpt") would not match their own output, so a
+ * second pass would grow or rewrite them. They are left out.
+ */
+function readsBackAsItself(text: string): boolean {
+  if (text.startsWith('-') || text.endsWith('-')) return false;
+  return (text.match(SEPARATORS) ?? []).every((run) => /^(?:[^\S\r\n]+|-)$/u.test(run));
+}
 
 /**
  * A plain common word on its own ("Will", "Sky", "IT") can only be a case
@@ -42,8 +57,8 @@ function usableEntries(words: readonly string[]): Entry[] {
   for (const word of words) {
     const chunks = entryChunks(word);
     if (chunks.length === 0) continue;
-    const entry = { chunks, key: chunks.join('').toLowerCase(), text: word.trim().normalize('NFC') };
-    if (seen.has(entry.key)) continue;
+    const entry = { chunks, key: foldKey(chunks.join('')), text: word.trim().normalize('NFC') };
+    if (!readsBackAsItself(entry.text) || seen.has(entry.key)) continue;
     seen.add(entry.key);
     if (!isPlainCommonWord(entry)) entries.push(entry);
   }
@@ -75,9 +90,13 @@ export function replaceDictionaryTerms(
   const normalized = text.normalize('NFC');
   const replaced = normalized.replace(
     matcherFor(entries),
-    (match: string, lead: string, heard: string) => {
-      const spelled = byKey.get(keyOf(heard));
-      return spelled === undefined ? match : lead + spelled;
+    (match: string, lead: string, heard: string, offset: number) => {
+      const spelled = byKey.get(foldKey(heard));
+      const start = offset + lead.length;
+      if (spelled === undefined || touchesCode(normalized, start, start + heard.length)) {
+        return match;
+      }
+      return lead + spelled;
     },
   );
   return replaced === normalized ? text : replaced;

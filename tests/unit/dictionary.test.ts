@@ -30,4 +30,22 @@ describe('validateWord', () => {
       word: 'typescript',
     });
   });
+
+  it('rejects tabs, line breaks and control characters inside a word', () => {
+    const error = 'A word can\'t contain tabs, line breaks or other control characters.';
+    for (const value of ['Vite\tJS', 'Vite\nJS', 'Vite\r\nJS', 'Vi\u0000te', 'Vi\u001bte', 'Vi\u007fte']) {
+      expect(validateWord(value, [])).toEqual({ error, ok: false });
+    }
+  });
+
+  it('still trims a tab or newline at either end', () => {
+    expect(validateWord('\tVite\n', [])).toEqual({ ok: true, word: 'Vite' });
+  });
+
+  it('allows spaces, hyphens, accents and symbols', () => {
+    expect(validateWord('Chat-GPT 4 Café C++', [])).toEqual({
+      ok: true,
+      word: 'Chat-GPT 4 Café C++',
+    });
+  });
 });
