@@ -1,6 +1,7 @@
 // @vitest-environment node
-// BUS-138 PR B2, review round 1: names that look alike, entries that are plain
-// words, hyphenated text kept as spoken, inflections, and the cost on long input.
+// BUS-138 PR B2, review round 1: words that look alike (two edits apart),
+// entries that are plain words, hyphenated text kept as spoken, inflections,
+// and the cost on long input.
 import { describe, expect, it } from 'vitest';
 
 import { validateCleanupOutput } from '../../../src/services/cleanup/validation';
@@ -10,9 +11,9 @@ const check = (raw: string, out: string, dictionary: string[]) =>
 
 describe('one spoken word gets one edit, never two', () => {
   it.each([
-    ['Jeffrey', 'Geoffrey'],
-    ['Alexander', 'Alexandra'],
-    ['Michael', 'Micheal'],
+    ['Foxloon', 'Voxloom'],
+    ['Granada', 'Grafana'],
+    ['Anthropoid', 'Anthropic'],
   ])('keeps %s apart from %s', (spoken, entry) => {
     expect(check(`Ask ${spoken} to call.`, `Ask ${entry} to call.`, [entry])).toBeNull();
     expect(check(`Ask ${spoken} to call.`, `Ask ${spoken} to call.`, [entry]))

@@ -53,7 +53,7 @@ export function dictionarySpellings(
 /**
  * One edit, as before B2. Two only for a longer word (7+ letters) heard as
  * several words (box loom): one spoken word two edits away is as likely a
- * different name (Jeffrey, Geoffrey; Alexander, Alexandra).
+ * different word or name that merely looks alike.
  */
 function allowedEdits(key: string, words: number): number {
   return key.length >= 7 && words > 1 ? 2 : 1;
