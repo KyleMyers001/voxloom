@@ -6,7 +6,7 @@
   "Zentrix",
   "Anthropic",
   "Grafana",
-  "Skylar"
+  "Skylane"
  ],
  "items": [
   {
@@ -100,9 +100,9 @@
   {
    "id": "fix-near-6",
    "kind": "fix",
-   "raw": "Skyler is joining the call at noon.",
+   "raw": "The Skylene service went down at noon.",
    "expect": [
-    "Skylar"
+    "Skylane"
    ]
   },
   {
