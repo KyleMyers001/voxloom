@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { Icon } from '../components/Icon';
 import { isMacPlatform } from '../components/KeyCombo';
 import { Waveform } from '../components/Waveform';
@@ -42,6 +43,11 @@ const isResult = (w: OverlayWaveform) => w.startsWith('result-');
  * One permanent role=status node announces "Transcribing" and results.
  */
 export function OverlayWaveformView({ levels, waveform, result = null, mac = isMacPlatform() }: Props) {
+  // Use the newest existing display sample, not the waveform's trailing history:
+  // silence should quiet the ripples immediately, even after a loud syllable.
+  const latest = levels.at(-1) ?? 0;
+  const energy = waveform === 'speaking' && Number.isFinite(latest) ? Math.min(1, Math.max(0, latest)) : 0;
+  const resonanceStyle = { '--resonance-opacity': energy * 0.42 } as CSSProperties;
   const text = isResult(waveform) ? resultText(result, mac) : '';
   const spoken = waveform === 'processing' ? 'Transcribing' : isResult(waveform) ? spokenResultText(result, mac) : '';
   const kind = waveform === 'result-copied' ? 'copied' : waveform === 'result-unverified' ? 'unverified' : 'failed';
@@ -55,6 +61,14 @@ export function OverlayWaveformView({ levels, waveform, result = null, mac = isM
         </div>
       ) : (
         <div className="recording recording--overlay" data-waveform={waveform}>
+          {waveform !== 'processing' && (
+            <div aria-hidden="true" className="hud-resonance" style={resonanceStyle}>
+              <i className="hud-resonance__rim" />
+              <i className="hud-resonance__ripple" />
+              <i className="hud-resonance__ripple" />
+              <i className="hud-resonance__ripple" />
+            </div>
+          )}
           {waveform === 'processing'
             ? <div aria-hidden="true" className="hud-transcribing"><i /></div>
             : <Waveform levels={levels} waveform={waveform} />}

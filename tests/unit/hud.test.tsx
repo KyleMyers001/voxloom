@@ -120,7 +120,7 @@ describe('overlayBridge.showResult', () => {
     await bridge.showResult('copied');
     await bridge.sync({ kind: 'listening', runId: 2, waveform: 'silent' });
     expect(window.setWaveform).toHaveBeenLastCalledWith('silent');
-    expect(window.showBottomCenter).toHaveBeenLastCalledWith({ height: 28, width: 142 });
+    expect(window.showBottomCenter).toHaveBeenLastCalledWith({ height: 76, width: 190 });
     await vi.advanceTimersByTimeAsync(3000);
     expect(window.hide).not.toHaveBeenCalled();
   });

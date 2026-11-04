@@ -39,6 +39,48 @@
   .hud-transcribing i { animation: none; will-change: auto; }
 }
 
+/* Resonance: sound-responsive capsule outlines, not a moving gradient edge.
+   The native listening envelope reserves 24px around the original slim pill.
+   Only transform and opacity animate; no audio, timers or extra render loop. */
+.hud-resonance {
+  inset: -1px;
+  opacity: var(--resonance-opacity, 0);
+  pointer-events: none;
+  position: absolute;
+  transition: opacity 90ms linear;
+}
+
+.hud-resonance__rim,
+.hud-resonance__ripple {
+  border: 1px solid var(--brand-a);
+  border-radius: 999px;
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+}
+
+.hud-resonance__rim { border-color: var(--brand-a) var(--brand-b) var(--brand-b) var(--brand-a); opacity: .6; }
+.hud-resonance__ripple {
+  animation: hud-resonance-ripple 2.1s linear infinite;
+  box-shadow: 0 0 4px color-mix(in srgb, var(--brand-b) 20%, transparent);
+  will-change: transform, opacity;
+}
+.hud-resonance__ripple:nth-child(3) { animation-delay: -.7s; border-color: var(--brand-b); }
+.hud-resonance__ripple:nth-child(4) { animation-delay: -1.4s; }
+
+@keyframes hud-resonance-ripple {
+  from { opacity: .75; transform: scale(1, 1); }
+  to { opacity: 0; transform: scale(1.24, 2.45); }
+}
+
+/* No new motion (including audio-driven fades) under Reduce Motion.
+   Keep only the same subtle, static rim regardless of incoming levels. */
+@media (prefers-reduced-motion: reduce) {
+  .hud-resonance { opacity: 1; transition: none; }
+  .hud-resonance__rim { opacity: .22; }
+  .hud-resonance__ripple { animation: none; opacity: 0; will-change: auto; }
+}
+
 /* Result states: ~2.5 s each (timed by overlayBridge). */
 .hud-result {
   align-items: center;
