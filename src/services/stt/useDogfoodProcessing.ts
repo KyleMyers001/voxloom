@@ -129,6 +129,7 @@ export function useDogfoodProcessing({
         clipboard: optionsRef.current.clipboard,
         clipboardFallback: optionsRef.current.clipboardFallback !== false,
         deliveryPlatform: platform,
+        dictionary: latest.dictionary,
         isCurrent: current,
         pasteBinding,
         beforeDelivery: settleCancellation,

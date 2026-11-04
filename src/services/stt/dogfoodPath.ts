@@ -17,6 +17,7 @@ import {
   type TargetSnapshot,
 } from '../delivery';
 import type { SttEngine } from './contracts';
+import { withDictionary } from './dogfoodDictionary';
 import { audioHandleFromCapture } from './fromCapture';
 import { createSttEngine } from './factory';
 import { explainEmptyTranscript } from './noSpeech';
@@ -56,6 +57,12 @@ export interface DogfoodTranscribeOptions {
    * a raw-text fallback. `cancelled` (the user's cancel) delivers nothing.
    */
   cleanup?: (text: string) => Promise<CleanupOutcome>;
+  /**
+   * The user's dictionary words (BUS-138). Entries are spelled exactly as
+   * saved in the transcript, right after STT and again after cleanup. History
+   * keeps the engine output as `rawText`. Empty or missing: no change.
+   */
+  dictionary?: readonly string[];
   /** Close the native cancellation window before target lookup or delivery. */
   beforeDelivery?: () => Promise<void>;
   /**
@@ -121,18 +128,22 @@ export async function dogfoodTranscribeAndCopy(
   const modelId = resolveTranscriptionModelId(options.modelId);
   const engine = (options.createEngine ?? createSttEngine)(modelId);
   const handle = audioHandleFromCapture(options.audio);
-  const sttTranscript = await engine.transcribe(handle);
+  const sttTranscript = withDictionary(
+    await engine.transcribe(handle),
+    options.dictionary,
+  );
   const cleanup = await cleanUp(options, sttTranscript);
   if (cleanup?.status === 'cancelled') {
     throw new DOMException('Dictation cancelled', 'AbortError');
   }
-  // History keeps the engine output; delivery uses the cleaned text.
+  // History keeps the engine output; delivery uses the cleaned text. The
+  // dictionary runs again because cleanup may have undone a spelling.
   const transcript: Transcript = cleanup?.status === 'cleaned'
-    ? {
+    ? withDictionary({
         ...sttTranscript,
         rawText: sttTranscript.rawText ?? sttTranscript.text,
         text: cleanup.finalText,
-      }
+      }, options.dictionary)
     : sttTranscript;
   if (options.isCurrent?.() ?? true) await options.beforeDelivery?.();
 

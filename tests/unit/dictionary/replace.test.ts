@@ -1,0 +1,202 @@
+// @vitest-environment node
+import { describe, expect, it } from 'vitest';
+
+import { replaceDictionaryTerms } from '../../../src/services/dictionary/replace';
+
+const fix = (text: string, words: string[]) =>
+  replaceDictionaryTerms(text, words);
+
+describe('whole-word, case-insensitive replacement', () => {
+  it('writes the entry exactly as saved', () => {
+    expect(fix('ask voxloom about it', ['Voxloom'])).toBe('ask Voxloom about it');
+    expect(fix('ask VOXLOOM about it', ['Voxloom'])).toBe('ask Voxloom about it');
+    expect(fix('use kubernetes today', ['kubernetes'])).toBe('use kubernetes today');
+    expect(fix('Use Kubernetes today', ['kubernetes'])).toBe('Use kubernetes today');
+  });
+
+  it('only replaces whole words', () => {
+    expect(fix('voxloomer and avoxloom', ['Voxloom'])).toBe('voxloomer and avoxloom');
+    expect(fix('voxloom2 and voxloom_x', ['Voxloom'])).toBe('voxloom2 and voxloom_x');
+  });
+
+  it('handles punctuation, quotes and line starts and ends', () => {
+    expect(fix('voxloom, voxloom. (voxloom) "voxloom" voxloom!', ['Voxloom']))
+      .toBe('Voxloom, Voxloom. (Voxloom) "Voxloom" Voxloom!');
+    expect(fix('voxloom\nvoxloom', ['Voxloom'])).toBe('Voxloom\nVoxloom');
+  });
+
+  it('leaves a trailing possessive alone', () => {
+    expect(fix('voxloom\'s menu and voxloom\u2019s icon', ['Voxloom']))
+      .toBe('Voxloom\'s menu and Voxloom\u2019s icon');
+  });
+
+  it('does not split contractions', () => {
+    expect(fix('don\'t stop, don\'t', ['Don'])).toBe('don\'t stop, don\'t');
+  });
+
+  it('does not touch a plural or other suffix', () => {
+    expect(fix('two voxlooms', ['Voxloom'])).toBe('two voxlooms');
+  });
+
+  it('returns the same text when nothing matches', () => {
+    const text = 'nothing to see here';
+    expect(fix(text, ['Voxloom'])).toBe(text);
+  });
+});
+
+describe('phrases, spacing and hyphens', () => {
+  it.each([
+    'chat gpt', 'Chat GPT', 'chat-gpt', 'CHAT GPT', 'chatgpt', 'chat  gpt',
+  ])('turns "%s" into ChatGPT', (heard) => {
+    expect(fix(`ask ${heard} now`, ['ChatGPT'])).toBe('ask ChatGPT now');
+  });
+
+  it('accepts the same variants for an entry typed with a space', () => {
+    expect(fix('ask chatgpt now', ['Chat GPT'])).toBe('ask Chat GPT now');
+    expect(fix('ask chat-gpt now', ['Chat GPT'])).toBe('ask Chat GPT now');
+  });
+
+  it('splits letter-digit changes into chunks', () => {
+    expect(fix('gpt 4 and gpt-4 and gpt4', ['GPT4'])).toBe('GPT4 and GPT4 and GPT4');
+    expect(fix('use gpt-3.5 please', ['GPT-3.5'])).toBe('use GPT-3.5 please');
+    expect(fix('use gpt 3.5 please', ['GPT-3.5'])).toBe('use GPT-3.5 please');
+  });
+
+  it('handles multi-word entries', () => {
+    expect(fix('in new york city today', ['New York City']))
+      .toBe('in New York City today');
+  });
+
+  it('does not match across a comma or other punctuation', () => {
+    expect(fix('chat, gpt', ['ChatGPT'])).toBe('chat, gpt');
+    expect(fix('chat. gpt', ['ChatGPT'])).toBe('chat. gpt');
+    expect(fix('chat\ngpt', ['ChatGPT'])).toBe('chat\ngpt');
+    expect(fix('chat - gpt', ['ChatGPT'])).toBe('chat - gpt');
+  });
+
+  it('keeps a lone lowercase letter attached to its word (iPhone)', () => {
+    expect(fix('buy an iphone', ['iPhone'])).toBe('buy an iPhone');
+    expect(fix('then i phone him', ['iPhone'])).toBe('then i phone him');
+  });
+
+  it('matches entries made of symbols and escapes regex characters', () => {
+    expect(fix('write node.js and nodexjs', ['Node.js'])).toBe('write Node.js and nodexjs');
+    expect(fix('a c++ b', ['C++'])).toBe('a C++ b');
+    expect(fix('x (a|b) y', ['(A|B)'])).toBe('x (A|B) y');
+  });
+});
+
+describe('Unicode', () => {
+  it('matches accented and non-Latin entries', () => {
+    expect(fix('hello éclair', ['Éclair'])).toBe('hello Éclair');
+    expect(fix('chez café et café', ['Café'])).toBe('chez Café et Café');
+    expect(fix('это москва', ['Москва'])).toBe('это Москва');
+  });
+
+  it('normalises to NFC before matching', () => {
+    const decomposed = 'hello e\u0301milie';
+    expect(fix(decomposed, ['\u00c9milie'])).toBe('hello \u00c9milie');
+    expect(fix('hello \u00e9milie', ['E\u0301milie'])).toBe('hello \u00c9milie');
+  });
+
+  it('does not match a word that continues with a combining mark', () => {
+    expect(fix('cafe\u0301 here', ['Cafe'])).toBe('cafe\u0301 here');
+  });
+
+  it('keeps untouched text byte-for-byte when nothing changes', () => {
+    const decomposed = 'caf\u0065\u0301 time';
+    expect(fix(decomposed, ['Voxloom'])).toBe(decomposed);
+  });
+});
+
+describe('longest match and single pass', () => {
+  it('prefers the longer entry at the same position', () => {
+    const words = ['New York', 'New York City', 'York'];
+    expect(fix('visit new york city', words)).toBe('visit New York City');
+    expect(fix('visit new york', words)).toBe('visit New York');
+    expect(fix('visit york', words)).toBe('visit York');
+  });
+
+  it('does not chain one replacement into another', () => {
+    // After "New York" is fixed, "York City" must not claim the same words.
+    expect(fix('in new york city', ['New York', 'York City']))
+      .toBe('in New York city');
+    const words = ['ab cd', 'cd ef'];
+    expect(fix('ab cd ef', words)).toBe('ab cd ef');
+    expect(fix('AB CD EF', words)).toBe('ab cd EF');
+  });
+
+  it('applies several different entries in one text', () => {
+    expect(fix('voxloom uses chat gpt and skyloom', ['Voxloom', 'ChatGPT', 'Skyloom']))
+      .toBe('Voxloom uses ChatGPT and Skyloom');
+  });
+
+  it('uses the first entry when two entries collapse to one key', () => {
+    expect(fix('chat gpt', ['Chat GPT', 'ChatGPT'])).toBe('Chat GPT');
+  });
+});
+
+describe('common-word guard', () => {
+  it.each(['Will', 'Sky', 'Mark', 'Bill', 'Grace', 'May', 'IT', 'Amber', 'Chase', 'Ray', 'will'])(
+    'leaves every use of a plain common word alone (%s)',
+    (entry) => {
+      const text = 'it will be a clear sky, mark my words. May I? Bill it.';
+      expect(fix(text, [entry])).toBe(text);
+    },
+  );
+
+  it('still fixes a name that is not a common word', () => {
+    expect(fix('ask skyloom and café', ['Skyloom', 'Café'])).toBe('ask Skyloom and Café');
+  });
+
+  it('does not guard phrases, hyphenated words, digits or internal capitals', () => {
+    expect(fix('a red bull', ['Red Bull'])).toBe('a Red Bull');
+    expect(fix('a sky-net', ['Sky-Net'])).toBe('a Sky-Net');
+    expect(fix('a sky2', ['Sky2'])).toBe('a Sky2');
+    expect(fix('a skyline and skyLine', ['SkyLine'])).toBe('a SkyLine and SkyLine');
+  });
+
+  it('applies the guard to a common word inside a larger dictionary', () => {
+    expect(fix('will voxloom ship', ['Will', 'Voxloom'])).toBe('will Voxloom ship');
+  });
+});
+
+describe('empty and degenerate dictionaries', () => {
+  it('is the identity for an empty dictionary', () => {
+    const text = 'Anything here, even  odd  spacing\u00e9';
+    expect(fix(text, [])).toBe(text);
+  });
+
+  it('ignores blank, separator-only and duplicate entries', () => {
+    const text = 'voxloom -- test';
+    expect(fix(text, ['', '   ', '-', ' - ', 'Voxloom', 'voxloom'])).toBe('Voxloom -- test');
+  });
+
+  it('is the identity for empty text', () => {
+    expect(fix('', ['Voxloom'])).toBe('');
+  });
+});
+
+describe('idempotency', () => {
+  const words = [
+    'Voxloom', 'ChatGPT', 'GPT-3.5', 'New York', 'New York City', 'iPhone',
+    'Node.js', 'Skyloom', 'Café', 'Will', 'Open AI',
+  ];
+  const vocabulary = [
+    'voxloom', 'chat', 'gpt', 'gpt-3.5', 'chat-gpt', 'new', 'york', 'city',
+    'iphone', 'i', 'phone', 'node.js', 'skyloom', 'café', 'will', 'open', 'ai',
+    'openai', 'the', 'and', 'sky', ',', '.', '-', 'voxloom\'s', 'GPT', '3.5',
+  ];
+
+  it('gives the same result when run twice over generated sentences', () => {
+    let seed = 7;
+    const next = () => (seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
+    for (let run = 0; run < 500; run += 1) {
+      const length = 3 + Math.floor(next() * 14);
+      const text = Array.from({ length }, () =>
+        vocabulary[Math.floor(next() * vocabulary.length)]).join(' ');
+      const once = fix(text, words);
+      expect(fix(once, words), text).toBe(once);
+    }
+  });
+});
