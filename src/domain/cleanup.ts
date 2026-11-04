@@ -7,7 +7,25 @@ import type { CleanupProvenance, Settings } from './types';
  */
 export const CLEANUP_PROMPT_VERSION = 'cleanup-v3';
 
-/** Provenance for a row whose transcript did not go through model cleanup. */
+/**
+ * With no dictionary words the prompt text is byte-identical to cleanup-v2's
+ * (BUS-188), so a row for such a run records that version. Only the prompt
+ * sent for a non-empty dictionary is cleanup-v3.
+ */
+export const CLEANUP_PROMPT_VERSION_NO_DICTIONARY = 'cleanup-v2';
+
+/** The version of the prompt text built for these (already snapshotted) words. */
+export function cleanupPromptVersion(dictionary: readonly string[]): string {
+  return dictionary.length > 0
+    ? CLEANUP_PROMPT_VERSION
+    : CLEANUP_PROMPT_VERSION_NO_DICTIONARY;
+}
+
+/**
+ * Provenance for a row whose transcript did not go through model cleanup. No
+ * prompt was built and no dictionary is known here, so it records the build's
+ * current version.
+ */
 export function skippedCleanupProvenance(): CleanupProvenance {
   return {
     dictionaryDigest: null,
