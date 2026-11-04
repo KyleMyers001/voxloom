@@ -1,4 +1,5 @@
-//! Binds a paste to the terminal that was in front when dictation started.
+//! Binds a paste to the terminal (or Messages) that was in front when
+//! dictation started.
 //! The pid and app path are captured at recording start; the app in front at
 //! delivery must be that same process and app, or nothing is pasted.
 
@@ -24,7 +25,7 @@ pub fn check_paste_target(
 ) -> Result<i32, String> {
     match (front_pid, front_app) {
         (Some(pid), Some(app)) if pid == bound.app_pid && app == bound.paste_app => Ok(pid),
-        _ => Err("frontmost app is not the terminal dictation started in — paste skipped".into()),
+        _ => Err("frontmost app is not the app dictation started in — paste skipped".into()),
     }
 }
 
@@ -63,6 +64,16 @@ mod tests {
                 "{pid:?} {app:?}"
             );
         }
+    }
+
+    #[test]
+    fn messages_binds_and_refuses_a_terminal_in_its_place() {
+        const MSG: &str = "/System/Applications/Messages.app";
+        let bound = binding_for(Some(5), Some(MSG.into())).unwrap();
+        assert_eq!(check_paste_target(&bound, Some(5), Some(MSG)), Ok(5));
+        // WezTerm in front now (another pid and app), or not a paste app at all.
+        assert!(check_paste_target(&bound, Some(7), Some(WEZ)).is_err());
+        assert!(check_paste_target(&bound, Some(5), None).is_err());
     }
 
     #[test]

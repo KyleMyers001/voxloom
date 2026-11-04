@@ -4,7 +4,7 @@
 //! uses a separate guarded Unicode-only path with explicit unverified dispatch
 //! reporting: never AX-first, never scrollback verification, never auto-copy or
 //! retry after events are posted. Secure/changed targets always refuse.
-//! Other known terminals (WezTerm, iTerm2, ...) take the clipboard paste route
+//! Other known terminals (WezTerm, iTerm2, ...) and Apple Messages take the clipboard paste route
 //! (`paste_text`) instead of any AX write.
 
 mod ax;
@@ -124,15 +124,15 @@ pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<InsertRep
     result
 }
 
-/// The paste terminal in front now, for `delivery_paste_binding`.
+/// The paste-route app in front now, for `delivery_paste_binding`.
 pub fn paste_binding() -> Option<PasteBindingDto> {
     let front = host::frontmost_pid();
     binding_for(front, front.and_then(host::paste_app))
 }
 
-/// Terminal paste route (WezTerm, iTerm2, ...): clipboard + one ⌘V, then the
-/// user's clipboard back. `bound` is the terminal that was in front when
-/// dictation started: the frontmost process must be that same terminal (pid
+/// Paste route (WezTerm, iTerm2, Messages, ...): clipboard + one ⌘V, then the
+/// user's clipboard back. `bound` is the app that was in front when
+/// dictation started: the frontmost process must be that same app (pid
 /// and app path). `Err` = nothing pasted.
 pub fn paste_text(text: &str, bound: &PasteBindingDto) -> Result<PasteReport, String> {
     let front = host::frontmost_pid();
@@ -145,7 +145,7 @@ pub fn paste_text(text: &str, bound: &PasteBindingDto) -> Result<PasteReport, St
     let report = super::decide::paste::paste_text(&paste::MacPaste { pid }, text)?;
     // Never the transcript: only that a paste went out and what became of the clipboard.
     eprintln!(
-        "[paste] cmd-v posted to terminal; clipboard_restored={} reason={:?}",
+        "[paste] cmd-v posted to paste-route app; clipboard_restored={} reason={:?}",
         report.clipboard_restored, report.restore_skipped_reason
     );
     Ok(report)

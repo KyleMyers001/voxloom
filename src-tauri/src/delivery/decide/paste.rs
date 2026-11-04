@@ -1,5 +1,5 @@
-//! Clipboard paste route for terminals that expose no insertable AX field
-//! (WezTerm, Alacritty, kitty, Ghostty, iTerm2). Pure orchestration over
+//! Clipboard paste route for apps that expose no insertable AX field
+//! (WezTerm, Alacritty, kitty, Ghostty, iTerm2, Apple Messages). Pure orchestration over
 //! `PasteHost`; the macOS adapter supplies the pasteboard and ⌘V.
 //!
 //! Contract (as `delivery_insert_text`): `Err` means ⌘V was not posted. After
