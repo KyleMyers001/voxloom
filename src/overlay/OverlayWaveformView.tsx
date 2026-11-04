@@ -2,6 +2,7 @@ import { Icon } from '../components/Icon';
 import { isMacPlatform } from '../components/KeyCombo';
 import { Waveform } from '../components/Waveform';
 import type { OverlayResult, OverlayWaveform } from '../services/shortcut/overlayVisibility';
+import { PlasmaFilament } from './PlasmaFilament';
 
 interface Props {
   levels: readonly number[];
@@ -37,7 +38,8 @@ const isResult = (w: OverlayWaveform) => w.startsWith('result-');
 
 /**
  * Non-focusable desktop HUD (SPEC § HUD behavior rules). Listening: waveform
- * only. Transcribing: Option A (pulsing, shimmering lime→cyan bar row; slow
+ * with a decorative, level-reactive plasma filament. Transcribing: Option A
+ * (pulsing, shimmering lime→cyan bar row; slow
  * breathe under Reduce Motion). Results: a brief Copied / maybe-copied / error.
  * One permanent role=status node announces "Transcribing" and results.
  */
@@ -55,6 +57,7 @@ export function OverlayWaveformView({ levels, waveform, result = null, mac = isM
         </div>
       ) : (
         <div className="recording recording--overlay" data-waveform={waveform}>
+          {(waveform === 'silent' || waveform === 'speaking') && <PlasmaFilament levels={levels} />}
           {waveform === 'processing'
             ? <div aria-hidden="true" className="hud-transcribing"><i /></div>
             : <Waveform levels={levels} waveform={waveform} />}

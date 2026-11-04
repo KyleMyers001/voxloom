@@ -2,6 +2,44 @@
    The HUD is the same dark pill on any wallpaper, so it doesn't follow the app theme. */
 .recording--overlay[data-waveform="processing"] { border-color: color-mix(in srgb, var(--brand-b) 45%, transparent); }
 
+/* Plasma is a set of irregular electric strands, not a rotating gradient rim.
+   Three SVG paths, no filters/canvas/RAF. Geometry only updates on level metadata;
+   one sparse highlight travels along the strand with a bounded CSS dash offset. */
+.hud-plasma {
+  height: 76px;
+  left: 50%;
+  overflow: hidden;
+  pointer-events: none;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  transition: opacity 100ms ease-out;
+  width: 190px;
+}
+
+.hud-plasma__filament {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.1px;
+}
+
+.hud-plasma__filament--1 {
+  animation: plasma-current 6s linear infinite;
+  opacity: .8;
+  stroke-dasharray: 18 8 3 9 27 7;
+  stroke-width: .75px;
+}
+
+/* Broad, faint strand supplies bounded light without an offscreen blur surface. */
+.hud-plasma__filament--2 { opacity: .14; stroke-width: 4px; }
+
+@keyframes plasma-current { to { stroke-dashoffset: -72; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-plasma,
+  .hud-plasma__filament { animation: none; transition: none; }
+}
+
 /* Option A: the bars settle into an even row; the gradient shimmers and pulses (1.6 s). */
 /* Listening and transcribing share one 118px row in a 136px pill, so nothing jumps. */
 .recording--overlay .wave { gap: 2px; width: 118px; }

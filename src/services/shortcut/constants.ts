@@ -3,9 +3,12 @@ export const HOLD_MS = 320;
 export const DOUBLE_TAP_MS = 260;
 
 export const OVERLAY_WINDOW_LABEL = 'dictation-overlay';
-export const OVERLAY_WIDTH = 142;
-export const OVERLAY_HEIGHT = 28;
+/** 24px transparent clearance around the original 142×28 listening envelope. */
+export const OVERLAY_WIDTH = 190;
+export const OVERLAY_HEIGHT = 76;
+/** Result placement remains unchanged; listening adds symmetric clearance. */
 export const OVERLAY_BOTTOM_MARGIN = 28;
+export const OVERLAY_LISTENING_BOTTOM_MARGIN = 4;
 /** Result HUD ("Copied · ⌘V to paste" / short error) needs a wider window. */
 export const OVERLAY_RESULT_WIDTH = 248;
 export const OVERLAY_RESULT_HEIGHT = 40;

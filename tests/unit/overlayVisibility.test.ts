@@ -86,7 +86,7 @@ describe('overlay visibility', () => {
     const bridge = createOverlayBridge(api);
     await bridge.sync({ kind: 'listening', runId: 1, waveform: 'silent' }, false, false);
     expect(api.setWaveform).toHaveBeenCalledWith('silent');
-    expect(api.showBottomCenter).toHaveBeenLastCalledWith({ height: 28, width: 142 }, false);
+    expect(api.showBottomCenter).toHaveBeenLastCalledWith({ height: 76, width: 190 }, false);
   });
 
   it('overlaySyncPlan hides after cancel/error', () => {

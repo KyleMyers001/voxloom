@@ -3,6 +3,11 @@ import type { OverlayWaveform } from '../services/shortcut/overlayVisibility';
 
 export const WAVEFORM_BARS = 24;
 
+/** Display metadata may cross a window boundary; never emit invalid CSS. */
+export function clampDisplayLevel(level: number): number {
+  return Number.isFinite(level) ? Math.min(1, Math.max(0, level)) : 0;
+}
+
 /** Per-frame RMS is metadata only; map speech into a legible display range. */
 export function toDisplayLevel(level: number): number {
   if (!Number.isFinite(level) || level <= 0) return 0;
@@ -22,7 +27,7 @@ export function Waveform({ levels, waveform }: Props) {
       role="img"
     >
       {Array.from({ length: WAVEFORM_BARS }, (_, index) => {
-        const level = levels[index] ?? 0;
+        const level = clampDisplayLevel(levels[index] ?? 0);
         return <i
           key={index}
           style={{ '--h': `${1 + Math.round(level * 12)}px` } as CSSProperties}
