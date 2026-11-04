@@ -41,14 +41,54 @@ export function dictionarySpellings(
   for (const term of dictionary) {
     const exact = term.trim().normalize('NFC');
     const key = exact.toLowerCase();
-    if (/^[\p{L}\p{M}]{5,}$/u.test(key) && !spellings.has(key)) spellings.set(key, exact);
+    // An entry that is itself a plain common word (Apple, Sky) is only ever a
+    // case change, as in replace.ts: apply is never Apple.
+    if (/^[\p{L}\p{M}]{5,}$/u.test(key) && !isCommonWord(key) && !spellings.has(key)) {
+      spellings.set(key, exact);
+    }
   }
   return spellings;
 }
 
-/** One edit for a 5 or 6 letter word, two for a longer one. */
-function allowedEdits(key: string): number {
-  return key.length >= 7 ? 2 : 1;
+/**
+ * One edit, as before B2. Two only for a longer word (7+ letters) heard as
+ * several words (box loom): one spoken word two edits away is as likely a
+ * different name (Jeffrey, Geoffrey; Alexander, Alexandra).
+ */
+function allowedEdits(key: string, words: number): number {
+  return key.length >= 7 && words > 1 ? 2 : 1;
+}
+
+/** Letter counts: a cheap lower bound on the edit distance. */
+function letterBag(word: string): Map<string, number> {
+  const bag = new Map<string, number>();
+  for (const letter of word) bag.set(letter, (bag.get(letter) ?? 0) + 1);
+  return bag;
+}
+
+const keyBags = new Map<string, Map<string, number>>();
+
+/** The letter counts of a dictionary key, remembered between calls. */
+function keyBag(key: string): Map<string, number> {
+  let bag = keyBags.get(key);
+  if (!bag) {
+    if (keyBags.size >= 512) keyBags.clear();
+    bag = letterBag(key);
+    keyBags.set(key, bag);
+  }
+  return bag;
+}
+
+/**
+ * Each edit changes the letter counts by at most 2, so counts further apart
+ * than that cannot be within `max` edits. Skips the edit-distance table for
+ * almost every word of a long transcript.
+ */
+function bagsAreClose(left: Map<string, number>, right: Map<string, number>, max: number): boolean {
+  let apart = 0;
+  for (const [letter, count] of left) apart += Math.abs(count - (right.get(letter) ?? 0));
+  for (const [letter, count] of right) if (!left.has(letter)) apart += count;
+  return apart <= 2 * max;
 }
 
 /** Whether `left` is within `max` insertions, deletions or substitutions of `right`. */
@@ -126,8 +166,12 @@ export function findSpan(
     if (!single && (run.some(({ continuesWord, word }) => continuesWord
       || word.length < MIN_RUN_WORD_LETTERS)
       || touchesCode(text, first.start, last.end))) continue;
+    const bag = letterBag(joined);
     for (const key of spellings.keys()) {
-      if (!withinEdits(joined, key, allowedEdits(key))) continue;
+      const max = allowedEdits(key, run.length);
+      if (Math.abs(joined.length - key.length) > max
+        || !bagsAreClose(bag, keyBag(key), max)
+        || !withinEdits(joined, key, max)) continue;
       if (joined !== key && onlyAnEndDiffers(joined, key, run.length > 1)) continue;
       matches.push({ key, run });
     }

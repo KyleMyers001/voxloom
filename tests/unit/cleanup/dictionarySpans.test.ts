@@ -39,10 +39,11 @@ describe('split words that sound like a dictionary word', () => {
     expect(check(raw, raw)).toBe(raw);
   });
 
-  it('accepts three spoken words, and two edits only for a long word', () => {
+  it('accepts three spoken words, and two edits only for several words', () => {
     expect(check('The stupid jar gin app.', 'The StupidJargon app.', ['StupidJargon']))
       .toBe('The StupidJargon app.');
-    expect(check('Open Foxlomm now.', 'Open Voxloom now.')).toBe('Open Voxloom now.');
+    expect(check('Open Foxlomm now.', 'Open Voxloom now.')).toBeNull();
+    expect(check('Open box looms now.', 'Open Voxloom now.')).toBe('Open Voxloom now.');
     // Notion is 6 letters: one edit only.
     expect(check('Ship the mocion.', 'Ship the Notion.', ['Notion'])).toBeNull();
     expect(check('Ship the motion.', 'Ship the Notion.', ['Notion']))

@@ -55,6 +55,12 @@ function attachments(
   for (const word of contentWords(normalized, dictionary, repair)) {
     ending.set(word.end, word);
     if (!starting.has(word.start)) starting.set(word.start, word);
+    // A mark inside a repaired run (box-loom) touches the spoken words, which
+    // the unchanged output keeps as they are.
+    for (const part of word.parts ?? []) {
+      if (!ending.has(part.end)) ending.set(part.end, word);
+      if (!starting.has(part.start)) starting.set(part.start, word);
+    }
   }
   const offsets = utf16Offsets(characters);
   return (index: number): [Attached, Attached] => {
