@@ -109,7 +109,7 @@ describe('import failure before any status is known (BUS-112 item 4)', () => {
     ));
     await act(async () => { answer(notInstalled); });
     expect(note()).toBe(
-      'Not installed. Import the Qwen3 0.6B (Q4_K_M) GGUF file. Couldn\'t import that file: wrong file.',
+      'Not installed. Download it, or import the Qwen3 0.6B (Q4_K_M) GGUF file. Couldn\'t import that file: wrong file.',
     );
     expect(status).toHaveBeenCalledTimes(1);
   });
@@ -125,7 +125,7 @@ describe('import line next to a known status (BUS-112 items 2-3)', () => {
     await waitFor(() => expect(note()).toMatch(/^Not installed/));
     await user.click(button('Import model…'));
     await waitFor(() => expect(note()).toBe(
-      'Not installed. Import the Qwen3 0.6B (Q4_K_M) GGUF file. Couldn\'t import that file: wrong file.',
+      'Not installed. Download it, or import the Qwen3 0.6B (Q4_K_M) GGUF file. Couldn\'t import that file: wrong file.',
     ));
   });
 });

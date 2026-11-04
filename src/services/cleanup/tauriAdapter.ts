@@ -3,6 +3,7 @@ import type {
   CleanupEngine,
   CleanupModelStore,
 } from './contracts';
+import { cancelCleanupDownload, downloadCleanupModel } from './modelDownload';
 import type {
   CleanupAttempt,
   CleanupModelStatus,
@@ -173,6 +174,8 @@ async function modelInvoke<T>(command: string): Promise<T> {
 
 export function createTauriCleanupModelStore(): CleanupModelStore {
   return {
+    cancelDownload: cancelCleanupDownload,
+    download: downloadCleanupModel,
     async importModel() {
       return modelInvoke<CleanupModelStatus | null>(
         'cleanup_pick_and_import_model',

@@ -1,5 +1,6 @@
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use tauri::{AppHandle, Manager};
@@ -8,13 +9,13 @@ use super::artifact::{
     copy_private, open_regular, validate as validate_artifact, validate_file_while, ArtifactSpec,
 };
 
+pub mod download;
+mod guard;
+mod pin;
 mod status_cache;
+pub use pin::MODEL_ID;
+use pin::{MODEL_FILE, MODEL_SHA256, MODEL_SIZE};
 use status_cache::{fingerprint, FileFingerprint};
-
-pub const MODEL_ID: &str = "qwen3-0.6b-q4-k-m";
-const MODEL_FILE: &str = "qwen3-0.6b-q4-k-m.gguf";
-const MODEL_SHA256: &str = "ac2d97712095a558e31573f62f466a3f9d93990898b0ec79d7c974c1780d524a";
-const MODEL_SIZE: u64 = 396_705_472;
 
 const ARTIFACT: ArtifactSpec = ArtifactSpec {
     sha256: MODEL_SHA256,
@@ -34,6 +35,8 @@ pub struct ModelStatus {
 struct StoreInner {
     importing: bool,
     leases: usize,
+    /// Cancel flag of the running download (BUS-181), if any.
+    download: Option<Arc<AtomicBool>>,
     /// Last successful status() hash, keyed by dev/ino/size/mtime/ctime.
     verified: Option<FileFingerprint>,
 }
@@ -86,16 +89,6 @@ impl std::borrow::Borrow<File> for ModelLease {
     }
 }
 
-struct ImportGuard {
-    inner: Arc<Mutex<StoreInner>>,
-}
-
-impl Drop for ImportGuard {
-    fn drop(&mut self) {
-        self.inner.lock().unwrap().importing = false;
-    }
-}
-
 impl Drop for ModelLease {
     fn drop(&mut self) {
         let mut inner = self.inner.lock().unwrap();
@@ -116,6 +109,7 @@ impl CleanupModelStore {
     pub fn new(root: PathBuf) -> Self {
         Self {
             inner: Arc::new(Mutex::new(StoreInner {
+                download: None,
                 importing: false,
                 leases: 0,
                 verified: None,
@@ -223,22 +217,6 @@ impl CleanupModelStore {
 
     fn model_path(&self) -> PathBuf {
         self.root.join(MODEL_FILE)
-    }
-
-    fn begin_import(&self) -> Result<ImportGuard, String> {
-        let mut inner = self.inner.lock().unwrap();
-        if inner.leases > 0 {
-            return Err("cleanup model is in use".into());
-        }
-        if inner.importing {
-            return Err("cleanup model import is already running".into());
-        }
-        inner.importing = true;
-        // Import replaces the on-disk bytes; drop any stale status cache.
-        inner.verified = None;
-        Ok(ImportGuard {
-            inner: Arc::clone(&self.inner),
-        })
     }
 
     /// Cheap status path: skip a full re-hash when the fingerprint matches.
