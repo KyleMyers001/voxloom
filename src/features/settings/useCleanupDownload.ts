@@ -1,18 +1,23 @@
-import { useState } from 'react';
+import { useSyncExternalStore } from 'react';
+import type { CleanupModelStore } from '../../services/cleanup/contracts';
 import { CleanupDownloadError } from '../../services/cleanup/modelDownload';
+import type { CleanupModelStatus } from '../../services/cleanup/types';
 import {
   CLEANUP_DOWNLOAD_CANCELLED, CLEANUP_DOWNLOAD_CHECKSUM, cleanupDownloadFailedNote,
 } from './cleanupCopy';
 import type { CleanupModel } from './useCleanupModel';
 
-export interface CleanupDownload {
-  /** The store can download (the native one can; test fakes may not). */
-  supported: boolean;
+interface DownloadSnapshot {
   downloading: boolean;
   /** Last progress ratio, 0..1. */
   ratio: number;
   /** Outcome line after a failed or cancelled download; null otherwise. */
   note: string | null;
+}
+
+export interface CleanupDownload extends DownloadSnapshot {
+  /** The store can download (the native one can; test fakes may not). */
+  supported: boolean;
   start: () => Promise<void>;
   cancel: () => void;
   clearNote: () => void;
@@ -26,40 +31,63 @@ export function downloadNote(reason: unknown): string {
   return cleanupDownloadFailedNote(reason instanceof Error ? reason.message : String(reason));
 }
 
+// Window-level, like cleanupModelCache: switching Settings tabs unmounts the
+// row, but the native download keeps running, so its state must outlive it.
+const IDLE: DownloadSnapshot = { downloading: false, note: null, ratio: 0 };
+let snapshot = IDLE;
+const listeners = new Set<() => void>();
+
+function publish(next: Partial<DownloadSnapshot>) {
+  snapshot = { ...snapshot, ...next };
+  for (const listener of listeners) listener();
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
+
+async function start(
+  store: CleanupModelStore,
+  apply: (status: CleanupModelStatus) => void,
+  clearImportError: () => void,
+) {
+  if (snapshot.downloading || !store.download) return;
+  clearImportError();
+  publish({ downloading: true, note: null, ratio: 0 });
+  try {
+    // The verified status comes back with the download: no second hash.
+    apply(await store.download((progress) => { publish({ ratio: progress.ratio }); }));
+    publish({ downloading: false });
+  } catch (reason: unknown) {
+    publish({ downloading: false, note: downloadNote(reason) });
+  }
+}
+
+/** Tests only: forget any download state. */
+export function resetCleanupDownloadForTests() {
+  snapshot = IDLE;
+  listeners.clear();
+}
+
+if (import.meta.env.MODE === 'test') {
+  (globalThis as { __voxloomResetCleanupDownload?: () => void })
+    .__voxloomResetCleanupDownload = resetCleanupDownloadForTests;
+}
+
 /**
- * BUS-181: one-click download state for the Cleanup model row. A success
- * applies the verified status the download returns (no second hash). A
- * failure leaves nothing on disk natively, so Import and a retry both work.
+ * BUS-181: one-click download state for the Cleanup model row. A failure
+ * leaves nothing on disk natively, so Import and a retry both work.
  */
 export function useCleanupDownload(model: Pick<CleanupModel, 'apply' | 'clearImportError' | 'store'>): CleanupDownload {
   const { apply, clearImportError, store } = model;
-  const [downloading, setDownloading] = useState(false);
-  const [ratio, setRatio] = useState(0);
-  const [note, setNote] = useState<string | null>(null);
-
-  const start = async () => {
-    const native = store();
-    if (downloading || !native.download) return;
-    clearImportError();
-    setNote(null);
-    setRatio(0);
-    setDownloading(true);
-    try {
-      apply(await native.download((progress) => { setRatio(progress.ratio); }));
-    } catch (reason: unknown) {
-      setNote(downloadNote(reason));
-    } finally {
-      setDownloading(false);
-    }
-  };
-
-  const cancel = () => {
-    // The pending download rejects as cancelled; that sets the note.
-    void store().cancelDownload?.().catch(() => {});
-  };
-
+  const current = useSyncExternalStore(subscribe, () => snapshot);
   return {
-    cancel, clearNote: () => { setNote(null); }, downloading, note, ratio, start,
+    ...current,
+    // The pending download rejects as cancelled; that sets the note.
+    cancel: () => { void store().cancelDownload?.().catch(() => {}); },
+    clearNote: () => { if (snapshot.note !== null) publish({ note: null }); },
+    start: () => start(store(), apply, clearImportError),
     supported: typeof store().download === 'function',
   };
 }

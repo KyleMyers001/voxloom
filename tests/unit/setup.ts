@@ -74,6 +74,7 @@ afterEach(() => {
   // Not imported here: importing it would load the Tauri adapter before the
   // adapter tests install their own mocks.
   (globalThis as { __voxloomResetCleanupModelCache?: () => void }).__voxloomResetCleanupModelCache?.();
+  (globalThis as { __voxloomResetCleanupDownload?: () => void }).__voxloomResetCleanupDownload?.();
 });
 
 beforeEach(() => {

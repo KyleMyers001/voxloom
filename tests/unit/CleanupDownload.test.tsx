@@ -109,4 +109,23 @@ describe('Cleanup model download', () => {
     expect(store.importModel).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(note()).not.toContain(line));
   });
+
+  it('keeps progress and Cancel when the row unmounts and remounts (tab switch)', async () => {
+    const { pending, store } = downloadingStore();
+    const user = userEvent.setup();
+    const first = renderWithApp(<Harness modelStore={store} />);
+    await waitFor(() => expect(downloadButton()).toBeInTheDocument());
+    await user.click(downloadButton()!);
+    act(() => { pending[0].progress({ bytesReceived: 3, bytesTotal: 10, ratio: 0.3 }); });
+    first.unmount();
+    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
+    renderWithApp(<Harness modelStore={store} />);
+    expect(screen.getByRole('button', { name: 'Downloading… 30%' })).toHaveAttribute('aria-disabled', 'true');
+    expect(importButton()).toHaveAttribute('aria-disabled', 'true');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(store.cancelDownload).toHaveBeenCalledTimes(1);
+    await act(async () => { pending[0].resolve(ready); });
+    expect(note()).toBe('Qwen3 0.6B is installed.');
+    expect(store.download).toHaveBeenCalledTimes(1);
+  });
 });
