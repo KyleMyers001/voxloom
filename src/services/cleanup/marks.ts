@@ -72,7 +72,7 @@ function attachments(
 /** The output touches the same word: as spoken, or its exact repair. */
 function sameAttachment(source: Attached, output: Attached): boolean {
   if (!source || !output) return source === output;
-  return output.word === source.word || output.word === source.spoken;
+  return output.word === source.word || (source.spoken?.includes(output.word) ?? false);
 }
 
 /**

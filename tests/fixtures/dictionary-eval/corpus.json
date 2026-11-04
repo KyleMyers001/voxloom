@@ -1,0 +1,206 @@
+{
+ "dictionary": [
+  "Voxloom",
+  "Notion",
+  "Kubernetes",
+  "Zentrix",
+  "Anthropic",
+  "Grafana",
+  "Skylar"
+ ],
+ "items": [
+  {
+   "id": "fix-split-1",
+   "kind": "fix",
+   "raw": "Please send the build to box loom today.",
+   "expect": [
+    "Voxloom"
+   ]
+  },
+  {
+   "id": "fix-split-2",
+   "kind": "fix",
+   "raw": "I think vox loom crashed again after the update.",
+   "expect": [
+    "Voxloom"
+   ]
+  },
+  {
+   "id": "fix-split-3",
+   "kind": "fix",
+   "raw": "Can you open box loom and check the settings?",
+   "expect": [
+    "Voxloom"
+   ]
+  },
+  {
+   "id": "fix-near-1",
+   "kind": "fix",
+   "raw": "Ask Voxlom to export the file.",
+   "expect": [
+    "Voxloom"
+   ]
+  },
+  {
+   "id": "fix-near-2",
+   "kind": "fix",
+   "raw": "We keep our meeting notes in Notian and our code in Git.",
+   "expect": [
+    "Notion"
+   ]
+  },
+  {
+   "id": "fix-near-3",
+   "kind": "fix",
+   "raw": "I wrote the project plan in motion last night.",
+   "expect": [
+    "Notion"
+   ]
+  },
+  {
+   "id": "fix-near-4",
+   "kind": "fix",
+   "raw": "The deploy runs on Kubernetis in the staging cluster.",
+   "expect": [
+    "Kubernetes"
+   ]
+  },
+  {
+   "id": "fix-split-4",
+   "kind": "fix",
+   "raw": "Our zen tricks dashboard is down again.",
+   "expect": [
+    "Zentrix"
+   ]
+  },
+  {
+   "id": "fix-near-5",
+   "kind": "fix",
+   "raw": "Anthropik released a new model this week.",
+   "expect": [
+    "Anthropic"
+   ]
+  },
+  {
+   "id": "fix-split-5",
+   "kind": "fix",
+   "raw": "The Graf Anna dashboard shows the latency.",
+   "expect": [
+    "Grafana"
+   ]
+  },
+  {
+   "id": "fix-split-6",
+   "kind": "fix",
+   "raw": "Please check Kuber netes before the release.",
+   "expect": [
+    "Kubernetes"
+   ]
+  },
+  {
+   "id": "fix-near-6",
+   "kind": "fix",
+   "raw": "Skyler is joining the call at noon.",
+   "expect": [
+    "Skylar"
+   ]
+  },
+  {
+   "id": "fix-two-1",
+   "kind": "fix",
+   "raw": "I opened box loom and then wrote it up in Notian.",
+   "expect": [
+    "Voxloom",
+    "Notion"
+   ]
+  },
+  {
+   "id": "fix-split-7",
+   "kind": "fix",
+   "raw": "Is box loom ready for the demo on Friday?",
+   "expect": [
+    "Voxloom"
+   ]
+  },
+  {
+   "id": "keep-1",
+   "kind": "keep",
+   "raw": "Put the motion on the agenda for Tuesday."
+  },
+  {
+   "id": "keep-2",
+   "kind": "keep",
+   "raw": "The motion picture won three awards."
+  },
+  {
+   "id": "keep-3",
+   "kind": "keep",
+   "raw": "She put lotion on her hands before leaving."
+  },
+  {
+   "id": "keep-4",
+   "kind": "keep",
+   "raw": "He drank a magic potion in the story."
+  },
+  {
+   "id": "keep-5",
+   "kind": "keep",
+   "raw": "The box looms large over the room."
+  },
+  {
+   "id": "keep-6",
+   "kind": "keep",
+   "raw": "He bought a wooden loom at the market."
+  },
+  {
+   "id": "keep-7",
+   "kind": "keep",
+   "raw": "Zen tricks are a fun way to relax after work."
+  },
+  {
+   "id": "keep-8",
+   "kind": "keep",
+   "raw": "The sky looked clear and a lark sang."
+  },
+  {
+   "id": "keep-9",
+   "kind": "keep",
+   "raw": "A matrix of numbers fills the whole table."
+  },
+  {
+   "id": "keep-10",
+   "kind": "keep",
+   "raw": "The graph and the stats looked fine to me."
+  },
+  {
+   "id": "keep-11",
+   "kind": "keep",
+   "raw": "Their motion to dismiss was denied by the judge."
+  },
+  {
+   "id": "keep-12",
+   "kind": "keep",
+   "raw": "That nation has a long and proud history."
+  },
+  {
+   "id": "keep-13",
+   "kind": "keep",
+   "raw": "The weaver sat at the loom with a box of wool."
+  },
+  {
+   "id": "keep-14",
+   "kind": "keep",
+   "raw": "The cooper made barrels for the cellar all winter."
+  },
+  {
+   "id": "keep-15",
+   "kind": "keep",
+   "raw": "Please buy a box of tissues and some lotion."
+  },
+  {
+   "id": "keep-16",
+   "kind": "keep",
+   "raw": "The old fox looms in the story and the box is empty."
+  }
+ ]
+}

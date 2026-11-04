@@ -1,26 +1,20 @@
 /// Deterministic dictionary spelling (BUS-138): once the transcript exists,
 /// every dictionary entry is written exactly as saved wherever it was heard
-/// differing only in case or in spacing/hyphens ("chat gpt" -> "ChatGPT").
-/// No model, no sound-alike guessing (that is the optional aliases, later),
-/// and nothing is rewritten that the entry does not spell out.
+/// differing only in case or in spacing/hyphens ("chat gpt" -> "ChatGPT"), and
+/// a one-piece entry heard as two or three words that spell it exactly
+/// ("vox loom" -> "Voxloom", see joins.ts). No model, no sound-alike guessing
+/// (the cleanup model does that, from context), and nothing is rewritten that
+/// the entry does not spell out.
 
+import { END, startsInsideWord } from './boundary';
 import { entryChunks } from './chunks';
 import { touchesCode } from './codeContext';
 import { isCommonWord } from './commonWords';
+import { foldKey, joinSplitWords } from './joins';
 
-const WORD_CHAR = String.raw`[\p{L}\p{M}\p{N}_]`;
 // Between two chunks: a run of spaces or tabs, or one hyphen, or nothing.
 // Never a newline, comma or other punctuation.
 const SEPARATOR = String.raw`(?:[^\S\r\n]+|-)?`;
-// A match can't start right after an apostrophe inside a word (a letter or
-// digit before it: "we're", "it\u2019s", "l'iphone"); it may end before one,
-// so possessives work ("Voxloom's"), except before another contraction tail
-// ("don't" is not a match for "Don"). Lookbehind is avoided on purpose: the
-// start edge is a captured character that is put back and checked in
-// replaceOnce.
-const APOSTROPHE = /^['\u2019]$/u;
-const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
-const END = String.raw`(?!${WORD_CHAR})(?!['\u2019](?!s(?!${WORD_CHAR}))\p{L})`;
 const SEPARATORS = /[\s-]+/gu;
 const SYNTAX_CHARS = /[\\^$.*+?()[\]{}|/]/gu;
 
@@ -29,11 +23,6 @@ interface Entry {
   key: string;
   text: string;
 }
-
-// Final sigma: "ΠΑΎΛΟΥΣ" lowercases to ς at the end of a word but σ inside one,
-// so both sides of a lookup are folded to σ.
-const foldKey = (spelled: string) =>
-  spelled.replace(SEPARATORS, '').toLowerCase().replace(/ς/gu, 'σ');
 
 /**
  * Entry text the matcher reads back as itself: whitespace runs only of spaces
@@ -91,7 +80,7 @@ function replaceOnce(
     (match: string, lead: string, heard: string, offset: number) => {
       const spelled = byKey.get(foldKey(heard));
       const start = offset + lead.length;
-      const insideWord = APOSTROPHE.test(lead) && LETTER_OR_DIGIT.test(text[offset - 1] ?? '');
+      const insideWord = startsInsideWord(lead, text[offset - 1] ?? '');
       if (spelled === undefined || insideWord || touchesCode(text, start, start + heard.length)) {
         return match;
       }
@@ -128,7 +117,7 @@ export function replaceDictionaryTerms(
   const normalized = text.normalize('NFC');
   let current = normalized;
   for (let pass = 0; pass <= MAX_PASSES; pass += 1) {
-    const next = replaceOnce(current, matcher, byKey);
+    const next = joinSplitWords(replaceOnce(current, matcher, byKey), byKey);
     if (next === current) return current === normalized ? text : current;
     current = next;
   }
