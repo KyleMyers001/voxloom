@@ -24,3 +24,10 @@ describe('window capabilities', () => {
     expect(ids(cap)).toEqual(expect.arrayContaining(['core:event:allow-emit', 'core:event:allow-listen']));
   });
 });
+
+describe('cleanup model import is gone (BUS-186)', () => {
+  it.each(['settings', 'main'])('%s capability no longer allows the import command', (file) => {
+    expect(ids(load(file))).not.toContain('allow-cleanup-pick-and-import-model');
+    expect(ids(load(file))).toContain('allow-cleanup-download-model');
+  });
+});

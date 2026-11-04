@@ -13,7 +13,7 @@ export const noWorker: CleanupModelStatus = { ...ready, runtimeAvailable: false 
 export function deferredStore() {
   const answers: { reject: (error: Error) => void; resolve: (status: CleanupModelStatus) => void }[] = [];
   const store: CleanupModelStore = {
-    importModel: vi.fn(),
+    
     status: vi.fn(() => new Promise<CleanupModelStatus>((resolve, reject) => { answers.push({ reject, resolve }); })),
   };
   cleanupModelCache.useStore(store);
@@ -23,4 +23,3 @@ export function deferredStore() {
 export const flush = () => new Promise((resolve) => { setTimeout(resolve, 0); });
 export const view = () => cleanupModelCache.snapshot().view;
 export const worker = () => cleanupModelCache.snapshot().workerAvailable;
-export const importError = () => cleanupModelCache.snapshot().importError;

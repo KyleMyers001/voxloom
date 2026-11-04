@@ -182,7 +182,6 @@ pub fn run() {
             capture_stop,
             cleanup::commands::cleanup_acquire,
             cleanup::commands::cleanup_cancel,
-            cleanup::commands::cleanup_pick_and_import_model,
             cleanup::download_commands::cleanup_cancel_download,
             cleanup::download_commands::cleanup_download_model,
             cleanup::commands::cleanup_model_status,

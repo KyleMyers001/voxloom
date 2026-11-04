@@ -51,15 +51,13 @@ describe('Tauri cleanup adapters', () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it('uses native-issued ownership for requests and native-owned import', async () => {
+  it('uses native-issued ownership for requests', async () => {
     const engine = createTauriCleanupEngine();
     await expect(engine.run(request)).resolves.toEqual({ text: 'Cleaned.', attempt });
     expect(invoke).toHaveBeenCalledWith('cleanup_session_open');
     expect(invoke).toHaveBeenCalledWith('cleanup_run', {
       onStarted: expect.anything(), request, sessionId: 'native-owner-1',
     });
-    await createTauriCleanupModelStore().importModel();
-    expect(invoke).toHaveBeenLastCalledWith('cleanup_pick_and_import_model');
   });
 
   it('shares one session across acquire, cancel, release and repeated disposal', async () => {
@@ -243,9 +241,9 @@ describe('Tauri cleanup adapters', () => {
     });
   });
 
-  it('surfaces structured import rejections via CleanupEngineError.message', async () => {
+  it('surfaces structured status rejections via CleanupEngineError.message', async () => {
     invoke.mockRejectedValueOnce({ code: 'runtime-error', message: 'SHA-256 mismatch' });
-    await expect(createTauriCleanupModelStore().importModel()).rejects.toMatchObject({
+    await expect(createTauriCleanupModelStore().status()).rejects.toMatchObject({
       code: 'runtime-error',
       message: 'SHA-256 mismatch',
     });

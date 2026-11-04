@@ -1,17 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanupImportNote, cleanupModelNote, endSentence } from '../../src/features/settings/cleanupCopy';
-
-describe('cleanupImportNote (BUS-101)', () => {
-  it('names the import failure without claiming the model was checked', () => {
-    expect(cleanupImportNote('wrong file', false))
-      .toBe('Couldn\'t import that file: wrong file.');
-  });
-
-  it('adds the unchanged-model sentence when a model is already installed', () => {
-    expect(cleanupImportNote('wrong file', true))
-      .toBe('Couldn\'t import that file: wrong file. Your current model is unchanged.');
-  });
-});
+import { cleanupModelNote, endSentence } from '../../src/features/settings/cleanupCopy';
 
 describe('endSentence (UI/UX: one closing period, never "..")', () => {
   it('adds a period to a bare reason', () => {
@@ -34,24 +22,12 @@ describe('cleanupModelNote error (UI/UX period)', () => {
   });
 
   it('does not double a period the reason already has', () => {
-    expect(note('an import is already running.'))
-      .toBe('Couldn\'t check the cleanup model: an import is already running.');
+    expect(note('a download is already running.'))
+      .toBe('Couldn\'t check the cleanup model: a download is already running.');
   });
 
   it('keeps a reason ending in ! or ?', () => {
     expect(note('disk gone!')).toBe('Couldn\'t check the cleanup model: disk gone!');
     expect(note('where is it?')).toBe('Couldn\'t check the cleanup model: where is it?');
-  });
-});
-
-describe('cleanupImportNote punctuation (UI/UX period)', () => {
-  it('does not double a period the reason already has', () => {
-    expect(cleanupImportNote('an import is already running.', true))
-      .toBe('Couldn\'t import that file: an import is already running. Your current model is unchanged.');
-  });
-
-  it('keeps a reason ending in ! or ?', () => {
-    expect(cleanupImportNote('picker exploded!', false)).toBe('Couldn\'t import that file: picker exploded!');
-    expect(cleanupImportNote('wrong file?', false)).toBe('Couldn\'t import that file: wrong file?');
   });
 });

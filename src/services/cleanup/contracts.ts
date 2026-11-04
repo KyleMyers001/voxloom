@@ -20,9 +20,8 @@ export interface CleanupEngine {
 }
 
 export interface CleanupModelStore {
-  importModel(): Promise<CleanupModelStatus | null>;
   status(): Promise<CleanupModelStatus>;
-  /** BUS-181: one-click download; stores without it show Import only. */
+  /** BUS-181: one-click download, the only way to install the model. Test fakes may omit it. */
   download?(onProgress?: (progress: CleanupDownloadProgress) => void): Promise<CleanupModelStatus>;
   /** Stops a running download; false when none was running. */
   cancelDownload?(): Promise<boolean>;

@@ -150,7 +150,7 @@ fn an_installed_model_is_kept_without_any_request() {
 }
 
 #[test]
-fn cancel_mid_stream_removes_everything_and_blocks_import_meanwhile() {
+fn cancel_mid_stream_removes_everything_and_blocks_writes_meanwhile() {
     let base = root("cancel");
     let store = Arc::new(CleanupModelStore::new(base.join("installed")));
     let body = vec![7u8; 4096];
@@ -172,17 +172,15 @@ fn cancel_mid_stream_removes_everything_and_blocks_import_meanwhile() {
     use std::os::unix::fs::PermissionsExt;
     let mode = fs::metadata(&partial).unwrap().permissions().mode();
     assert_eq!(mode & 0o777, 0o600, "partial is private while bytes land");
-    let source = base.join("source.gguf");
-    fs::write(&source, BODY).unwrap();
-    let import = store.import_artifact(&source, spec(BODY)).unwrap_err();
-    assert!(import.contains("already running"), "{import}");
+    let write = store.begin_write().err().unwrap();
+    assert!(write.contains("already running"), "{write}");
     assert!(store.lease(MODEL_ID).is_err(), "no lease while downloading");
     assert!(store.cancel_download());
     assert_eq!(worker.join().unwrap(), Err(DownloadError::Cancelled));
     assert_nothing_left(&store);
     assert!(!store.cancel_download());
-    // Import works again once the download is gone.
-    store.import_artifact(&source, spec(BODY)).unwrap();
+    // A new write works again once the download is gone.
+    assert!(store.begin_write().is_ok());
 }
 
 #[test]

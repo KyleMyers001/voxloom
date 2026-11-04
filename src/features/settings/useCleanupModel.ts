@@ -9,20 +9,14 @@ export interface CleanupModel {
   view: CleanupModelView;
   /**
    * Last known `runtimeAvailable`. Unknown (never read) counts as false. A
-   * later check or error keeps the last known value, so Check again or an
-   * import error never hide the block mid-use.
+   * later check or error keeps the last known value, so Check again never
+   * hides the block mid-use.
    */
   workerAvailable: boolean;
-  /** BUS-101: import-failure line; null when none. */
-  importError: string | null;
   /** Re-reads `cleanup_model_status`. */
   refresh: () => Promise<void>;
-  /** Applies a status from an import result, without another read. */
+  /** Applies a status from a download result, without another read. */
   apply: (status: CleanupModelStatus) => void;
-  /** Shows an error from outside the status read (a failed import). */
-  fail: (reason: unknown) => void;
-  /** Clears the import-failure line before a new import attempt. */
-  clearImportError: () => void;
   /** The native store, created lazily. */
   store: () => CleanupModelStore;
 }
@@ -64,15 +58,12 @@ export function useCleanupModel(isNative: boolean, modelStore?: CleanupModelStor
   }, [isNative]);
   if (!isNative) {
     return {
-      apply: noop, clearImportError: noop, fail: noop, importError: null,
+      apply: noop,
       refresh: async () => {}, store: cleanupModelCache.store, view: BROWSER, workerAvailable: false,
     };
   }
   return {
     apply: cleanupModelCache.apply,
-    clearImportError: cleanupModelCache.clearImportError,
-    fail: cleanupModelCache.fail,
-    importError: shared.importError,
     refresh: cleanupModelCache.refresh,
     store: cleanupModelCache.store,
     view: shared.view,
