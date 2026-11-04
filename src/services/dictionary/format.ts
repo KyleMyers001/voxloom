@@ -1,3 +1,5 @@
+import { hasControlCharacter } from '../../domain/dictionary';
+
 /** On-disk schema version for `dictionary.json`. */
 export const DICTIONARY_FILE_VERSION = 1 as const;
 
@@ -15,8 +17,10 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Normalize a words array: keep non-empty trimmed strings, drop blanks,
- * de-dupe case-insensitively (first casing wins), sort locale-insensitive.
+ * Normalize a words array: keep non-empty trimmed strings, drop blanks and
+ * entries with a control character, tab or line break inside (an old file with
+ * one still loads, minus that entry), de-dupe case-insensitively (first casing
+ * wins), sort locale-insensitive.
  */
 export function normalizeWords(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -25,7 +29,7 @@ export function normalizeWords(raw: unknown): string[] {
   for (const entry of raw) {
     if (typeof entry !== 'string') continue;
     const word = entry.trim();
-    if (!word) continue;
+    if (!word || hasControlCharacter(word)) continue;
     const key = word.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
