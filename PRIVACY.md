@@ -1,10 +1,12 @@
 # Privacy and local data
 
 Voxloom transcribes on your Mac. Nothing you dictate is sent to a remote
-service. The only network traffic is a Whisper model download, and only when
-you start it (see `src-tauri/src/stt/catalog.rs` for the exact URLs).
-Each URL is pinned to one immutable Hugging Face revision, and the app checks
-the file's exact size and SHA-256 before saving it; a mismatch saves nothing.
+service. The only network traffic is a model download from Hugging Face, and
+only when you start it: a Whisper model (see `src-tauri/src/stt/catalog.rs`)
+or the optional local cleanup model (see
+`src-tauri/src/cleanup/model_store/pin.rs`). Each URL is pinned to one
+immutable Hugging Face revision, and the app checks the file's exact size and
+SHA-256 before saving it; a mismatch saves nothing.
 
 ## Transcripts are stored as plain text
 
@@ -18,8 +20,10 @@ The desktop app keeps its data as **unencrypted JSON** in its app data folder:
 │                     Voxloom couldn't read (see below)
 ├── dictionary.json   your custom words
 ├── settings.json     preferences
-└── models/           downloaded Whisper model files (*.bin), and *.bin.verified
+├── models/           downloaded Whisper model files (*.bin), and *.bin.verified
                       markers (pinned SHA-256, size, modified time; no user data)
+└── cleanup-models/   the local cleanup model (qwen3-0.6b-q4-k-m.gguf), downloaded
+                      or imported; no user data
 ```
 
 `history.json` is not encrypted. Any process running as your macOS user, and

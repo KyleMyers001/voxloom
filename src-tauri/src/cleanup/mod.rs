@@ -5,6 +5,7 @@ mod artifact;
 mod auth;
 mod budget;
 pub mod commands;
+pub mod download_commands;
 mod error;
 pub mod model_store;
 mod ownership;

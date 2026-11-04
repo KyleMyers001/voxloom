@@ -4,6 +4,7 @@ import type {
   CleanupRequest,
   CleanupResult,
 } from './types';
+import type { CleanupDownloadProgress } from './modelDownload';
 
 export interface CleanupEngine {
   acquire?(requestId: string, modelId: string): Promise<void>;
@@ -21,4 +22,8 @@ export interface CleanupEngine {
 export interface CleanupModelStore {
   importModel(): Promise<CleanupModelStatus | null>;
   status(): Promise<CleanupModelStatus>;
+  /** BUS-181: one-click download; stores without it show Import only. */
+  download?(onProgress?: (progress: CleanupDownloadProgress) => void): Promise<CleanupModelStatus>;
+  /** Stops a running download; false when none was running. */
+  cancelDownload?(): Promise<boolean>;
 }
