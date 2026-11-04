@@ -20,7 +20,8 @@ function isObject(value: unknown): value is Record<string, unknown> {
  * Normalize a words array: keep non-empty trimmed strings, drop blanks and
  * entries with a control character, tab or line break inside (an old file with
  * one still loads, minus that entry), de-dupe case-insensitively (first casing
- * wins), sort locale-insensitive.
+ * wins). The order is kept: it is the order the words were added, oldest
+ * first (a file written before this was alphabetical, and loads as it is).
  */
 export function normalizeWords(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -35,9 +36,22 @@ export function normalizeWords(raw: unknown): string[] {
     seen.add(key);
     words.push(word);
   }
-  return words.sort((a, b) => a.localeCompare(b, undefined, {
+  return words;
+}
+
+/** The words for display and for cleanup: alphabetical, locale-insensitive. */
+export function sortedWords(words: readonly string[]): string[] {
+  return [...words].sort((a, b) => a.localeCompare(b, undefined, {
     sensitivity: 'base',
   }));
+}
+
+/**
+ * The words for Whisper's prompt: newest added first, so the newest entries
+ * survive the prompt's token cut (BUS-196). Stored order is oldest first.
+ */
+export function newestFirst(words: readonly string[]): string[] {
+  return [...words].reverse();
 }
 
 /**

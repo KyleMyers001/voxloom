@@ -210,14 +210,16 @@ in the background. A file that opens but can't be read during the check stays
 failed until Retry download or the next launch.
 
 Your Word dictionary also biases recognition: the saved words are passed to
-whisper.cpp as its initial prompt (`Glossary: Word, Word.`, in saved order,
+whisper.cpp as its initial prompt (`Glossary: Word, Word.`, newest added first,
 cut at a whole entry to stay within about 220 tokens). An empty dictionary sets
 no prompt at all. With a prompt, Whisper answers noise and near-silence with
 different junk than without one, so a clip that is quiet by the same test the
 speech filter uses is transcribed with no prompt and behaves as before. The
 prompt can also turn a look-alike phrase ("box loom") into a dictionary word.
-The words stay on the device; this adds no network use. Nothing about
-`dictionary.json`, Settings or History changes.
+The words stay on the device; this adds no network use. `dictionary.json` keeps
+its shape; its words are now stored in the order they were added, oldest first
+(an older, alphabetical file loads as it is), and the Dictionary screen still
+lists them alphabetically. Settings and History do not change.
 
 Real whisper.cpp linkage is **opt-in** on macOS:
 

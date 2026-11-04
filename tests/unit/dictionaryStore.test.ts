@@ -39,7 +39,7 @@ describe('parseDictionaryJson', () => {
     }));
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect(parsed.file.words).toEqual(['Postgres', 'Vite']);
+    expect(parsed.file.words).toEqual(['Vite', 'Postgres']);
   });
 });
 
@@ -51,7 +51,7 @@ describe('dictionary entries with control characters', () => {
     }));
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect(parsed.file.words).toEqual(['Postgres', 'Vite']);
+    expect(parsed.file.words).toEqual(['Vite', 'Postgres']);
   });
 
   it('normalizeWords drops them and serialising never writes them', () => {

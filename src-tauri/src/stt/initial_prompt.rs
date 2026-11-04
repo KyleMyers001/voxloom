@@ -24,7 +24,7 @@ fn usable(entry: &str) -> Option<&str> {
     (!bad).then_some(word)
 }
 
-/// Usable entries in saved order, without repeats (case-insensitive).
+/// Usable entries in the order given, without repeats (case-insensitive).
 fn usable_words(dictionary: &[String]) -> Vec<&str> {
     let mut seen = std::collections::HashSet::new();
     dictionary
@@ -45,7 +45,8 @@ fn render(words: &[&str]) -> String {
 /// The prompt for `dictionary`, or `None` when it has no usable entry (then
 /// Whisper runs with no prompt at all, as before this feature).
 ///
-/// Entries go in saved order and the first one that would push the prompt past
+/// Entries go in the order given (the app sends the newest first, so the newest
+/// words survive the cut) and the first one that would push the prompt past
 /// [`MAX_PROMPT_TOKENS`] ends it, so the same dictionary always gives the same
 /// prompt. `count_tokens` is the model's tokenizer.
 pub fn build_initial_prompt(
@@ -95,7 +96,7 @@ mod tests {
     }
 
     #[test]
-    fn words_go_in_saved_order() {
+    fn words_go_in_the_order_given() {
         assert_eq!(
             prompt(&["Voxloom", "Notion", "Kubernetes"]).as_deref(),
             Some("Glossary: Voxloom, Notion, Kubernetes.")
@@ -141,6 +142,16 @@ mod tests {
         assert!(got.starts_with("Glossary: Word000, Word001, "));
         let last = got.trim_end_matches('.').rsplit(", ").next().unwrap();
         assert_eq!(last.len(), "Word000".len(), "no entry is cut short: {last}");
+    }
+
+    #[test]
+    fn a_large_dictionary_sent_newest_first_keeps_the_newest() {
+        // The app stores words oldest first and sends them reversed.
+        let added: Vec<String> = (0..400).map(|i| format!("Term{i:03}")).collect();
+        let newest_first: Vec<String> = added.iter().rev().cloned().collect();
+        let got = build_initial_prompt(&newest_first, per_three_bytes).unwrap();
+        assert!(got.starts_with("Glossary: Term399, Term398, Term397, "));
+        assert!(!got.contains("Term000"), "the oldest are the ones cut");
     }
 
     #[test]

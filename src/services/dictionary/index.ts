@@ -13,9 +13,11 @@ export type { DictionaryFile, ParseDictionaryResult } from './format';
 export {
   DICTIONARY_FILE_VERSION,
   defaultDictionaryFile,
+  newestFirst,
   normalizeWords,
   parseDictionaryJson,
   serializeDictionaryFile,
+  sortedWords,
 } from './format';
 export { createDictionaryStore } from './store';
 export { createMemoryDictionaryIo } from './io';

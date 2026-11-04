@@ -69,13 +69,23 @@ describe('dictation', () => {
     return { done, transcribe };
   }
 
-  it('hands the engine the saved dictionary', async () => {
+  it('hands the engine the saved dictionary, newest added first', async () => {
     const { done, transcribe } = run(['Voxloom', 'Notion']);
     await done;
     expect(transcribe).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'pcm-2' }),
-      { dictionary: ['Voxloom', 'Notion'] },
+      { dictionary: ['Notion', 'Voxloom'] },
     );
+  });
+
+  it('keeps the newest entries first when the dictionary is large', async () => {
+    const added = Array.from({ length: 400 }, (_, i) => `Term${String(i).padStart(3, '0')}`);
+    const { done, transcribe } = run(added);
+    await done;
+    const sent = (transcribe.mock.calls[0][1] as { dictionary: string[] }).dictionary;
+    expect(sent).toHaveLength(400);
+    expect(sent.slice(0, 3)).toEqual(['Term399', 'Term398', 'Term397']);
+    expect(sent.at(-1)).toBe('Term000');
   });
 
   it('hands the engine no words when the dictionary is empty', async () => {
