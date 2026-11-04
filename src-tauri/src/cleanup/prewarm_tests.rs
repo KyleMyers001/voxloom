@@ -26,7 +26,7 @@ fn fixture(name: &str) -> (CleanupModelStore, ArtifactSpec, WorkerSupervisor, Pa
         size: 8,
     };
     let store = CleanupModelStore::new(root.join("models"));
-    store.import_artifact(&source, spec).unwrap();
+    store.install_fixture(&source, spec).unwrap();
     let log = root.join("spawned.log");
     let worker = root.join("worker.py");
     write_executable(

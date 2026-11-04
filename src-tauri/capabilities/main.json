@@ -45,7 +45,6 @@
     "allow-cleanup-prewarm",
     "allow-cleanup-prewarm-disarm",
     "allow-cleanup-model-status",
-    "allow-cleanup-pick-and-import-model",
     "allow-cleanup-download-model",
     "allow-cleanup-cancel-download",
     "allow-delivery-insert-text",

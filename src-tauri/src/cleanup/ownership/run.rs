@@ -69,7 +69,7 @@ impl OwnedRun {
 
 impl Drop for OwnedRun {
     fn drop(&mut self) {
-        // Keep import and admission excluded until the process is reaped. Then
+        // Keep downloads and admission excluded until the process is reaped. Then
         // release the descriptor before notifying cancellation waiters.
         self.permit.as_ref().unwrap().finish();
         drop(self.lease.take());

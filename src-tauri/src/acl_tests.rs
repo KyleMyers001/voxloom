@@ -30,9 +30,6 @@ fn cleanup_prewarm() {}
 fn cleanup_prewarm_disarm() {}
 
 #[tauri::command]
-fn cleanup_pick_and_import_model() {}
-
-#[tauri::command]
 fn cleanup_download_model() {}
 
 #[tauri::command]
@@ -84,7 +81,6 @@ fn cleanup_models_are_available_in_settings_but_worker_execution_is_main_only() 
         "cleanup_prewarm",
         "cleanup_prewarm_disarm",
         "cleanup_model_status",
-        "cleanup_pick_and_import_model",
         "cleanup_download_model",
         "cleanup_cancel_download",
     ] {
@@ -94,7 +90,6 @@ fn cleanup_models_are_available_in_settings_but_worker_execution_is_main_only() 
                 cleanup_prewarm,
                 cleanup_prewarm_disarm,
                 cleanup_model_status,
-                cleanup_pick_and_import_model,
                 cleanup_download_model,
                 cleanup_cancel_download
             ])

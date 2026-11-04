@@ -7,8 +7,6 @@ export const CLEANUP_HELP =
   'Fixes punctuation and drops filler words on this Mac. If cleanup fails or changes your words, Voxloom types what you said.';
 export const CLEANUP_SWITCH = 'Clean up transcripts locally';
 export const CLEANUP_MODEL_LABEL = 'Cleanup model';
-export const CLEANUP_IMPORT = 'Import model…';
-export const CLEANUP_IMPORTING = 'Importing…';
 export const CLEANUP_REFRESH = 'Check again';
 /** BUS-181: one-click download; the size is the pinned file's (396,705,472 B). */
 export const CLEANUP_DOWNLOAD = 'Download (397 MB)';
@@ -24,7 +22,7 @@ export function cleanupDownloadingLabel(ratio: number): string {
 }
 
 export function cleanupDownloadFailedNote(reason: string): string {
-  return `Couldn't download the model: ${endSentence(reason)} Check your connection and try again, or import the file.`;
+  return `Couldn't download the model: ${endSentence(reason)} Check your connection and try again.`;
 }
 
 /** Ends a reason with a period unless it already ends in . ! or ? (no ".."). */
@@ -44,18 +42,12 @@ export function cleanupModelNote(view: CleanupModelView): string {
   if (view.kind === 'checking') return 'Checking the cleanup model…';
   if (view.kind === 'error') return `Couldn't check the cleanup model: ${endSentence(view.message)}`;
   const { status } = view;
-  if (!status.available) return 'Not installed. Download it, or import the Qwen3 0.6B (Q4_K_M) GGUF file.';
+  if (!status.available) return 'Not installed. Download it to use local cleanup.';
   if (!status.runtimeAvailable) {
     // Only reachable in dev builds: production hides the block without a worker.
     return 'Model installed. This build doesn\'t include the cleanup worker yet.';
   }
   return 'Qwen3 0.6B is installed.';
-}
-
-/** BUS-101: import failures use their own line, not the check-failure note. */
-export function cleanupImportNote(reason: string, modelInstalled: boolean): string {
-  const base = `Couldn't import that file: ${endSentence(reason)}`;
-  return modelInstalled ? `${base} Your current model is unchanged.` : base;
 }
 
 /** Cleanup can be turned on only with a verified model and a worker. */

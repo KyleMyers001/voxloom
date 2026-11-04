@@ -1,11 +1,10 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import { useApp } from '../../app/AppContext';
 import { Switch } from '../../components/Switch';
 import { isCleanupActive } from '../../domain/cleanup';
 import {
-  CLEANUP_DOWNLOAD, CLEANUP_DOWNLOAD_CANCEL, CLEANUP_HELP, CLEANUP_IMPORT, CLEANUP_IMPORTING,
-  CLEANUP_LABEL, CLEANUP_MODEL_LABEL, CLEANUP_REFRESH, CLEANUP_SWITCH, CLEANUP_TAG,
-  cleanupDownloadingLabel, cleanupImportNote, cleanupModelNote, cleanupReady,
+  CLEANUP_DOWNLOAD, CLEANUP_DOWNLOAD_CANCEL, CLEANUP_HELP, CLEANUP_LABEL, CLEANUP_MODEL_LABEL, CLEANUP_REFRESH, CLEANUP_SWITCH, CLEANUP_TAG,
+  cleanupDownloadingLabel, cleanupModelNote, cleanupReady,
 } from './cleanupCopy';
 import { useCleanupDownload } from './useCleanupDownload';
 import { cleanupShown, type CleanupModel } from './useCleanupModel';
@@ -26,10 +25,9 @@ export function CleanupSettings({ isNative, model }: { isNative: boolean; model:
   const { settings, state } = useApp();
   const update = settings.update;
   const active = isCleanupActive(state.settings);
-  const { apply, clearImportError, fail, importError, refresh, store, view } = model;
-  const [importing, setImporting] = useState(false);
+  const { refresh, view } = model;
   const download = useCleanupDownload(model);
-  const busy = importing || download.downloading;
+  const busy = download.downloading;
   const shown = cleanupShown(model, active);
   const firstRow = useRef<HTMLDivElement>(null);
   const lastRow = useRef<HTMLDivElement>(null);
@@ -43,23 +41,6 @@ export function CleanupSettings({ isNative, model }: { isNative: boolean; model:
     focusAfterHide.current.focus();
     focusAfterHide.current = null;
   }, [shown]);
-
-  const importModel = async () => {
-    if (busy) return;
-    clearImportError();
-    download.clearNote();
-    setImporting(true);
-    try {
-      // The import verifies the file and returns the new status, so there is
-      // no second hash. A cancelled picker (null) changed nothing.
-      const imported = await store().importModel();
-      if (imported) apply(imported);
-    } catch (reason: unknown) {
-      fail(reason);
-    } finally {
-      setImporting(false);
-    }
-  };
 
   const setActive = (on: boolean) => {
     if (on) {
@@ -77,11 +58,7 @@ export function CleanupSettings({ isNative, model }: { isNative: boolean; model:
 
   if (!shown) return null;
 
-  const modelInstalled = view.kind === 'status' && view.status.available;
-  // Import failures use their own line (BUS-101), next to the status note.
-  const statusNote = cleanupModelNote(view);
-  const importNote = importError ? cleanupImportNote(importError, modelInstalled) : null;
-  const notes = [statusNote, importNote, download.note].filter(Boolean).join(' ');
+  const notes = [cleanupModelNote(view), download.note].filter(Boolean).join(' ');
   // BUS-181: offered only once the status says the model is missing.
   const offerDownload = download.supported && view.kind === 'status' && !view.status.available;
   const noteId = 'settings-cleanup-model-note';
@@ -124,9 +101,6 @@ export function CleanupSettings({ isNative, model }: { isNative: boolean; model:
           {download.downloading && (
             <button className="btn" onClick={download.cancel} type="button">{CLEANUP_DOWNLOAD_CANCEL}</button>
           )}
-          <button aria-disabled={busy} className="btn" onClick={() => { if (!busy) void importModel(); }} type="button">
-            {importing ? CLEANUP_IMPORTING : CLEANUP_IMPORT}
-          </button>
           <button
             aria-disabled={busy || checking}
             className="btn"

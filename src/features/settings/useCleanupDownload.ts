@@ -20,7 +20,6 @@ export interface CleanupDownload extends DownloadSnapshot {
   supported: boolean;
   start: () => Promise<void>;
   cancel: () => void;
-  clearNote: () => void;
 }
 
 export function downloadNote(reason: unknown): string {
@@ -50,11 +49,9 @@ function subscribe(listener: () => void): () => void {
 async function start(
   store: CleanupModelStore,
   apply: (status: CleanupModelStatus) => void,
-  clearImportError: () => void,
   refresh: () => Promise<void>,
 ) {
   if (snapshot.downloading || !store.download) return;
-  clearImportError();
   publish({ downloading: true, note: null, ratio: 0 });
   try {
     // The verified status comes back with the download: no second hash.
@@ -81,17 +78,16 @@ if (import.meta.env.MODE === 'test') {
 
 /**
  * BUS-181: one-click download state for the Cleanup model row. A failure
- * leaves nothing on disk natively, so Import and a retry both work.
+ * leaves nothing on disk natively, so a retry starts clean.
  */
-export function useCleanupDownload(model: Pick<CleanupModel, 'apply' | 'clearImportError' | 'refresh' | 'store'>): CleanupDownload {
-  const { apply, clearImportError, refresh, store } = model;
+export function useCleanupDownload(model: Pick<CleanupModel, 'apply' | 'refresh' | 'store'>): CleanupDownload {
+  const { apply, refresh, store } = model;
   const current = useSyncExternalStore(subscribe, () => snapshot);
   return {
     ...current,
     // The pending download rejects as cancelled; that sets the note.
     cancel: () => { void store().cancelDownload?.().catch(() => {}); },
-    clearNote: () => { if (snapshot.note !== null) publish({ note: null }); },
-    start: () => start(store(), apply, clearImportError, refresh),
+    start: () => start(store(), apply, refresh),
     supported: typeof store().download === 'function',
   };
 }

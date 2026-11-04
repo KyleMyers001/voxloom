@@ -23,7 +23,7 @@ The desktop app keeps its data as **unencrypted JSON** in its app data folder:
 ├── models/           downloaded Whisper model files (*.bin), and *.bin.verified
                       markers (pinned SHA-256, size, modified time; no user data)
 └── cleanup-models/   the local cleanup model (qwen3-0.6b-q4-k-m.gguf), downloaded
-                      or imported; no user data
+                      (or imported by an earlier version); no user data
 ```
 
 `history.json` is not encrypted. Any process running as your macOS user, and

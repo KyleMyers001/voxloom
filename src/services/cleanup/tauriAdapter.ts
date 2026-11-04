@@ -176,11 +176,6 @@ export function createTauriCleanupModelStore(): CleanupModelStore {
   return {
     cancelDownload: cancelCleanupDownload,
     download: downloadCleanupModel,
-    async importModel() {
-      return modelInvoke<CleanupModelStatus | null>(
-        'cleanup_pick_and_import_model',
-      );
-    },
     async status() {
       return modelInvoke<CleanupModelStatus>('cleanup_model_status');
     },

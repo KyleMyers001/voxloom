@@ -1,5 +1,5 @@
 //! Optional local LLM cleanup (BUS-16), native side. Off by default: nothing
-//! runs unless the renderer opts in and a worker plus an imported model exist.
+//! runs unless the renderer opts in and a worker plus an installed model exist.
 
 mod artifact;
 mod auth;
@@ -9,7 +9,6 @@ pub mod download_commands;
 mod error;
 pub mod model_store;
 mod ownership;
-mod picker;
 pub mod prewarm;
 pub mod protocol;
 #[cfg(all(test, unix))]

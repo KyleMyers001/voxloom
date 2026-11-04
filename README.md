@@ -219,15 +219,16 @@ npm run tauri -- dev -- --features whisper
 ## Local cleanup model
 
 Optional local cleanup uses one pinned model: Qwen3 0.6B Q4_K_M (GGUF,
-396,705,472 bytes). Settings > Cleanup model offers **Download (397 MB)**
-next to **Import model…**. The download comes from
+396,705,472 bytes). Settings > Cleanup model offers **Download (397 MB)**,
+the only way to install it. The download comes from
 `unsloth/Qwen3-0.6B-GGUF` at a fixed commit
 (`src-tauri/src/cleanup/model_store/pin.rs`) and goes through the same
 `model_fetch` path as the Whisper models: HTTPS only, written to a `.partial`
 file, checked against the exact size and SHA-256, then renamed into place.
 A failed, cancelled or mismatched download leaves no file behind and never
-touches an installed model; retrying starts from zero. Import takes the same
-file chosen by hand and checks it the same way.
+touches an installed model; retrying starts from zero. A model imported by
+hand in an earlier version is the same pinned file at the same path, so it
+still shows as installed.
 
 Credit: Qwen3 by Alibaba Cloud (Qwen team), Apache-2.0; GGUF by Unsloth.
 License: <https://huggingface.co/Qwen/Qwen3-0.6B/blob/main/LICENSE>.
