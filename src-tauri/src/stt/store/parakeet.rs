@@ -177,18 +177,14 @@ impl ModelStore {
     }
     pub(super) fn parakeet_info(&self, spec: &ParakeetModelSpec) -> ModelInfoDto {
         let supported = parakeet_catalog::is_supported();
-        let verdict = self.parakeet_verdict(spec);
         let status = if self.is_downloading(spec.id) {
             "downloading"
-        } else if verdict == Some(true) {
-            "available"
-        } else if verdict == Some(false)
-            || (fs::symlink_metadata(self.root.join(spec.id)).is_ok()
-                && super::parakeet_verify::snapshot(spec, &self.root.join(spec.id)).is_none())
-        {
-            "failed"
         } else {
-            "missing"
+            match self.parakeet_usable(spec) {
+                Some(true) => "available",
+                Some(false) => "failed",
+                None => "missing",
+            }
         };
         ModelInfoDto {
             id: spec.id.to_owned(),
@@ -197,13 +193,8 @@ impl ModelStore {
             status: status.to_owned(),
             failure_reason: (status == "failed").then(|| "damaged".to_owned()),
             supported,
-            unavailable_reason: if !supported {
-                Some(parakeet_catalog::UNAVAILABLE_REASON.to_owned())
-            } else if status == "missing" && self.root.join(spec.id).exists() {
-                Some("Model verification is in progress.".to_owned())
-            } else {
-                None
-            },
+            unavailable_reason: (!supported)
+                .then(|| parakeet_catalog::UNAVAILABLE_REASON.to_owned()),
         }
     }
     pub(super) fn parakeet_resolved(
@@ -216,15 +207,16 @@ impl ModelStore {
                 parakeet_catalog::UNAVAILABLE_REASON,
             ));
         }
-        if self.parakeet_is_verified(spec) {
-            return Ok(self.root.join(spec.id));
+        match self.parakeet_usable(spec) {
+            Some(true) => Ok(self.root.join(spec.id)),
+            Some(false) => Err(SttErrorDto::new(
+                "model-missing",
+                super::existing::DAMAGED_MESSAGE,
+            )),
+            None => Err(SttErrorDto::new(
+                "model-missing",
+                "Complete model set is not downloaded.",
+            )),
         }
-        Err(SttErrorDto::new(
-            "model-missing",
-            "Complete verified model set is not downloaded.",
-        ))
-    }
-    fn parakeet_is_verified(&self, spec: &ParakeetModelSpec) -> bool {
-        self.parakeet_verdict(spec) == Some(true)
     }
 }

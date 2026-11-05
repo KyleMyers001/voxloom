@@ -151,14 +151,22 @@ impl super::ModelStore {
         );
         valid
     }
-    pub(super) fn parakeet_verdict(&self, spec: &ParakeetModelSpec) -> Option<bool> {
-        let verdict = self.cached_parakeet_verdict(spec);
-        if verdict.is_none() && snapshot(spec, &self.root.join(spec.id)).is_some() {
-            self.queue_parakeet_verify(*spec);
+    /// Whisper's rule (`store.rs` `info_for`/`resolved_path`): a structurally
+    /// complete set whose hash check has not finished is usable (`Some(true)`)
+    /// and queues one background check. Only a set that check found damaged,
+    /// or an incomplete, extra or symlinked set, is `Some(false)`. `None`: no set.
+    pub(super) fn parakeet_usable(&self, spec: &ParakeetModelSpec) -> Option<bool> {
+        if let Some(verdict) = self.cached_parakeet_verdict(spec) {
+            return Some(verdict);
         }
-        verdict
+        let dir = self.root.join(spec.id);
+        if snapshot(spec, &dir).is_some() {
+            self.queue_parakeet_verify(*spec);
+            return Some(true);
+        }
+        fs::symlink_metadata(&dir).is_ok().then_some(false)
     }
-    fn cached_parakeet_verdict(&self, spec: &ParakeetModelSpec) -> Option<bool> {
+    pub(super) fn cached_parakeet_verdict(&self, spec: &ParakeetModelSpec) -> Option<bool> {
         let cached = self.parakeet_verified.lock().unwrap().get(spec.id).cloned();
         cached.and_then(|v| v.verdict(spec, &self.root.join(spec.id)))
     }

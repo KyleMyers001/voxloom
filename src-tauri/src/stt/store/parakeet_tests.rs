@@ -31,8 +31,8 @@ fn fixture(version: usize) -> (pc::ParakeetModelSpec, Vec<Vec<u8>>) {
     )
 }
 
-// Asset verification is platform-independent; runtime resolution is not.
-fn assert_verified_assets_and_platform_resolution(
+// Asset availability is platform-independent; runtime resolution is not.
+fn assert_available_assets_and_platform_resolution(
     store: &ModelStore,
     spec: &pc::ParakeetModelSpec,
 ) {
@@ -89,7 +89,7 @@ fn parakeet_complete_download_is_staged_verified_and_reports_aggregate_progress(
             .all(|p| p[0].bytes_received <= p[1].bytes_received));
         assert_eq!(progress.last().unwrap().ratio, 1.0);
         assert_eq!(progress.last().unwrap().bytes_received, spec.size_bytes);
-        assert_verified_assets_and_platform_resolution(&store, &spec);
+        assert_available_assets_and_platform_resolution(&store, &spec);
         assert!(fs::read_dir(&dir).unwrap().all(|entry| !entry
             .unwrap()
             .file_name()
@@ -102,7 +102,7 @@ fn parakeet_complete_download_is_staged_verified_and_reports_aggregate_progress(
 use crate::stt::parakeet_catalog as pc;
 
 #[test]
-fn parakeet_modified_component_immediately_revokes_readiness_without_hashing_on_resolve() {
+fn parakeet_modified_component_drops_cached_trust_and_is_rechecked_without_hashing_on_resolve() {
     let (store, dir) = temp_store("parakeet-modified");
     let (spec, bodies) = fixture(0);
     let urls: Vec<_> = bodies
@@ -117,19 +117,28 @@ fn parakeet_modified_component_immediately_revokes_readiness_without_hashing_on_
             |_| {},
         )
         .unwrap();
+    assert_eq!(store.cached_parakeet_verdict(&spec), Some(true));
     let component = dir.join(spec.id).join(spec.files[0].path);
     fs::write(&component, vec![b'x'; spec.files[0].size_bytes as usize]).unwrap();
-    assert_ne!(store.parakeet_info(&spec).status, "available");
-    assert!(
-        store.parakeet_resolved(&spec).is_err(),
+    assert_eq!(
+        store.cached_parakeet_verdict(&spec),
+        None,
         "cached trust must not survive component modification"
     );
+    // Like Whisper, a changed set reads as not-yet-checked (usable) and never
+    // hashes on status/resolve; only the background re-check marks it failed.
+    let hashing = store.hashing.lock().unwrap();
+    assert_available_assets_and_platform_resolution(&store, &spec);
+    drop(hashing);
+    assert!(!store.verify_parakeet_existing(&spec));
+    assert_eq!(store.parakeet_info(&spec).status, "failed");
+    assert!(store.parakeet_resolved(&spec).is_err());
     assert!(component.exists(), "never delete damaged components");
     fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
-fn parakeet_existing_complete_set_requires_full_verification_and_detects_hash_damage() {
+fn parakeet_unverified_complete_set_is_usable_until_full_verification_detects_hash_damage() {
     let (store, dir) = temp_store("parakeet-existing");
     let (spec, bodies) = fixture(1);
     for (file, body) in spec.files.iter().zip(&bodies) {
@@ -137,41 +146,33 @@ fn parakeet_existing_complete_set_requires_full_verification_and_detects_hash_da
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, body).unwrap();
     }
-    assert_eq!(
-        store.parakeet_info(&spec).status,
-        "missing",
-        "unverified is never available"
-    );
-    assert_eq!(
-        store.parakeet_resolved(&spec).unwrap_err().code,
-        if pc::is_supported() {
-            "model-missing"
-        } else {
-            "engine-unavailable"
-        }
-    );
+    // Startup hashing has not run yet: like Whisper, the set reads available
+    // and resolves, so dictation and Settings never offer a re-download.
+    assert_eq!(store.cached_parakeet_verdict(&spec), None);
+    assert_available_assets_and_platform_resolution(&store, &spec);
     assert!(
         store.verify_parakeet_existing(&spec),
         "all production hashes must be checked"
     );
-    assert_verified_assets_and_platform_resolution(&store, &spec);
+    assert_available_assets_and_platform_resolution(&store, &spec);
     fs::write(
         dir.join(spec.id).join(spec.files[0].path),
         vec![b'x'; bodies[0].len()],
     )
     .unwrap();
     assert!(!store.verify_parakeet_existing(&spec));
+    assert_eq!(store.cached_parakeet_verdict(&spec), Some(false));
     let info = store.parakeet_info(&spec);
     assert_eq!(info.status, "failed");
     assert_eq!(info.failure_reason.as_deref(), Some("damaged"));
-    assert_eq!(
-        store.parakeet_resolved(&spec).unwrap_err().code,
-        if pc::is_supported() {
-            "model-missing"
-        } else {
-            "engine-unavailable"
-        }
-    );
+    assert_eq!(info.unavailable_reason.is_some(), !pc::is_supported());
+    let error = store.parakeet_resolved(&spec).unwrap_err();
+    if pc::is_supported() {
+        assert_eq!(error.code, "model-missing");
+        assert_eq!(error.message, super::existing::DAMAGED_MESSAGE);
+    } else {
+        assert_eq!(error.code, "engine-unavailable");
+    }
     assert!(
         dir.join(spec.id).exists(),
         "never repair/delete existing damaged sets"
@@ -301,7 +302,7 @@ fn parakeet_reverifies_staged_set_before_publication_and_preserves_prior_on_fail
 }
 
 #[test]
-fn parakeet_changed_sets_queue_one_background_recheck_and_refuse_until_done() {
+fn parakeet_changed_sets_queue_one_background_recheck_and_stay_usable_until_done() {
     let (store, dir) = temp_store("parakeet-recheck");
     let (spec, bodies) = fixture(1);
     for (file, body) in spec.files.iter().zip(&bodies) {
@@ -318,9 +319,8 @@ fn parakeet_changed_sets_queue_one_background_recheck_and_refuse_until_done() {
     let caller = std::thread::current().id();
     let hashing = store.hashing.lock().unwrap();
     for _ in 0..10 {
-        assert_eq!(store.parakeet_info(&spec).status, "missing");
+        assert_available_assets_and_platform_resolution(&store, &spec);
     }
-    assert!(store.parakeet_resolved(&spec).is_err());
     drop(hashing);
     assert_ne!(
         receive
@@ -335,9 +335,8 @@ fn parakeet_changed_sets_queue_one_background_recheck_and_refuse_until_done() {
     )
     .unwrap();
     let hashing = store.hashing.lock().unwrap();
-    assert!(store.parakeet_resolved(&spec).is_err());
     for _ in 0..10 {
-        assert_eq!(store.parakeet_info(&spec).status, "missing");
+        assert_available_assets_and_platform_resolution(&store, &spec);
     }
     drop(hashing);
     receive
@@ -347,6 +346,7 @@ fn parakeet_changed_sets_queue_one_background_recheck_and_refuse_until_done() {
         store.parakeet_info(&spec).failure_reason.as_deref(),
         Some("damaged")
     );
+    assert!(store.parakeet_resolved(&spec).is_err());
     assert!(receive.try_recv().is_err(), "one callback per queued check");
     fs::remove_dir_all(dir).unwrap();
 }
@@ -434,7 +434,7 @@ fn parakeet_explicit_replacement_retains_prior_directory_and_idle_cancel_keeps_n
         .expect("prior set must be retained");
     assert_eq!(fs::read(prior.join("prior")).unwrap(), b"retained");
     store.cancel(spec.id).unwrap();
-    assert_verified_assets_and_platform_resolution(&store, &spec);
+    assert_available_assets_and_platform_resolution(&store, &spec);
     fs::remove_dir_all(dir).unwrap();
 }
 
