@@ -17,6 +17,7 @@ import {
   type TargetSnapshot,
 } from '../delivery';
 import type { SttEngine } from './contracts';
+import { newestFirst } from '../dictionary/format';
 import { withDictionary } from './dogfoodDictionary';
 import { audioHandleFromCapture } from './fromCapture';
 import { createSttEngine } from './factory';
@@ -129,7 +130,9 @@ export async function dogfoodTranscribeAndCopy(
   const engine = (options.createEngine ?? createSttEngine)(modelId);
   const handle = audioHandleFromCapture(options.audio);
   const sttTranscript = withDictionary(
-    await engine.transcribe(handle),
+    await engine.transcribe(handle, {
+      dictionary: newestFirst(options.dictionary ?? []),
+    }),
     options.dictionary,
   );
   const cleanup = await cleanUp(options, sttTranscript);

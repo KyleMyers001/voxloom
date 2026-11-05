@@ -124,7 +124,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     const remaining = action.editing
       ? state.words.filter((word) => word !== action.editing)
       : state.words;
-    return { ...state, words: [...remaining, action.word].sort() };
+    return { ...state, words: [...remaining, action.word] };
   }
   if (action.type === 'delete-word') {
     return {

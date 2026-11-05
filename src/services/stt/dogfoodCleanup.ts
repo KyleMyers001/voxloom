@@ -4,6 +4,7 @@
 import type { CleanupProvenance, WritingStyle } from '../../domain/types';
 import type { CleanupEngine } from '../cleanup/contracts';
 import { snapshotDictionary } from '../cleanup/prompt';
+import { sortedWords } from '../dictionary/format';
 import { createCleanupProvenance } from '../cleanup/provenance';
 import type { CleanupOutcome, CleanupSnapshot } from '../cleanup/types';
 import { cleanTranscript } from '../dictation/cleanupStage';
@@ -34,7 +35,7 @@ export function prepareDogfoodCleanup(input: {
 }): DogfoodCleanup {
   if (!input.settings.active) return { provenance: async () => undefined };
   const snapshot: CleanupSnapshot = {
-    dictionary: snapshotDictionary(input.settings.dictionary),
+    dictionary: snapshotDictionary(sortedWords(input.settings.dictionary)),
     enabled: true,
     modelId: input.settings.modelId,
     style: input.settings.style,

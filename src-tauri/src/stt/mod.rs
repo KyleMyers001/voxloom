@@ -12,9 +12,16 @@ pub mod engine;
 pub mod error;
 pub mod filter_config;
 pub mod gate;
+pub mod initial_prompt;
 pub mod pipeline;
 pub mod store;
 pub mod trim;
+pub mod with_dictionary;
+
+#[cfg(test)]
+mod with_dictionary_eval_tests;
+#[cfg(test)]
+mod with_dictionary_silence_tests;
 
 use std::sync::Arc;
 
@@ -92,12 +99,15 @@ pub fn stt_cancel_download(state: State<'_, SttState>, model_id: String) -> Resu
 /// BUS-23: near-silent clips skip whisper; output is cleaned of non-speech
 /// tags / silence hallucinations before it reaches insert or Copy. `filter`
 /// is optional; omitted fields use `SpeechFilterConfig::default()`.
+/// BUS-138: `dictionary` is the user's Word dictionary; it becomes Whisper's
+/// initial prompt. Missing or empty: no prompt, as before.
 #[tauri::command]
 pub async fn stt_transcribe(
     state: State<'_, SttState>,
     model_id: String,
     buffer_id: String,
     filter: Option<SpeechFilterConfig>,
+    dictionary: Option<Vec<String>>,
 ) -> Result<TranscriptDto, String> {
     if model_id.trim().is_empty() {
         return Err(err_string(SttErrorDto::new(
@@ -118,10 +128,9 @@ pub async fn stt_transcribe(
             ))
         })?;
         let cfg = filter.unwrap_or_default();
-        pipeline::transcribe_filtered(&samples, rate, &cfg, &gate::NoVad, |pcm| {
-            engine::transcribe_pcm(&path, pcm, rate, &cfg)
-        })
-        .map_err(err_string)
+        let dictionary = dictionary.unwrap_or_default();
+        with_dictionary::transcribe_with_dictionary(&path, &samples, rate, &cfg, &dictionary)
+            .map_err(err_string)
     })
     .await
     .map_err(|e| join_err("transcribe-failed", e))?
@@ -160,7 +169,8 @@ mod tests {
 
         let path = models.resolved_path("whisper-tiny.en").unwrap();
         let (samples, rate) = buffers.take(&handle.id).unwrap();
-        let result = engine::transcribe_pcm(&path, &samples, rate, &SpeechFilterConfig::default());
+        let result =
+            engine::transcribe_pcm(&path, &samples, rate, &SpeechFilterConfig::default(), &[]);
 
         #[cfg(not(feature = "whisper"))]
         {

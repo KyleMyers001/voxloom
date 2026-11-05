@@ -29,6 +29,19 @@ describe('Dictionary', () => {
     expect(screen.getByText('No words found.')).toBeInTheDocument();
   });
 
+  it('lists words alphabetically whatever order they were added in', async () => {
+    const user = userEvent.setup();
+    renderWithApp(<Dictionary />);
+    for (const word of ['Zebra', 'Apple', 'mango']) {
+      await user.click(screen.getByRole('button', { name: 'Add term' }));
+      await user.type(screen.getByLabelText('Word'), word);
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+    }
+    const shown = screen.getAllByRole('button', { name: /^Edit / }).map((b) => b.getAttribute('aria-label'));
+    const mine = shown.filter((l) => ['Edit Zebra', 'Edit Apple', 'Edit mango'].includes(l ?? ''));
+    expect(mine).toEqual(['Edit Apple', 'Edit mango', 'Edit Zebra']);
+  });
+
   it('restores focus and supports backdrop dismissal', async () => {
     const user = userEvent.setup();
     renderWithApp(<Dictionary />);
