@@ -161,10 +161,12 @@ describe('BUS-51 brand tokens', () => {
     expect(css('home.css')).toContain('0 0 40px var(--tile-glow)');
   });
 
-  it('keeps raw brand hex and rgba out of hud.css', () => {
+  it('keeps raw brand hex and rgba out of the HUD stylesheets', () => {
+    for (const file of ['hud.css', 'hud-aurora.css']) {
+      expect(css(file), file).not.toMatch(/#(b6ff3c|3cf0ff)\b/i);
+      expect(css(file), file).not.toMatch(/rgba\((182, 255, 60|60, 240, 255)/);
+    }
     const hud = css('hud.css');
-    expect(hud).not.toMatch(/#(b6ff3c|3cf0ff)\b/i);
-    expect(hud).not.toMatch(/rgba\((182, 255, 60|60, 240, 255)/);
     expect(hud).toMatch(/\.hud-result \{[^}]*box-shadow: inset 0 0 0 1px color-mix\(in srgb, var\(--brand-a\) 35%, transparent\)[^;]*color-mix\(in srgb, var\(--brand-b\) 14%, transparent\);/);
   });
 

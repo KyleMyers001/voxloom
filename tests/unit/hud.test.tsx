@@ -6,6 +6,7 @@ import { OverlayWaveformView, resultText, spokenResultText } from '../../src/ove
 import { createOverlayBridge } from '../../src/services/shortcut/overlayBridge';
 import { resultWaveform } from '../../src/services/shortcut/overlayVisibility';
 import { hudResultFor } from '../../src/services/stt/useDogfoodCapture';
+import { OVERLAY_LISTEN_PLACEMENT } from '../../src/services/shortcut/constants';
 
 const levels = Array<number>(24).fill(0.5);
 
@@ -92,7 +93,7 @@ describe('overlayBridge.showResult', () => {
     const bridge = createOverlayBridge(window);
     await bridge.showResult('copied');
     expect(window.setWaveform).toHaveBeenCalledWith('result-copied', 'copied');
-    expect(window.showBottomCenter).toHaveBeenCalledWith({ height: 40, width: 248 }, false);
+    expect(window.showBottomCenter).toHaveBeenCalledWith({ height: 40, marginBottom: 28, width: 248 }, false);
     await bridge.sync({ kind: 'ready' });
     expect(window.hide).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(2499);
@@ -120,7 +121,7 @@ describe('overlayBridge.showResult', () => {
     await bridge.showResult('copied');
     await bridge.sync({ kind: 'listening', runId: 2, waveform: 'silent' });
     expect(window.setWaveform).toHaveBeenLastCalledWith('silent');
-    expect(window.showBottomCenter).toHaveBeenLastCalledWith({ height: 28, width: 142 });
+    expect(window.showBottomCenter).toHaveBeenLastCalledWith(OVERLAY_LISTEN_PLACEMENT);
     await vi.advanceTimersByTimeAsync(3000);
     expect(window.hide).not.toHaveBeenCalled();
   });

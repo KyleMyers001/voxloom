@@ -123,6 +123,9 @@ pub fn overlay_show(
     position_bottom_center(&window, width, height, margin_bottom)?;
     let _ = window.set_focusable(false);
     let _ = window.set_always_on_top(true);
+    // The HUD has no pointer UI. Pass clicks through to the apps beneath it,
+    // including the transparent clearance around the pill and its halo.
+    let _ = window.set_ignore_cursor_events(true);
     // Show without taking focus — never call set_focus(true).
     window.show().map_err(|e| e.to_string())?;
     crate::cancel_scope::visible(cancellable);

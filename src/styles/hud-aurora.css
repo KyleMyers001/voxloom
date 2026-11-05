@@ -1,0 +1,75 @@
+/* Aurora: fixed capsule geometry; only two small gradient layers translate.
+   Masks, blur radius and colors stay static. Level metadata changes opacity only.
+   Imported after features.css: the rim replaces the pill border in every state. */
+.recording--overlay {
+  background: #0e0e14;
+  border-color: transparent;
+}
+
+.hud-aurora,
+.hud-aurora * {
+  pointer-events: none;
+}
+
+.hud-aurora {
+  border-radius: inherit;
+  inset: -1px;
+  position: absolute;
+}
+
+.hud-aurora__rim,
+.hud-aurora__halo,
+.hud-aurora__band {
+  border-radius: inherit;
+  inset: 0;
+  position: absolute;
+}
+
+.hud-aurora__rim,
+.hud-aurora__band {
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  overflow: hidden;
+  padding: 1px;
+}
+
+.hud-aurora__rim {
+  opacity: calc(.62 + var(--aurora-energy, 0) * .22);
+  transition: opacity 180ms ease;
+}
+
+/* Blur outside a separate masked band, so the halo can spill softly past the rim. */
+.hud-aurora__halo {
+  filter: blur(6px);
+  inset: -2px;
+  opacity: calc(.16 + var(--aurora-energy, 0) * .14);
+  transition: opacity 180ms ease;
+}
+
+.hud-aurora__band { padding: 2px; }
+
+.hud-aurora__flow {
+  animation: hud-aurora-flow 8s linear infinite;
+  background: linear-gradient(90deg, var(--brand-a), var(--brand-b), var(--brand-a), var(--brand-b), var(--brand-a));
+  display: block;
+  height: 100%;
+  left: 0;
+  position: absolute;
+  top: 0;
+  width: 200%;
+  will-change: transform;
+}
+
+@keyframes hud-aurora-flow { to { transform: translateX(-50%); } }
+
+/* Responds immediately, including when the preference changes during a hold. */
+@media (prefers-reduced-motion: reduce) {
+  .hud-aurora,
+  .hud-aurora * {
+    animation: none;
+    transition: none;
+    will-change: auto;
+  }
+}
