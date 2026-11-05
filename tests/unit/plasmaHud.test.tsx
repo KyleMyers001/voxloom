@@ -42,6 +42,24 @@ describe('Plasma listening HUD', () => {
     expect(plasma()).toBe(bounded);
   });
 
+  it('retains the same plasma shell and energy when listening becomes processing', () => {
+    const { container, rerender } = render(<OverlayWaveformView levels={levels} waveform="speaking" />);
+    const plasma = container.querySelector('.hud-plasma');
+    const filament = plasma?.querySelector('path');
+    const path = filament?.getAttribute('d');
+    const opacity = plasma?.getAttribute('style');
+    const status = screen.getByRole('status');
+    rerender(<OverlayWaveformView levels={levels} waveform="processing" />);
+    expect(container.querySelector('.hud-plasma')).toBe(plasma);
+    expect(container.querySelector('.hud-plasma path')).toBe(filament);
+    expect(filament).toHaveAttribute('d', path);
+    expect(plasma).toHaveAttribute('style', opacity);
+    expect(screen.queryByRole('img', { name: 'Microphone level' })).toBeNull();
+    expect(container.querySelector('.hud-transcribing i')).not.toBeNull();
+    expect(screen.getByRole('status')).toBe(status);
+    expect(status).toHaveTextContent('Transcribing');
+  });
+
   it.each<[OverlayWaveform, OverlayResult | null, string]>([
     ['silent', null, ''],
     ['speaking', null, ''],
@@ -52,7 +70,7 @@ describe('Plasma listening HUD', () => {
     ['result-failed', 'transcribe-failed', 'Couldn’t transcribe'],
   ])('gates plasma for %s / %s without changing announcements', (waveform, result, spoken) => {
     const { container } = render(<OverlayWaveformView levels={levels} mac result={result} waveform={waveform} />);
-    expect(Boolean(container.querySelector('.hud-plasma'))).toBe(waveform === 'silent' || waveform === 'speaking');
+    expect(Boolean(container.querySelector('.hud-plasma'))).toBe(!waveform.startsWith('result-'));
     expect(screen.getByRole('status').textContent).toContain(spoken);
     if (waveform === 'processing') expect(container.querySelector('.hud-transcribing i')).not.toBeNull();
     if (waveform.startsWith('result-')) expect(container.querySelector('.hud-result')).toHaveAttribute('aria-hidden', 'true');

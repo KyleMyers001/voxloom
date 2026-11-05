@@ -38,8 +38,8 @@ const isResult = (w: OverlayWaveform) => w.startsWith('result-');
 
 /**
  * Non-focusable desktop HUD (SPEC § HUD behavior rules). Listening: waveform
- * with a decorative, level-reactive plasma filament. Transcribing: Option A
- * (pulsing, shimmering lime→cyan bar row; slow
+ * with a decorative, level-reactive plasma filament. Transcribing retains that
+ * same filament around Option A (pulsing, shimmering lime→cyan bar row; slow
  * breathe under Reduce Motion). Results: a brief Copied / maybe-copied / error.
  * One permanent role=status node announces "Transcribing" and results.
  */
@@ -57,7 +57,7 @@ export function OverlayWaveformView({ levels, waveform, result = null, mac = isM
         </div>
       ) : (
         <div className="recording recording--overlay" data-waveform={waveform}>
-          {(waveform === 'silent' || waveform === 'speaking') && <PlasmaFilament levels={levels} />}
+          <PlasmaFilament levels={levels} />
           {waveform === 'processing'
             ? <div aria-hidden="true" className="hud-transcribing"><i /></div>
             : <Waveform levels={levels} waveform={waveform} />}

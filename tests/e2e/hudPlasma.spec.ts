@@ -131,12 +131,46 @@ test('Plasma: changing Reduce Motion immediately removes all new motion and tran
   await expect.poll(() => plasma.evaluate((svg) => svg.getAnimations({ subtree: true }).length)).toBeGreaterThan(0);
 });
 
-test('Plasma: processing and all results remove the decoration but retain live announcements', async ({ page }) => {
+test('Plasma: listening flows continuously into processing, then results remove the decoration', async ({ page }) => {
   await openHud(page);
   const status = page.getByRole('status');
+  await status.evaluate((node) => node.setAttribute('data-original-status', 'true'));
   await voice(page, 1);
+  const plasma = page.locator('.hud-plasma');
+  await plasma.evaluate((svg) => svg.setAttribute('data-continuity', 'original'));
+  const paths = await plasma.locator('path').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('d')));
+  const style = await plasma.getAttribute('style');
+  const bounds = await plasma.boundingBox();
+  const animation = await plasma.evaluateHandle((svg) => svg.getAnimations({ subtree: true })
+    .find((item) => item instanceof CSSAnimation && item.animationName === 'plasma-current')!);
+  const beforeTime = await animation.evaluate((item) => Number(item.currentTime));
+
+  await page.evaluate(() => window.__hud.emit('overlay:waveform', { waveform: 'processing' }));
+  await expect(plasma).toHaveAttribute('data-continuity', 'original');
+  await expect(plasma).toHaveAttribute('style', style!);
+  expect(await plasma.locator('path').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('d')))).toEqual(paths);
+  expect(await plasma.boundingBox()).toEqual(bounds);
+  await expect.poll(() => animation.evaluate((item) => Number(item.currentTime))).toBeGreaterThan(beforeTime);
+  await expect(page.locator('.hud-transcribing i')).toBeVisible();
+  await expect(page.locator('.wave')).toHaveCount(0);
+  await expect(status).toHaveText('Transcribing');
+  await expect(status).toHaveAttribute('data-original-status', 'true');
+  await expect(page.locator('[role="status"]')).toHaveCount(1);
+  // Processing holds the captured energy; late level metadata must not fake a live meter.
+  await page.evaluate(() => window.__hud.emit('capture:event', { generation: 1, kind: 'capture-level', level: 0, request_id: 'plasma-fixture' }));
+  expect(await plasma.locator('path').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('d')))).toEqual(paths);
+  await page.screenshot({ path: test.info().outputPath('plasma-processing.png'), omitBackground: true });
+
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect.poll(() => plasma.evaluate((svg) => svg.getAnimations({ subtree: true }).length)).toBe(0);
+  await expect(plasma).toHaveCSS('transition-duration', '0s');
+  await expect(page.locator('.hud-transcribing')).toHaveCSS('animation-name', 'hud-breathe');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await expect.poll(() => plasma.evaluate((svg) => svg.getAnimations({ subtree: true }).length)).toBeGreaterThan(0);
+  await expect(page.locator('.hud-transcribing')).toHaveCSS('animation-name', 'hud-pulse');
+  await animation.dispose();
+
   for (const state of [
-    { spoken: 'Transcribing', waveform: 'processing' },
     { result: 'copied', spoken: 'Copied.', waveform: 'result-copied' },
     { result: 'maybe-copied', spoken: 'May have been inserted', waveform: 'result-unverified' },
     { result: 'insert-failed', spoken: 'Couldn’t insert', waveform: 'result-failed' },
@@ -145,7 +179,7 @@ test('Plasma: processing and all results remove the decoration but retain live a
     await page.evaluate((payload) => window.__hud.emit('overlay:waveform', payload), state);
     await expect(page.locator('.hud-plasma')).toHaveCount(0);
     await expect(status).toContainText(state.spoken);
-    expect(await page.evaluate(() => document.getAnimations().some((animation) => animation instanceof CSSAnimation && animation.animationName.startsWith('plasma-')))).toBe(false);
-    if (state.waveform === 'processing') await expect(page.locator('.hud-transcribing i')).toBeVisible();
+    await expect(status).toHaveAttribute('data-original-status', 'true');
+    expect(await page.evaluate(() => document.getAnimations().some((item) => item instanceof CSSAnimation && item.animationName.startsWith('plasma-')))).toBe(false);
   }
 });
