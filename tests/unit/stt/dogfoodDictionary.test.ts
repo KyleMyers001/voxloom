@@ -148,6 +148,34 @@ describe('with optional cleanup', () => {
   });
 });
 
+describe('split words (BUS-138 PR B2)', () => {
+  const split = 'ask chat gpt about vox loom, not box loom';
+  const joined = 'ask ChatGPT about Voxloom, not box loom';
+
+  it('joins an exact spelling with cleanup off, and leaves sound-alikes', async () => {
+    const { deliveryPlatform, result } = run({ heard: split, target: SECURE });
+    const done = await result;
+    expect(deliveryPlatform.clipboardWrite).toHaveBeenCalledWith(joined);
+    expect(done.transcript).toMatchObject({ rawText: split, text: joined });
+  });
+
+  it('hands cleanup the joined text, and a sound-alike as heard', async () => {
+    const cleanup = vi.fn(async (text: string): Promise<CleanupOutcome> => ({
+      finalText: text, status: 'skipped',
+    }));
+    await run({ cleanup, heard: split, target: SECURE }).result;
+    expect(cleanup).toHaveBeenCalledWith(joined);
+  });
+
+  it('joins again when cleanup returns the split words', async () => {
+    const cleanup = async (): Promise<CleanupOutcome> => ({
+      finalText: 'Ask about vox-loom.', status: 'cleaned',
+    });
+    const done = await run({ cleanup, heard: split, target: SECURE }).result;
+    expect(done.transcript.text).toBe('Ask about Voxloom.');
+  });
+});
+
 describe('History text', () => {
   it('keeps the engine output as rawText', async () => {
     const done = await run({ target: SECURE }).result;

@@ -233,6 +233,44 @@ still shows as installed.
 Credit: Qwen3 by Alibaba Cloud (Qwen team), Apache-2.0; GGUF by Unsloth.
 License: <https://huggingface.co/Qwen/Qwen3-0.6B/blob/main/LICENSE>.
 
+## Word dictionary
+
+Add a word once, in its correct spelling (for example `Voxloom`). Voxloom uses it
+in two ways, and the file format (`dictionary.json`) is unchanged:
+
+- **Always, with cleanup on or off:** a transcript word is respelled as saved
+  (`voxloom` → `Voxloom`), and words the recognizer split are joined when their
+  letters spell the saved word exactly (`vox loom`, `vox-loom` → `Voxloom`).
+  Whole words only, longest match first, and code, backticked text, hyphenated
+  identifiers (`vox-loom-cli`), paths, URLs and flags are left alone. A run that
+  contains a negation or a pronoun (`not`, `no`, `my`, ...) is never joined, so
+  what was said does not change meaning.
+  Real phrases join too when their entry is in the dictionary: with `Salesforce`
+  saved, `sales force` becomes `Salesforce`, and `git hub` becomes `GitHub`. That
+  is by design; removing the word from the dictionary is the opt-out. The
+  pronoun and negation skip protects a saved word written as one piece
+  (`Mycell`, `Hermes`): `my cell` and `her mes` stay as said. A saved word with
+  an inner capital or a separator (`YouTube`) is matched by its parts, as before
+  this change, so `you tube` still becomes `YouTube`.
+- **With local cleanup on:** the cleanup model also sees the dictionary and may
+  fix a near miss or a split from context (`Notian` → `Notion`). A fix is
+  kept only if the output check allows it: the spoken words are 1 to 3
+  adjacent words that sound close to one saved word. A single spoken word may
+  differ by 1 letter only; 2 letters are allowed only for 2 or 3 spoken words
+  that stand for a saved word of 7 or more letters. They must not be a plain
+  real word, a saved word that is itself a common word is never a fix target,
+  an ending or inflection alone is not a fix, and no other dictionary word
+  matches equally well.
+  Otherwise the unchanged transcript is used. The model can still decline a
+  fix, so near misses are fixed on a best-effort basis.
+
+The dictionary holds at most 64 words, 2 KB in total and 128 bytes per word for
+the cleanup prompt. It never leaves the Mac.
+
+With an empty dictionary the cleanup prompt is exactly the text it was before
+the context-aware dictionary (prompt version `cleanup-v2`); the dictionary
+paragraph and version `cleanup-v3` apply only once the dictionary has words.
+
 ## Verification
 
 Pull requests targeting `main` run GitHub Actions CI on Node 24 and Ubuntu:
