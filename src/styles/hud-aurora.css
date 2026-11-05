@@ -1,7 +1,8 @@
 /* Aurora: fixed capsule geometry; only two small gradient layers translate.
    Masks, blur radius and colors stay static. Level metadata changes opacity only. */
 .recording--overlay[data-waveform="silent"],
-.recording--overlay[data-waveform="speaking"] {
+.recording--overlay[data-waveform="speaking"],
+.recording.recording--overlay[data-waveform="processing"] {
   background: #0e0e14;
   border-color: transparent;
 }

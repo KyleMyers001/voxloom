@@ -22,7 +22,7 @@ describe('Aurora listening decoration', () => {
     expect(energy()).toBe('0'); // Only the visible 24 bars contribute.
   });
 
-  it('decorates only silent/speaking without replacing bars or adding announcements', () => {
+  it('retains the listening decoration during processing without replacing its nodes or live region', () => {
     const levels = Array<number>(24).fill(0.5);
     const { container, rerender } = render(<OverlayWaveformView levels={levels} waveform="silent" />);
     const status = screen.getByRole('status');
@@ -37,9 +37,21 @@ describe('Aurora listening decoration', () => {
       expect(status).toHaveTextContent('');
       expect(container.querySelector('button, input, [tabindex]')).toBeNull();
     }
+    const pill = container.querySelector('.recording--overlay');
+    const aurora = container.querySelector<HTMLElement>('.hud-aurora');
+    const decorationNodes = [...aurora!.querySelectorAll('*')];
     rerender(<OverlayWaveformView levels={levels} waveform="processing" />);
-    expect(container.querySelector('.hud-aurora')).toBeNull();
-    expect(container.querySelector('.hud-transcribing')).not.toBeNull();
+    expect(container.querySelector('.recording--overlay')).toBe(pill);
+    expect(container.querySelector('.hud-aurora')).toBe(aurora);
+    expect(aurora).toHaveStyle('--aurora-energy: 0.5');
+    const processingNodes = [...container.querySelectorAll('.hud-aurora *')];
+    expect(processingNodes).toHaveLength(decorationNodes.length);
+    processingNodes.forEach((node, index) => expect(node).toBe(decorationNodes[index]));
+    expect(container.querySelector('.wave')).toBeNull();
+    expect(container.querySelectorAll('.hud-transcribing')).toHaveLength(1);
+    expect(container.querySelector('.hud-transcribing')).toHaveAttribute('aria-hidden', 'true');
+    expect(container.querySelector('button, input, [tabindex]')).toBeNull();
+    expect(screen.getAllByRole('status')).toEqual([status]);
     expect(status).toHaveTextContent('Transcribing');
     for (const [waveform, result, announcement] of [
       ['result-copied', 'copied', 'Copied. Press Command V to paste'],

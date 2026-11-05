@@ -121,7 +121,7 @@ test('Aurora immediately stops new animations and transitions when Reduce Motion
 });
 
 for (const platform of ['MacIntel', 'Linux x86_64']) {
-  test(`Aurora unmounts for processing and every result while the existing live region remains (${platform})`, async ({ page }) => {
+  test(`Aurora preserves processing continuity and unmounts for every result while the existing live region remains (${platform})`, async ({ page }, testInfo) => {
     const pasteModifier = platform === 'MacIntel' ? 'Command' : 'Control';
     await page.addInitScript((value) => {
       Object.defineProperty(navigator, 'platform', { value, configurable: true });
@@ -129,14 +129,83 @@ for (const platform of ['MacIntel', 'Linux x86_64']) {
     await openOverlay(page);
     const status = page.getByRole('status');
     await status.evaluate((node) => node.setAttribute('data-original-status', 'true'));
+    const aurora = page.locator('.hud-aurora');
+    const pill = page.locator('.recording--overlay');
+    await emit(page, 'overlay:waveform', { waveform: 'speaking' });
+    await fillLevels(page, 1);
+    await expect(aurora).toHaveCSS('--aurora-energy', '1');
+    await expect(aurora.locator('.hud-aurora__halo')).toHaveCSS('opacity', '0.3');
+    await expect(aurora.locator('.hud-aurora__rim')).toHaveCSS('opacity', '0.84');
+    const continuity = await pill.evaluateHandle((node) => {
+      const nodes = [node, ...node.querySelectorAll('.hud-aurora, .hud-aurora *')];
+      const properties = ['background-color', 'border-color', 'border-radius', 'opacity', 'filter', 'mask-image', 'mask-composite', 'padding'];
+      const styles = nodes.map((element) => ({
+        box: element.classList.contains('hud-aurora__flow')
+            ? { width: element.getBoundingClientRect().width, height: element.getBoundingClientRect().height }
+            : element.getBoundingClientRect().toJSON(),
+        style: properties.map((property) => getComputedStyle(element).getPropertyValue(property)),
+      }));
+      const animations = [...node.querySelectorAll('.hud-aurora__flow')].flatMap((element) => element.getAnimations());
+      nodes.forEach((element, index) => element.setAttribute('data-continuity-token', String(index)));
+      return { nodes, styles, properties, animations };
+    });
+    await expect.poll(() => continuity.evaluate(({ animations }) => animations.every((animation) => Number(animation.currentTime) > 250))).toBe(true);
+    const times = await continuity.evaluate(({ animations }) => animations.map((animation) => Number(animation.currentTime)));
+    expect(times).toHaveLength(2);
     await emit(page, 'overlay:waveform', { waveform: 'processing' });
-    await expect(page.locator('.hud-aurora')).toHaveCount(0);
+    await expect(aurora).toHaveCount(1);
+    await expect(pill).toHaveCSS('background-color', 'rgb(14, 14, 20)');
+    await expect(pill).toHaveCSS('border-color', 'rgba(0, 0, 0, 0)');
+    await expect(aurora).toHaveCSS('--aurora-energy', '1');
+    const after = await continuity.evaluate(({ nodes, properties, animations }) => {
+      const current = [document.querySelector('.recording--overlay')!, ...document.querySelectorAll('.hud-aurora, .hud-aurora *')];
+      const currentAnimations = [...document.querySelectorAll('.hud-aurora__flow')].flatMap((element) => element.getAnimations());
+      return {
+        sameNodes: current.length === nodes.length && current.every((element, index) => element === nodes[index] && element.getAttribute('data-continuity-token') === String(index)),
+        sameAnimations: currentAnimations.length === animations.length && currentAnimations.every((animation, index) => animation === animations[index]),
+        styles: current.map((element) => ({
+          box: element.classList.contains('hud-aurora__flow')
+            ? { width: element.getBoundingClientRect().width, height: element.getBoundingClientRect().height }
+            : element.getBoundingClientRect().toJSON(),
+          style: properties.map((property) => getComputedStyle(element).getPropertyValue(property)),
+        })),
+      };
+    });
+    expect(after.sameNodes).toBe(true);
+    expect(after.sameAnimations).toBe(true);
+    expect(after.styles).toEqual(await continuity.evaluate(({ styles }) => styles));
+    await expect.poll(async () => (await continuity.evaluate(({ animations }) => animations.map((animation) => Number(animation.currentTime))))
+      .every((time, index) => time > times[index])).toBe(true);
+    await fillLevels(page, 0); // Late capture levels must not change processing energy.
+    await expect(aurora).toHaveCSS('--aurora-energy', '1');
+    await expect(page.getByRole('img', { name: 'Microphone level' })).toHaveCount(0);
     await expect(page.locator('.hud-transcribing')).toHaveCount(1);
+    await expect(page.locator('.hud-transcribing')).toHaveAttribute('aria-hidden', 'true');
+    await expect(page.locator('button, input, [tabindex]')).toHaveCount(0);
+    await expect(status).toHaveAttribute('data-original-status', 'true');
     await expect(status).toHaveText('Transcribing');
     await expect(page.locator('.hud-transcribing')).toHaveCSS('animation-name', 'hud-pulse');
-    const processingBox = await page.locator('.recording--overlay').boundingBox();
+    const processingBox = await pill.boundingBox();
     expect(processingBox?.width).toBe(136);
     expect(processingBox?.height).toBe(22);
+    expect(processingBox!.x).toBeGreaterThanOrEqual(24);
+    expect(processingBox!.y).toBeGreaterThanOrEqual(24);
+    expect(processingBox!.x + processingBox!.width).toBeLessThanOrEqual(190 - 24);
+    expect(processingBox!.y + processingBox!.height).toBeLessThanOrEqual(76 - 24);
+    await page.screenshot({ path: testInfo.outputPath('aurora-processing.png'), omitBackground: true });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    expect(await aurora.evaluate((node) => node.getAnimations({ subtree: true }).length)).toBe(0);
+    for (const node of await aurora.locator('*').all()) {
+      await expect(node).toHaveCSS('animation-name', 'none');
+      await expect(node).toHaveCSS('transition-duration', '0s');
+      await expect(node).toHaveCSS('will-change', 'auto');
+    }
+    await expect(page.locator('.hud-transcribing')).toHaveCSS('animation-name', 'hud-breathe');
+    await expect(page.locator('.hud-transcribing i')).toHaveCSS('animation-name', 'none');
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await expect(aurora.locator('.hud-aurora__flow').first()).toHaveCSS('animation-name', 'hud-aurora-flow');
+    await expect(page.locator('.hud-transcribing')).toHaveCSS('animation-name', 'hud-pulse');
+    await continuity.dispose();
     await page.setViewportSize({ width: 248, height: 40 });
     for (const [waveform, result, text] of [
       ['result-copied', 'copied', `Copied. Press ${pasteModifier} V to paste`],

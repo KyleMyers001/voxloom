@@ -62,7 +62,7 @@ export function OverlayWaveformView({ levels, waveform, result = null, mac = isM
         </div>
       ) : (
         <div className="recording recording--overlay" data-waveform={waveform}>
-          {(waveform === 'silent' || waveform === 'speaking') && <AuroraListeningEffect energy={energy} />}
+          <AuroraListeningEffect energy={energy} />
           {waveform === 'processing'
             ? <div aria-hidden="true" className="hud-transcribing"><i /></div>
             : <Waveform levels={displayLevels} waveform={waveform} />}
