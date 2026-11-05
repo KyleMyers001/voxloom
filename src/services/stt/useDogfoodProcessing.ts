@@ -121,21 +121,19 @@ export function useDogfoodProcessing({
     announce('Transcribing…');
     try {
       const modelId = cancellation.modelId ?? await ensureModel();
-      if (cancellation.cancelled && !cancellation.preparation) return;
-      // A prepared request must receive stopped PCM even on cancellation: native
-      // consumes the handle before refusing the cancelled request. Do not retain
-      // that PCM behind an obsolete, potentially stalled start-binding lookup.
+      // A cancelled run stops here; `finally` releases the prepared request and
+      // its stopped PCM (native discards the buffer).
+      if (cancellation.cancelled) return;
+      // Abort (cancel or supersede) stops waiting on a stalled start-binding
+      // lookup, so a prepared request's stopped PCM is never held behind it.
       const binding = cancellation.preparation
         ? Promise.race([startBinding, new Promise<null>((resolve) => {
           stopWaitingForBinding = () => resolve(null);
           processing.signal.addEventListener('abort', stopWaitingForBinding, { once: true });
         })])
         : startBinding;
-      const pasteBinding = cancellation.cancelled ? null : (await binding) ?? null;
-      if (cancellation.cancelled) {
-        if (!cancellation.preparation) return;
-        await cancellation.preparation.cancel().catch(() => {});
-      }
+      const pasteBinding = (await binding) ?? null;
+      if (cancellation.cancelled) return;
       const dogfood = optionsRef.current.dogfood ?? dogfoodTranscribeAndCopy;
       const result = await dogfood({
         audio,

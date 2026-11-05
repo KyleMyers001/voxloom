@@ -73,14 +73,11 @@ describe('Parakeet recording sessions', () => {
     expect(copy).not.toHaveBeenCalled();
     expect(result.current.phase).toBe('cancelled');
   });
-  it('drains stopped PCM through the cancelled request even when the start binding lookup is still pending', async () => {
+  it('releases stopped PCM for the cancelled request even when the start binding lookup is still pending', async () => {
     const store = createMockSttModelStore();
     await store.download('parakeet-tdt-0.6b-v3');
-    invoke.mockImplementation((command: string) => {
-      if (command === 'delivery_paste_binding') return new Promise(() => {});
-      if (command === 'stt_transcribe') return Promise.reject({ code: 'cancelled', message: 'request cancelled' });
-      return Promise.resolve();
-    });
+    invoke.mockImplementation((command: string) => command === 'delivery_paste_binding'
+      ? new Promise(() => {}) : Promise.resolve());
     const mic = capture({ kind: 'idle' });
     const history = vi.fn();
     const copy = vi.fn();
@@ -90,8 +87,8 @@ describe('Parakeet recording sessions', () => {
     rerender({ state: { kind: 'stopped', audio } });
     await waitFor(() => expect(result.current.phase).toBe('transcribing'));
     act(() => result.current.cancel());
-    await waitFor(() => expect(invoke).toHaveBeenCalledWith('stt_transcribe', expect.objectContaining({ requestId, bufferId: audio.id })));
-    expect(invoke.mock.calls.findIndex(([c]) => c === 'stt_cancel')).toBeLessThan(invoke.mock.calls.findIndex(([c]) => c === 'stt_transcribe'));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('stt_release', { requestId, bufferId: audio.id }));
+    expect(invoke.mock.calls.filter(([c]) => c === 'stt_transcribe')).toHaveLength(0);
     expect(history).not.toHaveBeenCalled();
     expect(copy).not.toHaveBeenCalled();
     expect(result.current.phase).toBe('cancelled');
