@@ -7,7 +7,7 @@ use crate::stt::{
     parakeet_catalog::{self, ParakeetFile, ParakeetModelSpec},
 };
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
@@ -26,6 +26,19 @@ impl Drop for Stage {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
     }
+}
+
+/// Download leftovers a quit or crash can orphan: `.{id}.staging-*` (before
+/// `Stage::drop` runs) and `.{id}.previous-*` (before the backup is removed).
+const LEFTOVER_KINDS: [&str; 2] = ["staging-", "previous-"];
+
+/// Remove one entry without following symlinks: a symlink or file is unlinked.
+fn remove_entry(path: &Path) {
+    let _ = match fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_dir() => fs::remove_dir_all(path),
+        Ok(_) => fs::remove_file(path),
+        Err(_) => return,
+    };
 }
 
 fn fetch_error(error: FetchError) -> SttErrorDto {
@@ -139,7 +152,6 @@ impl ModelStore {
                 }
                 return Err(fetch_error(FetchError::Io(String::new())));
             }
-            // Prior sets are intentionally retained, never silently repaired/deleted.
             if verified.verdict(spec, &dest) != Some(true) {
                 let _ = fs::rename(&dest, &stage.0);
                 if prior {
@@ -156,6 +168,11 @@ impl ModelStore {
                 .insert(spec.id, verified);
             *inflight = None;
             drop(inflight);
+            // The verified replacement is published; the prior set is no longer
+            // needed. Failure paths above restore it instead.
+            if prior {
+                remove_entry(&backup);
+            }
             on_progress(DownloadProgressDto {
                 model_id: spec.id.to_owned(),
                 bytes_received: spec.size_bytes,
@@ -174,6 +191,33 @@ impl ModelStore {
             *inflight = None;
         }
         result
+    }
+    /// Startup sweep of orphaned download leftovers for catalog ids (exact
+    /// `.{id}.staging-` / `.{id}.previous-` prefixes only). Holding the download
+    /// slot skips the sweep while a download is in flight and keeps one from
+    /// claiming a stage mid-sweep.
+    pub(super) fn remove_parakeet_leftovers(&self) {
+        let inflight = self.inflight.lock().unwrap();
+        if inflight.is_some() {
+            return;
+        }
+        let Ok(entries) = fs::read_dir(&self.root) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            let leftover = parakeet_catalog::CATALOG.iter().any(|spec| {
+                LEFTOVER_KINDS
+                    .iter()
+                    .any(|kind| name.starts_with(&format!(".{}.{kind}", spec.id)))
+            });
+            if leftover {
+                remove_entry(&entry.path());
+            }
+        }
     }
     pub(super) fn parakeet_info(&self, spec: &ParakeetModelSpec) -> ModelInfoDto {
         let supported = parakeet_catalog::is_supported();

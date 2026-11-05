@@ -21,6 +21,9 @@ impl ModelStore {
         let _ = self.this.set(Arc::downgrade(self));
         let store = Arc::clone(self);
         std::thread::spawn(move || {
+            // Before verification: a quit or crash mid-download can orphan
+            // ~470 MB Parakeet staging/backup directories in the model root.
+            store.remove_parakeet_leftovers();
             for spec in catalog::CATALOG {
                 if store.model_path(spec).is_file()
                     && store.known_verdict(spec).is_none()

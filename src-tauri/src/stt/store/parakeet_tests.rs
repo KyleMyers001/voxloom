@@ -403,39 +403,116 @@ fn parakeet_cancel_or_corrupt_download_cleans_only_new_staging_and_preserves_pri
     }
 }
 
+fn leftovers(dir: &std::path::Path) -> Vec<String> {
+    fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.contains("staging") || name.contains("previous"))
+        .collect()
+}
+
 #[test]
-fn parakeet_explicit_replacement_retains_prior_directory_and_idle_cancel_keeps_new_set() {
+fn parakeet_replacement_removes_prior_backup_after_success_and_keeps_set_on_failure() {
     let (store, dir) = temp_store("parakeet-replace");
     let (spec, bodies) = fixture(1);
     fs::create_dir_all(dir.join(spec.id)).unwrap();
-    fs::write(dir.join(spec.id).join("prior"), b"retained").unwrap();
-    store
-        .download_parakeet_spec(
+    fs::write(dir.join(spec.id).join("prior"), b"replaced").unwrap();
+    let download = |corrupt: bool| {
+        store.download_parakeet_spec(
             &test_agent(),
             &spec,
             |file| {
-                serve_bytes(
-                    bodies[spec.files.iter().position(|f| f.path == file.path).unwrap()].clone(),
-                    None,
-                )
+                let i = spec.files.iter().position(|f| f.path == file.path).unwrap();
+                let body = if corrupt && i == 1 {
+                    vec![b'x'; bodies[i].len()]
+                } else {
+                    bodies[i].clone()
+                };
+                serve_bytes(body, None)
             },
             |_| {},
         )
-        .unwrap();
-    let prior = fs::read_dir(&dir)
-        .unwrap()
-        .find_map(|e| {
-            let e = e.unwrap();
-            e.file_name()
-                .to_string_lossy()
-                .contains("previous")
-                .then(|| e.path())
-        })
-        .expect("prior set must be retained");
-    assert_eq!(fs::read(prior.join("prior")).unwrap(), b"retained");
+    };
+    download(false).unwrap();
+    assert!(!dir.join(spec.id).join("prior").exists());
+    assert_eq!(
+        leftovers(&dir),
+        Vec::<String>::new(),
+        "a verified replacement must not retain the prior set as a hidden backup"
+    );
     store.cancel(spec.id).unwrap();
     assert_available_assets_and_platform_resolution(&store, &spec);
+    // A failed re-download leaves the published set in place and nothing hidden.
+    assert_eq!(download(true).unwrap_err().code, "download-corrupted");
+    assert_eq!(leftovers(&dir), Vec::<String>::new());
+    assert_available_assets_and_platform_resolution(&store, &spec);
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn parakeet_startup_removes_orphaned_staging_and_backups_but_nothing_else() {
+    let (store, dir) = temp_store("parakeet-leftovers");
+    let live = pc::CATALOG[0].id;
+    let outside = temp_store("parakeet-leftovers-outside").1;
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("keep"), b"symlink target").unwrap();
+    let orphans: Vec<String> = pc::CATALOG
+        .iter()
+        .flat_map(|spec| {
+            [
+                format!(".{}.staging-123-0", spec.id),
+                format!(".{}.previous-123-0", spec.id),
+            ]
+        })
+        .collect();
+    for orphan in &orphans {
+        fs::create_dir_all(dir.join(orphan).join("Encoder.mlmodelc")).unwrap();
+        fs::write(dir.join(orphan).join("Encoder.mlmodelc/weight.bin"), b"x").unwrap();
+    }
+    let symlinked = format!(".{live}.previous-9-9");
+    std::os::unix::fs::symlink(&outside, dir.join(&symlinked)).unwrap();
+    let kept = [
+        live.to_owned(),
+        format!("{live}.staging-1"),
+        format!(".{live}.staging"),
+        format!(".{live}x.staging-1"),
+        ".parakeet-unknown.previous-1".to_owned(),
+        "ggml-base.en.bin".to_owned(),
+    ];
+    for name in &kept {
+        fs::create_dir_all(dir.join(name)).unwrap();
+        fs::write(dir.join(name).join("keep"), b"keep").unwrap();
+    }
+    // An in-flight download owns its stage: the sweep is skipped entirely.
+    *store.inflight.lock().unwrap() = Some((
+        "other".to_owned(),
+        super::Inflight {
+            cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        },
+    ));
+    store.remove_parakeet_leftovers();
+    assert!(orphans.iter().all(|orphan| dir.join(orphan).is_dir()));
+    *store.inflight.lock().unwrap() = None;
+
+    let store = std::sync::Arc::new(store);
+    store.spawn_verify_existing(|| {}).join().unwrap();
+    for orphan in &orphans {
+        assert!(
+            fs::symlink_metadata(dir.join(orphan)).is_err(),
+            "{orphan} remains"
+        );
+    }
+    assert!(fs::symlink_metadata(dir.join(&symlinked)).is_err());
+    assert_eq!(fs::read(outside.join("keep")).unwrap(), b"symlink target");
+    for name in &kept {
+        assert_eq!(
+            fs::read(dir.join(name).join("keep")).unwrap(),
+            b"keep",
+            "{name}"
+        );
+    }
+    fs::remove_dir_all(dir).unwrap();
+    fs::remove_dir_all(outside).unwrap();
 }
 
 #[test]
