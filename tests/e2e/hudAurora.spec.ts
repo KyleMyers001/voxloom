@@ -120,40 +120,46 @@ test('Aurora immediately stops new animations and transitions when Reduce Motion
   await expect(aurora.locator('.hud-aurora__flow').first()).toHaveCSS('animation-name', 'hud-aurora-flow');
 });
 
-test('Aurora unmounts for processing and every result while the existing live region remains', async ({ page }) => {
-  await openOverlay(page);
-  const status = page.getByRole('status');
-  await status.evaluate((node) => node.setAttribute('data-original-status', 'true'));
-  await emit(page, 'overlay:waveform', { waveform: 'processing' });
-  await expect(page.locator('.hud-aurora')).toHaveCount(0);
-  await expect(page.locator('.hud-transcribing')).toHaveCount(1);
-  await expect(status).toHaveText('Transcribing');
-  await expect(page.locator('.hud-transcribing')).toHaveCSS('animation-name', 'hud-pulse');
-  const processingBox = await page.locator('.recording--overlay').boundingBox();
-  expect(processingBox?.width).toBe(136);
-  expect(processingBox?.height).toBe(22);
-  await page.setViewportSize({ width: 248, height: 40 });
-  for (const [waveform, result, text] of [
-    ['result-copied', 'copied', 'Copied. Press Command V to paste'],
-    ['result-unverified', 'maybe-copied', 'May have been inserted; also copied. If it\'s missing, press Command V to paste.'],
-    ['result-failed', 'insert-failed', 'Couldn’t insert'],
-    ['result-failed', 'transcribe-failed', 'Couldn’t transcribe'],
-  ] as const) {
-    await emit(page, 'overlay:waveform', { result, waveform });
+for (const platform of ['MacIntel', 'Linux x86_64']) {
+  test(`Aurora unmounts for processing and every result while the existing live region remains (${platform})`, async ({ page }) => {
+    const pasteModifier = platform === 'MacIntel' ? 'Command' : 'Control';
+    await page.addInitScript((value) => {
+      Object.defineProperty(navigator, 'platform', { value, configurable: true });
+    }, platform);
+    await openOverlay(page);
+    const status = page.getByRole('status');
+    await status.evaluate((node) => node.setAttribute('data-original-status', 'true'));
+    await emit(page, 'overlay:waveform', { waveform: 'processing' });
     await expect(page.locator('.hud-aurora')).toHaveCount(0);
-    await expect(page.locator('.hud-transcribing')).toHaveCount(0);
-    await expect(status).toHaveAttribute('data-original-status', 'true');
-    await expect(status).toHaveText(text);
-    await expect(page.locator('[role="status"]')).toHaveCount(1);
-    const box = await page.locator('.hud-result').boundingBox();
-    expect(box!.x).toBeGreaterThanOrEqual(4);
-    expect(box!.x + box!.width).toBeLessThanOrEqual(244);
-    expect(box!.y).toBeGreaterThanOrEqual(0);
-    expect(box!.y + box!.height).toBeLessThanOrEqual(40);
-  }
-  await page.setViewportSize({ width: 190, height: 76 });
-  await emit(page, 'overlay:waveform', { waveform: 'silent' });
-  await expect(page.locator('.hud-aurora')).toHaveCount(1);
-  await expect(status).toHaveText('');
-  await expect(page.locator('.hud-aurora')).toHaveCSS('--aurora-energy', '0');
-});
+    await expect(page.locator('.hud-transcribing')).toHaveCount(1);
+    await expect(status).toHaveText('Transcribing');
+    await expect(page.locator('.hud-transcribing')).toHaveCSS('animation-name', 'hud-pulse');
+    const processingBox = await page.locator('.recording--overlay').boundingBox();
+    expect(processingBox?.width).toBe(136);
+    expect(processingBox?.height).toBe(22);
+    await page.setViewportSize({ width: 248, height: 40 });
+    for (const [waveform, result, text] of [
+      ['result-copied', 'copied', `Copied. Press ${pasteModifier} V to paste`],
+      ['result-unverified', 'maybe-copied', `May have been inserted; also copied. If it's missing, press ${pasteModifier} V to paste.`],
+      ['result-failed', 'insert-failed', 'Couldn’t insert'],
+      ['result-failed', 'transcribe-failed', 'Couldn’t transcribe'],
+    ] as const) {
+      await emit(page, 'overlay:waveform', { result, waveform });
+      await expect(page.locator('.hud-aurora')).toHaveCount(0);
+      await expect(page.locator('.hud-transcribing')).toHaveCount(0);
+      await expect(status).toHaveAttribute('data-original-status', 'true');
+      await expect(status).toHaveText(text);
+      await expect(page.locator('[role="status"]')).toHaveCount(1);
+      const box = await page.locator('.hud-result').boundingBox();
+      expect(box!.x).toBeGreaterThanOrEqual(4);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(244);
+      expect(box!.y).toBeGreaterThanOrEqual(0);
+      expect(box!.y + box!.height).toBeLessThanOrEqual(40);
+    }
+    await page.setViewportSize({ width: 190, height: 76 });
+    await emit(page, 'overlay:waveform', { waveform: 'silent' });
+    await expect(page.locator('.hud-aurora')).toHaveCount(1);
+    await expect(status).toHaveText('');
+    await expect(page.locator('.hud-aurora')).toHaveCSS('--aurora-energy', '0');
+  });
+}
