@@ -571,3 +571,39 @@ fn pending_transcription_is_claimed_only_once() {
     release.send(()).unwrap();
     wait(|| rt.idle());
 }
+/// The capture resampler is windowed-sinc without clamping, so loud in-range
+/// input can overshoot full scale. Parakeet must still transcribe it, and the
+/// worker (strict like Swift's Wire.samples) must only ever see [-1, 1].
+#[test]
+fn resampler_overshoot_on_loud_audio_is_clamped_and_transcribed() {
+    let path = fixture("load=read()\nr=load['requestId']\nsend(dict(protocolVersion=1,op='ready',requestId=r))\nh=read()\nn=h['sampleCount']\ns=struct.unpack('<%df'%n,readn(n*4))\nassert all(-1.0<=x<=1.0 for x in s) and max(s)==1.0 and min(s)==-1.0\nsend(dict(protocolVersion=1,op='result',requestId=r,text='loud',rawText='loud',language=None,dropped=None))");
+    let rt = ParakeetRuntime::new(path);
+    for native_rate in [44_100u32, 48_000] {
+        let period = native_rate as usize / 440;
+        let square: Vec<f32> = (0..native_rate as usize)
+            .map(|i| if (i % period) < period / 2 { 0.9 } else { -0.9 })
+            .collect();
+        let mut downmixer = crate::capture::resample::Downmixer::new(native_rate).unwrap();
+        let mut pcm = downmixer.process(&square).unwrap();
+        pcm.extend(downmixer.flush().unwrap());
+        let peak = pcm.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+        assert!(
+            peak > 1.0,
+            "{native_rate} Hz resampled peak {peak} does not overshoot"
+        );
+        let id = format!("loud-{native_rate}");
+        prepare(&rt, &id).unwrap();
+        let out = rt
+            .transcribe(
+                rt.epoch(),
+                &id,
+                "model",
+                pcm,
+                16000,
+                &SpeechFilterConfig::default(),
+            )
+            .unwrap_or_else(|error| panic!("{native_rate} Hz: {}", error.code));
+        assert_eq!(out.text, "loud");
+        wait(|| rt.idle());
+    }
+}

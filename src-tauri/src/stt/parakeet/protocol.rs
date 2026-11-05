@@ -2,6 +2,14 @@ use crate::stt::{engine::TranscriptDto, error::SttErrorDto};
 use serde_json::Value;
 pub const MAX_CONTROL: usize = 65_536;
 pub const MAX_SAMPLES: usize = 1_920_000;
+/// The capture resampler (windowed sinc, unclamped) can overshoot full scale on
+/// loud in-range input. Clamp finite samples so the strict worker accepts them;
+/// NaN and infinities are left for `validate_pcm` to reject.
+pub fn clamp_pcm(samples: &mut [f32]) {
+    for sample in samples.iter_mut().filter(|s| s.is_finite()) {
+        *sample = sample.clamp(-1.0, 1.0);
+    }
+}
 pub fn validate_pcm(samples: &[f32], rate: u32) -> Result<(), SttErrorDto> {
     if rate != 16_000
         || samples.is_empty()
@@ -85,6 +93,21 @@ mod tests {
             );
         }
         validate_pcm(&[-1.0, 0.0, 1.0], 16000).unwrap();
+    }
+    #[test]
+    fn clamp_pcm_bounds_resampler_overshoot_but_keeps_nonfinite_invalid() {
+        let mut samples = vec![1.068, -1.056, 0.5];
+        clamp_pcm(&mut samples);
+        assert_eq!(samples, vec![1.0, -1.0, 0.5]);
+        validate_pcm(&samples, 16000).unwrap();
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let mut samples = vec![1.068, bad];
+            clamp_pcm(&mut samples);
+            assert_eq!(
+                validate_pcm(&samples, 16000).unwrap_err().code,
+                "unsupported-audio"
+            );
+        }
     }
     #[test]
     fn result_validates_identity_schema_and_language_without_whisper_cleanup() {

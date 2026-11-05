@@ -207,7 +207,7 @@ impl ParakeetRuntime {
         epoch: u64,
         id: &str,
         model: &str,
-        pcm: Vec<f32>,
+        mut pcm: Vec<f32>,
         rate: u32,
         cfg: &SpeechFilterConfig,
     ) -> Output {
@@ -228,6 +228,7 @@ impl ParakeetRuntime {
                 "Request model is immutable",
             ));
         }
+        protocol::clamp_pcm(&mut pcm);
         if let Err(error) = protocol::validate_pcm(&pcm, rate) {
             self.cancel(epoch, id)?;
             return Err(error);
