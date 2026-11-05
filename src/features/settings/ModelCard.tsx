@@ -35,7 +35,7 @@ export function ModelCard({ model, selected, progress, failure, onSelect, onDown
         <input checked={selected} disabled={unsupported} name="stt-model" onChange={onSelect} type="radio" value={model.id} />
         <span>
           <strong>{model.label}</strong>
-          <span className="stt-model-id"><span>{model.id}</span> · <span className="stt-model-size">{model.sizeBytes > 0 ? mb(model.sizeBytes) : 'Size available on download'}</span></span>
+          <span className="stt-model-id"><span>{model.id}</span> · <span className="stt-model-size">{mb(model.sizeBytes)}</span></span>
         </span>
       </label>
       {unsupported ? <Badge status="failed">Unavailable</Badge> : <Badge status={status} />}
