@@ -1,4 +1,5 @@
 use super::tests::{serve_bytes, temp_store, test_agent};
+use super::ModelStore;
 use sha2::{Digest, Sha256};
 use std::fs;
 
@@ -28,6 +29,33 @@ fn fixture(version: usize) -> (pc::ParakeetModelSpec, Vec<Vec<u8>>) {
         },
         bodies,
     )
+}
+
+// Asset verification is platform-independent; runtime resolution is not.
+fn assert_verified_assets_and_platform_resolution(
+    store: &ModelStore,
+    spec: &pc::ParakeetModelSpec,
+) {
+    let info = store.parakeet_info(spec);
+    assert_eq!(info.status, "available");
+    assert!(store.models_dir().join(spec.id).is_dir());
+    assert_eq!(info.failure_reason, None);
+    assert_eq!(info.supported, pc::is_supported());
+    if pc::is_supported() {
+        assert_eq!(info.unavailable_reason, None);
+        assert_eq!(
+            store.parakeet_resolved(spec).unwrap(),
+            store.models_dir().join(spec.id)
+        );
+    } else {
+        assert_eq!(
+            info.unavailable_reason.as_deref(),
+            Some(pc::UNAVAILABLE_REASON)
+        );
+        let error = store.parakeet_resolved(spec).unwrap_err();
+        assert_eq!(error.code, "engine-unavailable");
+        assert_eq!(error.message, pc::UNAVAILABLE_REASON);
+    }
 }
 
 #[test]
@@ -61,8 +89,7 @@ fn parakeet_complete_download_is_staged_verified_and_reports_aggregate_progress(
             .all(|p| p[0].bytes_received <= p[1].bytes_received));
         assert_eq!(progress.last().unwrap().ratio, 1.0);
         assert_eq!(progress.last().unwrap().bytes_received, spec.size_bytes);
-        assert_eq!(store.parakeet_info(&spec).status, "available");
-        assert_eq!(store.parakeet_resolved(&spec).unwrap(), dir.join(spec.id));
+        assert_verified_assets_and_platform_resolution(&store, &spec);
         assert!(fs::read_dir(&dir).unwrap().all(|entry| !entry
             .unwrap()
             .file_name()
@@ -115,13 +142,19 @@ fn parakeet_existing_complete_set_requires_full_verification_and_detects_hash_da
         "missing",
         "unverified is never available"
     );
-    assert!(store.parakeet_resolved(&spec).is_err());
+    assert_eq!(
+        store.parakeet_resolved(&spec).unwrap_err().code,
+        if pc::is_supported() {
+            "model-missing"
+        } else {
+            "engine-unavailable"
+        }
+    );
     assert!(
         store.verify_parakeet_existing(&spec),
         "all production hashes must be checked"
     );
-    assert_eq!(store.parakeet_info(&spec).status, "available");
-    assert!(store.parakeet_resolved(&spec).is_ok());
+    assert_verified_assets_and_platform_resolution(&store, &spec);
     fs::write(
         dir.join(spec.id).join(spec.files[0].path),
         vec![b'x'; bodies[0].len()],
@@ -131,7 +164,14 @@ fn parakeet_existing_complete_set_requires_full_verification_and_detects_hash_da
     let info = store.parakeet_info(&spec);
     assert_eq!(info.status, "failed");
     assert_eq!(info.failure_reason.as_deref(), Some("damaged"));
-    assert!(store.parakeet_resolved(&spec).is_err());
+    assert_eq!(
+        store.parakeet_resolved(&spec).unwrap_err().code,
+        if pc::is_supported() {
+            "model-missing"
+        } else {
+            "engine-unavailable"
+        }
+    );
     assert!(
         dir.join(spec.id).exists(),
         "never repair/delete existing damaged sets"
@@ -394,8 +434,7 @@ fn parakeet_explicit_replacement_retains_prior_directory_and_idle_cancel_keeps_n
         .expect("prior set must be retained");
     assert_eq!(fs::read(prior.join("prior")).unwrap(), b"retained");
     store.cancel(spec.id).unwrap();
-    assert_eq!(store.parakeet_info(&spec).status, "available");
-    assert!(store.parakeet_resolved(&spec).unwrap().is_dir());
+    assert_verified_assets_and_platform_resolution(&store, &spec);
     fs::remove_dir_all(dir).unwrap();
 }
 
