@@ -1,5 +1,4 @@
 import type { CSSProperties } from 'react';
-import '../styles/hud-aurora.css';
 
 /** Decorative light only; the existing waveform remains the accessible meter. */
 export function AuroraListeningEffect({ energy }: { energy: number }) {

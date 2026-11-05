@@ -1,8 +1,7 @@
 /* Aurora: fixed capsule geometry; only two small gradient layers translate.
-   Masks, blur radius and colors stay static. Level metadata changes opacity only. */
-.recording--overlay[data-waveform="silent"],
-.recording--overlay[data-waveform="speaking"],
-.recording.recording--overlay[data-waveform="processing"] {
+   Masks, blur radius and colors stay static. Level metadata changes opacity only.
+   Imported after features.css: the rim replaces the pill border in every state. */
+.recording--overlay {
   background: #0e0e14;
   border-color: transparent;
 }
@@ -53,7 +52,7 @@
 
 .hud-aurora__flow {
   animation: hud-aurora-flow 8s linear infinite;
-  background: linear-gradient(90deg, #b6ff3c, #3cf0ff, #b6ff3c, #3cf0ff, #b6ff3c);
+  background: linear-gradient(90deg, var(--brand-a), var(--brand-b), var(--brand-a), var(--brand-b), var(--brand-a));
   display: block;
   height: 100%;
   left: 0;
