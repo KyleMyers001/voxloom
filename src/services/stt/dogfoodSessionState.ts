@@ -3,12 +3,16 @@
 /// values across awaits.
 
 import { useRef } from 'react';
+import type { PreparedSttSession } from './prepareSession';
 import type { PasteBinding } from '../delivery';
 import type { CancelScope } from '../shortcut/cancelScope';
 
 /** Per-session lease: cancellation discards results, unlike supersession. */
 export interface Cancellation {
   cancelled: boolean;
+  modelId?: string;
+  preparation?: PreparedSttSession;
+  transcribing?: boolean;
   scope?: CancelScope;
   settle?: () => Promise<void>;
 }

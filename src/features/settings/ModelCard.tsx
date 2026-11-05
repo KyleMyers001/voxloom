@@ -19,6 +19,7 @@ type Props = {
 
 /** One model card (M3–M5, M7): radio + label, id · size, status badge, and its action. */
 export function ModelCard({ model, selected, progress, failure, onSelect, onDownload, onCancel, downloadLocked = false }: Props) {
+  const unsupported = model.supported === false;
   const downloading = model.status === 'downloading' || progress !== null;
   const failed = !downloading && model.status !== 'available' && (failure !== undefined || model.status === 'failed');
   const status: BadgeStatus = downloading ? 'downloading' : failed ? 'failed' : model.status === 'available' ? 'available' : 'missing';
@@ -31,15 +32,15 @@ export function ModelCard({ model, selected, progress, failure, onSelect, onDown
   return (
     <li className="stt-model-row" data-selected={selected || undefined}>
       <label className="stt-model-select">
-        <input checked={selected} name="stt-model" onChange={onSelect} type="radio" value={model.id} />
+        <input checked={selected} disabled={unsupported} name="stt-model" onChange={onSelect} type="radio" value={model.id} />
         <span>
           <strong>{model.label}</strong>
-          <span className="stt-model-id"><span>{model.id}</span> · <span className="stt-model-size">{mb(model.sizeBytes)}</span></span>
+          <span className="stt-model-id"><span>{model.id}</span> · <span className="stt-model-size">{model.sizeBytes > 0 ? mb(model.sizeBytes) : 'Size available on download'}</span></span>
         </span>
       </label>
-      <Badge status={status} />
+      {unsupported ? <Badge status="failed">Unavailable</Badge> : <Badge status={status} />}
       <div className="stt-model-actions">
-        {downloading ? (
+        {unsupported ? null : downloading ? (
           <>
             <ProgressBar
               caption={progress ? `${pct}% · ${Math.round(progress.bytesReceived / 1_000_000)} of ${mb(total)}` : 'Downloading…'}
@@ -61,7 +62,8 @@ export function ModelCard({ model, selected, progress, failure, onSelect, onDown
           </button>
         )}
       </div>
-      {failed && (
+      {unsupported && <p className="empty-note stt-model-error">{model.unavailableReason ?? 'This model is unavailable on this Mac.'}</p>}
+      {!unsupported && failed && (
         <p className="form-error stt-model-error" id={errorId} role="alert">
           {failure ?? 'Model file is damaged. Download it again.'}
         </p>
@@ -72,7 +74,7 @@ export function ModelCard({ model, selected, progress, failure, onSelect, onDown
       {selected && (
         <p className="empty-note stt-model-selected-note">
           Selected for transcription
-          {model.status !== 'available' ? ' · download required before dictating' : ''}
+          {unsupported ? ' · unavailable on this Mac' : model.status !== 'available' ? ' · download required before dictating' : ''}
         </p>
       )}
     </li>

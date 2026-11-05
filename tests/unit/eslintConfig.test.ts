@@ -9,6 +9,12 @@ async function lint(source: string) {
 }
 
 describe('TypeScript style lint', () => {
+  it('ignores generated cleanup and Swift helper build artifacts', async () => {
+    expect(await eslint.isPathIgnored('src-tauri/worker/target/release/build/compiler_depend.ts')).toBe(true);
+    expect(await eslint.isPathIgnored('src-tauri/parakeet-worker/.build/checkouts/dependency/example.ts')).toBe(true);
+    expect(await eslint.isPathIgnored('src/services/stt/prepareSession.ts')).toBe(false);
+  });
+
   it('rejects double-quoted ordinary strings', async () => {
     expect(await lint('export const value = "hello";')).toContain('@stylistic/quotes');
   });

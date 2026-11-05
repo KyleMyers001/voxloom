@@ -8,6 +8,7 @@ import type { UseCaptureStateResult } from '../capture/useCaptureState';
 import type { PasteBinding } from '../delivery';
 import { beginCancelScope } from '../shortcut/cancelScope';
 import { errorText } from './dogfoodModel';
+import { prepareSttSession } from './prepareSession';
 import type { DogfoodOrigin, DogfoodPhase, DogfoodViewActions } from './dogfoodPhase';
 import type { Cancellation, DogfoodLiveSession } from './dogfoodSessionState';
 
@@ -17,7 +18,8 @@ export interface DogfoodSessionInput {
   /** Disposes the native cleanup engine on unmount. */
   disposeNativeEngine: () => void;
   /** Resolves the selected model id or throws `model-missing`. */
-  ensureModel: () => Promise<string>;
+  ensureModel: (modelId?: string) => Promise<string>;
+  selectedModelId: () => string;
   /** Looks up the paste terminal in front right now (never rejects). */
   lookupPasteBinding: () => Promise<PasteBinding | null>;
   live: DogfoodLiveSession;
@@ -32,7 +34,7 @@ export interface DogfoodSessionControls {
 }
 
 export function useDogfoodSession({
-  actions, capture, disposeNativeEngine, ensureModel, live, lookupPasteBinding, phase, preferredDeviceId,
+  actions, capture, disposeNativeEngine, ensureModel, live, lookupPasteBinding, phase, preferredDeviceId, selectedModelId,
 }: DogfoodSessionInput): DogfoodSessionControls {
   const captureRef = useRef(capture);
   captureRef.current = capture;
@@ -50,12 +52,14 @@ export function useDogfoodSession({
     // only terminal a paste may later go to.
     live.pasteBinding = lookupPasteBinding();
     const previous = live.cancellation;
+    // Superseded STT still owns its request and must finish for History.
+    if (!previous.transcribing) void previous.preparation?.release().catch(() => {});
     const retire = previous.settle?.() ?? previous.scope?.dispose().catch(() => {});
     const retirement = retire || live.retirement
       ? Promise.all([live.retirement, retire]).then(() => {})
       : undefined;
     live.retirement = retirement;
-    const cancellation: Cancellation = { cancelled: false };
+    const cancellation: Cancellation = { cancelled: false, modelId: selectedModelId() };
     live.cancellation = cancellation;
     live.active = true;
     setScopeReady(false);
@@ -89,7 +93,11 @@ export function useDogfoodSession({
       if (cancellation.scope) setScopeReady(true);
       // Show the HUD (waveform) even when Escape-cancel could not arm.
       setHudReady(true);
-      await ensureModel();
+      const modelId = await ensureModel(cancellation.modelId);
+      if (superseded()) return;
+      cancellation.preparation = prepareSttSession(modelId);
+      // This acknowledges admission only; native loading overlaps microphone capture.
+      await cancellation.preparation?.admission;
     } catch (error: unknown) {
       if (superseded()) return;
       setPhase('error');
@@ -128,7 +136,7 @@ export function useDogfoodSession({
       setPhase('error');
       announce(errorText(error));
     }
-  }, [actions, capture, ensureModel, live, lookupPasteBinding, preferredDeviceId]);
+  }, [actions, capture, ensureModel, live, lookupPasteBinding, preferredDeviceId, selectedModelId]);
 
   const stop = useCallback(async () => {
     const session = live.session;
@@ -147,6 +155,7 @@ export function useDogfoodSession({
     setScopeReady(false);
     setHudReady(false);
     live.cancellation.cancelled = true;
+    void live.cancellation.preparation?.cancel().catch(() => {});
     // After `cancelled` is set, so the cleanup stage reports a user cancel.
     live.processing?.abort();
     void live.cancellation.scope?.dispose().catch(() => {});
@@ -168,6 +177,7 @@ export function useDogfoodSession({
   useEffect(() => () => {
     live.active = false;
     live.cancellation.cancelled = true;
+    void live.cancellation.preparation?.cancel().catch(() => {});
     live.processing?.abort();
     disposeNativeEngine();
     live.session += 1;
@@ -189,6 +199,7 @@ export function useDogfoodSession({
   useEffect(() => {
     if (phase === 'success' || phase === 'error' || phase === 'cancelled') {
       live.active = false;
+      if (!live.cancellation.transcribing) void live.cancellation.preparation?.release().catch(() => {});
       void live.cancellation.scope?.dispose().catch(() => {});
     }
   }, [live, phase]);

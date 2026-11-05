@@ -29,6 +29,12 @@ impl ModelStore {
                     on_verdict();
                 }
             }
+            for spec in crate::stt::parakeet_catalog::CATALOG {
+                if std::fs::symlink_metadata(store.root.join(spec.id)).is_ok() {
+                    store.verify_parakeet_existing(spec);
+                    on_verdict();
+                }
+            }
         })
     }
 

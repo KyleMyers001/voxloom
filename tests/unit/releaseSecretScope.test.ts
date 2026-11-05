@@ -93,7 +93,7 @@ beforeEach(() => {
       join(dir, 'scripts/release', name),
     );
   }
-  for (const stub of ['bin/npm', 'scripts/release/build-worker.sh']) {
+  for (const stub of ['bin/npm', 'scripts/release/build-worker.sh', 'scripts/release/build-parakeet-worker.sh']) {
     writeFileSync(join(dir, stub), RECORD_STUB);
     chmodSync(join(dir, stub), 0o755);
   }
@@ -111,6 +111,7 @@ describe('build-macos.sh (compile phase)', () => {
     expect(r.status).toBe(0);
     expect(r.seen).toBe(
       '== build-worker.sh universal-apple-darwin\n' +
+        '== build-parakeet-worker.sh universal-apple-darwin\n' +
         '== npm run tauri -- build --no-bundle --target ' +
         'universal-apple-darwin --config src-tauri/tauri.worker.conf.json ' +
         '-- --locked --features whisper\n' +

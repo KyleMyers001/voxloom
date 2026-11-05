@@ -72,6 +72,9 @@
     "allow-stt-download-model",
     "allow-stt-list-models",
     "allow-stt-model-status",
-    "allow-stt-transcribe"
+    "allow-stt-transcribe",
+    "allow-stt-prepare",
+    "allow-stt-cancel",
+    "allow-stt-release"
   ]
 }

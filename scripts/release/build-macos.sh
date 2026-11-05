@@ -20,6 +20,7 @@ done < <(compgen -e | grep '^APPLE_' || true)
 # merge config, not tauri.conf.json, because tauri-build fails any cargo
 # build that lacks the sidecar file and the dev/test builds never make one.
 bash scripts/release/build-worker.sh "$TARGET"
+bash scripts/release/build-parakeet-worker.sh "$TARGET"
 npm run tauri -- build --no-bundle --target "$TARGET" \
   --config src-tauri/tauri.worker.conf.json -- --locked --features whisper
 

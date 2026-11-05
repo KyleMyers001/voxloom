@@ -51,6 +51,9 @@ const COMMANDS: &[&str] = &[
     "stt_list_models",
     "stt_model_status",
     "stt_transcribe",
+    "stt_prepare",
+    "stt_cancel",
+    "stt_release",
 ];
 
 fn main() {

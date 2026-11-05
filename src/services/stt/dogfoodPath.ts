@@ -70,6 +70,8 @@ export interface DogfoodTranscribeOptions {
    * Resolved via `resolveTranscriptionModelId` — never auto-downloaded.
    */
   modelId: string;
+  /** Prepared native Parakeet session identity; no PCM crosses the renderer. */
+  requestId?: string;
   /** Optional engine factory (tests); defaults to env whisper/mock. */
   createEngine?: (modelId: string) => SttEngine;
   /** Injectable delivery platform (tests). */
@@ -126,7 +128,9 @@ export async function dogfoodTranscribeAndCopy(
   options: DogfoodTranscribeOptions,
 ): Promise<DogfoodResult> {
   const modelId = resolveTranscriptionModelId(options.modelId);
-  const engine = (options.createEngine ?? createSttEngine)(modelId);
+  const engine = options.createEngine
+    ? options.createEngine(modelId)
+    : createSttEngine(modelId, options.requestId);
   const handle = audioHandleFromCapture(options.audio);
   const sttTranscript = withDictionary(
     await engine.transcribe(handle),

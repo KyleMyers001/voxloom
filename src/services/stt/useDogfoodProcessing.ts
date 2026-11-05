@@ -72,6 +72,7 @@ export function useDogfoodProcessing({
     const session = live.session;
     const startBinding = live.pasteBinding;
     const cancellation = live.cancellation;
+    cancellation.transcribing = true;
     const current = () => session === live.session && !cancellation.cancelled;
     const platform = platformRef.current;
     let settlement: Promise<void> | undefined;
@@ -94,6 +95,7 @@ export function useDogfoodProcessing({
     cancellation.settle = settleCancellation;
     const processing = new AbortController();
     live.processing = processing;
+    let stopWaitingForBinding: (() => void) | undefined;
     // Snapshot at stop: a settings change mid-dictation applies to the next
     // one. The same style goes to cleanup and onto the History row.
     const latest = optionsRef.current;
@@ -118,10 +120,22 @@ export function useDogfoodProcessing({
     setPhase('transcribing');
     announce('Transcribing…');
     try {
-      const modelId = await ensureModel();
-      if (cancellation.cancelled) return;
-      const pasteBinding = (await startBinding) ?? null;
-      if (cancellation.cancelled) return;
+      const modelId = cancellation.modelId ?? await ensureModel();
+      if (cancellation.cancelled && !cancellation.preparation) return;
+      // A prepared request must receive stopped PCM even on cancellation: native
+      // consumes the handle before refusing the cancelled request. Do not retain
+      // that PCM behind an obsolete, potentially stalled start-binding lookup.
+      const binding = cancellation.preparation
+        ? Promise.race([startBinding, new Promise<null>((resolve) => {
+          stopWaitingForBinding = () => resolve(null);
+          processing.signal.addEventListener('abort', stopWaitingForBinding, { once: true });
+        })])
+        : startBinding;
+      const pasteBinding = cancellation.cancelled ? null : (await binding) ?? null;
+      if (cancellation.cancelled) {
+        if (!cancellation.preparation) return;
+        await cancellation.preparation.cancel().catch(() => {});
+      }
       const dogfood = optionsRef.current.dogfood ?? dogfoodTranscribeAndCopy;
       const result = await dogfood({
         audio,
@@ -139,6 +153,7 @@ export function useDogfoodProcessing({
           return target;
         },
         modelId,
+        requestId: cancellation.preparation?.requestId,
       });
       // A stale successful path skips beforeDelivery, but still needs the
       // saved cancellation decision before publishing History or a toast.
@@ -184,6 +199,8 @@ export function useDogfoodProcessing({
         toast(errorText(error));
       }
     } finally {
+      if (stopWaitingForBinding) processing.signal.removeEventListener('abort', stopWaitingForBinding);
+      await cancellation.preparation?.release(audio.id).catch(() => {});
       if (live.processing === processing) live.processing = null;
       await cancellation.scope?.dispose().catch(() => {});
     }
@@ -210,6 +227,11 @@ export function useDogfoodProcessing({
     }
     if (live.handledAudioId === audio.id) return;
     live.handledAudioId = audio.id;
+    if (live.cancellation.cancelled) {
+      // A late stopped event must dispose PCM without restarting cancelled STT.
+      void live.cancellation.preparation?.release(audio.id).catch(() => {});
+      return;
+    }
     void runDogfood(audio);
   }, [actions, captureState, live, runDogfood]);
 

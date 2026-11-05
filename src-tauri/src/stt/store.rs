@@ -18,6 +18,8 @@ use super::error::SttErrorDto;
 
 mod download;
 mod existing;
+mod parakeet;
+mod parakeet_verify;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,6 +32,9 @@ pub struct ModelInfoDto {
     /// (couldn't open) or `read-failed` (opened, couldn't read).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure_reason: Option<String>,
+    pub supported: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unavailable_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -58,6 +63,8 @@ pub struct ModelStore {
     this: OnceLock<Weak<ModelStore>>,
     /// Tells Settings → Models to re-list (`stt:models-changed`); set by lib.rs.
     on_models_changed: Mutex<Option<ModelsChanged>>,
+    parakeet_verified: Mutex<std::collections::HashMap<&'static str, parakeet_verify::CheckedSet>>,
+    parakeet_pending: Mutex<std::collections::HashSet<&'static str>>,
 }
 
 /// Callback that asks the UI to re-list models.
@@ -74,6 +81,8 @@ impl ModelStore {
             reverifying: Mutex::new(Default::default()),
             this: OnceLock::new(),
             on_models_changed: Mutex::new(None),
+            parakeet_verified: Mutex::new(Default::default()),
+            parakeet_pending: Mutex::new(Default::default()),
         }
     }
 
@@ -108,11 +117,20 @@ impl ModelStore {
         catalog::CATALOG
             .iter()
             .map(|spec| self.info_for(spec))
+            .chain(
+                super::parakeet_catalog::CATALOG
+                    .iter()
+                    .map(|spec| self.parakeet_info(spec)),
+            )
             .collect()
     }
 
     pub fn status(&self, model_id: &str) -> Option<ModelInfoDto> {
-        catalog::find(model_id).map(|spec| self.info_for(spec))
+        catalog::find(model_id)
+            .map(|spec| self.info_for(spec))
+            .or_else(|| {
+                super::parakeet_catalog::find(model_id).map(|spec| self.parakeet_info(spec))
+            })
     }
 
     fn info_for(&self, spec: &ModelSpec) -> ModelInfoDto {
@@ -141,6 +159,8 @@ impl ModelStore {
             size_bytes: spec.size_bytes,
             status: status.to_owned(),
             failure_reason: failure_reason.map(str::to_owned),
+            supported: true,
+            unavailable_reason: None,
         }
     }
 
@@ -149,6 +169,9 @@ impl ModelStore {
     }
 
     pub fn resolved_path(&self, model_id: &str) -> Result<PathBuf, SttErrorDto> {
+        if let Some(spec) = super::parakeet_catalog::find(model_id) {
+            return self.parakeet_resolved(spec);
+        }
         let spec = catalog::find(model_id).ok_or_else(|| {
             SttErrorDto::new("model-missing", format!("Unknown model: {model_id}"))
         })?;
@@ -184,6 +207,8 @@ impl ModelStore {
 
 #[cfg(test)]
 mod integrity_tests;
+#[cfg(test)]
+mod parakeet_tests;
 #[cfg(test)]
 mod recovery_tests;
 #[cfg(test)]

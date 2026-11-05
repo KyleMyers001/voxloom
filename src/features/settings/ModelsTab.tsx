@@ -19,7 +19,7 @@ export function ModelsTab() {
   return (
     <>
       <p className="empty-note">
-        Local Whisper models. Nothing downloads until you click Download,
+        Local Whisper and Parakeet models. Nothing downloads until you click Download,
         not when the app opens or Settings is shown.
       </p>
       {stt.loading && <p className="empty-note" role="status">Loading model list…</p>}

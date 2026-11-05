@@ -26,6 +26,8 @@ export function CaptureTab({ cleanupModelStore, onSetup }: {
 }) {
   const { settings, state } = useApp();
   const isNative = isTauriEnv();
+  const multilingual = state.settings.transcriptionModel === 'parakeet-tdt-0.6b-v3';
+  const nativeLanguage = multilingual ? 'Automatic (Multilingual)' : 'English (US)';
   const update = settings.update;
   const cleanupModel = useCleanupModel(isNative, cleanupModelStore);
   // Same gate as the Local cleanup block: no cleanup wording while it's hidden.
@@ -55,15 +57,15 @@ export function CaptureTab({ cleanupModelStore, onSetup }: {
       <div className="frow">
         <span className="frow__label">
           <label htmlFor="settings-language">Language</label>
-          {isNative && <span className="tag">English-first</span>}
+          {isNative && <span className="tag">{multilingual ? 'Multilingual' : 'English-first'}</span>}
         </span>
         <select
           disabled={isNative}
           id="settings-language"
           onChange={(event) => update({ key: 'language', value: event.target.value })}
-          value={isNative ? 'English (US)' : state.settings.language}
+          value={isNative ? nativeLanguage : state.settings.language}
         >
-          <option>English (US)</option>
+          {isNative && multilingual ? <option>Automatic (Multilingual)</option> : <option>English (US)</option>}
           {!isNative && <option>English (UK)</option>}
         </select>
       </div>

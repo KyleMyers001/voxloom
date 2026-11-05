@@ -3,8 +3,9 @@
 **Download:** [latest release](https://github.com/KyleMyers001/voxloom/releases/latest) (macOS; see [Releases](#releases)).
 
 The Tauri desktop shell captures real microphone audio, can transcribe it
-locally using an explicitly downloaded Whisper model (`--features whisper`),
-and attempts to insert text into the transcription-completion-time macOS target. When
+locally using explicitly downloaded Whisper models (`--features whisper`) or
+optional Parakeet Core ML models on supported Macs, and attempts to insert text
+into the transcription-completion-time macOS target. When
 insertion is unsafe or unavailable it can Copy instead, if clipboard fallback
 is enabled; results report Inserted, Copied, Failed, or Unverified (Terminal
 events posted without input-buffer verification). The configured global
@@ -214,6 +215,48 @@ Real whisper.cpp linkage is **opt-in** on macOS:
 ```sh
 brew install cmake   # once
 npm run tauri -- dev -- --features whisper
+```
+
+## Optional Parakeet models (Core ML)
+
+Settings → Models also offers **Parakeet v2 (English)** and **Parakeet v3
+(Multilingual)**. Parakeet requires Apple Silicon and macOS 14 or newer;
+Whisper and the parent app retain their existing macOS 13.1/Intel path.
+The Whisper default is unchanged. Selecting an unsupported or missing model
+never silently switches engines or downloads files.
+
+Each Parakeet model is an explicit, pinned download of a complete Core ML
+component set and vocabulary. The native store verifies the files before
+publishing the set. Transcription uses FluidAudio's local-only loader, not
+its automatic download/recovery APIs. NVIDIA created the models; FluidInference
+provides the Core ML conversions and Swift runtime. Attribution and runtime
+license text are bundled under `licenses/parakeet-worker/`.
+
+Model preparation starts when dictation activates, independently of microphone
+capture. The selected model is frozen for that recording. Completed audio waits
+for readiness if needed, then follows the existing dictionary, optional cleanup,
+History and completion-time delivery flow. Audio does not pass through the UI.
+The initial implementation uses a fresh helper for each recording and releases
+it afterward; this is not a claim that all system-owned Core ML caches vanish
+immediately. Parakeet work is bounded separately from Whisper work, and a busy
+engine reports an error instead of spawning unbounded workers. Multilingual
+recognition does not imply translation or a selectable language-hint setting.
+
+For development, build the native helper with a Swift 6.2+ toolchain before
+using Parakeet (substitute the target architecture as appropriate):
+
+```sh
+bash scripts/release/build-parakeet-worker.sh aarch64-apple-darwin
+npm run tauri -- dev -- --features whisper
+```
+
+For a complete release-style build, use `scripts/release/build-macos.sh` and
+`scripts/release/bundle-macos.sh`; the merge configuration includes both native
+workers and their notices. A plain Whisper-only Tauri build does not bundle
+these sidecars. Helper tests use mocked loaders and do not download weights:
+
+```sh
+swift test --package-path src-tauri/parakeet-worker --disable-automatic-resolution
 ```
 
 ## Local cleanup model

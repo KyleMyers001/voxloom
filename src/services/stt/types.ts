@@ -23,8 +23,8 @@ export type TranscriptDropReason =
 export interface Transcript {
   /** Set when BUS-23 cleanup dropped the whole output. */
   readonly dropped?: TranscriptDropReason | null;
-  readonly language?: string;
-  /** Whisper output before BUS-23 cleanup (debugging / History). */
+  readonly language?: string | null;
+  /** Engine output before speech filtering (debugging / History). */
   readonly rawText?: string;
   /** Cleaned text used for insert and Copy. */
   readonly text: string;
@@ -41,6 +41,9 @@ export interface SttModelInfo {
   readonly label: string;
   readonly sizeBytes: number;
   readonly status: SttModelStatus;
+  /** Omitted by older/native mocks means supported. */
+  readonly supported?: boolean;
+  readonly unavailableReason?: string;
   /**
    * BUS-76: UI-only. Shown as downloading because a mount started it, but the
    * backend has not registered it yet, so it cannot be canceled.
@@ -61,11 +64,14 @@ export interface SttDownloadProgress {
 }
 
 export type SttErrorCode =
+  | 'busy'
+  | 'timeout'
   | 'cancelled'
   | 'download-failed'
   | 'download-corrupted'
   | 'model-missing'
   | 'transcribe-failed'
+  | 'unsupported-platform'
   | 'unsupported-audio'
   | 'engine-unavailable';
 
@@ -92,5 +98,17 @@ export const STT_MODEL_CATALOG: readonly Omit<SttModelInfo, 'status'>[] = [
     id: 'whisper-base.en',
     label: 'Whisper Base (English)',
     sizeBytes: 148_000_000,
+  },
+  {
+    id: 'parakeet-tdt-0.6b-v2',
+    label: 'Parakeet v2 (English)',
+    // Sum of the pinned native manifest; covered by the catalog parity test.
+    sizeBytes: 464_413_247,
+  },
+  {
+    id: 'parakeet-tdt-0.6b-v3',
+    label: 'Parakeet v3 (Multilingual)',
+    // Sum of the pinned native manifest; covered by the catalog parity test.
+    sizeBytes: 483_105_645,
   },
 ] as const;
