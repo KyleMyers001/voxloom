@@ -37,7 +37,7 @@ fn the_corpus_loses_no_last_word_and_gains_no_hallucination() {
     let (mut dropped, mut halluc) = (vec![], vec![]);
     for clip in corpus() {
         let out = pipeline::transcribe_filtered(&clip.samples, 16_000, &cfg, &NoVad, |pcm| {
-            engine::transcribe_pcm(&model, pcm, 16_000, &cfg)
+            engine::transcribe_pcm(&model, pcm, 16_000, &cfg, &[])
         })
         .unwrap();
         println!("{}: {:?}", clip.name, out.raw_text);

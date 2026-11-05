@@ -52,22 +52,24 @@ pub fn validate_pcm(samples: &[f32], sample_rate_hz: u32) -> Result<(), SttError
 
 /// Transcribe mono f32 PCM at `sample_rate_hz` using the model at `model_path`.
 /// `decode` supplies the whisper.cpp non-speech parameters (BUS-23).
+/// `dictionary` (BUS-138) becomes Whisper's initial prompt; empty sets none.
 pub fn transcribe_pcm(
     model_path: &std::path::Path,
     samples: &[f32],
     sample_rate_hz: u32,
     decode: &SpeechFilterConfig,
+    dictionary: &[String],
 ) -> Result<TranscriptDto, SttErrorDto> {
     validate_pcm(samples, sample_rate_hz)?;
 
     #[cfg(feature = "whisper")]
     {
-        transcribe_with_whisper(model_path, samples, decode)
+        transcribe_with_whisper(model_path, samples, decode, dictionary)
     }
 
     #[cfg(not(feature = "whisper"))]
     {
-        let _ = (model_path, decode);
+        let _ = (model_path, decode, dictionary);
         Err(SttErrorDto::new(
             "engine-unavailable",
             "Native whisper.cpp is not linked in this build. On macOS rebuild \
@@ -83,7 +85,9 @@ fn transcribe_with_whisper(
     model_path: &std::path::Path,
     samples: &[f32],
     decode: &SpeechFilterConfig,
+    dictionary: &[String],
 ) -> Result<TranscriptDto, SttErrorDto> {
+    use super::initial_prompt::build_initial_prompt;
     use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
     let ctx = WhisperContext::new_with_params(
@@ -107,6 +111,15 @@ fn transcribe_with_whisper(
     params.set_suppress_non_speech_tokens(decode.suppress_non_speech_tokens);
     params.set_suppress_blank(decode.suppress_blank);
     params.set_no_speech_thold(decode.no_speech_thold);
+    // A token is at least one byte, so this capacity cannot overflow (whisper-rs
+    // reads a "too many tokens" result as a length).
+    let prompt = build_initial_prompt(dictionary, |text| {
+        ctx.tokenize(text, text.len() + 1)
+            .map_or(usize::MAX, |tokens| tokens.len())
+    });
+    if let Some(prompt) = &prompt {
+        params.set_initial_prompt(prompt);
+    }
 
     state
         .full(params, samples)
@@ -145,6 +158,7 @@ mod tests {
             &[],
             16_000,
             &SpeechFilterConfig::default(),
+            &[],
         )
         .unwrap_err();
         assert_eq!(err.code, "unsupported-audio");
@@ -157,6 +171,7 @@ mod tests {
             &[0.1],
             8_000,
             &SpeechFilterConfig::default(),
+            &[],
         )
         .unwrap_err();
         assert_eq!(err.code, "unsupported-audio");
@@ -170,6 +185,7 @@ mod tests {
             &[0.1, 0.2],
             16_000,
             &SpeechFilterConfig::default(),
+            &[],
         )
         .unwrap_err();
         assert_eq!(err.code, "engine-unavailable");

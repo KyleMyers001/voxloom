@@ -12,11 +12,18 @@ pub mod engine;
 pub mod error;
 pub mod filter_config;
 pub mod gate;
+pub mod initial_prompt;
 pub mod parakeet;
 pub mod parakeet_catalog;
 pub mod pipeline;
 pub mod store;
 pub mod trim;
+pub mod with_dictionary;
+
+#[cfg(test)]
+mod with_dictionary_eval_tests;
+#[cfg(test)]
+mod with_dictionary_silence_tests;
 
 use std::sync::Arc;
 
@@ -161,6 +168,8 @@ pub fn stt_release<R: Runtime>(
 
 /// Consume a stopped PCM handle and transcribe off-thread. Parakeet joins the
 /// exact admitted recording; Whisper retains its existing independent pipeline.
+/// The dictionary supplies Whisper's initial prompt for non-quiet clips only;
+/// Parakeet does not use Whisper prompt hints.
 #[tauri::command]
 pub async fn stt_transcribe<R: Runtime>(
     webview: Webview<R>,
@@ -169,6 +178,7 @@ pub async fn stt_transcribe<R: Runtime>(
     buffer_id: String,
     filter: Option<SpeechFilterConfig>,
     request_id: Option<String>,
+    dictionary: Option<Vec<String>>,
 ) -> Result<TranscriptDto, String> {
     require_main(&webview)?;
     let state = state.inner().clone();
@@ -178,6 +188,7 @@ pub async fn stt_transcribe<R: Runtime>(
     let buffers = state.buffers.clone();
     let error_buffer = buffer_id.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let dictionary = dictionary.unwrap_or_default();
         transcribe_buffer(
             &state,
             epoch,
@@ -185,6 +196,7 @@ pub async fn stt_transcribe<R: Runtime>(
             &buffer_id,
             filter,
             request_id.as_deref(),
+            &dictionary,
         )
         .map_err(err_string)
     })
@@ -202,6 +214,7 @@ fn transcribe_buffer(
     buffer_id: &str,
     filter: Option<SpeechFilterConfig>,
     request_id: Option<&str>,
+    dictionary: &[String],
 ) -> Result<TranscriptDto, SttErrorDto> {
     let out = (|| {
         // Consume first: stopped audio must not survive a failed model lookup,
@@ -228,10 +241,8 @@ fn transcribe_buffer(
                 .transcribe(epoch, id, model_id, samples, rate, &cfg);
         }
         let path = state.models.resolved_path(model_id)?;
-        // Whisper's engine, filters and concurrency remain unchanged.
-        pipeline::transcribe_filtered(&samples, rate, &cfg, &gate::NoVad, |pcm| {
-            engine::transcribe_pcm(&path, pcm, rate, &cfg)
-        })
+        // Preserve main's quiet-clip prompt suppression and Whisper filtering.
+        with_dictionary::transcribe_with_dictionary(&path, &samples, rate, &cfg, dictionary)
     })();
     if out.is_err() {
         if let Some(id) = request_id {
@@ -267,7 +278,7 @@ mod tests {
             let mut pcm = CaptureBuffer::new();
             pcm.push(&[0.25]).unwrap();
             let handle = state.buffers.deposit(pcm);
-            assert!(transcribe_buffer(&state, 0, model, &handle.id, None, request).is_err());
+            assert!(transcribe_buffer(&state, 0, model, &handle.id, None, request, &[]).is_err());
             assert_eq!(
                 state.buffers.len(),
                 0,
@@ -275,9 +286,17 @@ mod tests {
             );
         }
         assert_eq!(
-            transcribe_buffer(&state, 0, "parakeet-tdt-0.6b-v3", "absent", None, Some("r"))
-                .unwrap_err()
-                .code,
+            transcribe_buffer(
+                &state,
+                0,
+                "parakeet-tdt-0.6b-v3",
+                "absent",
+                None,
+                Some("r"),
+                &[]
+            )
+            .unwrap_err()
+            .code,
             "unsupported-audio"
         );
     }
@@ -309,7 +328,8 @@ mod tests {
 
         let path = models.resolved_path("whisper-tiny.en").unwrap();
         let (samples, rate) = buffers.take(&handle.id).unwrap();
-        let result = engine::transcribe_pcm(&path, &samples, rate, &SpeechFilterConfig::default());
+        let result =
+            engine::transcribe_pcm(&path, &samples, rate, &SpeechFilterConfig::default(), &[]);
 
         #[cfg(not(feature = "whisper"))]
         {

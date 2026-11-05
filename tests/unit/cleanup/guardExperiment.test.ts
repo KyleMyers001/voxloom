@@ -105,12 +105,17 @@ describe('guard experiment fixtures', () => {
         .map(({ cand }) => cand)).toEqual([]);
     });
 
-    it('accepts exactly the two StupidJargon fixes of the 20 good ones', () => {
+    // #122 accepted two of the 20. PR B2 (BUS-138) also accepts the three
+    // that a split or a near-miss dictionary word hears as (box loom → Voxloom).
+    it('accepts exactly the five dictionary fixes of the 20 good ones', () => {
       const good = stress.filter(({ label }) => label === 'good');
       expect(good.filter((item) => validateCleanupOutput(item.raw, item.cand, snapshotDictionary(item.dict)))
         .map(({ cand }) => cand)).toEqual([
         'You\'re making a lot of progress on the StupidJargon app.',
         'You are making a lot of progress on the StupidJargon app.',
+        'Voxloom should open when I press the shortcut.',
+        'The Voxloom installer crashed on launch.',
+        'The StupidJargon app needs a new icon.',
       ]);
     });
   });

@@ -5,6 +5,7 @@ import { Icon } from '../../components/Icon';
 import { IconButton } from '../../components/IconButton';
 import { SearchField } from '../../components/SearchField';
 import { WordDialog } from './WordDialog';
+import { sortedWords } from '../../services/dictionary/format';
 
 const count = (n: number) => `${n} ${n === 1 ? 'word' : 'words'}`;
 
@@ -14,7 +15,7 @@ export function Dictionary() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const opener = useRef<HTMLElement | null>(null);
-  const words = state.words.filter((word) =>
+  const words = sortedWords(state.words).filter((word) =>
     word.toLowerCase().includes(query.toLowerCase())
   );
 

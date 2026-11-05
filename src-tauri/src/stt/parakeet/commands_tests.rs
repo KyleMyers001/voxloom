@@ -199,6 +199,43 @@ fn actual_transcribe_command_joins_prepared_worker_and_returns_existing_dto() {
     assert_eq!(state.buffers.len(), 0);
 }
 #[test]
+fn actual_transcribe_preserves_parakeet_routing_with_dictionary_hints() {
+    for dictionary in [
+        serde_json::json!([]),
+        serde_json::json!(["Voxloom", "Notion"]),
+    ] {
+        let app = app();
+        let main = window(&app, "main");
+        let state = app.state::<SttState>();
+        let model = "parakeet-tdt-0.6b-v3";
+        state
+            .parakeet
+            .prepare(
+                state.parakeet.epoch(),
+                "dictionary-ready",
+                model,
+                "v3",
+                || Ok("/model".into()),
+            )
+            .unwrap();
+        let value = invoke(
+            &main,
+            "stt_transcribe",
+            serde_json::json!({
+                "modelId": model, "bufferId": deposit(&state),
+                "requestId": "dictionary-ready", "dictionary": dictionary
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({"text":"[Music] Thank you.","rawText":"[Music] Thank you.","language":null,"dropped":null})
+        );
+        assert_eq!(state.buffers.len(), 0);
+    }
+}
+
+#[test]
 fn actual_prepare_ack_is_admission_not_model_readiness_and_failure_drains_pcm() {
     let app = app();
     let main = window(&app, "main");

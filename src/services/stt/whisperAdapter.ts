@@ -8,7 +8,11 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
-import type { SttEngine, SttModelStore } from './contracts';
+import type {
+  SttEngine,
+  SttModelStore,
+  SttTranscribeOptions,
+} from './contracts';
 import {
   SttError,
   type AudioBufferHandle,
@@ -201,7 +205,10 @@ export function createWhisperSttEngine(
 
   return {
     modelId,
-    async transcribe(audio: AudioBufferHandle): Promise<Transcript> {
+    async transcribe(
+      audio: AudioBufferHandle,
+      hints?: SttTranscribeOptions,
+    ): Promise<Transcript> {
       if (!audio.id) {
         throw new SttError(
           'unsupported-audio',
@@ -220,6 +227,9 @@ export function createWhisperSttEngine(
           bufferId: audio.id,
           ...(options.requestId ? { requestId: options.requestId } : {}),
           filter: options.filter ?? null,
+          // BUS-138: sent only when there are words, so an empty dictionary
+          // is the same call as before (no prompt).
+          ...(hints?.dictionary?.length ? { dictionary: hints.dictionary } : {}),
         });
       } catch (error) {
         throw mapNativeError(error);

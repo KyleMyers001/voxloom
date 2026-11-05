@@ -44,7 +44,7 @@ describe('createCleanupProvenance', () => {
     });
 
     // New runs must be distinguishable from the real-model JSON-echo baseline.
-    expect(provenance.promptVersion).toBe('cleanup-v2');
+    expect(provenance.promptVersion).toBe('cleanup-v3');
     expect(provenance.dictionaryDigest).toMatch(/^[a-f0-9]{64}$/);
     expect(provenance.modelDigest).toBe(CLEANUP_MODEL_SHA256);
     expect(provenance.status).toBe('cleaned');

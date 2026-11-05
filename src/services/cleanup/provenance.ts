@@ -1,6 +1,6 @@
-import { CLEANUP_PROMPT_VERSION } from '../../domain/cleanup';
+import { CLEANUP_PROMPT_VERSION, cleanupPromptVersion } from '../../domain/cleanup';
 import type { CleanupProvenance } from '../../domain/types';
-import { digestDictionary } from './prompt';
+import { digestDictionary, snapshotDictionary } from './prompt';
 import {
   type CleanupOutcome,
   type CleanupSnapshot,
@@ -21,7 +21,8 @@ export async function createCleanupProvenance(
     dictionaryVersion: 1,
     modelDigest: attempt?.modelDigest ?? null,
     modelId: attempt?.modelId ?? null,
-    promptVersion: CLEANUP_PROMPT_VERSION,
+    // The version of the prompt this dictionary produces (BUS-188).
+    promptVersion: cleanupPromptVersion(snapshotDictionary(snapshot.dictionary)),
     reason: fallback ? outcome.reason : null,
     status: fallback ? 'fallback' : cleaned ? 'cleaned' : 'skipped',
   };

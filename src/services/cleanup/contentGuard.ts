@@ -1,3 +1,5 @@
+import { dictionarySpellings, findSpan } from './dictionarySpans';
+import { NEGATION, PRONOUNS } from './guardedWords';
 import { tokenize, type Token } from './tokens';
 
 // Conservative lexical checks, not a semantic-equivalence guarantee.
@@ -7,15 +9,6 @@ import { tokenize, type Token } from './tokens';
 export const CLEANUP_MIN_CONTENT_RETENTION = 1;
 export const CLEANUP_MIN_CANDIDATE_COVERAGE = 1;
 
-const NEGATION = new Set([
-  'not', 'no', 'never', 'without', 'ne', 'pas', 'jamais', 'ni', 'non',
-]);
-const PRONOUNS = new Set([
-  'i', 'we', 'you', 'he', 'she', 'they', 'it', 'me', 'us', 'him', 'her',
-  'them', 'my', 'our', 'your', 'his', 'their', 'mine', 'ours', 'yours',
-  'theirs', 'je', 'tu', 'nous', 'vous', 'il', 'elle', 'ils', 'elles',
-]);
-
 function words(text: string): string[] {
   return tokenize(text).map(({ word }) => word);
 }
@@ -24,87 +17,51 @@ export function sameMultiset(left: readonly string[], right: readonly string[]):
   return JSON.stringify([...left].sort()) === JSON.stringify([...right].sort());
 }
 
-function oneEditApart(left: string, right: string): boolean {
-  if (Math.abs(left.length - right.length) > 1) return false;
-  let edits = 0;
-  let i = 0;
-  let j = 0;
-  while (i < left.length && j < right.length) {
-    if (left[i] === right[j]) { i++; j++; continue; }
-    if (++edits > 1) return false;
-    if (left.length >= right.length) i++;
-    if (right.length >= left.length) j++;
-  }
-  return edits + Number(i < left.length || j < right.length) <= 1;
-}
-
-/** A final letter added or removed: notion ↔ notions is an inflection. */
-function differsByFinalLetter(left: string, right: string): boolean {
-  const [short, long] = left.length < right.length ? [left, right] : [right, left];
-  return long.length === short.length + 1 && long.startsWith(short);
-}
-
 export interface SourceWord extends Token {
   /** The exact dictionary spelling when `word` is a repair or a join. */
   canonical?: string;
-  /** The spoken word when `word` is its dictionary repair. */
-  spoken?: string;
-}
-
-/** Lowercased dictionary key → its first exact spelling, as the prompt sends it. */
-function dictionarySpellings(dictionary: readonly string[]): Map<string, string> {
-  const spellings = new Map<string, string>();
-  for (const term of dictionary) {
-    const exact = term.trim().normalize('NFC');
-    const key = exact.toLowerCase();
-    if (/^[\p{L}\p{M}]{5,}$/u.test(key) && !spellings.has(key)) spellings.set(key, exact);
-  }
-  return spellings;
+  /** The spoken words when `word` is their dictionary repair. */
+  spoken?: string[];
+  /** Where each spoken word sits, for a repair of several words (box-loom). */
+  parts?: { end: number; start: number }[];
 }
 
 /**
  * Lowercased tokens with dictionary joins (vox loom → voxloom). With `repair`
- * (source text only), a word of 5+ letters one edit from exactly one
- * dictionary spelling is that spelling: this is the dictionary repair feature
- * (motion → Notion), so the output may keep the spoken word or use the exact
- * spelling. A final letter is an inflection, not a typo, so notions is never
- * repaired to Notion. Output words are never snapped, or `motion` → `nation`
- * would pass. Skippable source words (fillers, articles outside quotations)
- * may be dropped, never swapped.
+ * (source text only), 1 to 3 adjacent words close to one dictionary spelling
+ * are that spelling (motion → Notion, box loom → Voxloom), see
+ * dictionarySpans.ts: this is the dictionary repair feature, so the output may
+ * keep the spoken words or use the exact spelling. Output words are never
+ * snapped, or `motion` → `nation` would pass. Skippable source words
+ * (fillers, articles outside quotations) may be dropped, never swapped.
  */
 export function contentWords(
   text: string,
   dictionary: readonly string[],
   repair = false,
 ): SourceWord[] {
-  const tokens = tokenize(text);
+  const normalized = text.normalize('NFC');
+  const tokens = tokenize(normalized);
   const spellings = dictionarySpellings(dictionary);
   const canonical: SourceWord[] = [];
   for (let i = 0; i < tokens.length; i++) {
     const { continuesWord, end, skippable, start, word } = tokens[i];
-    const next = tokens[i + 1];
-    const joined = word + (next?.word ?? '');
-    if (next && spellings.has(joined)) {
-      // One spoken word that expands to a dictionary word (can't, cannot →
-      // can not) is that word as spoken, not a join that needs its spelling.
-      canonical.push({
-        canonical: next.continuesWord ? undefined : spellings.get(joined),
-        continuesWord: false, end: next.end, skippable: false, start,
-        word: joined,
-      });
-      i++;
+    const span = spellings.size
+      ? findSpan(normalized, tokens, i, spellings, repair) : null;
+    if (!span) {
+      canonical.push({ continuesWord, end, skippable, start, word });
       continue;
     }
-    const matches = repair && word.length >= 5
-      ? [...spellings.keys()].filter((term) => oneEditApart(word, term)
-        && !differsByFinalLetter(word, term))
-      : [];
-    canonical.push(matches.length === 1 && matches[0] !== word
-      ? {
-          canonical: spellings.get(matches[0]), continuesWord, end,
-          skippable: false, spoken: word, start, word: matches[0],
-        }
-      : { continuesWord, end, skippable, start, word });
+    const last = tokens[i + span.length - 1];
+    canonical.push({
+      canonical: span.canonical,
+      continuesWord: span.length === 1 && continuesWord,
+      end: last.end, parts: span.spoken && span.length > 1
+        ? tokens.slice(i, i + span.length).map((part) => ({ end: part.end, start: part.start }))
+        : undefined,
+      skippable: false, spoken: span.spoken, start, word: span.word,
+    });
+    i += span.length - 1;
   }
   return canonical;
 }
@@ -168,12 +125,24 @@ interface OutputWord {
 /**
  * A repaired or joined word written as the dictionary word must use its
  * exact spelling (Voxloom, not voxloom). Keeping the spoken form (Voxlom,
- * vox loom, can't for [cannot]) is always allowed.
+ * vox loom, can't for [cannot]) is always allowed. A repaired span is never
+ * half fixed: a joined output like "Vox loom" for box loom is neither the
+ * spoken words nor the spelling.
  */
 function spelledAsDictionary(source: SourceWord, output: OutputWord): boolean {
   if (!source.canonical || output.word !== source.word) return true;
+  if (source.spoken) return output.surface === source.canonical;
   return output.surface.toLowerCase() !== source.word
     || output.surface === source.canonical;
+}
+
+/** How many output words from `at` stand for `source`: its word or its spoken words. */
+function matchedWords(source: SourceWord, output: OutputWord[], at: number): number {
+  if (output[at] === undefined) return 0;
+  if (output[at].word === source.word) return spelledAsDictionary(source, output[at]) ? 1 : -1;
+  const { spoken } = source;
+  return spoken?.every((word, index) => output[at + index]?.word === word)
+    ? spoken.length : 0;
 }
 
 // The output must be the source in order, minus only skippable source words:
@@ -184,13 +153,12 @@ function coveredInOrder(source: SourceWord[], output: OutputWord[]): boolean {
   let matched = 0;
   let kept = 0;
   for (const sourceWord of source) {
-    const { skippable, spoken, word } = sourceWord;
-    const next = output[matched];
-    if (next !== undefined && (word === next.word || spoken === next.word)) {
-      if (!spelledAsDictionary(sourceWord, next)) return false;
-      matched++;
-      if (!skippable) kept++;
-    } else if (!skippable) {
+    const count = matchedWords(sourceWord, output, matched);
+    if (count < 0) return false;
+    if (count > 0) {
+      matched += count;
+      if (!sourceWord.skippable) kept++;
+    } else if (!sourceWord.skippable) {
       return false;
     }
   }
