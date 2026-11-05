@@ -3,15 +3,14 @@ export const HOLD_MS = 320;
 export const DOUBLE_TAP_MS = 260;
 
 export const OVERLAY_WINDOW_LABEL = 'dictation-overlay';
-/** 24px of transparent halo clearance per side; the visible pill stays 136×22. */
-export const OVERLAY_WIDTH = 190;
-export const OVERLAY_HEIGHT = 76;
-/** Preserve the original pill center: 28 + 28/2 === 4 + 76/2. */
-export const OVERLAY_BOTTOM_MARGIN = 4;
+/**
+ * Listening/processing window: 24px of transparent halo clearance per side
+ * around the 136×22 pill. The margin keeps the pill's original center
+ * (28 + 28/2 === 4 + 76/2).
+ */
+export const OVERLAY_LISTEN_PLACEMENT = { height: 76, marginBottom: 4, width: 190 } as const;
 /** Result HUD ("Copied · ⌘V to paste" / short error) needs a wider window. */
-export const OVERLAY_RESULT_WIDTH = 248;
-export const OVERLAY_RESULT_HEIGHT = 40;
-export const OVERLAY_RESULT_BOTTOM_MARGIN = 28;
+export const OVERLAY_RESULT_PLACEMENT = { height: 40, marginBottom: 28, width: 248 } as const;
 
 /**
  * Post-arm window where Carbon Released is ignored (spurious focus/Released race).

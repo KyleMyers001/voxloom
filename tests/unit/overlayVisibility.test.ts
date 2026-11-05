@@ -5,7 +5,7 @@ import {
 } from '../../src/services/shortcut/overlayVisibility';
 import { createOverlayBridge, overlaySyncPlan } from
   '../../src/services/shortcut/overlayBridge';
-import { OVERLAY_HEIGHT, OVERLAY_WIDTH } from '../../src/services/shortcut/constants';
+import { OVERLAY_LISTEN_PLACEMENT } from '../../src/services/shortcut/constants';
 
 describe('overlay visibility', () => {
   it('is visible only for listening and processing', () => {
@@ -87,7 +87,7 @@ describe('overlay visibility', () => {
     const bridge = createOverlayBridge(api);
     await bridge.sync({ kind: 'listening', runId: 1, waveform: 'silent' }, false, false);
     expect(api.setWaveform).toHaveBeenCalledWith('silent');
-    expect(api.showBottomCenter).toHaveBeenLastCalledWith({ height: OVERLAY_HEIGHT, width: OVERLAY_WIDTH }, false);
+    expect(api.showBottomCenter).toHaveBeenLastCalledWith(OVERLAY_LISTEN_PLACEMENT, false);
   });
 
   it('overlaySyncPlan hides after cancel/error', () => {

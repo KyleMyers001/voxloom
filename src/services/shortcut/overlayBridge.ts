@@ -1,10 +1,5 @@
 import type { DictationState } from '../../domain/types';
-import {
-  OVERLAY_HEIGHT,
-  OVERLAY_RESULT_HEIGHT,
-  OVERLAY_RESULT_WIDTH,
-  OVERLAY_WIDTH,
-} from './constants';
+import { OVERLAY_LISTEN_PLACEMENT, OVERLAY_RESULT_PLACEMENT } from './constants';
 import { createTauriOverlayApi } from './overlayWindowApi';
 import {
   isOverlayVisible,
@@ -27,14 +22,15 @@ export interface OverlayBridge {
   showResult(result: OverlayResult): Promise<void>;
 }
 
-export interface OverlaySize { width: number; height: number }
+/** Window size and its gap above the work area's bottom edge, in logical points. */
+export interface OverlayPlacement { width: number; height: number; marginBottom: number }
 
 export interface OverlayWindowApi {
   ensureCreated(): Promise<void>;
   hide(): Promise<void>;
   isAvailable(): boolean;
   setWaveform(waveform: OverlayWaveform, result?: OverlayResult): Promise<void>;
-  showBottomCenter(size?: OverlaySize, cancellable?: boolean): Promise<void>;
+  showBottomCenter(placement: OverlayPlacement, cancellable?: boolean): Promise<void>;
 }
 
 export interface OverlayTimers {
@@ -46,9 +42,6 @@ const defaultTimers: OverlayTimers = {
   clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
   setTimeout: (fn, ms) => setTimeout(fn, ms),
 };
-
-export const LISTEN_SIZE: OverlaySize = { height: OVERLAY_HEIGHT, width: OVERLAY_WIDTH };
-const RESULT_SIZE: OverlaySize = { height: OVERLAY_RESULT_HEIGHT, width: OVERLAY_RESULT_WIDTH };
 
 /** Pure sync decision used by tests and the live bridge. */
 export function overlaySyncPlan(
@@ -91,11 +84,11 @@ export function createOverlayBridge(
     if (gen !== syncGeneration) return;
     lastWaveform = null;
   };
-  const show = async (gen: number, size: OverlaySize, cancellable = true) => {
+  const show = async (gen: number, placement: OverlayPlacement, cancellable = true) => {
     // Native cancellation/delivery may hide independently of this cache.
     // Reassert visibility; never focus the window.
-    if (cancellable) await windowApi.showBottomCenter(size);
-    else await windowApi.showBottomCenter(size, false);
+    if (cancellable) await windowApi.showBottomCenter(placement);
+    else await windowApi.showBottomCenter(placement, false);
     if (gen !== syncGeneration) return;
   };
   /** Serialize show/hide so a late show cannot outrun a newer hide. */
@@ -131,7 +124,7 @@ export function createOverlayBridge(
               if (gen !== syncGeneration) return;
               lastWaveform = plan.waveform;
             }
-            await show(gen, LISTEN_SIZE, cancellable);
+            await show(gen, OVERLAY_LISTEN_PLACEMENT, cancellable);
           } else {
             // Always hide when not visible so a raced late show cannot stick.
             await hideNow(gen);
@@ -162,7 +155,7 @@ export function createOverlayBridge(
           await windowApi.setWaveform(waveform, result);
           if (gen !== syncGeneration) return;
           lastWaveform = waveform;
-          await show(gen, RESULT_SIZE, false);
+          await show(gen, OVERLAY_RESULT_PLACEMENT, false);
         } catch {
           // non-fatal
         }
