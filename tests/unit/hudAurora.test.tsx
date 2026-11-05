@@ -3,23 +3,16 @@ import { describe, expect, it } from 'vitest';
 import { OverlayWaveformView } from '../../src/overlay/OverlayWaveformView';
 
 describe('Aurora listening decoration', () => {
-  it('uses bounded display history for modest reactive energy, including malformed levels', () => {
+  it('sets reactive energy to the mean of the 24-bar display history', () => {
     const { container, rerender } = render(<OverlayWaveformView levels={[]} waveform="silent" />);
     const energy = () => container.querySelector<HTMLElement>('.hud-aurora')?.style.getPropertyValue('--aurora-energy');
     expect(energy()).toBe('0');
     rerender(<OverlayWaveformView levels={Array<number>(24).fill(0.5)} waveform="speaking" />);
     expect(energy()).toBe('0.5');
-    rerender(<OverlayWaveformView levels={Array<number>(24).fill(9)} waveform="speaking" />);
+    rerender(<OverlayWaveformView levels={[...Array<number>(18).fill(0), ...Array<number>(6).fill(1)]} waveform="speaking" />);
+    expect(energy()).toBe('0.25');
+    rerender(<OverlayWaveformView levels={Array<number>(24).fill(1)} waveform="speaking" />);
     expect(energy()).toBe('1');
-    const malformed = [NaN, Infinity, -Infinity, -1, 9, 0.5];
-    rerender(<OverlayWaveformView levels={malformed} waveform="speaking" />);
-    expect(energy()).toBe('0.0625'); // (1 + .5) / 24 displayed bars; missing bars are silent.
-    expect([...container.querySelectorAll<HTMLElement>('.wave i')].map((bar) => bar.style.getPropertyValue('--h')))
-      .toEqual(['1px', '1px', '1px', '1px', '13px', '7px', ...Array<string>(18).fill('1px')]);
-    expect(container.innerHTML).not.toMatch(/NaN|Infinity/);
-    expect(malformed[4]).toBe(9); // Never mutate the display history supplied by the session.
-    rerender(<OverlayWaveformView levels={[...Array<number>(24).fill(0), 1]} waveform="silent" />);
-    expect(energy()).toBe('0'); // Only the visible 24 bars contribute.
   });
 
   it('retains the listening decoration during processing without replacing its nodes or live region', () => {

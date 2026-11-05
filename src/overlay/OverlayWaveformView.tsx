@@ -38,17 +38,14 @@ const isResult = (w: OverlayWaveform) => w.startsWith('result-');
 
 /**
  * Non-focusable desktop HUD (SPEC § HUD behavior rules). Listening: waveform
- * only. Transcribing: Option A (pulsing, shimmering lime→cyan bar row; slow
- * breathe under Reduce Motion). Results: a brief Copied / maybe-copied / error.
- * One permanent role=status node announces "Transcribing" and results.
+ * inside the decorative Aurora rim and halo, which stay mounted through
+ * transcribing. Transcribing: Option A (pulsing, shimmering lime→cyan bar row;
+ * slow breathe under Reduce Motion). Results: a brief Copied / maybe-copied /
+ * error. One permanent role=status node announces "Transcribing" and results.
  */
 export function OverlayWaveformView({ levels, waveform, result = null, mac = isMacPlatform() }: Props) {
-  // Display metadata only: keep both the bars and decorative light finite and bounded.
-  const displayLevels = Array.from({ length: WAVEFORM_BARS }, (_, index) => {
-    const level = levels[index] ?? 0;
-    return Number.isFinite(level) ? Math.min(1, Math.max(0, level)) : 0;
-  });
-  const energy = displayLevels.reduce((sum, level) => sum + level, 0) / WAVEFORM_BARS;
+  // Levels arrive as 0–1 display levels (OverlayApp applies toDisplayLevel).
+  const energy = levels.reduce((sum, level) => sum + level, 0) / WAVEFORM_BARS;
   const text = isResult(waveform) ? resultText(result, mac) : '';
   const spoken = waveform === 'processing' ? 'Transcribing' : isResult(waveform) ? spokenResultText(result, mac) : '';
   const kind = waveform === 'result-copied' ? 'copied' : waveform === 'result-unverified' ? 'unverified' : 'failed';
@@ -65,7 +62,7 @@ export function OverlayWaveformView({ levels, waveform, result = null, mac = isM
           <AuroraListeningEffect energy={energy} />
           {waveform === 'processing'
             ? <div aria-hidden="true" className="hud-transcribing"><i /></div>
-            : <Waveform levels={displayLevels} waveform={waveform} />}
+            : <Waveform levels={levels} waveform={waveform} />}
         </div>
       )}
     </>
