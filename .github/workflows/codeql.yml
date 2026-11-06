@@ -41,9 +41,11 @@ jobs:
           - language: rust
             build-mode: none
             os: ubuntu-latest
+          # Tracing uses Intel tools; avoid Rosetta while compiling ARM64 sources.
+          # Temporary: review GitHub's Intel deprecation before December 2026.
           - language: swift
             build-mode: manual
-            os: macos-latest
+            os: macos-15-intel
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -52,6 +54,14 @@ jobs:
       - name: Explain preview mode
         if: vars.CODEQL_ADVANCED_SETUP != 'true'
         run: echo '::notice::Preview mode; SARIF is saved as an artifact. Default setup remains responsible for published alerts.'
+
+      # Swift 6.2 is required by Package.swift; Xcode 27 is unsupported by CodeQL.
+      - name: Select the supported Swift toolchain
+        if: matrix.language == 'swift'
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_26.2.app/Contents/Developer
+          swift --version
+          uname -m
 
       # Only download/checkouts are reusable: cached compiler outputs can make
       # SwiftPM skip the compilation CodeQL needs to observe.
@@ -65,20 +75,10 @@ jobs:
             src-tauri/parakeet-worker/.build/repositories
           key: codeql-swift-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src-tauri/parakeet-worker/Package.swift', 'src-tauri/parakeet-worker/Package.resolved') }}
 
-      # Keep package resolution and third-party compilation out of the tracer.
-      # Production coverage is checked before any alerts are published.
+      # Resolve before tracing, but compile all product sources after init.
       - name: Resolve Swift dependencies before tracing
         if: matrix.language == 'swift'
         run: swift package --package-path src-tauri/parakeet-worker --disable-automatic-resolution resolve
-
-      # FluidAudio has no dependency on Voxloom targets. Prebuild only that
-      # pinned external target, never the product or any first-party target.
-      - name: Compile only the third-party Swift dependency
-        if: matrix.language == 'swift'
-        run: >-
-          swift build --package-path src-tauri/parakeet-worker
-          --disable-automatic-resolution --target FluidAudio
-          --arch "$(uname -m)" --jobs 2
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
@@ -86,14 +86,16 @@ jobs:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
 
-      # All first-party production sources are fresh; only FluidAudio is prebuilt.
-      # No release optimization, signing or second architecture is needed here.
-      - name: Build the native Swift helper
+      # ARM64 is deliberate: LocalASR's production implementation is conditional
+      # on arch(arm64). Building for the Intel host would analyze its stub instead.
+      # FluidAudio is compiled under tracing too; no product outputs are cached.
+      - name: Build the Swift helper for Apple Silicon
         if: matrix.language == 'swift'
-        run: >-
-          swift build --package-path src-tauri/parakeet-worker
-          --disable-automatic-resolution --product voxloom-parakeet-worker
-          --arch "$(uname -m)" --jobs 2
+        run: |
+          file "$CODEQL_DIST/swift/tools/osx64/extractor"
+          swift build --package-path src-tauri/parakeet-worker \
+            --disable-automatic-resolution --product voxloom-parakeet-worker \
+            --arch arm64 --jobs 2
 
       - name: Analyze
         uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3

@@ -14,17 +14,21 @@ inside CodeQL tracing, before a large instrumented FluidAudio build.
 Resolving before initialization alone reduced the first trial to 18m59s; traced
 SwiftPM startup and FluidAudio compilation still dominated.
 
-The job now resolves the checked-in dependency versions and builds **only the
-pinned external `FluidAudio` target before CodeQL initializes**. It then freshly
-compiles the native `voxloom-parakeet-worker` debug product under tracing, with
-two build jobs. No Voxloom target is prebuilt. Only downloaded artifacts and
-source checkouts are cached—not `.build` as a whole or compiled targets.
+Prebuilding FluidAudio did not beat that trial and is **not retained**. The job
+resolves checked-in dependencies before initialization, then compiles the helper
+**and FluidAudio under tracing**, with no compiled outputs restored from cache.
+Only downloads and source checkouts are cached.
 
-**Coverage trade-off:** the scan covers Voxloom's production Swift sources, not
-FluidAudio's implementation. Its imported API remains available to the analyzer,
-but cross-library body analysis is no longer performed. Dependency updates remain
-revision-pinned and need review. Ordinary CI still compiles FluidAudio, runs the
-Swift contracts and builds both release architectures.
+The Swift job uses `macos-15-intel` and explicitly selects Xcode 26.2 (Swift 6.2).
+GitHub documents that traced builds on Apple Silicon require Rosetta. Running on
+Intel avoids that translation, while `--arch arm64` still compiles the **real
+Apple Silicon implementation**, not LocalASR's Intel stub. Ordinary CI retains
+its Swift contracts and universal release build.
+
+**Temporary workaround:** GitHub has announced Intel CodeQL deprecation for
+mid-December 2026 and does not support traced Swift scans with Xcode 27 / Swift
+6.4. Reassess the runner/toolchain before December; do not silently move this job
+to `macos-latest`, remove ARM64 compilation, or freeze CodeQL security updates.
 
 After analysis, `scripts/ci/check-swift-codeql-coverage.mjs` checks SARIF extraction
 diagnostics for **every** `.swift` file under the helper's `Sources/` directory.
@@ -40,8 +44,8 @@ workflow runs in **preview mode**: it saves SARIF artifacts but uploads neither
 alerts nor databases. Existing default setup is left enabled and continues
 publishing security results. Preview mode temporarily runs both workflows.
 
-After reviewing the PR's timings, first-party extraction coverage, and the
-third-party coverage trade-off above:
+After reviewing the PR's timings, extraction coverage, and the temporary Intel
+support constraint above:
 
 1. Merge the PR only with Kyle's explicit approval.
 2. In repository **Settings → Advanced Security → CodeQL analysis**, disable the
@@ -60,6 +64,8 @@ limit. Rust analysis remains a separate roughly 10–13-minute baseline even aft
 the Swift bottleneck is reduced.
 
 References:
+- [CodeQL system requirements and Rosetta](https://codeql.github.com/docs/codeql-overview/system-requirements/)
+- [macOS 27 / Xcode 27 restrictions and Intel deprecation](https://github.blog/changelog/2026-10-19-codeql-changes-for-macos-27-xcode-27-and-swift-6-4/)
 - [Swift CodeQL build guidance](https://docs.github.com/en/code-security/reference/code-scanning/codeql/build-options-for-compiled-languages#building-swift)
 - [Editing default setup](https://docs.github.com/en/code-security/code-scanning/managing-your-code-scanning-configuration/editing-your-configuration-of-default-setup)
 - [Original slow Swift job](https://github.com/KyleMyers001/voxloom/actions/runs/42148089473/job/127664346502)

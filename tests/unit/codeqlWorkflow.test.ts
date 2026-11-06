@@ -42,7 +42,7 @@ describe('CodeQL workflow', () => {
       { language: 'javascript-typescript', 'build-mode': 'none', os: 'ubuntu-latest' },
       { language: 'python', 'build-mode': 'none', os: 'ubuntu-latest' },
       { language: 'rust', 'build-mode': 'none', os: 'ubuntu-latest' },
-      { language: 'swift', 'build-mode': 'manual', os: 'macos-latest' },
+      { language: 'swift', 'build-mode': 'manual', os: 'macos-15-intel' },
     ]);
     expect(init.with?.['build-mode']).toBe('${{ matrix.build-mode }}');
     expect(steps.some((step) => step.uses?.includes('/autobuild@'))).toBe(false);
@@ -50,27 +50,26 @@ describe('CodeQL workflow', () => {
 
   it('resolves locked dependencies before tracing, but compiles after initialization', () => {
     const prepare = named('Resolve Swift dependencies before tracing');
-    const build = named('Build the native Swift helper');
+    const build = named('Build the Swift helper for Apple Silicon');
     expect(steps.indexOf(prepare)).toBeLessThan(steps.indexOf(init));
     expect(steps.indexOf(build)).toBeGreaterThan(steps.indexOf(init));
     expect(steps.indexOf(build)).toBeLessThan(steps.indexOf(analyze));
     expect(prepare.run).toContain('--disable-automatic-resolution resolve');
     expect(build.run).toContain('--disable-automatic-resolution');
     expect(build.run).toContain('--product voxloom-parakeet-worker');
-    expect(build.run).toContain('--arch "$(uname -m)"');
+    // LocalASR's real implementation is behind #if arch(arm64), even on Intel hosts.
+    expect(build.run).toContain('--arch arm64');
     for (const step of [prepare, build]) expect(step.if).toBe('matrix.language == \'swift\'');
   });
 
-  it('prebuilds only the pinned third-party target, never Voxloom sources', () => {
-    const dependency = named('Compile only the third-party Swift dependency');
-    expect(dependency.if).toBe('matrix.language == \'swift\'');
-    expect(dependency.run).toContain('--target FluidAudio');
-    expect(dependency.run).toContain('--disable-automatic-resolution');
-    expect(dependency.run).toContain('--arch "$(uname -m)" --jobs 2');
-    expect(dependency.run).not.toMatch(/--product|--build-tests|WorkerCore|LocalASR|ParakeetWorker/);
-    expect(steps.indexOf(dependency)).toBeGreaterThan(steps.indexOf(named('Resolve Swift dependencies before tracing')));
-    expect(steps.indexOf(dependency)).toBeLessThan(steps.indexOf(init));
-    expect(named('Build the native Swift helper').run).toContain('--jobs 2');
+  it('pins a supported Xcode and leaves all product compilation under tracing', () => {
+    const toolchain = named('Select the supported Swift toolchain');
+    expect(toolchain.run).toContain('/Applications/Xcode_26.2.app/Contents/Developer');
+    expect(toolchain.if).toBe('matrix.language == \'swift\'');
+    expect(steps.indexOf(toolchain)).toBeLessThan(steps.indexOf(named('Resolve Swift dependencies before tracing')));
+    for (const step of steps.slice(0, steps.indexOf(init))) {
+      expect(step.run ?? '').not.toMatch(/swift build/);
+    }
   });
 
   it('caches downloaded dependencies, never compiled first-party outputs', () => {
