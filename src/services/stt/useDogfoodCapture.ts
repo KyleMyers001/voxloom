@@ -35,6 +35,7 @@ import {
 } from './dogfoodPhase';
 import { useDogfoodLiveSession } from './dogfoodSessionState';
 import { createSttModelStore } from './factory';
+import { resolveTranscriptionModelId } from './resolveModelId';
 import type { Transcript } from './types';
 import { useCleanupEngine } from './useCleanupEngine';
 import { useDogfoodProcessing } from './useDogfoodProcessing';
@@ -51,7 +52,7 @@ export interface UseDogfoodCaptureOptions {
   clipboard: ClipboardAdapter;
   /** Settings `clipboardFallback` (default true). */
   clipboardFallback?: boolean;
-  /** Settings `transcriptionModel` (resolved before STT). */
+  /** Settings `transcriptionModel` (frozen at recording start). */
   modelId: string;
   /** Clock for history `createdAt` (defaults to Date.now). */
   now?: () => number;
@@ -127,7 +128,7 @@ export function useDogfoodCapture(
   const modelIdRef = useRef(options.modelId);
   modelIdRef.current = options.modelId;
   const ensureModel = useCallback(
-    () => ensureModelAvailable(storeRef.current, modelIdRef.current),
+    (modelId = modelIdRef.current) => ensureModelAvailable(storeRef.current, modelId),
     [],
   );
 
@@ -143,6 +144,7 @@ export function useDogfoodCapture(
     lookupPasteBinding,
     phase: state.phase,
     preferredDeviceId: options.preferredDeviceId,
+    selectedModelId: () => resolveTranscriptionModelId(modelIdRef.current),
   });
 
   return {

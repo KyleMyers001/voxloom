@@ -31,6 +31,20 @@ describe('native transcribe call', () => {
     });
   });
 
+  it('preserves request identity alongside dictionary hints', async () => {
+    const engine = createWhisperSttEngine({
+      modelId: 'parakeet-tdt-0.6b-v3', requestId: 'prepared-request',
+    });
+    await engine.transcribe(HANDLE, { dictionary: ['Voxloom', 'Notion'] });
+    expect(mockInvoke).toHaveBeenCalledWith('stt_transcribe', {
+      bufferId: 'pcm-1',
+      dictionary: ['Voxloom', 'Notion'],
+      filter: null,
+      modelId: 'parakeet-tdt-0.6b-v3',
+      requestId: 'prepared-request',
+    });
+  });
+
   it.each([
     ['an empty dictionary', { dictionary: [] }],
     ['no dictionary', {}],

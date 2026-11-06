@@ -124,6 +124,71 @@ fn store_backup_is_granted_to_main_only() {
     assert!(overlay.contains("not allowed"), "{overlay}");
 }
 
+#[tauri::command]
+fn stt_prepare() {}
+#[tauri::command]
+fn stt_transcribe() {}
+#[tauri::command]
+fn stt_cancel() {}
+#[tauri::command]
+fn stt_release() {}
+#[tauri::command]
+fn stt_list_models() {}
+#[tauri::command]
+fn stt_model_status() {}
+#[tauri::command]
+fn stt_download_model() {}
+#[tauri::command]
+fn stt_cancel_download() {}
+
+#[test]
+fn stt_execution_is_main_only_and_settings_has_only_inventory() {
+    for command in [
+        "stt_prepare",
+        "stt_transcribe",
+        "stt_cancel",
+        "stt_release",
+        "stt_list_models",
+        "stt_model_status",
+        "stt_download_model",
+        "stt_cancel_download",
+    ] {
+        let app = mock_builder()
+            .invoke_handler(tauri::generate_handler![
+                stt_prepare,
+                stt_transcribe,
+                stt_cancel,
+                stt_release,
+                stt_list_models,
+                stt_model_status,
+                stt_download_model,
+                stt_cancel_download
+            ])
+            .build(crate::app_context())
+            .unwrap();
+        assert_eq!(
+            invoke_command(&app, "main", "index.html", command),
+            Ok(()),
+            "{command}"
+        );
+        let settings = invoke_command(&app, "settings", "settings.html", command);
+        if matches!(
+            command,
+            "stt_prepare" | "stt_transcribe" | "stt_cancel" | "stt_release"
+        ) {
+            assert!(settings.unwrap_err().contains("not allowed"), "{command}");
+        } else {
+            assert_eq!(settings, Ok(()), "{command}");
+        }
+        assert!(
+            invoke_command(&app, OVERLAY, "overlay.html", command)
+                .unwrap_err()
+                .contains("not allowed"),
+            "{command}"
+        );
+    }
+}
+
 #[test]
 fn lone_key_commands_are_main_only() {
     for command in ["lone_key_arm", "lone_key_disarm", "lone_key_request_access"] {

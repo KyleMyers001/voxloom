@@ -82,6 +82,11 @@ impl PcmBufferStore {
         map.remove(id).map(|b| (b.samples, b.sample_rate_hz))
     }
 
+    /// Explicitly dispose of an abandoned stopped capture without inference.
+    pub fn discard(&self, id: &str) -> bool {
+        self.inner.lock().unwrap().remove(id).is_some()
+    }
+
     #[cfg(test)]
     pub fn len(&self) -> usize {
         self.inner.lock().unwrap().len()
@@ -98,6 +103,19 @@ impl Default for PcmBufferStore {
 mod tests {
     use super::*;
     use crate::capture::buffer::CaptureBuffer;
+
+    #[test]
+    fn discard_is_single_use_and_leaves_other_audio_untouched() {
+        let store = PcmBufferStore::new();
+        let mut pcm = CaptureBuffer::new();
+        pcm.push(&[0.25]).unwrap();
+        let first = store.deposit(pcm);
+        let second = store.deposit(CaptureBuffer::new());
+        assert!(store.discard(&first.id));
+        assert!(!store.discard(&first.id));
+        assert!(store.take(&second.id).is_some());
+        assert_eq!(store.len(), 0);
+    }
 
     #[test]
     fn deposit_and_take_round_trip() {

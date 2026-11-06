@@ -218,11 +218,17 @@ pub fn run() {
             stt::stt_list_models,
             stt::stt_model_status,
             stt::stt_transcribe,
+            stt::stt_prepare,
+            stt::stt_cancel,
+            stt::stt_release,
         ])
         .on_page_load(|webview, payload| {
             if payload.event() == tauri::webview::PageLoadEvent::Started {
                 if let Some(cleanup) = webview.try_state::<cleanup::CleanupState>() {
                     cleanup.retire_main(webview.label());
+                }
+                if let Some(stt) = webview.try_state::<SttState>() {
+                    stt.parakeet.retire_main(webview.label());
                 }
             }
         })
@@ -231,6 +237,9 @@ pub fn run() {
                 if let Some(cleanup) = window.try_state::<cleanup::CleanupState>() {
                     cleanup.retire_main(window.label());
                 }
+                if let Some(stt) = window.try_state::<SttState>() {
+                    stt.parakeet.retire_main(window.label());
+                }
             }
             // Only closing main ends capture; closing Settings must not.
             if window.label() != settings_window::MAIN_LABEL {
@@ -238,6 +247,9 @@ pub fn run() {
             }
             if let tauri::WindowEvent::CloseRequested { .. } = event {
                 cancel_scope::close();
+                if let Some(stt) = window.try_state::<SttState>() {
+                    stt.parakeet.retire_main(window.label());
+                }
                 if let Some(coordinator) = window.try_state::<CaptureCoordinator>() {
                     coordinator.cancel_any();
                 }
@@ -253,6 +265,9 @@ pub fn run() {
     let builder = builder.on_web_content_process_terminate(|webview| {
         if let Some(cleanup) = webview.try_state::<cleanup::CleanupState>() {
             cleanup.retire_main(webview.label());
+        }
+        if let Some(stt) = webview.try_state::<SttState>() {
+            stt.parakeet.retire_main(webview.label());
         }
     });
     builder.run(app_context()).expect("failed to run Voxloom");

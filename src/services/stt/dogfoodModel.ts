@@ -51,6 +51,9 @@ export async function ensureModelAvailable(
 ): Promise<string> {
   const modelId = resolveTranscriptionModelId(rawModelId);
   const info = await store.status(modelId);
+  if (info?.supported === false) {
+    throw new SttError('unsupported-platform', info.unavailableReason ?? 'This model is unavailable on this Mac.');
+  }
   if (info?.status === 'failed') {
     throw new SttError('model-missing', failedModelMessage(info.failureReason));
   }

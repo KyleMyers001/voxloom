@@ -44,3 +44,24 @@ team() { sed -n 's/^TeamIdentifier=//p' <<<"$1"; }
 
 echo "sidecar OK: $(wc -c < "$SIDECAR" | tr -d ' ') bytes, archs: $archs"
 grep -E '^(Identifier|CodeDirectory|TeamIdentifier|Signature)' <<<"$details"
+
+# Optional at runtime on supported Macs, required in every distributed bundle.
+PARAKEET="$APP/Contents/MacOS/voxloom-parakeet-worker"
+PARAKEET_NOTICES="$APP/Contents/Resources/licenses/parakeet-worker/THIRD-PARTY-NOTICES.txt"
+[[ -x "$PARAKEET" ]] || fail "no executable Parakeet helper at $PARAKEET"
+[[ -s "$PARAKEET_NOTICES" ]] || fail "no Parakeet attribution notices at $PARAKEET_NOTICES"
+parakeet_archs="$(lipo -archs "$PARAKEET")"
+for arch in "${want[@]}"; do
+  [[ " $parakeet_archs " == *" $arch "* ]] \
+    || fail "Parakeet helper archs '$parakeet_archs' lack $arch"
+done
+if grep -q VOXLOOM_PARAKEET_TEST_ "$PARAKEET"; then
+  fail "Parakeet helper contains test hooks"
+fi
+codesign --verify --strict --verbose=2 "$PARAKEET"
+parakeet_details="$(codesign -dv --verbose=4 "$PARAKEET" 2>&1)"
+grep -Eq '^CodeDirectory .*flags=0x[0-9a-f]+\([^)]*runtime' <<<"$parakeet_details" \
+  || fail "Parakeet helper is not signed with the hardened runtime"
+[[ "$(team "$parakeet_details")" == "$(team "$app_details")" ]] \
+  || fail "Parakeet helper signer differs from the app"
+echo "Parakeet helper OK: archs: $parakeet_archs"

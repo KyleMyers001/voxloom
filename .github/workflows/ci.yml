@@ -129,6 +129,20 @@ jobs:
           host="$(rustc -vV | sed -n 's/^host: //p')"
           bash scripts/release/build-worker.sh "$host"
 
+  parakeet-worker:
+    # Core ML helper contracts use mocked loaders; CI never downloads weights.
+    # The helper's macOS 14 target is separate from the parent app's 13.1 target.
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Check the installed Swift toolchain
+        run: swift --version
+      - name: Test Parakeet helper contracts
+        run: swift test --package-path src-tauri/parakeet-worker --disable-automatic-resolution
+      - name: Build both helper architectures
+        run: bash scripts/release/build-parakeet-worker.sh universal-apple-darwin
+
   rust-whisper:
     # Builds and tests with the opt-in `whisper` feature (whisper-rs ->
     # whisper.cpp via cmake + bindgen/libclang), which the other Rust jobs

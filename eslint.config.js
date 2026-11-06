@@ -22,6 +22,8 @@ export default tseslint.config(
       'playwright-report',
       'playwright-report-release',
       'src-tauri/target',
+      'src-tauri/worker/target/**',
+      'src-tauri/parakeet-worker/.build/**',
       'test-results',
       'test-results-release',
     ],

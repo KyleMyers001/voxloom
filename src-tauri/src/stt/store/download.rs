@@ -19,12 +19,17 @@ impl ModelStore {
     /// Cancel an in-flight download. Safe when nothing is downloading
     /// (including when the model is already present) — returns Ok.
     pub fn cancel(&self, model_id: &str) -> Result<(), SttErrorDto> {
-        let spec = catalog::find(model_id).ok_or_else(|| {
-            SttErrorDto::new("download-failed", format!("Unknown model: {model_id}"))
-        })?;
+        if catalog::find(model_id).is_none()
+            && crate::stt::parakeet_catalog::find(model_id).is_none()
+        {
+            return Err(SttErrorDto::new(
+                "download-failed",
+                format!("Unknown model: {model_id}"),
+            ));
+        }
         let guard = self.inflight.lock().unwrap();
         if let Some((id, inflight)) = guard.as_ref() {
-            if id == spec.id {
+            if id == model_id {
                 inflight.cancel.store(true, Ordering::Release);
                 return Ok(());
             }
@@ -46,6 +51,20 @@ impl ModelStore {
     where
         F: FnMut(DownloadProgressDto),
     {
+        if let Some(spec) = crate::stt::parakeet_catalog::find(model_id) {
+            if !crate::stt::parakeet_catalog::is_supported() {
+                return Err(SttErrorDto::new(
+                    "engine-unavailable",
+                    crate::stt::parakeet_catalog::UNAVAILABLE_REASON,
+                ));
+            }
+            return self.download_parakeet_spec(
+                model_fetch::shared_agent(),
+                spec,
+                |file| spec.url(file),
+                on_progress,
+            );
+        }
         let spec = catalog::find(model_id).ok_or_else(|| {
             SttErrorDto::new("download-failed", format!("Unknown model: {model_id}"))
         })?;

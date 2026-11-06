@@ -13,6 +13,8 @@ pub mod error;
 pub mod filter_config;
 pub mod gate;
 pub mod initial_prompt;
+pub mod parakeet;
+pub mod parakeet_catalog;
 pub mod pipeline;
 pub mod store;
 pub mod trim;
@@ -25,7 +27,7 @@ mod with_dictionary_silence_tests;
 
 use std::sync::Arc;
 
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Runtime, State, Webview};
 
 use crate::capture::pcm_store::PcmBufferStore;
 use engine::TranscriptDto;
@@ -33,9 +35,11 @@ use error::SttErrorDto;
 use filter_config::SpeechFilterConfig;
 use store::{ModelInfoDto, ModelStore};
 
+#[derive(Clone)]
 pub struct SttState {
     pub models: Arc<ModelStore>,
     pub buffers: Arc<PcmBufferStore>,
+    pub parakeet: parakeet::ParakeetRuntime,
 }
 
 impl SttState {
@@ -43,6 +47,7 @@ impl SttState {
         Self {
             models: Arc::new(models),
             buffers,
+            parakeet: parakeet::ParakeetRuntime::new(parakeet::worker_path::installed()),
         }
     }
 }
@@ -94,53 +99,207 @@ pub fn stt_cancel_download(state: State<'_, SttState>, model_id: String) -> Resu
     state.models.cancel(&model_id).map_err(err_string)
 }
 
-/// Transcribe off-thread so long whisper runs do not freeze the webview.
-/// Consumes the PCM buffer (single-use handle). Requires an explicit modelId.
-/// BUS-23: near-silent clips skip whisper; output is cleaned of non-speech
-/// tags / silence hallucinations before it reaches insert or Copy. `filter`
-/// is optional; omitted fields use `SpeechFilterConfig::default()`.
-/// BUS-138: `dictionary` is the user's Word dictionary; it becomes Whisper's
-/// initial prompt. Missing or empty: no prompt, as before.
+/// Defense in depth in addition to the generated command ACL.
+fn require_main<R: Runtime>(webview: &Webview<R>) -> Result<(), String> {
+    if webview.label() != "main" || webview.window().label() != "main" {
+        return Err(err_string(SttErrorDto::new(
+            "engine-unavailable",
+            "STT execution requires the main renderer",
+        )));
+    }
+    Ok(())
+}
+
+/// Fast admission only. Loading is owned by the background runner and may fail
+/// later; transcribe receives that failure with the same request token.
 #[tauri::command]
-pub async fn stt_transcribe(
+pub fn stt_prepare<R: Runtime>(
+    webview: Webview<R>,
+    state: State<'_, SttState>,
+    model_id: String,
+    request_id: String,
+) -> Result<(), String> {
+    require_main(&webview)?;
+    let epoch = state.parakeet.epoch();
+    let spec = parakeet_catalog::find(&model_id)
+        .ok_or_else(|| err_string(SttErrorDto::new("model-missing", "Unknown Parakeet model")))?;
+    if !parakeet_catalog::is_supported() {
+        return Err(err_string(SttErrorDto::new(
+            "engine-unavailable",
+            "Parakeet requires Apple Silicon and macOS 14 or later",
+        )));
+    }
+    let models = state.models.clone();
+    let resolve_id = model_id.clone();
+    state
+        .parakeet
+        .prepare(epoch, &request_id, &model_id, spec.version, move || {
+            models.resolved_path(&resolve_id)
+        })
+        .map_err(err_string)
+}
+#[tauri::command]
+pub fn stt_cancel<R: Runtime>(
+    webview: Webview<R>,
+    state: State<'_, SttState>,
+    request_id: String,
+) -> Result<bool, String> {
+    require_main(&webview)?;
+    state
+        .parakeet
+        .cancel(state.parakeet.epoch(), &request_id)
+        .map_err(err_string)
+}
+#[tauri::command]
+pub fn stt_release<R: Runtime>(
+    webview: Webview<R>,
+    state: State<'_, SttState>,
+    request_id: String,
+    buffer_id: Option<String>,
+) -> Result<bool, String> {
+    require_main(&webview)?;
+    // A stopped capture can fail before transcription is invoked (admission,
+    // model selection, cancellation). Dispose that opaque buffer explicitly.
+    if let Some(id) = buffer_id {
+        state.buffers.discard(&id);
+    }
+    stt_cancel(webview, state, request_id)
+}
+
+/// Consume a stopped PCM handle and transcribe off-thread. Parakeet joins the
+/// exact admitted recording; Whisper retains its existing independent pipeline.
+/// The dictionary supplies Whisper's initial prompt for non-quiet clips only;
+/// Parakeet does not use Whisper prompt hints.
+#[tauri::command]
+pub async fn stt_transcribe<R: Runtime>(
+    webview: Webview<R>,
     state: State<'_, SttState>,
     model_id: String,
     buffer_id: String,
     filter: Option<SpeechFilterConfig>,
+    request_id: Option<String>,
     dictionary: Option<Vec<String>>,
 ) -> Result<TranscriptDto, String> {
-    if model_id.trim().is_empty() {
-        return Err(err_string(SttErrorDto::new(
-            "model-missing",
-            "Explicit modelId is required for transcription",
-        )));
-    }
-
-    let models = Arc::clone(&state.models);
-    let buffers = Arc::clone(&state.buffers);
-
+    require_main(&webview)?;
+    let state = state.inner().clone();
+    // Reserve renderer ownership before the async boundary. Reload retirement
+    // makes this token stale, even if the blocking pool starts it much later.
+    let epoch = state.parakeet.epoch();
+    let buffers = state.buffers.clone();
+    let error_buffer = buffer_id.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let path = models.resolved_path(&model_id).map_err(err_string)?;
-        let (samples, rate) = buffers.take(&buffer_id).ok_or_else(|| {
-            err_string(SttErrorDto::new(
-                "unsupported-audio",
-                format!("Unknown or already-consumed audio buffer: {buffer_id}"),
-            ))
-        })?;
-        let cfg = filter.unwrap_or_default();
         let dictionary = dictionary.unwrap_or_default();
-        with_dictionary::transcribe_with_dictionary(&path, &samples, rate, &cfg, &dictionary)
-            .map_err(err_string)
+        transcribe_buffer(
+            &state,
+            epoch,
+            &model_id,
+            &buffer_id,
+            filter,
+            request_id.as_deref(),
+            &dictionary,
+        )
+        .map_err(err_string)
     })
     .await
-    .map_err(|e| join_err("transcribe-failed", e))?
+    .map_err(|e| {
+        buffers.discard(&error_buffer);
+        join_err("transcribe-failed", e)
+    })?
 }
+
+fn transcribe_buffer(
+    state: &SttState,
+    epoch: u64,
+    model_id: &str,
+    buffer_id: &str,
+    filter: Option<SpeechFilterConfig>,
+    request_id: Option<&str>,
+    dictionary: &[String],
+) -> Result<TranscriptDto, SttErrorDto> {
+    let out = (|| {
+        // Consume first: stopped audio must not survive a failed model lookup,
+        // failed preparation, missing request, cancellation or stale renderer.
+        let (samples, rate) = state.buffers.take(buffer_id).ok_or_else(|| {
+            SttErrorDto::new(
+                "unsupported-audio",
+                "Unknown or already-consumed audio buffer",
+            )
+        })?;
+        if model_id.trim().is_empty() {
+            return Err(SttErrorDto::new(
+                "model-missing",
+                "Explicit modelId is required for transcription",
+            ));
+        }
+        let cfg = filter.unwrap_or_default();
+        if parakeet_catalog::find(model_id).is_some() {
+            let id = request_id.ok_or_else(|| {
+                SttErrorDto::new("transcribe-failed", "Parakeet requestId is required")
+            })?;
+            return state
+                .parakeet
+                .transcribe(epoch, id, model_id, samples, rate, &cfg);
+        }
+        let path = state.models.resolved_path(model_id)?;
+        // Preserve main's quiet-clip prompt suppression and Whisper filtering.
+        with_dictionary::transcribe_with_dictionary(&path, &samples, rate, &cfg, dictionary)
+    })();
+    if out.is_err() {
+        if let Some(id) = request_id {
+            let _ = state.parakeet.cancel(epoch, id);
+        }
+    }
+    out
+}
+
+#[cfg(all(test, unix))]
+#[path = "parakeet/commands_tests.rs"]
+mod parakeet_commands_tests;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::capture::buffer::CaptureBuffer;
     use std::sync::Arc;
+
+    #[test]
+    fn stopped_pcm_is_consumed_on_all_routing_errors() {
+        let state = SttState::new(
+            ModelStore::new(std::env::temp_dir().join("parakeet-routing-missing")),
+            Arc::new(PcmBufferStore::new()),
+        );
+        for (model, request) in [
+            ("", None),
+            ("unknown", None),
+            ("whisper-tiny.en", None),
+            ("parakeet-tdt-0.6b-v3", None),
+            ("parakeet-tdt-0.6b-v3", Some("not-prepared")),
+        ] {
+            let mut pcm = CaptureBuffer::new();
+            pcm.push(&[0.25]).unwrap();
+            let handle = state.buffers.deposit(pcm);
+            assert!(transcribe_buffer(&state, 0, model, &handle.id, None, request, &[]).is_err());
+            assert_eq!(
+                state.buffers.len(),
+                0,
+                "PCM drained even before engine/model/request errors"
+            );
+        }
+        assert_eq!(
+            transcribe_buffer(
+                &state,
+                0,
+                "parakeet-tdt-0.6b-v3",
+                "absent",
+                None,
+                Some("r"),
+                &[]
+            )
+            .unwrap_err()
+            .code,
+            "unsupported-audio"
+        );
+    }
 
     #[test]
     fn empty_model_id_rejected_before_spawn() {

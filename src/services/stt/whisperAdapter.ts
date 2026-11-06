@@ -1,4 +1,4 @@
-/// Tauri-backed whisper STT adapter — BUS-10.
+/// Tauri-backed local STT adapter (Whisper and prepared Parakeet).
 /// Talks to native `stt_*` commands. No silent downloads; modelId is explicit.
 ///
 /// Native `stt_download_model` / `stt_transcribe` are async commands that run
@@ -29,7 +29,7 @@ interface NativeSttError {
   message?: string;
 }
 
-function mapNativeError(error: unknown): SttError {
+export function mapNativeError(error: unknown): SttError {
   if (error instanceof SttError) return error;
   const payload =
     typeof error === 'string'
@@ -52,6 +52,9 @@ function safeParse(raw: string): NativeSttError | null {
 
 function normalizeCode(code: string | undefined): SttErrorCode {
   switch (code) {
+    case 'busy':
+    case 'unsupported-platform':
+    case 'timeout':
     case 'cancelled':
     case 'download-failed':
     case 'download-corrupted':
@@ -180,6 +183,8 @@ export interface SpeechFilterConfig {
 }
 
 export interface WhisperEngineOptions {
+  /** Prepared Parakeet request; omitted on the unchanged Whisper route. */
+  requestId?: string;
   /** BUS-23 filter overrides; omitted → native defaults. */
   filter?: SpeechFilterConfig;
   /** Explicit model id — required; never auto-selected silently. */
@@ -220,6 +225,7 @@ export function createWhisperSttEngine(
         return await invoke<Transcript>('stt_transcribe', {
           modelId,
           bufferId: audio.id,
+          ...(options.requestId ? { requestId: options.requestId } : {}),
           filter: options.filter ?? null,
           // BUS-138: sent only when there are words, so an empty dictionary
           // is the same call as before (no prompt).
