@@ -1,0 +1,109 @@
+name: CodeQL (advanced)
+
+on:
+  pull_request:
+    branches: [main, 'ui/**']
+  push:
+    branches: [main]
+  schedule:
+    - cron: '37 8 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-advanced-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: actions
+            build-mode: none
+            os: ubuntu-latest
+          - language: javascript-typescript
+            build-mode: none
+            os: ubuntu-latest
+          - language: python
+            build-mode: none
+            os: ubuntu-latest
+          - language: rust
+            build-mode: none
+            os: ubuntu-latest
+          - language: swift
+            build-mode: manual
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # Stage this workflow alongside default setup without replacing its alerts.
+      # See .github/codeql/README.md for the explicitly approved cutover.
+      - name: Explain preview mode
+        if: vars.CODEQL_ADVANCED_SETUP != 'true'
+        run: echo '::notice::Preview mode; SARIF is saved as an artifact. Default setup remains responsible for published alerts.'
+
+      # Only download/checkouts are reusable: cached compiler outputs can make
+      # SwiftPM skip the compilation CodeQL needs to observe.
+      - name: Cache Swift dependency downloads
+        if: matrix.language == 'swift'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            src-tauri/parakeet-worker/.build/artifacts
+            src-tauri/parakeet-worker/.build/checkouts
+            src-tauri/parakeet-worker/.build/repositories
+          key: codeql-swift-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src-tauri/parakeet-worker/Package.swift', 'src-tauri/parakeet-worker/Package.resolved') }}
+
+      # Manifest compilation and resolution are particularly expensive under the
+      # tracer. Prepare them first, but leave all product compilation to CodeQL.
+      - name: Resolve Swift dependencies before tracing
+        if: matrix.language == 'swift'
+        run: swift package --package-path src-tauri/parakeet-worker --disable-automatic-resolution resolve
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      # No tests, release optimization, signing or second architecture is needed
+      # for scanning. FluidAudio still compiles under tracing with the helper.
+      - name: Build the native Swift helper
+        if: matrix.language == 'swift'
+        run: >-
+          swift build --package-path src-tauri/parakeet-worker
+          --disable-automatic-resolution --product voxloom-parakeet-worker
+          --arch "$(uname -m)"
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: /language:${{ matrix.language }}
+          output: codeql-results
+          # GitHub rejects advanced-setup uploads while default setup is enabled.
+          upload: ${{ vars.CODEQL_ADVANCED_SETUP == 'true' && 'always' || 'never' }}
+          upload-database: ${{ vars.CODEQL_ADVANCED_SETUP == 'true' }}
+
+      - name: Verify Swift extraction coverage
+        if: matrix.language == 'swift'
+        run: node scripts/ci/check-swift-codeql-coverage.mjs codeql-results/swift.sarif
+
+      - name: Save analysis results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: codeql-${{ matrix.language }}
+          path: codeql-results/
+          if-no-files-found: warn
+          retention-days: 7
