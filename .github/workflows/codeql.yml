@@ -65,11 +65,20 @@ jobs:
             src-tauri/parakeet-worker/.build/repositories
           key: codeql-swift-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src-tauri/parakeet-worker/Package.swift', 'src-tauri/parakeet-worker/Package.resolved') }}
 
-      # Manifest compilation and resolution are particularly expensive under the
-      # tracer. Prepare them first, but leave all product compilation to CodeQL.
+      # Keep package resolution and third-party compilation out of the tracer.
+      # Production coverage is checked before any alerts are published.
       - name: Resolve Swift dependencies before tracing
         if: matrix.language == 'swift'
         run: swift package --package-path src-tauri/parakeet-worker --disable-automatic-resolution resolve
+
+      # FluidAudio has no dependency on Voxloom targets. Prebuild only that
+      # pinned external target, never the product or any first-party target.
+      - name: Compile only the third-party Swift dependency
+        if: matrix.language == 'swift'
+        run: >-
+          swift build --package-path src-tauri/parakeet-worker
+          --disable-automatic-resolution --target FluidAudio
+          --arch "$(uname -m)" --jobs 2
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
@@ -77,27 +86,35 @@ jobs:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
 
-      # No tests, release optimization, signing or second architecture is needed
-      # for scanning. FluidAudio still compiles under tracing with the helper.
+      # All first-party production sources are fresh; only FluidAudio is prebuilt.
+      # No release optimization, signing or second architecture is needed here.
       - name: Build the native Swift helper
         if: matrix.language == 'swift'
         run: >-
           swift build --package-path src-tauri/parakeet-worker
           --disable-automatic-resolution --product voxloom-parakeet-worker
-          --arch "$(uname -m)"
+          --arch "$(uname -m)" --jobs 2
 
       - name: Analyze
         uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           category: /language:${{ matrix.language }}
           output: codeql-results
-          # GitHub rejects advanced-setup uploads while default setup is enabled.
-          upload: ${{ vars.CODEQL_ADVANCED_SETUP == 'true' && 'always' || 'never' }}
+          # Publish only after the extraction coverage guard passes.
+          upload: never
           upload-database: ${{ vars.CODEQL_ADVANCED_SETUP == 'true' }}
 
       - name: Verify Swift extraction coverage
         if: matrix.language == 'swift'
         run: node scripts/ci/check-swift-codeql-coverage.mjs codeql-results/swift.sarif
+
+      - name: Publish alerts
+        # GitHub rejects advanced-setup uploads while default setup is enabled.
+        if: vars.CODEQL_ADVANCED_SETUP == 'true'
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: codeql-results/
+          category: /language:${{ matrix.language }}
 
       - name: Save analysis results
         if: always()

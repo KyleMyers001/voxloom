@@ -61,6 +61,18 @@ describe('CodeQL workflow', () => {
     for (const step of [prepare, build]) expect(step.if).toBe('matrix.language == \'swift\'');
   });
 
+  it('prebuilds only the pinned third-party target, never Voxloom sources', () => {
+    const dependency = named('Compile only the third-party Swift dependency');
+    expect(dependency.if).toBe('matrix.language == \'swift\'');
+    expect(dependency.run).toContain('--target FluidAudio');
+    expect(dependency.run).toContain('--disable-automatic-resolution');
+    expect(dependency.run).toContain('--arch "$(uname -m)" --jobs 2');
+    expect(dependency.run).not.toMatch(/--product|--build-tests|WorkerCore|LocalASR|ParakeetWorker/);
+    expect(steps.indexOf(dependency)).toBeGreaterThan(steps.indexOf(named('Resolve Swift dependencies before tracing')));
+    expect(steps.indexOf(dependency)).toBeLessThan(steps.indexOf(init));
+    expect(named('Build the native Swift helper').run).toContain('--jobs 2');
+  });
+
   it('caches downloaded dependencies, never compiled first-party outputs', () => {
     const cache = named('Cache Swift dependency downloads');
     const paths = String(cache.with?.path).trim().split('\n');
@@ -74,12 +86,18 @@ describe('CodeQL workflow', () => {
   });
 
   it('does not upload over default setup until the migration is explicitly enabled', () => {
-    expect(analyze.with?.upload).toBe('${{ vars.CODEQL_ADVANCED_SETUP == \'true\' && \'always\' || \'never\' }}');
+    expect(analyze.with?.upload).toBe('never');
     expect(analyze.with?.['upload-database']).toBe('${{ vars.CODEQL_ADVANCED_SETUP == \'true\' }}');
     expect(analyze.with?.category).toBe('/language:${{ matrix.language }}');
-    expect(named('Verify Swift extraction coverage').run)
-      .toBe('node scripts/ci/check-swift-codeql-coverage.mjs codeql-results/swift.sarif');
-    expect(steps.indexOf(named('Verify Swift extraction coverage'))).toBeGreaterThan(steps.indexOf(analyze));
+    const coverage = named('Verify Swift extraction coverage');
+    expect(coverage.run).toBe('node scripts/ci/check-swift-codeql-coverage.mjs codeql-results/swift.sarif');
+    expect(steps.indexOf(coverage)).toBeGreaterThan(steps.indexOf(analyze));
+    const publish = named('Publish alerts');
+    expect(publish.if).toBe('vars.CODEQL_ADVANCED_SETUP == \'true\'');
+    expect(publish.uses).toMatch(/^github\/codeql-action\/upload-sarif@/);
+    expect(publish.with?.sarif_file).toBe('codeql-results/');
+    expect(publish.with?.category).toBe('/language:${{ matrix.language }}');
+    expect(steps.indexOf(publish)).toBeGreaterThan(steps.indexOf(coverage));
     expect(named('Save analysis results').with?.path).toBe('codeql-results/');
   });
 

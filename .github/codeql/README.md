@@ -1,7 +1,8 @@
 # CodeQL setup and Swift build performance
 
-`workflows/codeql.yml` replaces GitHub's generated default setup with an explicit
-five-language matrix (Actions, JavaScript/TypeScript, Python, Rust and Swift).
+`.github/workflows/codeql.yml` replaces GitHub's generated default setup with an
+explicit five-language matrix (Actions, JavaScript/TypeScript, Python, Rust and
+Swift).
 Default queries and the existing `/language:…` categories are retained.
 
 ## Why the Swift job is different
@@ -10,18 +11,27 @@ The first Parakeet-era default scan spent 22m11s of its 24m08s Swift job in
 `autobuild`; analysis took 1m09s. SwiftPM manifest compilation and resolution ran
 inside CodeQL tracing, before a large instrumented FluidAudio build.
 
-The explicit job resolves the checked-in dependency versions **before** CodeQL
-initializes, then builds the native `voxloom-parakeet-worker` debug product under
-tracing. FluidAudio is still compiled under tracing; no dependency source analysis
-is deliberately skipped. Only downloaded artifacts and source checkouts are
-cached—not `.build` as a whole or compiled targets. Ordinary CI still runs the
-Swift contracts and universal release build.
+Resolving before initialization alone reduced the first trial to 18m59s; traced
+SwiftPM startup and FluidAudio compilation still dominated.
+
+The job now resolves the checked-in dependency versions and builds **only the
+pinned external `FluidAudio` target before CodeQL initializes**. It then freshly
+compiles the native `voxloom-parakeet-worker` debug product under tracing, with
+two build jobs. No Voxloom target is prebuilt. Only downloaded artifacts and
+source checkouts are cached—not `.build` as a whole or compiled targets.
+
+**Coverage trade-off:** the scan covers Voxloom's production Swift sources, not
+FluidAudio's implementation. Its imported API remains available to the analyzer,
+but cross-library body analysis is no longer performed. Dependency updates remain
+revision-pinned and need review. Ordinary CI still compiles FluidAudio, runs the
+Swift contracts and builds both release architectures.
 
 After analysis, `scripts/ci/check-swift-codeql-coverage.mjs` checks SARIF extraction
 diagnostics for **every** `.swift` file under the helper's `Sources/` directory.
-It fails on missing production coverage, including if a future cache change skips
-compilation. Package manifests and test/fixture executables are not production
-coverage requirements. SARIF artifacts are retained for seven days for comparison.
+It fails on missing production coverage **before alerts are published**, including
+if a future cache change skips compilation. Package manifests and test/fixture
+executables are not production coverage requirements. SARIF artifacts are retained
+for seven days for comparison.
 
 ## Safe migration (requires maintainer approval)
 
@@ -30,7 +40,8 @@ workflow runs in **preview mode**: it saves SARIF artifacts but uploads neither
 alerts nor databases. Existing default setup is left enabled and continues
 publishing security results. Preview mode temporarily runs both workflows.
 
-After reviewing the PR's timings and extraction coverage:
+After reviewing the PR's timings, first-party extraction coverage, and the
+third-party coverage trade-off above:
 
 1. Merge the PR only with Kyle's explicit approval.
 2. In repository **Settings → Advanced Security → CodeQL analysis**, disable the
