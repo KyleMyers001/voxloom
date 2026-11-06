@@ -42,7 +42,7 @@ describe('CodeQL workflow', () => {
       { language: 'javascript-typescript', 'build-mode': 'none', os: 'ubuntu-latest' },
       { language: 'python', 'build-mode': 'none', os: 'ubuntu-latest' },
       { language: 'rust', 'build-mode': 'none', os: 'ubuntu-latest' },
-      { language: 'swift', 'build-mode': 'manual', os: 'macos-15-intel' },
+      { language: 'swift', 'build-mode': 'manual', os: 'macos-26' },
     ]);
     expect(init.with?.['build-mode']).toBe('${{ matrix.build-mode }}');
     expect(steps.some((step) => step.uses?.includes('/autobuild@'))).toBe(false);
@@ -64,7 +64,7 @@ describe('CodeQL workflow', () => {
 
   it('pins a supported Xcode and leaves all product compilation under tracing', () => {
     const toolchain = named('Select the supported Swift toolchain');
-    expect(toolchain.run).toContain('/Applications/Xcode_26.2.app/Contents/Developer');
+    expect(toolchain.run).toContain('/Applications/Xcode_26.6.app/Contents/Developer');
     expect(toolchain.if).toBe('matrix.language == \'swift\'');
     expect(steps.indexOf(toolchain)).toBeLessThan(steps.indexOf(named('Resolve Swift dependencies before tracing')));
     for (const step of steps.slice(0, steps.indexOf(init))) {
