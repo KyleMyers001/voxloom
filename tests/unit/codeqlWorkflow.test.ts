@@ -78,7 +78,9 @@ describe('CodeQL workflow', () => {
     expect(build.run).toContain('vm.swapusage');
     expect(build.run).toContain('comm=');
     expect(build.run).not.toContain('args=');
-    expect(build.run).toContain('codeql-results/swift-resources.log');
+    // Analyze recreates its output directory; resource logs must live elsewhere.
+    expect(build.run).toContain('codeql-resources/swift-resources.log');
+    expect(build.run).not.toContain('codeql-results/');
   });
 
   it('caches downloaded dependencies, never compiled first-party outputs', () => {
@@ -106,7 +108,9 @@ describe('CodeQL workflow', () => {
     expect(publish.with?.sarif_file).toBe('codeql-results/');
     expect(publish.with?.category).toBe('/language:${{ matrix.language }}');
     expect(steps.indexOf(publish)).toBeGreaterThan(steps.indexOf(coverage));
-    expect(named('Save analysis results').with?.path).toBe('codeql-results/');
+    expect(String(named('Save analysis results').with?.path).trim().split('\n')).toEqual([
+      'codeql-results/', 'codeql-resources/',
+    ]);
   });
 
   it('keeps PR, main and scheduled scans, caps runtime, and cancels superseded PR runs', () => {

@@ -23,12 +23,20 @@ finished in **15m46s**. **No repeatable speedup has been demonstrated.** The fir
 trial used `uname -m` inside tracing; file extraction alone does not establish
 which architecture-conditional bodies were included.
 
+The [serialized ARM64 trial](https://github.com/KyleMyers001/voxloom/actions/runs/42283985371/job/128119935212)
+passed in **22m33s**, including extraction of all five production sources and
+FluidAudio, with zero unresolved AST nodes. This avoids the timeout observed with
+default parallelism but does not establish a consistent speedup against default
+setup. Its initial telemetry was discarded when analyze recreated the output
+directory; resource logs are now stored separately.
+
 The job resolves checked-in dependencies before initialization, then compiles the
 helper **and FluidAudio under tracing**, with no compiled outputs restored from
 cache. The current candidate sets **one build job** to bound compiler/extractor
 overlap. It records architecture, swap usage and executable-only process memory
-in `swift-resources.log`, never process arguments or environments. This tests a
-resource-pressure hypothesis; it is not a measured explanation yet.
+in `codeql-resources/swift-resources.log`, never process arguments or environments.
+Logs live outside the SARIF output directory, which analyze recreates. This tests
+a resource-pressure hypothesis; it is not a measured explanation yet.
 Only downloads and source checkouts are cached. Dependency-prebuild and
 Intel-runner trials did not beat the first manual trial and are **not retained**.
 
