@@ -150,6 +150,38 @@ class ProtocolTests(unittest.TestCase):
                 self.assertEqual(process.wait(timeout=3), 0)
                 self.assertEqual(self.remaining(process.stderr), b"")
 
+    def test_real_executable_reports_a_missing_dictionary_boosting_set_as_missing_models(self):
+        binary = Path(os.environ.get("PARAKEET_WORKER", ROOT / ".build/debug/voxloom-parakeet-worker"))
+        process = self.spawn(binary=binary)
+        header = load("v3")
+        header["modelDirectory"] = str(ROOT)
+        header["vocabularyDirectory"] = "/voxloom-test-never-provisioned-ctc-571c0c1c"
+        self.send(process, frame(header))
+        reply = self.reply(process)
+        self.assertEqual(reply["op"], "error")
+        self.assertEqual(reply["code"], "model-missing")
+        self.assertNotIn(header["vocabularyDirectory"], json.dumps(reply))
+        self.assertEqual(process.wait(timeout=3), 0)
+        self.assertEqual(self.remaining(process.stderr), b"")
+
+    def test_dictionary_words_cross_the_pipe_and_unusable_lists_are_rejected(self):
+        process = self.spawn()
+        self.send(process, frame(dict(load(), vocabularyDirectory="/mock/vocabulary")))
+        self.assertEqual(self.reply(process)["op"], "ready")
+        self.send(process, frame(dict(audio(), vocabulary=["Voxloom", "Notion"])) + struct.pack("<fff", -1, 0, 1))
+        self.assertEqual(self.reply(process)["text"], "fixture transcript: Voxloom, Notion")
+        self.assertEqual(process.wait(timeout=3), 0)
+        for vocabulary in ([f"w{i}" for i in range(257)], ["x" * 129], [""], ["Kuber\nnetes"], ["line\u2028break"]):
+            with self.subTest(vocabulary=vocabulary[:2]):
+                process = self.spawn()
+                self.send(process, frame(load()))
+                self.assertEqual(self.reply(process)["op"], "ready")
+                self.send(process, frame(dict(audio(), vocabulary=vocabulary)))
+                reply = self.reply(process)
+                self.assertEqual(reply["op"], "error")
+                self.assertEqual(reply["code"], "unsupported-audio")
+                self.assertEqual(process.wait(timeout=3), 0)
+
     def test_dependency_console_output_cannot_corrupt_wire_or_leak_paths(self):
         process = self.spawn("noisy")
         self.send(process, frame(load()))

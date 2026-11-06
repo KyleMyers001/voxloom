@@ -222,6 +222,22 @@ its shape; its words are now stored in the order they were added, oldest first
 (an older, alphabetical file loads as it is), and the Dictionary screen still
 lists them alphabetically. Settings and History do not change.
 
+Parakeet uses the dictionary differently, because it takes no prompt. After
+each recording, FluidAudio's CTC keyword spotter scores the saved words against
+the same audio, and a transcribed span is replaced by a saved word only when
+the audio supports it. Voxloom also replaces only spans that hold a word the
+macOS spelling dictionary doesn't know ("Voxlum", "pubernets"), never real words
+alone ("lotion", "box loom"). If any change in a sentence would re-spell a real
+word, the sentence stays exactly as heard. Mishearings that are real words are
+left to the always-on dictionary respelling and optional cleanup. With an empty
+dictionary, or if the boosting model cannot load, Parakeet transcribes as
+before. On the synthetic-speech dictionary corpus (75 sentences that must not
+change and 45 dictionary words to recover, three macOS voices), boosting raised
+dictionary words recovered from 41 to 42 (v2) and 38 to 40 (v3) and changed none
+of the 75. Synthetic speech is not a person's voice, so treat this as
+indicative. Boosting adds about 80 ms per sentence that holds a likely
+candidate, and nothing otherwise.
+
 Real whisper.cpp linkage is **opt-in** on macOS:
 
 ```sh
@@ -238,8 +254,12 @@ The Whisper default is unchanged. Selecting an unsupported or missing model
 never silently switches engines or downloads files.
 
 Each Parakeet model is an explicit, pinned download of a complete Core ML
-component set and vocabulary. The native store verifies the files before
-publishing the set. Transcription uses FluidAudio's local-only loader, not
+component set and vocabulary. The same Download also fetches one shared ~103 MB
+set, Parakeet CTC 110M, that both models use for dictionary boosting (below),
+stored once. A model is available only when its set and the shared set are both
+verified, so a model installed before boosting shows Download again, and that
+fetches only the shared set. The native store verifies the files before
+publishing each set. Transcription uses FluidAudio's local-only loader, not
 its automatic download/recovery APIs. NVIDIA created the models; FluidInference
 provides the Core ML conversions and Swift runtime. Attribution and runtime
 license text are bundled under `licenses/parakeet-worker/`.

@@ -39,7 +39,7 @@ fn nonblocking(fd: std::os::fd::RawFd) -> Result<(), SttErrorDto> {
 impl Worker {
     pub fn load(
         path: &Path,
-        dir: &Path,
+        dirs: &super::ModelDirs,
         id: &str,
         version: &str,
         cancel: &AtomicBool,
@@ -75,7 +75,7 @@ impl Worker {
                 "Parakeet requires macOS",
             ));
         }
-        worker.write(&protocol::frame(&serde_json::json!({"protocolVersion":1,"op":"load","requestId":id,"modelVersion":version,"modelDirectory":dir}))?,cancel,deadline)?;
+        worker.write(&protocol::frame(&serde_json::json!({"protocolVersion":1,"op":"load","requestId":id,"modelVersion":version,"modelDirectory":dirs.model,"vocabularyDirectory":dirs.vocabulary}))?,cancel,deadline)?;
         let ready = worker.read_json(cancel, deadline)?;
         protocol::identity(&ready, id)?;
         if ready["op"] == "error" {
@@ -146,12 +146,13 @@ impl Worker {
         id: &str,
         version: &str,
         pcm: &[f32],
+        vocabulary: &[String],
         cancel: &AtomicBool,
         timeout: Duration,
     ) -> Result<TranscriptDto, SttErrorDto> {
         protocol::validate_pcm(pcm, 16000)?;
         let deadline = Instant::now() + timeout;
-        self.write(&protocol::frame(&serde_json::json!({"protocolVersion":1,"op":"transcribe","requestId":id,"sampleRateHz":16000,"sampleCount":pcm.len()}))?,cancel,deadline)?;
+        self.write(&protocol::frame(&serde_json::json!({"protocolVersion":1,"op":"transcribe","requestId":id,"sampleRateHz":16000,"sampleCount":pcm.len(),"vocabulary":vocabulary}))?,cancel,deadline)?;
         // Bounded chunks avoid another full-size audio allocation. Never write audio to disk.
         for chunk in pcm.chunks(4096) {
             let bytes: Vec<u8> = chunk.iter().flat_map(|s| s.to_le_bytes()).collect();

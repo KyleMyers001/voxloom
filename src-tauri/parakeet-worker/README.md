@@ -5,6 +5,10 @@ Apple Silicon. It accepts an already-provisioned **local** v2 or v3 directory.
 It never calls FluidAudio's repository-resolution, download, convenience-load or
 recovery APIs. The production path is `AsrModels.loadLocal` →
 `AsrManager.loadModels` → `AsrManager.transcribe` with a fresh `TdtDecoderState`.
+Dictionary boosting loads the local CTC 110M set with `CtcModels.loadDirect` and
+`CtcTokenizer.load(from:)`, then rescoring uses `CtcKeywordSpotter` and
+`VocabularyRescorer`. It does not use `VocabularyBoostingSession`, which reads
+the tokenizer from FluidAudio's own cache.
 
 ## Build and weight-free verification
 
@@ -45,10 +49,15 @@ Stdin/stdout control frames are a little-endian UInt32 length followed by UTF-8
 JSON, with at most 65,536 JSON bytes. No logs are written to the protocol pipe.
 
 1. `load`: `protocolVersion: 1`, `requestId`, `modelVersion: "v2" | "v3"`,
-   `modelDirectory` (absolute native path). Loading begins immediately.
+   `modelDirectory` (absolute native path), and optional `vocabularyDirectory`
+   (absolute path of the CTC 110M set; without it, no boosting). Loading begins
+   immediately. A missing directory is `model-missing`; a CTC set that Core ML
+   cannot load means no boosting, not a failed recording.
 2. `ready`: same version and request ID.
-3. `transcribe`: same version/ID, `sampleRateHz: 16000`, `sampleCount`, followed
-   by exactly `sampleCount * 4` bytes of little-endian mono Float32 samples.
+3. `transcribe`: same version/ID, `sampleRateHz: 16000`, `sampleCount`, optional
+   `vocabulary` (at most 256 dictionary words, each 1–128 UTF-8 bytes with no
+   control characters), followed by exactly `sampleCount * 4` bytes of
+   little-endian mono Float32 samples.
 4. `result`: same version/ID, `text`, `rawText`, `language`, `dropped: null`.
    v2 language is `"en"`; v3 language is `null` (no detected-language invention).
    The process exits after this single reply. Oversized replies fail, not truncate.

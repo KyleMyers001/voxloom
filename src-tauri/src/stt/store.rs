@@ -65,6 +65,9 @@ pub struct ModelStore {
     on_models_changed: Mutex<Option<ModelsChanged>>,
     parakeet_verified: Mutex<std::collections::HashMap<&'static str, parakeet_verify::CheckedSet>>,
     parakeet_pending: Mutex<std::collections::HashSet<&'static str>>,
+    /// The shared dictionary-boosting set every Parakeet model needs
+    /// (`parakeet_catalog::VOCABULARY`; a fixture in tests).
+    parakeet_vocabulary: super::parakeet_catalog::ParakeetModelSpec,
 }
 
 /// Callback that asks the UI to re-list models.
@@ -83,6 +86,7 @@ impl ModelStore {
             on_models_changed: Mutex::new(None),
             parakeet_verified: Mutex::new(Default::default()),
             parakeet_pending: Mutex::new(Default::default()),
+            parakeet_vocabulary: super::parakeet_catalog::VOCABULARY,
         }
     }
 
@@ -170,7 +174,7 @@ impl ModelStore {
 
     pub fn resolved_path(&self, model_id: &str) -> Result<PathBuf, SttErrorDto> {
         if let Some(spec) = super::parakeet_catalog::find(model_id) {
-            return self.parakeet_resolved(spec);
+            return self.parakeet_resolved(spec).map(|dirs| dirs.model);
         }
         let spec = catalog::find(model_id).ok_or_else(|| {
             SttErrorDto::new("model-missing", format!("Unknown model: {model_id}"))
@@ -194,6 +198,14 @@ impl ModelStore {
             Some(message) => Err(SttErrorDto::new("model-missing", message)),
             None => Ok(path),
         }
+    }
+
+    /// The verified directories a Parakeet worker loads for `model_id`.
+    pub fn parakeet_dirs(&self, model_id: &str) -> Result<super::parakeet::ModelDirs, SttErrorDto> {
+        let spec = super::parakeet_catalog::find(model_id).ok_or_else(|| {
+            SttErrorDto::new("model-missing", format!("Unknown model: {model_id}"))
+        })?;
+        self.parakeet_resolved(spec)
     }
 
     fn is_downloading(&self, model_id: &str) -> bool {

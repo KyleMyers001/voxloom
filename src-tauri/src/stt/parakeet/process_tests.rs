@@ -6,6 +6,12 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 static NEXT: AtomicU64 = AtomicU64::new(0);
+pub(crate) fn model_dirs() -> super::super::ModelDirs {
+    super::super::ModelDirs {
+        model: "/model".into(),
+        vocabulary: "/vocabulary".into(),
+    }
+}
 pub(crate) fn fixture(body: &str) -> PathBuf {
     let root = std::env::temp_dir().join(format!(
         "parakeet-runtime-{}-{}",
@@ -18,7 +24,7 @@ pub(crate) fn fixture(body: &str) -> PathBuf {
     fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
     script
 }
-pub(crate) const NORMAL:&str="load=read()\nassert load['op']=='load' and load['protocolVersion']==1\nr=load['requestId']\nsend(dict(protocolVersion=1,op='ready',requestId=r))\nh=read()\nassert h['op']=='transcribe' and h['sampleRateHz']==16000 and h['requestId']==r\na=readn(h['sampleCount']*4)\nassert struct.unpack('<f',a[:4])[0]==0.25\nsend(dict(protocolVersion=1,op='result',requestId=r,text='[Music] Thank you.',rawText='[Music] Thank you.',language=None if load['modelVersion']=='v3' else 'en',dropped=None))";
+pub(crate) const NORMAL:&str="load=read()\nassert load['op']=='load' and load['protocolVersion']==1 and isinstance(load['vocabularyDirectory'],str)\nr=load['requestId']\nsend(dict(protocolVersion=1,op='ready',requestId=r))\nh=read()\nassert h['op']=='transcribe' and h['sampleRateHz']==16000 and h['requestId']==r\nv=h['vocabulary']\nassert all(isinstance(w,str) for w in v)\nt='[Music] Thank you.'+(': '+', '.join(v) if v else '')\na=readn(h['sampleCount']*4)\nassert struct.unpack('<f',a[:4])[0]==0.25\nsend(dict(protocolVersion=1,op='result',requestId=r,text=t,rawText=t,language=None if load['modelVersion']=='v3' else 'en',dropped=None))";
 // Interpreter startup is setup, not cancellation/pipe-deadline latency. The
 // deliberate delay exceeds both old startup assumptions (150 ms and 2 s).
 const SETUP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -114,7 +120,7 @@ fn load_api_deadline_includes_startup_and_reaps_the_exact_child() {
     let start = Instant::now();
     let result = Worker::load(
         &path,
-        Path::new("/model"),
+        &model_dirs(),
         "r",
         "v3",
         &AtomicBool::new(false),
@@ -139,7 +145,7 @@ fn malformed_eof_oversized_and_wrong_identity_are_rejected() {
         assert_eq!(
             Worker::load(
                 &path,
-                Path::new("/model"),
+                &model_dirs(),
                 "r",
                 "v3",
                 &AtomicBool::new(false),
@@ -182,9 +188,7 @@ fn cancellation_interrupts_load_without_waiting_for_worker() {
     cancel_at_phase(
         &path,
         || path.with_extension("loading").exists(),
-        |cancel| {
-            Worker::load(&path, Path::new("/model"), "r", "v3", cancel, SETUP_TIMEOUT).map(drop)
-        },
+        |cancel| Worker::load(&path, &model_dirs(), "r", "v3", cancel, SETUP_TIMEOUT).map(drop),
     );
 }
 
@@ -198,7 +202,7 @@ fn transcription_fixture(inference: bool) -> PathBuf {
 }
 
 fn load_fixture(path: &Path, cancel: &AtomicBool) -> Worker {
-    Worker::load(path, Path::new("/model"), "r", "v3", cancel, SETUP_TIMEOUT).unwrap()
+    Worker::load(path, &model_dirs(), "r", "v3", cancel, SETUP_TIMEOUT).unwrap()
 }
 
 #[test]
@@ -217,7 +221,7 @@ fn write_and_inference_reads_have_deadlines_and_reap_the_exact_child() {
             }
         ];
         let start = Instant::now();
-        let result = worker.transcribe("r", "v3", &pcm, &cancel, IO_TIMEOUT);
+        let result = worker.transcribe("r", "v3", &pcm, &[], &cancel, IO_TIMEOUT);
         drop(worker);
         assert_eq!(result.unwrap_err().code, "timeout");
         assert!(start.elapsed() >= IO_TIMEOUT);
@@ -264,7 +268,7 @@ fn cancellation_interrupts_inference_and_blocked_binary_write() {
             },
             move |cancel| {
                 worker
-                    .transcribe("r", "v3", &pcm, cancel, SETUP_TIMEOUT)
+                    .transcribe("r", "v3", &pcm, &[], cancel, SETUP_TIMEOUT)
                     .map(|_| ())
             },
         );
@@ -302,7 +306,10 @@ fn rust_swift_real_coreml_join_with_local_models() {
         let started = std::time::Instant::now();
         let mut worker = Worker::load(
             Path::new(&binary),
-            &models.join(format!("parakeet-tdt-0.6b-{version}-coreml")),
+            &crate::stt::parakeet::ModelDirs {
+                model: models.join(format!("parakeet-tdt-0.6b-{version}-coreml")),
+                vocabulary: models.join("parakeet-ctc-110m-coreml"),
+            },
             "rust-real-coreml",
             version,
             &cancel,
@@ -315,6 +322,7 @@ fn rust_swift_real_coreml_join_with_local_models() {
                 "rust-real-coreml",
                 version,
                 &pcm,
+                &["Voxloom".to_owned()],
                 &cancel,
                 Duration::from_secs(120),
             )
@@ -344,7 +352,10 @@ fn rust_swift_framed_protocol_join_without_models() {
         let cancel = AtomicBool::new(false);
         let mut worker = Worker::load(
             Path::new(&fixture),
-            Path::new("/model-free-fixture"),
+            &crate::stt::parakeet::ModelDirs {
+                model: "/model-free-fixture".into(),
+                vocabulary: "/model-free-fixture-vocabulary".into(),
+            },
             "rust-swift-join",
             version,
             &cancel,
@@ -356,12 +367,14 @@ fn rust_swift_framed_protocol_join_without_models() {
                 "rust-swift-join",
                 version,
                 &[0.25, -0.25, 0.0],
+                &["Voxloom".to_owned(), "Notion".to_owned()],
                 &cancel,
                 Duration::from_secs(3),
             )
             .unwrap();
-        assert_eq!(result.text, "fixture transcript");
-        assert_eq!(result.raw_text, "fixture transcript");
+        // The fixture echoes the words it received.
+        assert_eq!(result.text, "fixture transcript: Voxloom, Notion");
+        assert_eq!(result.raw_text, "fixture transcript: Voxloom, Notion");
         assert_eq!(
             result.language,
             if version == "v2" {
@@ -382,7 +395,7 @@ fn supervisor_process_fixture() {
     let path = PathBuf::from(path);
     let _worker = Worker::load(
         &path,
-        Path::new("/model"),
+        &model_dirs(),
         "parent",
         "v3",
         &AtomicBool::new(false),
@@ -446,20 +459,13 @@ fn parent_death_closes_native_pipes_for_helper_eof_watchdog() {
 fn real_process_roundtrip_uses_framed_control_and_binary_pcm() {
     let path = fixture(NORMAL);
     let cancel = AtomicBool::new(false);
-    let mut worker = Worker::load(
-        &path,
-        Path::new("/model"),
-        "r",
-        "v3",
-        &cancel,
-        SETUP_TIMEOUT,
-    )
-    .unwrap();
+    let mut worker = Worker::load(&path, &model_dirs(), "r", "v3", &cancel, SETUP_TIMEOUT).unwrap();
     let out = worker
         .transcribe(
             "r",
             "v3",
             &vec![0.25; 16000],
+            &[],
             &cancel,
             Duration::from_secs(2),
         )

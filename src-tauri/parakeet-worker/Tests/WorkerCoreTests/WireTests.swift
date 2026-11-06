@@ -10,6 +10,8 @@ final class WireTests: XCTestCase {
             ("requestId", ""), ("requestId", String(repeating: "a", count: 129)),
             ("requestId", "speech\n"), ("modelVersion", "v4"),
             ("modelDirectory", "relative"), ("modelDirectory", "/bad\u{0}path"),
+            ("vocabularyDirectory", "relative"), ("vocabularyDirectory", "/bad\u{0}path"),
+            ("vocabularyDirectory", 7),
         ]
         for (field, value) in badFields {
             var input = valid
@@ -24,6 +26,7 @@ final class WireTests: XCTestCase {
     func testReadsMonoFloat32LEAudio() throws {
         let header = try Wire.audioHeader(Data(#"{"protocolVersion":1,"op":"transcribe","requestId":"job-1","sampleRateHz":16000,"sampleCount":3}"#.utf8), requestId: "job-1")
         XCTAssertEqual(header.sampleCount, 3)
+        XCTAssertEqual(header.vocabulary, [])
         XCTAssertEqual(try Wire.samples(Data([0, 0, 128, 191, 0, 0, 0, 0, 0, 0, 128, 63]), count: 3), [-1, 0, 1])
     }
 
@@ -53,5 +56,26 @@ final class WireTests: XCTestCase {
         XCTAssertEqual(header.requestId, "job-1")
         XCTAssertEqual(header.version, .v2)
         XCTAssertEqual(header.directory, "/local/model")
+    }
+
+    func testLoadHeaderCarriesOptionalVocabularyDirectory() throws {
+        var input: [String: Any] = ["protocolVersion": 1, "op": "load", "requestId": "job-1", "modelVersion": "v3", "modelDirectory": "/local/model"]
+        XCTAssertNil(try Wire.load(JSONSerialization.data(withJSONObject: input)).vocabularyDirectory)
+        input["vocabularyDirectory"] = "/local/ctc"
+        XCTAssertEqual(try Wire.load(JSONSerialization.data(withJSONObject: input)).vocabularyDirectory, "/local/ctc")
+    }
+
+    func testAudioHeaderCarriesBoundedDictionaryWords() throws {
+        var input: [String: Any] = ["protocolVersion": 1, "op": "transcribe", "requestId": "job-1", "sampleRateHz": 16000, "sampleCount": 1]
+        input["vocabulary"] = ["Voxloom", "Kubernetes", "ZWNJ\u{200C}word", String(repeating: "é", count: 64)]
+        XCTAssertEqual(try Wire.audioHeader(JSONSerialization.data(withJSONObject: input), requestId: "job-1").vocabulary.count, 4)
+        let bad: [Any] = [
+            [""], ["tab\tword"], ["line\u{2028}word"], [String(repeating: "x", count: 129)],
+            Array(repeating: "word", count: 257), "Voxloom", [7],
+        ]
+        for value in bad {
+            input["vocabulary"] = value
+            XCTAssertThrowsError(try Wire.audioHeader(JSONSerialization.data(withJSONObject: input), requestId: "job-1"), "\(value)")
+        }
     }
 }

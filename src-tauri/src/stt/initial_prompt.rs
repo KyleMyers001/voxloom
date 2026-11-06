@@ -25,7 +25,8 @@ fn usable(entry: &str) -> Option<&str> {
 }
 
 /// Usable entries in the order given, without repeats (case-insensitive).
-fn usable_words(dictionary: &[String]) -> Vec<&str> {
+/// Parakeet's dictionary boosting takes the same entries.
+pub(crate) fn usable_words(dictionary: &[String]) -> Vec<&str> {
     let mut seen = std::collections::HashSet::new();
     dictionary
         .iter()

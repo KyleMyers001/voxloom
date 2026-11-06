@@ -6,11 +6,18 @@ import { ensureModelAvailable } from '../../../src/services/stt/dogfoodModel';
 import { isKnownSttModelId, resolveTranscriptionModelId } from '../../../src/services/stt/resolveModelId';
 
 describe('Parakeet inventory', () => {
+  const manifestSizes = (name: string) => {
+    const manifest = readFileSync(`src-tauri/src/stt/parakeet-manifests/${name}.rs`, 'utf8');
+    return [...manifest.matchAll(/size_bytes: (\d+)/g)].map((match) => Number(match[1]));
+  };
   it.each(['v2', 'v3'])('uses the sum of pinned native file metadata for the %s catalog size', (version) => {
-    const manifest = readFileSync(`src-tauri/src/stt/parakeet-manifests/${version}.rs`, 'utf8');
-    const sizes = [...manifest.matchAll(/size_bytes: (\d+)/g)].map((match) => Number(match[1]));
+    const sizes = manifestSizes(version);
     expect(sizes).toHaveLength(21);
-    expect(STT_MODEL_CATALOG.find((m) => m.id === `parakeet-tdt-0.6b-${version}`)?.sizeBytes).toBe(sizes.reduce((sum, size) => sum + size, 0));
+    // Each model downloads with the shared dictionary-boosting set.
+    const shared = manifestSizes('ctc110m');
+    expect(shared).toHaveLength(12);
+    const total = [...sizes, ...shared].reduce((sum, size) => sum + size, 0);
+    expect(STT_MODEL_CATALOG.find((m) => m.id === `parakeet-tdt-0.6b-${version}`)?.sizeBytes).toBe(total);
   });
   it.each(['parakeet-tdt-0.6b-v2', 'parakeet-tdt-0.6b-v3'])('exposes %s for explicit download and selection without Whisper fallback', async (id) => {
     const store = createMockSttModelStore();

@@ -1,10 +1,16 @@
 use super::tests::{serve_bytes, temp_store, test_agent};
 use super::ModelStore;
+use crate::stt::parakeet::ModelDirs;
 use sha2::{Digest, Sha256};
 use std::fs;
+use std::path::{Path, PathBuf};
 
 fn fixture(version: usize) -> (pc::ParakeetModelSpec, Vec<Vec<u8>>) {
-    let base = pc::CATALOG[version];
+    fixture_of(pc::CATALOG[version])
+}
+
+/// `base` re-pinned to small bodies, so loopback downloads pass verification.
+fn fixture_of(base: pc::ParakeetModelSpec) -> (pc::ParakeetModelSpec, Vec<Vec<u8>>) {
     let bodies: Vec<Vec<u8>> = base
         .files
         .iter()
@@ -31,6 +37,46 @@ fn fixture(version: usize) -> (pc::ParakeetModelSpec, Vec<Vec<u8>>) {
     )
 }
 
+fn install(dir: &Path, spec: &pc::ParakeetModelSpec, bodies: &[Vec<u8>]) {
+    for (file, body) in spec.files.iter().zip(bodies) {
+        let path = dir.join(spec.id).join(file.path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, body).unwrap();
+    }
+}
+
+/// A store whose shared boosting set is an installed, verified fixture, so
+/// a download fetches only the model set.
+fn parakeet_store(label: &str) -> (ModelStore, PathBuf) {
+    let (mut store, dir) = temp_store(label);
+    let (vocabulary, bodies) = fixture_of(pc::VOCABULARY);
+    store.parakeet_vocabulary = vocabulary;
+    install(&dir, &vocabulary, &bodies);
+    assert!(store.verify_parakeet_existing(&vocabulary));
+    (store, dir)
+}
+
+/// Serves the fixture body of `file` in `set`; a set not listed panics.
+fn url_for(
+    sets: &[(pc::ParakeetModelSpec, &[Vec<u8>])],
+    set: &pc::ParakeetModelSpec,
+    file: &pc::ParakeetFile,
+) -> String {
+    let (spec, bodies) = sets
+        .iter()
+        .find(|(spec, _)| spec.id == set.id)
+        .unwrap_or_else(|| panic!("unexpected download of {}", set.id));
+    let i = spec.files.iter().position(|f| f.path == file.path).unwrap();
+    serve_bytes(bodies[i].clone(), None)
+}
+
+fn dirs(store: &ModelStore, spec: &pc::ParakeetModelSpec) -> ModelDirs {
+    ModelDirs {
+        model: store.models_dir().join(spec.id),
+        vocabulary: store.models_dir().join(store.parakeet_vocabulary.id),
+    }
+}
+
 // Asset availability is platform-independent; runtime resolution is not.
 fn assert_available_assets_and_platform_resolution(
     store: &ModelStore,
@@ -43,10 +89,7 @@ fn assert_available_assets_and_platform_resolution(
     assert_eq!(info.supported, pc::is_supported());
     if pc::is_supported() {
         assert_eq!(info.unavailable_reason, None);
-        assert_eq!(
-            store.parakeet_resolved(spec).unwrap(),
-            store.models_dir().join(spec.id)
-        );
+        assert_eq!(store.parakeet_resolved(spec).unwrap(), dirs(store, spec));
     } else {
         assert_eq!(
             info.unavailable_reason.as_deref(),
@@ -61,20 +104,22 @@ fn assert_available_assets_and_platform_resolution(
 #[test]
 fn parakeet_complete_download_is_staged_verified_and_reports_aggregate_progress() {
     for version in 0..2 {
-        let (store, dir) = temp_store("parakeet-complete");
+        let (mut store, dir) = temp_store("parakeet-complete");
+        let (vocabulary, vocabulary_bodies) = fixture_of(pc::VOCABULARY);
+        store.parakeet_vocabulary = vocabulary;
         let (spec, bodies) = fixture(version);
-        let urls: Vec<_> = bodies
-            .into_iter()
-            .map(|body| serve_bytes(body, None))
-            .collect();
+        let sets = [(vocabulary, &vocabulary_bodies[..]), (spec, &bodies[..])];
+        let total = spec.size_bytes + vocabulary.size_bytes;
         let mut progress = Vec::new();
         store
             .download_parakeet_spec(
                 &test_agent(),
                 &spec,
-                |file| urls[spec.files.iter().position(|f| f.path == file.path).unwrap()].clone(),
+                |set, file| url_for(&sets, set, file),
                 |p| {
-                    assert_eq!(p.bytes_total, spec.size_bytes);
+                    // One download of both sets, reported as the model.
+                    assert_eq!(p.model_id, spec.id);
+                    assert_eq!(p.bytes_total, total);
                     if p.ratio < 1.0 {
                         assert!(!dir.join(spec.id).exists(), "no partially installed set");
                     } else {
@@ -88,7 +133,8 @@ fn parakeet_complete_download_is_staged_verified_and_reports_aggregate_progress(
             .windows(2)
             .all(|p| p[0].bytes_received <= p[1].bytes_received));
         assert_eq!(progress.last().unwrap().ratio, 1.0);
-        assert_eq!(progress.last().unwrap().bytes_received, spec.size_bytes);
+        assert_eq!(progress.last().unwrap().bytes_received, total);
+        assert_eq!(store.cached_parakeet_verdict(&vocabulary), Some(true));
         assert_available_assets_and_platform_resolution(&store, &spec);
         assert!(fs::read_dir(&dir).unwrap().all(|entry| !entry
             .unwrap()
@@ -103,7 +149,7 @@ use crate::stt::parakeet_catalog as pc;
 
 #[test]
 fn parakeet_modified_component_drops_cached_trust_and_is_rechecked_without_hashing_on_resolve() {
-    let (store, dir) = temp_store("parakeet-modified");
+    let (store, dir) = parakeet_store("parakeet-modified");
     let (spec, bodies) = fixture(0);
     let urls: Vec<_> = bodies
         .into_iter()
@@ -113,7 +159,7 @@ fn parakeet_modified_component_drops_cached_trust_and_is_rechecked_without_hashi
         .download_parakeet_spec(
             &test_agent(),
             &spec,
-            |file| urls[spec.files.iter().position(|f| f.path == file.path).unwrap()].clone(),
+            |_, file| urls[spec.files.iter().position(|f| f.path == file.path).unwrap()].clone(),
             |_| {},
         )
         .unwrap();
@@ -139,13 +185,9 @@ fn parakeet_modified_component_drops_cached_trust_and_is_rechecked_without_hashi
 
 #[test]
 fn parakeet_unverified_complete_set_is_usable_until_full_verification_detects_hash_damage() {
-    let (store, dir) = temp_store("parakeet-existing");
+    let (store, dir) = parakeet_store("parakeet-existing");
     let (spec, bodies) = fixture(1);
-    for (file, body) in spec.files.iter().zip(&bodies) {
-        let path = dir.join(spec.id).join(file.path);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, body).unwrap();
-    }
+    install(&dir, &spec, &bodies);
     // Startup hashing has not run yet: like Whisper, the set reads available
     // and resolves, so dictation and Settings never offer a re-download.
     assert_eq!(store.cached_parakeet_verdict(&spec), None);
@@ -254,7 +296,7 @@ fn parakeet_startup_reports_existing_damaged_set_from_background_thread() {
 
 #[test]
 fn parakeet_reverifies_staged_set_before_publication_and_preserves_prior_on_failure() {
-    let (store, dir) = temp_store("parakeet-stage-tamper");
+    let (store, dir) = parakeet_store("parakeet-stage-tamper");
     let (spec, bodies) = fixture(0);
     fs::create_dir_all(dir.join(spec.id)).unwrap();
     fs::write(dir.join(spec.id).join("prior"), b"do not delete").unwrap();
@@ -263,7 +305,7 @@ fn parakeet_reverifies_staged_set_before_publication_and_preserves_prior_on_fail
     let result = store.download_parakeet_spec(
         &test_agent(),
         &spec,
-        |file| {
+        |_, file| {
             serve_bytes(
                 bodies[spec.files.iter().position(|f| f.path == file.path).unwrap()].clone(),
                 None,
@@ -303,13 +345,9 @@ fn parakeet_reverifies_staged_set_before_publication_and_preserves_prior_on_fail
 
 #[test]
 fn parakeet_changed_sets_queue_one_background_recheck_and_stay_usable_until_done() {
-    let (store, dir) = temp_store("parakeet-recheck");
+    let (store, dir) = parakeet_store("parakeet-recheck");
     let (spec, bodies) = fixture(1);
-    for (file, body) in spec.files.iter().zip(&bodies) {
-        let path = dir.join(spec.id).join(file.path);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, body).unwrap();
-    }
+    install(&dir, &spec, &bodies);
     let store = std::sync::Arc::new(store);
     store.this.set(std::sync::Arc::downgrade(&store)).unwrap();
     let (send, receive) = std::sync::mpsc::channel();
@@ -354,7 +392,7 @@ fn parakeet_changed_sets_queue_one_background_recheck_and_stay_usable_until_done
 #[test]
 fn parakeet_cancel_or_corrupt_download_cleans_only_new_staging_and_preserves_prior() {
     for cancel in [true, false] {
-        let (store, dir) = temp_store("parakeet-failure");
+        let (store, dir) = parakeet_store("parakeet-failure");
         let (spec, bodies) = fixture(0);
         fs::create_dir_all(dir.join(spec.id)).unwrap();
         fs::write(dir.join(spec.id).join("prior"), b"retained").unwrap();
@@ -363,7 +401,7 @@ fn parakeet_cancel_or_corrupt_download_cleans_only_new_staging_and_preserves_pri
             .download_parakeet_spec(
                 &test_agent(),
                 &spec,
-                |file| {
+                |_, file| {
                     let i = spec.files.iter().position(|f| f.path == file.path).unwrap();
                     let body = if !cancel && i == 1 {
                         vec![b'x'; bodies[i].len()]
@@ -394,10 +432,15 @@ fn parakeet_cancel_or_corrupt_download_cleans_only_new_staging_and_preserves_pri
             fs::read(dir.join(spec.id).join("prior")).unwrap(),
             b"retained"
         );
+        let mut remaining: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        remaining.sort();
         assert_eq!(
-            fs::read_dir(&dir).unwrap().count(),
-            1,
-            "only prior set remains"
+            remaining,
+            [pc::VOCABULARY.id, spec.id],
+            "only the prior sets remain"
         );
         fs::remove_dir_all(dir).unwrap();
     }
@@ -413,7 +456,7 @@ fn leftovers(dir: &std::path::Path) -> Vec<String> {
 
 #[test]
 fn parakeet_replacement_removes_prior_backup_after_success_and_keeps_set_on_failure() {
-    let (store, dir) = temp_store("parakeet-replace");
+    let (store, dir) = parakeet_store("parakeet-replace");
     let (spec, bodies) = fixture(1);
     fs::create_dir_all(dir.join(spec.id)).unwrap();
     fs::write(dir.join(spec.id).join("prior"), b"replaced").unwrap();
@@ -421,7 +464,7 @@ fn parakeet_replacement_removes_prior_backup_after_success_and_keeps_set_on_fail
         store.download_parakeet_spec(
             &test_agent(),
             &spec,
-            |file| {
+            |_, file| {
                 let i = spec.files.iter().position(|f| f.path == file.path).unwrap();
                 let body = if corrupt && i == 1 {
                     vec![b'x'; bodies[i].len()]
@@ -458,6 +501,7 @@ fn parakeet_startup_removes_orphaned_staging_and_backups_but_nothing_else() {
     fs::write(outside.join("keep"), b"symlink target").unwrap();
     let orphans: Vec<String> = pc::CATALOG
         .iter()
+        .chain([&pc::VOCABULARY])
         .flat_map(|spec| {
             [
                 format!(".{}.staging-123-0", spec.id),
@@ -525,7 +569,7 @@ fn parakeet_models_are_listed_missing_without_network_and_cancel_is_idle_safe() 
             .expect("Parakeet catalog entry is supported by store");
         assert_eq!(info.status, "missing");
         assert!(list.iter().any(|row| row.id == spec.id));
-        assert_eq!(info.size_bytes, spec.size_bytes);
+        assert_eq!(info.size_bytes, spec.size_bytes + pc::VOCABULARY.size_bytes);
         let json = serde_json::to_value(&info).unwrap();
         assert_eq!(json["supported"], pc::is_supported());
         assert!(store.cancel(spec.id).is_ok());
@@ -535,4 +579,131 @@ fn parakeet_models_are_listed_missing_without_network_and_cancel_is_idle_safe() 
         !dir.exists(),
         "listing and cancellation must not create directories"
     );
+}
+
+#[test]
+fn parakeet_install_from_before_boosting_reads_missing_and_downloads_only_the_shared_set() {
+    let (mut store, dir) = temp_store("parakeet-upgrade");
+    let (vocabulary, vocabulary_bodies) = fixture_of(pc::VOCABULARY);
+    store.parakeet_vocabulary = vocabulary;
+    let models: Vec<_> = (0..2).map(fixture).collect();
+    for (spec, bodies) in &models {
+        install(&dir, spec, bodies);
+        assert!(store.verify_parakeet_existing(spec));
+        let info = store.parakeet_info(spec);
+        assert_eq!(info.status, "missing");
+        assert_eq!(info.failure_reason, None);
+        if pc::is_supported() {
+            let error = store.parakeet_resolved(spec).unwrap_err();
+            assert_eq!(error.code, "model-missing");
+        }
+    }
+    let spec = models[0].0;
+    let component = dir.join(spec.id).join(spec.files[0].path);
+    let installed = fs::read(&component).unwrap();
+    // A model file request would panic in `url_for`.
+    let sets = [(vocabulary, &vocabulary_bodies[..])];
+    let mut progress = Vec::new();
+    store
+        .download_parakeet_spec(
+            &test_agent(),
+            &spec,
+            |set, file| url_for(&sets, set, file),
+            |p| progress.push(p),
+        )
+        .unwrap();
+    assert!(progress
+        .iter()
+        .all(|p| p.model_id == spec.id && p.bytes_total == vocabulary.size_bytes));
+    assert_eq!(progress.last().unwrap().ratio, 1.0);
+    assert_eq!(fs::read(&component).unwrap(), installed);
+    // Stored once, for both models.
+    for (spec, _) in &models {
+        assert_available_assets_and_platform_resolution(&store, spec);
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn parakeet_damaged_shared_set_fails_installed_models_and_is_downloaded_again_alone() {
+    let (store, dir) = parakeet_store("parakeet-shared-damage");
+    let (installed, bodies) = fixture(0);
+    install(&dir, &installed, &bodies);
+    assert!(store.verify_parakeet_existing(&installed));
+    let (absent, _) = fixture(1);
+    let vocabulary = store.parakeet_vocabulary;
+    let (_, vocabulary_bodies) = fixture_of(pc::VOCABULARY);
+    fs::write(
+        dir.join(vocabulary.id).join(vocabulary.files[0].path),
+        vec![b'x'; vocabulary_bodies[0].len()],
+    )
+    .unwrap();
+    // The startup pass checks the shared set too.
+    let store = std::sync::Arc::new(store);
+    store.spawn_verify_existing(|| {}).join().unwrap();
+    assert_eq!(store.cached_parakeet_verdict(&vocabulary), Some(false));
+    let info = store.parakeet_info(&installed);
+    assert_eq!(info.status, "failed");
+    assert_eq!(info.failure_reason.as_deref(), Some("damaged"));
+    if pc::is_supported() {
+        let error = store.parakeet_resolved(&installed).unwrap_err();
+        assert_eq!(error.message, super::existing::DAMAGED_MESSAGE);
+    }
+    // A model never downloaded is only missing.
+    assert_eq!(store.parakeet_info(&absent).status, "missing");
+    let sets = [(vocabulary, &vocabulary_bodies[..])];
+    store
+        .download_parakeet_spec(
+            &test_agent(),
+            &installed,
+            |set, file| url_for(&sets, set, file),
+            |_| {},
+        )
+        .unwrap();
+    assert_available_assets_and_platform_resolution(&store, &installed);
+    assert_eq!(leftovers(&dir), Vec::<String>::new());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn parakeet_shared_set_published_first_survives_a_failed_model_download() {
+    let (mut store, dir) = temp_store("parakeet-partial");
+    let (vocabulary, vocabulary_bodies) = fixture_of(pc::VOCABULARY);
+    store.parakeet_vocabulary = vocabulary;
+    let (spec, bodies) = fixture(1);
+    let corrupt: Vec<_> = bodies.iter().map(|body| vec![b'x'; body.len()]).collect();
+    let changed = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = std::sync::Arc::clone(&changed);
+    store.set_on_models_changed(std::sync::Arc::new(move || {
+        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }));
+    let sets = [(vocabulary, &vocabulary_bodies[..]), (spec, &corrupt[..])];
+    let error = store
+        .download_parakeet_spec(
+            &test_agent(),
+            &spec,
+            |set, file| url_for(&sets, set, file),
+            |_| {},
+        )
+        .unwrap_err();
+    assert_eq!(error.code, "download-corrupted");
+    // The other model may already have been usable with it: re-list.
+    assert_eq!(changed.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(store.cached_parakeet_verdict(&vocabulary), Some(true));
+    assert!(!dir.join(spec.id).exists());
+    assert_eq!(store.parakeet_info(&spec).status, "missing");
+    assert!(store.inflight.lock().unwrap().is_none());
+    assert_eq!(leftovers(&dir), Vec::<String>::new());
+    // Trying again fetches only the model set.
+    let sets = [(spec, &bodies[..])];
+    store
+        .download_parakeet_spec(
+            &test_agent(),
+            &spec,
+            |set, file| url_for(&sets, set, file),
+            |_| {},
+        )
+        .unwrap();
+    assert_available_assets_and_platform_resolution(&store, &spec);
+    fs::remove_dir_all(dir).unwrap();
 }

@@ -1,4 +1,4 @@
-use super::super::process::tests::{fixture, NORMAL};
+use super::super::process::tests::{fixture, model_dirs, NORMAL};
 use super::*;
 use std::{
     fs,
@@ -23,6 +23,7 @@ fn completed_recordings_do_not_exhaust_lifetime_admission() {
                 vec![0.0; 160],
                 16000,
                 &SpeechFilterConfig::default(),
+                &[],
             )
             .unwrap();
         assert!(out.text.is_empty());
@@ -46,9 +47,7 @@ fn wait(test: impl Fn() -> bool) {
     }
 }
 fn prepare(rt: &ParakeetRuntime, id: &str) -> Result<(), SttErrorDto> {
-    rt.prepare(rt.epoch(), id, "model", "v3", || {
-        Ok(PathBuf::from("/model"))
-    })
+    rt.prepare(rt.epoch(), id, "model", "v3", || Ok(model_dirs()))
 }
 #[test]
 fn admission_is_fast_loading_starts_before_pcm_and_transcribe_joins_same_worker() {
@@ -69,6 +68,7 @@ fn admission_is_fast_loading_starts_before_pcm_and_transcribe_joins_same_worker(
             vec![0.25; 16000],
             16000,
             &SpeechFilterConfig::default(),
+            &[],
         )
         .unwrap();
     assert_eq!(out.text, "[Music] Thank you.");
@@ -96,7 +96,8 @@ fn one_active_one_pending_fifo_busy_and_pending_cancel_never_kills_active() {
             "model",
             vec![0.25],
             16000,
-            &SpeechFilterConfig::default()
+            &SpeechFilterConfig::default(),
+            &[],
         )
         .unwrap()
         .text,
@@ -129,7 +130,8 @@ fn abandoned_preparation_has_a_finite_audio_wait_and_reaps_before_next_recording
             "model",
             vec![0.25],
             16000,
-            &SpeechFilterConfig::default()
+            &SpeechFilterConfig::default(),
+            &[],
         )
         .unwrap_err()
         .code,
@@ -152,6 +154,7 @@ fn fifo_success_does_not_cancel_superseded_recording() {
                 vec![0.25],
                 16000,
                 &SpeechFilterConfig::default(),
+                &[],
             )
             .unwrap()
     });
@@ -162,7 +165,8 @@ fn fifo_success_does_not_cancel_superseded_recording() {
             "model",
             vec![0.25],
             16000,
-            &SpeechFilterConfig::default()
+            &SpeechFilterConfig::default(),
+            &[],
         )
         .unwrap()
         .text,
@@ -195,7 +199,8 @@ fn retirement_kills_and_reaps_old_helper_before_successor_starts() {
             "model",
             vec![0.25],
             16000,
-            &SpeechFilterConfig::default()
+            &SpeechFilterConfig::default(),
+            &[],
         )
         .unwrap()
         .text,
@@ -215,7 +220,7 @@ fn blocked_model_resolution_never_holds_registry_lock_and_cancellation_prevents_
     rt.prepare(rt.epoch(), "r", "model", "v3", move || {
         entered.send(()).unwrap();
         gate.recv().unwrap();
-        Ok("/model".into())
+        Ok(model_dirs())
     })
     .unwrap();
     rx.recv_timeout(Duration::from_secs(2)).unwrap();
@@ -239,6 +244,7 @@ fn silence_uses_only_shared_gate_and_invalid_pcm_releases_worker() {
             vec![0.0; 16000],
             16000,
             &SpeechFilterConfig::default(),
+            &[],
         )
         .unwrap();
     assert_eq!(out.dropped, Some(DropReason::SilentAudio));
@@ -251,7 +257,8 @@ fn silence_uses_only_shared_gate_and_invalid_pcm_releases_worker() {
             "model",
             vec![f32::NAN],
             16000,
-            &SpeechFilterConfig::default()
+            &SpeechFilterConfig::default(),
+            &[],
         )
         .unwrap_err()
         .code,
@@ -278,7 +285,8 @@ fn cancelled_old_request_cleanup_cannot_kill_running_successor() {
             "model",
             vec![0.25],
             16000,
-            &SpeechFilterConfig::default()
+            &SpeechFilterConfig::default(),
+            &[],
         )
         .unwrap()
         .text,
@@ -299,6 +307,7 @@ fn parakeet_keeps_quiet_tail_and_raw_text_without_whisper_postfilters() {
             pcm,
             16000,
             &SpeechFilterConfig::default(),
+            &[],
         )
         .unwrap();
     assert_eq!(out.text, "[Music] Thank you.");
@@ -326,7 +335,8 @@ fn cancel_before_prepare_is_sticky_and_old_epoch_cannot_touch_successor() {
             "model",
             vec![0.25],
             16000,
-            &SpeechFilterConfig::default()
+            &SpeechFilterConfig::default(),
+            &[],
         )
         .unwrap()
         .text,
@@ -379,6 +389,7 @@ fn successful_result_remains_single_use_until_terminal_replay_eviction() {
         vec![0.25],
         16000,
         &SpeechFilterConfig::default(),
+        &[],
     )
     .unwrap();
     wait(|| rt.idle());
@@ -391,6 +402,7 @@ fn successful_result_remains_single_use_until_terminal_replay_eviction() {
             vec![0.25],
             16000,
             &SpeechFilterConfig::default(),
+            &[],
         )
         .is_err());
     assert!(!rt.cancel(epoch, "done").unwrap());
@@ -415,7 +427,7 @@ fn active_and_pending_ownership_survive_terminal_replay_eviction() {
     rt.prepare(epoch, "active", "model", "v3", move || {
         entered.send(()).unwrap();
         gate.recv().unwrap();
-        Ok("/model".into())
+        Ok(model_dirs())
     })
     .unwrap();
     rx.recv_timeout(Duration::from_secs(2)).unwrap();
@@ -477,6 +489,7 @@ fn active_and_pending_ownership_survive_terminal_replay_eviction() {
             vec![0.25],
             16000,
             &SpeechFilterConfig::default(),
+            &[],
         )
         .unwrap()
         .text,
@@ -514,6 +527,7 @@ fn unconsumed_results_keep_ownership_and_retained_job_bound() {
             vec![0.25],
             16000,
             &SpeechFilterConfig::default(),
+            &[],
         )
         .unwrap_err()
         .code,
@@ -549,6 +563,7 @@ fn pending_transcription_is_claimed_only_once() {
             vec![0.25],
             16000,
             &SpeechFilterConfig::default(),
+            &[],
         )
     });
     wait(|| pending.data.lock().unwrap().claimed);
@@ -560,6 +575,7 @@ fn pending_transcription_is_claimed_only_once() {
             vec![0.25],
             16000,
             &SpeechFilterConfig::default(),
+            &[],
         )
         .unwrap_err()
         .code,
@@ -601,6 +617,7 @@ fn resampler_overshoot_on_loud_audio_is_clamped_and_transcribed() {
                 pcm,
                 16000,
                 &SpeechFilterConfig::default(),
+                &[],
             )
             .unwrap_or_else(|error| panic!("{native_rate} Hz: {}", error.code));
         assert_eq!(out.text, "loud");

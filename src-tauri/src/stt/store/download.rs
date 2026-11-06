@@ -61,7 +61,7 @@ impl ModelStore {
             return self.download_parakeet_spec(
                 model_fetch::shared_agent(),
                 spec,
-                |file| spec.url(file),
+                |set, file| set.url(file),
                 on_progress,
             );
         }
