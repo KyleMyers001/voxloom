@@ -22,7 +22,7 @@ const ready: CleanupModelStatus = {
 function Harness({ modelStore, start }: { modelStore: CleanupModelStore; start?: Partial<Settings> }) {
   const { dispatch } = useApp();
   useEffect(() => {
-    if (start) dispatch({ onboardingComplete: true, settings: { ...initialSettings, ...start }, type: 'hydrate-settings' });
+    if (start) dispatch({ now: Date.now(), onboardingComplete: true, settings: { ...initialSettings, ...start }, type: 'hydrate-settings' });
   }, [dispatch, start]);
   return <CleanupSettings isNative model={useCleanupModel(true, modelStore)} />;
 }

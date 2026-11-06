@@ -35,7 +35,7 @@ const activeSettings = { cleanupEnabled: true, cleanupModelId: CLEANUP_MODEL_ID,
 function Start({ settings }: { settings?: Partial<Settings> }) {
   const { dispatch } = useApp();
   useEffect(() => {
-    if (settings) dispatch({ onboardingComplete: true, settings: { ...initialSettings, ...settings }, type: 'hydrate-settings' });
+    if (settings) dispatch({ now: Date.now(), onboardingComplete: true, settings: { ...initialSettings, ...settings }, type: 'hydrate-settings' });
   }, [dispatch, settings]);
   return null;
 }
