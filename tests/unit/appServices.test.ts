@@ -31,7 +31,7 @@ describe('mock application services', () => {
     setup.reopen();
     setup.replace({ ...initialOnboarding, permissionDenied: true });
     expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
-      { key: 'startAtLogin', type: 'set-setting', value: true },
+      { key: 'startAtLogin', now: expect.any(Number), type: 'set-setting', value: true },
       { changes: { holdTested: true }, type: 'update-onboarding' },
       { type: 'reopen-onboarding' },
       {
