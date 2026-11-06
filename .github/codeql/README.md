@@ -5,21 +5,31 @@ explicit five-language matrix (Actions, JavaScript/TypeScript, Python, Rust and
 Swift).
 Default queries and the existing `/language:…` categories are retained.
 
+**Experimental: do not migrate yet.** The first timing improvement was not
+reproduced. Default setup remains enabled while the serialized-build candidate
+is evaluated.
+
 ## Why the Swift job is different
 
 The first Parakeet-era default scan spent 22m11s of its 24m08s Swift job in
 `autobuild`; analysis took 1m09s. SwiftPM manifest compilation and resolution ran
 inside CodeQL tracing, before a large instrumented FluidAudio build.
 
-The [manual-build trial](https://github.com/KyleMyers001/voxloom/actions/runs/42266188434/job/128058599736)
-completed in **18m59s**, versus **28m12s** for the [same-head default scan](https://github.com/KyleMyers001/voxloom/actions/runs/42266182953/job/128058587049):
-**9m13s (33%) faster**, with all five production Swift sources extracted.
-These are individual observations, not a guaranteed runtime. Instrumented Swift
-compilation remains expensive; this does not make security CI a five-minute job.
+The [first manual trial](https://github.com/KyleMyers001/voxloom/actions/runs/42266188434/job/128058599736)
+completed in **18m59s**, versus **28m12s** for the [same-head default scan](https://github.com/KyleMyers001/voxloom/actions/runs/42266182953/job/128058587049).
+However, the [explicit-ARM64 repeat](https://github.com/KyleMyers001/voxloom/actions/runs/42278222359/job/128100175580)
+hit its **30-minute timeout**, while the [same-head default scan](https://github.com/KyleMyers001/voxloom/actions/runs/42278216752/job/128100027458)
+finished in **15m46s**. **No repeatable speedup has been demonstrated.** The first
+trial used `uname -m` inside tracing; file extraction alone does not establish
+which architecture-conditional bodies were included.
 
 The job resolves checked-in dependencies before initialization, then compiles the
 helper **and FluidAudio under tracing**, with no compiled outputs restored from
-cache. Only downloads and source checkouts are cached. Dependency-prebuild and
+cache. The current candidate sets **one build job** to bound compiler/extractor
+overlap. It records architecture, swap usage and executable-only process memory
+in `swift-resources.log`, never process arguments or environments. This tests a
+resource-pressure hypothesis; it is not a measured explanation yet.
+Only downloads and source checkouts are cached. Dependency-prebuild and
 Intel-runner trials did not beat the first manual trial and are **not retained**.
 
 The job pins the tested `macos-26` / Xcode 26.6 environment: CodeQL does not yet
@@ -42,7 +52,8 @@ workflow runs in **preview mode**: it saves SARIF artifacts but uploads neither
 alerts nor databases. Existing default setup is left enabled and continues
 publishing security results. Preview mode temporarily runs both workflows.
 
-After reviewing the PR's timings and extraction coverage:
+Only after a repeatable performance improvement and production extraction
+coverage have been established and reviewed:
 
 1. Merge the PR only with Kyle's explicit approval.
 2. In repository **Settings → Advanced Security → CodeQL analysis**, disable the

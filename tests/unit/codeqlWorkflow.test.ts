@@ -58,7 +58,7 @@ describe('CodeQL workflow', () => {
     expect(build.run).toContain('--disable-automatic-resolution');
     expect(build.run).toContain('--product voxloom-parakeet-worker');
     // LocalASR's real implementation is behind #if arch(arm64), even on Intel hosts.
-    expect(build.run).toContain('--arch arm64');
+    expect(build.run).toContain('--arch arm64 --jobs 1');
     for (const step of [prepare, build]) expect(step.if).toBe('matrix.language == \'swift\'');
   });
 
@@ -70,6 +70,15 @@ describe('CodeQL workflow', () => {
     for (const step of steps.slice(0, steps.indexOf(init))) {
       expect(step.run ?? '').not.toMatch(/swift build/);
     }
+  });
+
+  it('records safe resource telemetry without exposing process arguments', () => {
+    const build = named('Build the Swift helper for Apple Silicon');
+    expect(build.run).toContain('/usr/bin/time -l swift build');
+    expect(build.run).toContain('vm.swapusage');
+    expect(build.run).toContain('comm=');
+    expect(build.run).not.toContain('args=');
+    expect(build.run).toContain('codeql-results/swift-resources.log');
   });
 
   it('caches downloaded dependencies, never compiled first-party outputs', () => {

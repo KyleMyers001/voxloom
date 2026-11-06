@@ -87,13 +87,31 @@ jobs:
 
       # ARM64 is deliberate: LocalASR's production implementation is conditional
       # on arch(arm64). Building for the Intel host would analyze its stub instead.
+      # Bound compiler/extractor overlap on the small ARM runner. Keep resource
+      # telemetry for diagnosis; never record process arguments or environments.
       # FluidAudio is compiled under tracing too; no product outputs are cached.
       - name: Build the Swift helper for Apple Silicon
         if: matrix.language == 'swift'
-        run: >-
-          swift build --package-path src-tauri/parakeet-worker
-          --disable-automatic-resolution --product voxloom-parakeet-worker
-          --arch arm64
+        run: |
+          mkdir -p codeql-results
+          {
+            printf 'Trace-observed architecture: '
+            uname -m
+            sysctl hw.memsize hw.ncpu
+          } > codeql-results/swift-resources.log
+          while true; do
+            {
+              date -u '+%Y-%m-%dT%H:%M:%SZ'
+              sysctl vm.swapusage
+              ps -axww -o pid=,ppid=,rss=,%cpu=,comm= | awk '/swift-frontend|\/swift\/tools\/osx64\/extractor/ { print }'
+            } >> codeql-results/swift-resources.log
+            sleep 30
+          done &
+          monitor_pid=$!
+          trap 'kill "$monitor_pid" 2>/dev/null || true' EXIT
+          /usr/bin/time -l swift build --package-path src-tauri/parakeet-worker \
+            --disable-automatic-resolution --product voxloom-parakeet-worker \
+            --arch arm64 --jobs 1
 
       - name: Analyze
         uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
