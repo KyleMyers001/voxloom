@@ -84,7 +84,7 @@ public enum WorkerHost {
                 failure = .unsupportedAudio
                 let audio = try Wire.audioHeader(reader.frame(), requestId: header.requestId)
                 let samples = try Wire.samples(reader.exact(audio.sampleCount * 4), count: audio.sampleCount)
-                pair.continuation.yield(.audio(samples))
+                pair.continuation.yield(.audio(samples, vocabulary: audio.vocabulary))
             } catch is InputEnd {
                 // Core ML has no reliable cooperative cancellation. Terminate the
                 // process from this independent reader even while load/predict blocks.

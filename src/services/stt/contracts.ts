@@ -37,9 +37,9 @@ export interface SttModelStore {
 export interface SttTranscribeOptions {
   /**
    * The user's dictionary words (BUS-138). A native engine passes them to
-   * Whisper as its initial prompt, most important first (the app sends the
-   * newest added first, since a long list is cut); empty or missing sets no
-   * prompt.
+   * Whisper as its initial prompt, and to Parakeet's dictionary boosting,
+   * most important first (the app sends the newest added first, since a long
+   * list is cut); empty or missing sets no prompt and boosts nothing.
    */
   readonly dictionary?: readonly string[];
 }

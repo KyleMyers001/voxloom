@@ -102,13 +102,15 @@ export const STT_MODEL_CATALOG: readonly Omit<SttModelInfo, 'status'>[] = [
   {
     id: 'parakeet-tdt-0.6b-v2',
     label: 'Parakeet v2 (English)',
-    // Sum of the pinned native manifest; covered by the catalog parity test.
-    sizeBytes: 464_413_247,
+    // Sum of the pinned native manifest plus the shared dictionary-boosting
+    // set it downloads with; covered by the catalog parity test.
+    sizeBytes: 567_215_702,
   },
   {
     id: 'parakeet-tdt-0.6b-v3',
     label: 'Parakeet v3 (Multilingual)',
-    // Sum of the pinned native manifest; covered by the catalog parity test.
-    sizeBytes: 483_105_645,
+    // Sum of the pinned native manifest plus the shared dictionary-boosting
+    // set it downloads with; covered by the catalog parity test.
+    sizeBytes: 585_908_100,
   },
 ] as const;

@@ -4,6 +4,7 @@ use super::{DownloadProgressDto, Inflight, ModelInfoDto, ModelStore};
 use crate::model_fetch::{self, FetchError};
 use crate::stt::{
     error::SttErrorDto,
+    parakeet::ModelDirs,
     parakeet_catalog::{self, ParakeetFile, ParakeetModelSpec},
 };
 use std::fs;
@@ -69,6 +70,9 @@ mod tests {
 }
 
 impl ModelStore {
+    /// Download what `spec` still needs: the shared dictionary-boosting set
+    /// when it is missing or damaged, then the model set (unless only the
+    /// shared set was missing). Progress covers both, under the model's id.
     pub(super) fn download_parakeet_spec<U, F>(
         &self,
         agent: &ureq::Agent,
@@ -77,7 +81,7 @@ impl ModelStore {
         mut on_progress: F,
     ) -> Result<(), SttErrorDto>
     where
-        U: Fn(&ParakeetFile) -> String,
+        U: Fn(&ParakeetModelSpec, &ParakeetFile) -> String,
         F: FnMut(DownloadProgressDto),
     {
         let cancel = {
@@ -98,85 +102,36 @@ impl ModelStore {
             cancel
         };
         let result = (|| {
-            fs::create_dir_all(&self.root)
-                .map_err(|_| fetch_error(FetchError::Io(String::new())))?;
-            let suffix = format!(
-                "{}-{}",
-                std::process::id(),
-                NEXT_STAGE.fetch_add(1, Ordering::Relaxed)
-            );
-            let stage = Stage::create(self.root.join(format!(".{}.staging-{suffix}", spec.id)))
-                .map_err(|_| fetch_error(FetchError::Io(String::new())))?;
-            let mut completed = 0;
-            for file in spec.files {
-                if cancel.load(Ordering::Acquire) {
-                    return Err(fetch_error(FetchError::Cancelled));
+            let mut sets = Vec::with_capacity(2);
+            if self.parakeet_usable(&self.parakeet_vocabulary) != Some(true) {
+                sets.push(self.parakeet_vocabulary);
+            }
+            if self.parakeet_usable(spec) != Some(true) || sets.is_empty() {
+                sets.push(*spec);
+            }
+            let total: u64 = sets.iter().map(|set| set.size_bytes).sum();
+            let mut done = 0;
+            for (index, set) in sets.iter().enumerate() {
+                let last = index + 1 == sets.len();
+                self.fetch_parakeet_set(agent, set, &url, &cancel, last, |received| {
+                    let received = done + received;
+                    on_progress(DownloadProgressDto {
+                        model_id: spec.id.to_owned(),
+                        bytes_received: received,
+                        bytes_total: total,
+                        ratio: (received as f64 / total as f64).clamp(0.0, 0.999),
+                    });
+                })?;
+                done += set.size_bytes;
+                if !last {
+                    // The other Parakeet model may be usable now.
+                    self.notify_models_changed();
                 }
-                model_fetch::fetch_verified(
-                    agent,
-                    &url(file),
-                    &stage.0.join(file.path),
-                    &file.artifact(),
-                    &cancel,
-                    |received, _| {
-                        let received = completed + received;
-                        on_progress(DownloadProgressDto {
-                            model_id: spec.id.to_owned(),
-                            bytes_received: received,
-                            bytes_total: spec.size_bytes,
-                            ratio: (received as f64 / spec.size_bytes as f64).clamp(0.0, 0.999),
-                        });
-                    },
-                )
-                .map_err(fetch_error)?;
-                completed += file.size_bytes;
-            }
-            let verified = super::parakeet_verify::verify_staged(spec, &stage.0, &cancel)
-                .map_err(fetch_error)?;
-            // Serialize cancellation with publication: cancellation before this lock wins;
-            // after publication it is an idle cancel and must never delete the final set.
-            let mut inflight = self.inflight.lock().unwrap();
-            if cancel.load(Ordering::Acquire) {
-                return Err(fetch_error(FetchError::Cancelled));
-            }
-            let dest = self.root.join(spec.id);
-            let backup = self.root.join(format!(".{}.previous-{suffix}", spec.id));
-            let prior = fs::symlink_metadata(&dest).is_ok();
-            if prior {
-                fs::rename(&dest, &backup)
-                    .map_err(|_| fetch_error(FetchError::Io(String::new())))?;
-            }
-            if fs::rename(&stage.0, &dest).is_err() {
-                if prior {
-                    let _ = fs::rename(&backup, &dest);
-                }
-                return Err(fetch_error(FetchError::Io(String::new())));
-            }
-            if verified.verdict(spec, &dest) != Some(true) {
-                let _ = fs::rename(&dest, &stage.0);
-                if prior {
-                    let _ = fs::rename(&backup, &dest);
-                }
-                return Err(SttErrorDto::new(
-                    "download-corrupted",
-                    "Model set changed during verification. Nothing was saved.",
-                ));
-            }
-            self.parakeet_verified
-                .lock()
-                .unwrap()
-                .insert(spec.id, verified);
-            *inflight = None;
-            drop(inflight);
-            // The verified replacement is published; the prior set is no longer
-            // needed. Failure paths above restore it instead.
-            if prior {
-                remove_entry(&backup);
             }
             on_progress(DownloadProgressDto {
                 model_id: spec.id.to_owned(),
-                bytes_received: spec.size_bytes,
-                bytes_total: spec.size_bytes,
+                bytes_received: total,
+                bytes_total: total,
                 ratio: 1.0,
             });
             self.notify_models_changed();
@@ -192,7 +147,98 @@ impl ModelStore {
         }
         result
     }
-    /// Startup sweep of orphaned download leftovers for catalog ids (exact
+
+    /// Stage, verify and publish one complete set. `last` releases the
+    /// download slot together with publication.
+    fn fetch_parakeet_set<U>(
+        &self,
+        agent: &ureq::Agent,
+        set: &ParakeetModelSpec,
+        url: &U,
+        cancel: &AtomicBool,
+        last: bool,
+        mut on_received: impl FnMut(u64),
+    ) -> Result<(), SttErrorDto>
+    where
+        U: Fn(&ParakeetModelSpec, &ParakeetFile) -> String,
+    {
+        fs::create_dir_all(&self.root).map_err(|_| fetch_error(FetchError::Io(String::new())))?;
+        let suffix = format!(
+            "{}-{}",
+            std::process::id(),
+            NEXT_STAGE.fetch_add(1, Ordering::Relaxed)
+        );
+        let stage = Stage::create(self.root.join(format!(".{}.staging-{suffix}", set.id)))
+            .map_err(|_| fetch_error(FetchError::Io(String::new())))?;
+        let mut completed = 0;
+        for file in set.files {
+            if cancel.load(Ordering::Acquire) {
+                return Err(fetch_error(FetchError::Cancelled));
+            }
+            model_fetch::fetch_verified(
+                agent,
+                &url(set, file),
+                &stage.0.join(file.path),
+                &file.artifact(),
+                cancel,
+                |received, _| on_received(completed + received),
+            )
+            .map_err(fetch_error)?;
+            completed += file.size_bytes;
+        }
+        let verified =
+            super::parakeet_verify::verify_staged(set, &stage.0, cancel).map_err(fetch_error)?;
+        // Serialize cancellation with publication: cancellation before this lock wins;
+        // after publication it is an idle cancel and must never delete the final set.
+        let mut inflight = self.inflight.lock().unwrap();
+        if cancel.load(Ordering::Acquire) {
+            return Err(fetch_error(FetchError::Cancelled));
+        }
+        let dest = self.root.join(set.id);
+        let backup = self.root.join(format!(".{}.previous-{suffix}", set.id));
+        let prior = fs::symlink_metadata(&dest).is_ok();
+        if prior {
+            fs::rename(&dest, &backup).map_err(|_| fetch_error(FetchError::Io(String::new())))?;
+        }
+        if fs::rename(&stage.0, &dest).is_err() {
+            if prior {
+                let _ = fs::rename(&backup, &dest);
+            }
+            return Err(fetch_error(FetchError::Io(String::new())));
+        }
+        if verified.verdict(set, &dest) != Some(true) {
+            let _ = fs::rename(&dest, &stage.0);
+            if prior {
+                let _ = fs::rename(&backup, &dest);
+            }
+            return Err(SttErrorDto::new(
+                "download-corrupted",
+                "Model set changed during verification. Nothing was saved.",
+            ));
+        }
+        self.parakeet_verified
+            .lock()
+            .unwrap()
+            .insert(set.id, verified);
+        if last {
+            *inflight = None;
+        }
+        drop(inflight);
+        // The verified replacement is published; the prior set is no longer
+        // needed. Failure paths above restore it instead.
+        if prior {
+            remove_entry(&backup);
+        }
+        Ok(())
+    }
+
+    /// Every Parakeet set on disk: the models and the shared boosting set.
+    pub(super) fn parakeet_sets(&self) -> impl Iterator<Item = &ParakeetModelSpec> {
+        parakeet_catalog::CATALOG
+            .iter()
+            .chain(std::iter::once(&self.parakeet_vocabulary))
+    }
+    /// Startup sweep of orphaned download leftovers for Parakeet set ids (exact
     /// `.{id}.staging-` / `.{id}.previous-` prefixes only). Holding the download
     /// slot skips the sweep while a download is in flight and keeps one from
     /// claiming a stage mid-sweep.
@@ -209,7 +255,7 @@ impl ModelStore {
             let Some(name) = name.to_str() else {
                 continue;
             };
-            let leftover = parakeet_catalog::CATALOG.iter().any(|spec| {
+            let leftover = self.parakeet_sets().any(|spec| {
                 LEFTOVER_KINDS
                     .iter()
                     .any(|kind| name.starts_with(&format!(".{}.{kind}", spec.id)))
@@ -224,7 +270,7 @@ impl ModelStore {
         let status = if self.is_downloading(spec.id) {
             "downloading"
         } else {
-            match self.parakeet_usable(spec) {
+            match self.parakeet_ready(spec) {
                 Some(true) => "available",
                 Some(false) => "failed",
                 None => "missing",
@@ -233,7 +279,8 @@ impl ModelStore {
         ModelInfoDto {
             id: spec.id.to_owned(),
             label: spec.label.to_owned(),
-            size_bytes: spec.size_bytes,
+            // A fresh install downloads the shared boosting set too.
+            size_bytes: spec.size_bytes + self.parakeet_vocabulary.size_bytes,
             status: status.to_owned(),
             failure_reason: (status == "failed").then(|| "damaged".to_owned()),
             supported,
@@ -241,18 +288,31 @@ impl ModelStore {
                 .then(|| parakeet_catalog::UNAVAILABLE_REASON.to_owned()),
         }
     }
+    /// A model is usable only together with the shared boosting set: while
+    /// the model set is usable this is the boosting set's state, so an
+    /// install from before boosting reads as missing and Download fetches
+    /// only the boosting set. Otherwise it is the model set's own state.
+    fn parakeet_ready(&self, spec: &ParakeetModelSpec) -> Option<bool> {
+        match self.parakeet_usable(spec) {
+            Some(true) => self.parakeet_usable(&self.parakeet_vocabulary),
+            other => other,
+        }
+    }
     pub(super) fn parakeet_resolved(
         &self,
         spec: &ParakeetModelSpec,
-    ) -> Result<PathBuf, SttErrorDto> {
+    ) -> Result<ModelDirs, SttErrorDto> {
         if !parakeet_catalog::is_supported() {
             return Err(SttErrorDto::new(
                 "engine-unavailable",
                 parakeet_catalog::UNAVAILABLE_REASON,
             ));
         }
-        match self.parakeet_usable(spec) {
-            Some(true) => Ok(self.root.join(spec.id)),
+        match self.parakeet_ready(spec) {
+            Some(true) => Ok(ModelDirs {
+                model: self.root.join(spec.id),
+                vocabulary: self.root.join(self.parakeet_vocabulary.id),
+            }),
             Some(false) => Err(SttErrorDto::new(
                 "model-missing",
                 super::existing::DAMAGED_MESSAGE,

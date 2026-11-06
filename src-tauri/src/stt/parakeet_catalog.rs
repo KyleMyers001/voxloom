@@ -53,6 +53,42 @@ mod tests {
         }
         assert!(super::find("whisper-tiny.en").is_none());
     }
+
+    #[test]
+    fn vocabulary_set_is_complete_pinned_and_not_a_model() {
+        let spec = super::VOCABULARY;
+        assert_eq!(spec.files.len(), 12);
+        assert_eq!(
+            spec.size_bytes,
+            spec.files.iter().map(|f| f.size_bytes).sum::<u64>()
+        );
+        for component in ["AudioEncoder.mlmodelc/", "MelSpectrogram.mlmodelc/"] {
+            assert_eq!(
+                spec.files
+                    .iter()
+                    .filter(|f| f.path.starts_with(component))
+                    .count(),
+                5
+            );
+        }
+        for path in ["tokenizer.json", "vocab.json"] {
+            assert!(spec.files.iter().any(|f| f.path == path));
+        }
+        for file in spec.files {
+            assert!(file.size_bytes > 0);
+            assert_eq!(file.sha256.len(), 64);
+            assert!(file.sha256.bytes().all(|b| b.is_ascii_hexdigit()));
+            assert!(!file.path.starts_with('/'));
+            assert!(!file.path.split('/').any(|c| c == ".."));
+        }
+        assert_eq!(
+            spec.url(&spec.files[0]),
+            "https://huggingface.co/FluidInference/parakeet-ctc-110m-coreml/resolve/\
+             accdafd8cf8a2ff1cabe3c11e54416b405d409aa/AudioEncoder.mlmodelc/analytics/coremldata.bin"
+        );
+        assert!(super::find(spec.id).is_none());
+        assert!(super::CATALOG.iter().all(|model| model.id != spec.id));
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -92,6 +128,7 @@ impl ParakeetModelSpec {
 pub const FLUID_AUDIO_REVISION: &str = "ee78635d23d52379117554ba72358b65a0612447";
 include!("parakeet-manifests/v2.rs");
 include!("parakeet-manifests/v3.rs");
+include!("parakeet-manifests/ctc110m.rs");
 pub const CATALOG: &[ParakeetModelSpec] = &[
     ParakeetModelSpec {
         id: "parakeet-tdt-0.6b-v2",
@@ -110,6 +147,17 @@ pub const CATALOG: &[ParakeetModelSpec] = &[
         files: V3_FILES,
     },
 ];
+/// FluidAudio's CTC keyword spotter, which applies the Word dictionary to
+/// Parakeet transcripts. One copy serves both models; it is fetched with
+/// whichever is downloaded first and is not a model to pick.
+pub const VOCABULARY: ParakeetModelSpec = ParakeetModelSpec {
+    id: "parakeet-ctc-110m",
+    label: "Parakeet dictionary boosting",
+    version: "ctc",
+    revision: "accdafd8cf8a2ff1cabe3c11e54416b405d409aa",
+    size_bytes: 102_802_455,
+    files: CTC_110M_FILES,
+};
 fn supports_platform(os: &str, arch: &str, major: i64) -> bool {
     os == "macos" && arch == "aarch64" && major >= 14
 }

@@ -4,12 +4,13 @@ import WorkerCore
 
 private struct FixtureRecognizer: SpeechRecognizer {
     let mode: String
-    func transcribe(_ samples: [Float]) async throws -> String {
+    func transcribe(_ samples: [Float], vocabulary: [String]) async throws -> String {
         if mode == "inference-delay" || mode == "deadline-inference" {
             FileHandle.standardError.write(Data("inference\n".utf8))
             usleep(15_000_000)
         }
-        return "fixture transcript"
+        // Echo the words so protocol tests can see they crossed the pipe.
+        return vocabulary.isEmpty ? "fixture transcript" : "fixture transcript: " + vocabulary.joined(separator: ", ")
     }
 }
 

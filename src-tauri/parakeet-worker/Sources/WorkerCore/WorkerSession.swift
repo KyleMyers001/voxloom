@@ -1,11 +1,12 @@
 import Foundation
 
 public protocol SpeechRecognizer: Sendable {
-    func transcribe(_ samples: [Float]) async throws -> String
+    /// `vocabulary` holds the user's dictionary words; empty means none.
+    func transcribe(_ samples: [Float], vocabulary: [String]) async throws -> String
 }
 public enum WorkerInput: Sendable {
     case load(LoadHeader)
-    case audio([Float])
+    case audio([Float], vocabulary: [String] = [])
     case failure(WorkerFailure)
 }
 public enum WorkerPhase: Sendable { case loading, awaitingAudio, transcribing, writing }
@@ -27,15 +28,16 @@ public enum WorkerSession {
             try await send(JSONSerialization.data(withJSONObject: ["protocolVersion": 1, "op": "ready", "requestId": header.requestId]))
             phase(.awaitingAudio)
             let samples: [Float]
+            let vocabulary: [String]
             switch await iterator.next() {
-            case .audio(let audio): samples = audio
+            case .audio(let audio, let words): (samples, vocabulary) = (audio, words)
             case .failure(let failure): throw failure
             default: throw WorkerFailure.unsupportedAudio
             }
             fallback = .transcribeFailed
             phase(.transcribing)
             let text: String
-            do { text = try await recognizer.transcribe(samples) }
+            do { text = try await recognizer.transcribe(samples, vocabulary: vocabulary) }
             catch { throw WorkerFailure.transcribeFailed }
             guard text.utf8.count <= Wire.maxControlBytes else { throw WorkerFailure.transcribeFailed }
             let result: [String: Any] = ["protocolVersion": 1, "op": "result", "requestId": header.requestId,

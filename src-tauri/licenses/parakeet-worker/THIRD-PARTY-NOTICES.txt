@@ -8,7 +8,8 @@ License: Apache License 2.0 (included below).
 The app links FluidAudio's ASR functionality; unrelated TTS, diarization and
 NeMo text-normalization package traits are disabled.
 
-Parakeet TDT 0.6B v2 and v3 model attribution
+Parakeet TDT 0.6B v2 and v3 and Parakeet CTC 110M model attribution
+The CTC 110M model is the dictionary-boosting keyword spotter both models use.
 Original model authors: NVIDIA.
 Core ML conversion and Swift integration: FluidInference contributors.
 Models are optional separate downloads, not embedded in this application.
@@ -18,6 +19,8 @@ https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2
 https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
 https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml
 https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml
+https://huggingface.co/nvidia/parakeet-tdt_ctc-110m
+https://huggingface.co/FluidInference/parakeet-ctc-110m-coreml
 Voxloom uses the published converted artifacts; it does not retrain their weights.
 Retain original model attribution and consult each pinned model card for scope.
 

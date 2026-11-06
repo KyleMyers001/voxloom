@@ -2,7 +2,7 @@
 //! Locks protect bookkeeping only. The runner owns/kills/reaps its exact child.
 use super::{
     process::{check, Worker},
-    protocol,
+    protocol, ModelDirs,
 };
 use crate::stt::{
     cleanup::DropReason, engine::TranscriptDto, error::SttErrorDto,
@@ -18,7 +18,7 @@ use std::{
     time::{Duration, Instant},
 };
 type Output = Result<TranscriptDto, SttErrorDto>;
-type Resolve = Box<dyn FnOnce() -> Result<PathBuf, SttErrorDto> + Send>;
+type Resolve = Box<dyn FnOnce() -> Result<ModelDirs, SttErrorDto> + Send>;
 // FIFO replay window, not a lifetime admission quota. Live jobs and the active
 // runner reservation remain protected independently of terminal-ID eviction.
 const MAX_RECENT_IDS: usize = 4096;
@@ -38,6 +38,8 @@ struct Job {
 #[derive(Default)]
 struct JobData {
     pcm: Option<Vec<f32>>,
+    /// Dictionary words for boosting; set with `pcm`.
+    vocabulary: Vec<String>,
     claimed: bool,
     result: Option<Output>,
 }
@@ -147,7 +149,7 @@ impl ParakeetRuntime {
         id: &str,
         model: &str,
         version: &str,
-        resolve: impl FnOnce() -> Result<PathBuf, SttErrorDto> + Send + 'static,
+        resolve: impl FnOnce() -> Result<ModelDirs, SttErrorDto> + Send + 'static,
     ) -> Result<(), SttErrorDto> {
         validate_id(id)?;
         let work = {
@@ -202,6 +204,7 @@ impl ParakeetRuntime {
         }
         Ok(())
     }
+    #[allow(clippy::too_many_arguments)]
     pub fn transcribe(
         &self,
         epoch: u64,
@@ -210,6 +213,7 @@ impl ParakeetRuntime {
         mut pcm: Vec<f32>,
         rate: u32,
         cfg: &SpeechFilterConfig,
+        dictionary: &[String],
     ) -> Output {
         validate_id(id)?;
         let job = {
@@ -245,6 +249,7 @@ impl ParakeetRuntime {
             data.claimed = true;
             if !silent {
                 data.pcm = Some(pcm);
+                data.vocabulary = protocol::vocabulary(dictionary);
                 job.changed.notify_all();
             }
         }
@@ -345,6 +350,7 @@ fn run_queue(inner: Arc<Inner>, mut work: Work) {
         {
             let mut data = job.data.lock().unwrap();
             data.pcm = None;
+            data.vocabulary = Vec::new();
             data.result = Some(out);
             job.changed.notify_all();
         }
@@ -372,22 +378,22 @@ fn run_queue(inner: Arc<Inner>, mut work: Work) {
 }
 fn run(path: &std::path::Path, job: &Job, resolve: Resolve) -> Output {
     check(&job.cancel, job.deadline)?;
-    let dir = resolve()?;
+    let dirs = resolve()?;
     check(&job.cancel, job.deadline)?;
     let mut worker = Worker::load(
         path,
-        &dir,
+        &dirs,
         &job.id,
         &job.version,
         &job.cancel,
         std::cmp::min(LOAD, job.deadline.saturating_duration_since(Instant::now())),
     )?;
-    let pcm = {
+    let (pcm, vocabulary) = {
         let mut data = job.data.lock().unwrap();
         loop {
             check(&job.cancel, job.deadline)?;
             if let Some(pcm) = data.pcm.take() {
-                break pcm;
+                break (pcm, std::mem::take(&mut data.vocabulary));
             }
             data = job
                 .changed
@@ -396,7 +402,14 @@ fn run(path: &std::path::Path, job: &Job, resolve: Resolve) -> Output {
                 .0;
         }
     };
-    worker.transcribe(&job.id, &job.version, &pcm, &job.cancel, INFERENCE)
+    worker.transcribe(
+        &job.id,
+        &job.version,
+        &pcm,
+        &vocabulary,
+        &job.cancel,
+        INFERENCE,
+    )
 }
 #[cfg(all(test, unix))]
 #[path = "runtime_tests.rs"]

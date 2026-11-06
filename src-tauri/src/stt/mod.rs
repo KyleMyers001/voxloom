@@ -134,7 +134,7 @@ pub fn stt_prepare<R: Runtime>(
     state
         .parakeet
         .prepare(epoch, &request_id, &model_id, spec.version, move || {
-            models.resolved_path(&resolve_id)
+            models.parakeet_dirs(&resolve_id)
         })
         .map_err(err_string)
 }
@@ -168,8 +168,8 @@ pub fn stt_release<R: Runtime>(
 
 /// Consume a stopped PCM handle and transcribe off-thread. Parakeet joins the
 /// exact admitted recording; Whisper retains its existing independent pipeline.
-/// The dictionary supplies Whisper's initial prompt for non-quiet clips only;
-/// Parakeet does not use Whisper prompt hints.
+/// The dictionary supplies Whisper's initial prompt for non-quiet clips only,
+/// and Parakeet's dictionary boosting (the worker's CTC keyword spotter).
 #[tauri::command]
 pub async fn stt_transcribe<R: Runtime>(
     webview: Webview<R>,
@@ -238,7 +238,7 @@ fn transcribe_buffer(
             })?;
             return state
                 .parakeet
-                .transcribe(epoch, id, model_id, samples, rate, &cfg);
+                .transcribe(epoch, id, model_id, samples, rate, &cfg, dictionary);
         }
         let path = state.models.resolved_path(model_id)?;
         // Preserve main's quiet-clip prompt suppression and Whisper filtering.

@@ -8,15 +8,17 @@ private actor Replies {
 }
 private struct Recognizer: SpeechRecognizer {
     let text: String
-    func transcribe(_ samples: [Float]) async throws -> String {
+    var vocabulary: [String] = []
+    func transcribe(_ samples: [Float], vocabulary: [String]) async throws -> String {
         XCTAssertEqual(samples, [0])
+        XCTAssertEqual(vocabulary, self.vocabulary)
         return text
     }
 }
 
 private struct PrivateError: Error { let detail = "/private/model SECRET SPEECH" }
 private struct FailingRecognizer: SpeechRecognizer {
-    func transcribe(_ samples: [Float]) async throws -> String { throw PrivateError() }
+    func transcribe(_ samples: [Float], vocabulary: [String]) async throws -> String { throw PrivateError() }
 }
 
 final class SessionTests: XCTestCase, @unchecked Sendable {
@@ -88,5 +90,21 @@ final class SessionTests: XCTestCase, @unchecked Sendable {
             else { XCTAssertTrue(result["language"] is NSNull) }
             XCTAssertTrue(result["dropped"] is NSNull)
         }
+    }
+
+    func testDictionaryWordsAndVocabularyDirectoryReachTheRecognizer() async throws {
+        let input = AsyncStream<WorkerInput> { continuation in
+            continuation.yield(.load(LoadHeader(requestId: "job-1", version: .v2, directory: "/verified/local", vocabularyDirectory: "/verified/ctc")))
+            continuation.yield(.audio([0], vocabulary: ["Voxloom", "Kubernetes"]))
+            continuation.finish()
+        }
+        let replies = Replies()
+        await WorkerSession.run(input: input, load: { header in
+            XCTAssertEqual(header.vocabularyDirectory, "/verified/ctc")
+            return Recognizer(text: "boosted", vocabulary: ["Voxloom", "Kubernetes"])
+        }, send: { await replies.append($0) })
+        let last = await replies.values.last
+        let result = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(last)) as? [String: Any])
+        XCTAssertEqual(result["text"] as? String, "boosted")
     }
 }

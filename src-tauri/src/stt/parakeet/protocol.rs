@@ -2,6 +2,25 @@ use crate::stt::{engine::TranscriptDto, error::SttErrorDto};
 use serde_json::Value;
 pub const MAX_CONTROL: usize = 65_536;
 pub const MAX_SAMPLES: usize = 1_920_000;
+/// Most JSON bytes the dictionary may add to a transcribe header: the rest of
+/// the header stays far inside [`MAX_CONTROL`] (a request ID is ≤128 bytes).
+const MAX_VOCABULARY_JSON: usize = 60_000;
+/// The dictionary words sent with a recording for boosting. Whisper's prompt
+/// takes the same entries (trimmed, ≤128 bytes, no control characters, no
+/// repeats, the first 256), which the worker also enforces; the list is cut at
+/// a whole word if quotes and backslashes escape past the header budget.
+pub fn vocabulary(dictionary: &[String]) -> Vec<String> {
+    let mut used = 0usize;
+    crate::stt::initial_prompt::usable_words(dictionary)
+        .into_iter()
+        .take_while(|word| {
+            let json = serde_json::to_string(word).map_or(usize::MAX, |json| json.len() + 1);
+            used = used.saturating_add(json);
+            used <= MAX_VOCABULARY_JSON
+        })
+        .map(str::to_owned)
+        .collect()
+}
 /// The capture resampler (windowed sinc, unclamped) can overshoot full scale on
 /// loud in-range input. Clamp finite samples so the strict worker accepts them;
 /// NaN and infinities are left for `validate_pcm` to reject.
@@ -130,6 +149,41 @@ mod tests {
         let err=result(serde_json::json!({"protocolVersion":1,"op":"error","requestId":"r","code":"model-missing","message":"private speech and path"}),"r","v3").unwrap_err();
         assert_eq!(err.code, "model-missing");
         assert!(!err.message.contains("private"));
+    }
+    fn words(entries: &[&str]) -> Vec<String> {
+        entries.iter().map(|entry| entry.to_string()).collect()
+    }
+    #[test]
+    fn vocabulary_takes_the_prompt_entries_and_keeps_their_order() {
+        let long = "x".repeat(129);
+        let dictionary = words(&[
+            " Voxloom ",
+            "",
+            "voxloom",
+            "Kuber\nnetes",
+            "line\u{2028}break",
+            &long,
+            "Notion",
+        ]);
+        assert_eq!(vocabulary(&dictionary), ["Voxloom", "Notion"]);
+        assert!(vocabulary(&[]).is_empty());
+        let many: Vec<String> = (0..300).map(|i| format!("word{i}")).collect();
+        let kept = vocabulary(&many);
+        assert_eq!(kept.len(), 256);
+        assert_eq!(kept, many[..256]);
+    }
+    #[test]
+    fn vocabulary_is_cut_at_a_whole_word_inside_the_header_limit() {
+        // 128 bytes that escape to ~250 JSON bytes each: 256 would overflow.
+        let heavy: Vec<String> = (0..256)
+            .map(|i| format!("{}{i:03}", "\"".repeat(125)))
+            .collect();
+        let kept = vocabulary(&heavy);
+        assert!(kept.len() < heavy.len() && !kept.is_empty());
+        assert_eq!(kept, heavy[..kept.len()]);
+        let header = serde_json::json!({"protocolVersion":1,"op":"transcribe","requestId":"r".repeat(128),
+            "sampleRateHz":16000,"sampleCount":MAX_SAMPLES,"vocabulary":kept});
+        frame(&header).unwrap();
     }
     #[test]
     fn wire_frame_is_bounded_little_endian_json() {

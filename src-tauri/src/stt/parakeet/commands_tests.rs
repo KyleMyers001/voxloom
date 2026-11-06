@@ -132,7 +132,8 @@ fn actual_commands_transcribe_both_verified_coreml_model_sets() {
             .expect("model inventory entry");
         assert_eq!(info.status, "available");
         assert!(info.supported);
-        let inventory_size = parakeet_catalog::find(&model_id).unwrap().size_bytes;
+        let inventory_size = parakeet_catalog::find(&model_id).unwrap().size_bytes
+            + parakeet_catalog::VOCABULARY.size_bytes;
         assert_eq!(info.size_bytes, inventory_size);
         let started = std::time::Instant::now();
         invoke(
@@ -147,7 +148,8 @@ fn actual_commands_transcribe_both_verified_coreml_model_sets() {
         let result = invoke(
             &main,
             "stt_transcribe",
-            serde_json::json!({"modelId":model_id,"requestId":request_id,"bufferId":buffer_id}),
+            serde_json::json!({"modelId":model_id,"requestId":request_id,"bufferId":buffer_id,
+                "dictionary":["Voxloom","Kubernetes"]}),
         )
         .expect("actual native routing, model resolution, Swift inference and DTO return");
         assert!(!result["text"].as_str().unwrap().trim().is_empty());
@@ -183,7 +185,7 @@ fn actual_transcribe_command_joins_prepared_worker_and_returns_existing_dto() {
     state
         .parakeet
         .prepare(state.parakeet.epoch(), "ready", model, "v3", || {
-            Ok("/model".into())
+            Ok(parakeet::model_dirs())
         })
         .unwrap();
     let value = invoke(
@@ -199,10 +201,14 @@ fn actual_transcribe_command_joins_prepared_worker_and_returns_existing_dto() {
     assert_eq!(state.buffers.len(), 0);
 }
 #[test]
-fn actual_transcribe_preserves_parakeet_routing_with_dictionary_hints() {
-    for dictionary in [
-        serde_json::json!([]),
-        serde_json::json!(["Voxloom", "Notion"]),
+fn actual_transcribe_sends_the_dictionary_to_the_parakeet_worker() {
+    // The fixture worker appends the words it received to its transcript.
+    for (dictionary, text) in [
+        (serde_json::json!([]), "[Music] Thank you."),
+        (
+            serde_json::json!([" Voxloom ", "voxloom", "", "Notion"]),
+            "[Music] Thank you.: Voxloom, Notion",
+        ),
     ] {
         let app = app();
         let main = window(&app, "main");
@@ -215,7 +221,7 @@ fn actual_transcribe_preserves_parakeet_routing_with_dictionary_hints() {
                 "dictionary-ready",
                 model,
                 "v3",
-                || Ok("/model".into()),
+                || Ok(parakeet::model_dirs()),
             )
             .unwrap();
         let value = invoke(
@@ -229,7 +235,7 @@ fn actual_transcribe_preserves_parakeet_routing_with_dictionary_hints() {
         .unwrap();
         assert_eq!(
             value,
-            serde_json::json!({"text":"[Music] Thank you.","rawText":"[Music] Thank you.","language":null,"dropped":null})
+            serde_json::json!({"text":text,"rawText":text,"language":null,"dropped":null})
         );
         assert_eq!(state.buffers.len(), 0);
     }
