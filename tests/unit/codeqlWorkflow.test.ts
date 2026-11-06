@@ -1,0 +1,160 @@
+import { spawnSync } from 'child_process';
+import { mkdtempSync, readFileSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join, resolve } from 'path';
+import { describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
+
+interface Step {
+  name?: string;
+  uses?: string;
+  if?: string;
+  run?: string;
+  with?: Record<string, unknown>;
+}
+interface Workflow {
+  on: Record<string, unknown>;
+  concurrency: { group: string; 'cancel-in-progress': string };
+  jobs: {
+    analyze: {
+      'timeout-minutes': number;
+      strategy: { 'fail-fast': boolean; matrix: { include: { language: string; 'build-mode': string; os: string }[] } };
+      steps: Step[];
+    };
+  };
+}
+
+const workflow = parse(readFileSync('.github/workflows/codeql.yml', 'utf8')) as Workflow;
+const job = workflow.jobs.analyze;
+const steps = job.steps;
+const named = (name: string) => {
+  const step = steps.find((candidate) => candidate.name === name);
+  expect(step, name).toBeDefined();
+  return step!;
+};
+const init = steps.find((step) => step.uses?.startsWith('github/codeql-action/init@'))!;
+const analyze = steps.find((step) => step.uses?.startsWith('github/codeql-action/analyze@'))!;
+
+describe('CodeQL workflow', () => {
+  it('retains every currently scanned language and uses manual Swift builds only', () => {
+    expect(job.strategy.matrix.include).toEqual([
+      { language: 'actions', 'build-mode': 'none', os: 'ubuntu-latest' },
+      { language: 'javascript-typescript', 'build-mode': 'none', os: 'ubuntu-latest' },
+      { language: 'python', 'build-mode': 'none', os: 'ubuntu-latest' },
+      { language: 'rust', 'build-mode': 'none', os: 'ubuntu-latest' },
+      { language: 'swift', 'build-mode': 'manual', os: 'macos-26' },
+    ]);
+    expect(init.with?.['build-mode']).toBe('${{ matrix.build-mode }}');
+    expect(steps.some((step) => step.uses?.includes('/autobuild@'))).toBe(false);
+  });
+
+  it('resolves locked dependencies before tracing, but compiles after initialization', () => {
+    const prepare = named('Resolve Swift dependencies before tracing');
+    const build = named('Build the Swift helper for Apple Silicon');
+    expect(steps.indexOf(prepare)).toBeLessThan(steps.indexOf(init));
+    expect(steps.indexOf(build)).toBeGreaterThan(steps.indexOf(init));
+    expect(steps.indexOf(build)).toBeLessThan(steps.indexOf(analyze));
+    expect(prepare.run).toContain('--disable-automatic-resolution resolve');
+    expect(build.run).toContain('--disable-automatic-resolution');
+    expect(build.run).toContain('--product voxloom-parakeet-worker');
+    // LocalASR's real implementation is behind #if arch(arm64), even on Intel hosts.
+    expect(build.run).toContain('--arch arm64 --jobs 1');
+    for (const step of [prepare, build]) expect(step.if).toBe('matrix.language == \'swift\'');
+  });
+
+  it('pins a supported Xcode and leaves all product compilation under tracing', () => {
+    const toolchain = named('Select the supported Swift toolchain');
+    expect(toolchain.run).toContain('/Applications/Xcode_26.6.app/Contents/Developer');
+    expect(toolchain.if).toBe('matrix.language == \'swift\'');
+    expect(steps.indexOf(toolchain)).toBeLessThan(steps.indexOf(named('Resolve Swift dependencies before tracing')));
+    for (const step of steps.slice(0, steps.indexOf(init))) {
+      expect(step.run ?? '').not.toMatch(/swift build/);
+    }
+  });
+
+  it('records safe resource telemetry without exposing process arguments', () => {
+    const build = named('Build the Swift helper for Apple Silicon');
+    expect(build.run).toContain('/usr/bin/time -l swift build');
+    expect(build.run).toContain('vm.swapusage');
+    expect(build.run).toContain('comm=');
+    expect(build.run).not.toContain('args=');
+    // Analyze recreates its output directory; resource logs must live elsewhere.
+    expect(build.run).toContain('codeql-resources/swift-resources.log');
+    expect(build.run).not.toContain('codeql-results/');
+  });
+
+  it('caches downloaded dependencies, never compiled first-party outputs', () => {
+    const cache = named('Cache Swift dependency downloads');
+    const paths = String(cache.with?.path).trim().split('\n');
+    expect(paths).toEqual([
+      'src-tauri/parakeet-worker/.build/artifacts',
+      'src-tauri/parakeet-worker/.build/checkouts',
+      'src-tauri/parakeet-worker/.build/repositories',
+    ]);
+    expect(cache.with?.key).toContain('Package.resolved');
+    expect(steps.indexOf(cache)).toBeLessThan(steps.indexOf(init));
+  });
+
+  it('does not upload over default setup until the migration is explicitly enabled', () => {
+    expect(analyze.with?.upload).toBe('never');
+    expect(analyze.with?.['upload-database']).toBe('${{ vars.CODEQL_ADVANCED_SETUP == \'true\' }}');
+    expect(analyze.with?.category).toBe('/language:${{ matrix.language }}');
+    const coverage = named('Verify Swift extraction coverage');
+    expect(coverage.run).toBe('node scripts/ci/check-swift-codeql-coverage.mjs codeql-results/swift.sarif');
+    expect(steps.indexOf(coverage)).toBeGreaterThan(steps.indexOf(analyze));
+    const publish = named('Publish alerts');
+    expect(publish.if).toBe('vars.CODEQL_ADVANCED_SETUP == \'true\'');
+    expect(publish.uses).toMatch(/^github\/codeql-action\/upload-sarif@/);
+    expect(publish.with?.sarif_file).toBe('codeql-results/');
+    expect(publish.with?.category).toBe('/language:${{ matrix.language }}');
+    expect(steps.indexOf(publish)).toBeGreaterThan(steps.indexOf(coverage));
+    expect(String(named('Save analysis results').with?.path).trim().split('\n')).toEqual([
+      'codeql-results/', 'codeql-resources/',
+    ]);
+  });
+
+  it('keeps PR, main and scheduled scans, caps runtime, and cancels superseded PR runs', () => {
+    expect(workflow.on.pull_request).toEqual({ branches: ['main', 'ui/**'] });
+    expect(workflow.on.push).toEqual({ branches: ['main'] });
+    expect(workflow.on.schedule).toHaveLength(1);
+    expect(workflow.on).toHaveProperty('workflow_dispatch');
+    expect(job['timeout-minutes']).toBe(30);
+    expect(job.strategy['fail-fast']).toBe(false);
+    expect(workflow.concurrency['cancel-in-progress']).toBe('${{ github.event_name == \'pull_request\' }}');
+  });
+});
+
+describe('Swift extraction coverage guard', () => {
+  const sources = [
+    'Sources/WorkerCore/Wire.swift', 'Sources/WorkerCore/WorkerHost.swift',
+    'Sources/WorkerCore/WorkerSession.swift', 'Sources/LocalASR/FluidLocalLoader.swift',
+    'Sources/ParakeetWorker/main.swift',
+  ].map((path) => `src-tauri/parakeet-worker/${path}`);
+  const run = (uris: string[]) => {
+    const scratch = mkdtempSync(join(tmpdir(), 'voxloom-codeql-'));
+    const sarif = join(scratch, 'swift.sarif');
+    writeFileSync(sarif, JSON.stringify({ runs: [{ invocations: [{ toolExecutionNotifications: uris.map((uri) => ({
+      descriptor: { id: 'swift/diagnostics/successfully-extracted-files' },
+      locations: [{ physicalLocation: { artifactLocation: { uri, uriBaseId: '%SRCROOT%' } } }],
+    })) }] }] }));
+    return spawnSync('node', [resolve('scripts/ci/check-swift-codeql-coverage.mjs'), sarif], { encoding: 'utf8' });
+  };
+
+  it('accepts extraction of every production Swift source', () => {
+    const result = run(sources);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('5 production Swift files');
+  });
+
+  it('rejects a stale build that skipped a production source', () => {
+    const result = run(sources.slice(1));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(sources[0]);
+  });
+
+  it('fails closed on an empty extraction report', () => {
+    const result = run([]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Sources/ParakeetWorker/main.swift');
+  });
+});
