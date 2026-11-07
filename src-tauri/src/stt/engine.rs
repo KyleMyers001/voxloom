@@ -4,9 +4,14 @@
 //! CI on Linux can compile without cmake + ggml. On a Mac, build with
 //! `--features whisper` (see README, Local STT).
 
+#[cfg(test)]
+#[path = "engine_cancel_tests.rs"]
+mod engine_cancel_tests;
+
 use super::cleanup::DropReason;
 use super::error::SttErrorDto;
 use super::filter_config::SpeechFilterConfig;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -31,6 +36,53 @@ impl TranscriptDto {
             dropped: None,
         }
     }
+}
+
+#[cfg(any(test, feature = "whisper"))]
+fn with_loaded_model<C, T>(
+    cancel: Option<&AtomicBool>,
+    load: impl FnOnce() -> Result<C, SttErrorDto>,
+    infer: impl FnOnce(&C) -> Result<T, SttErrorDto>,
+) -> Result<T, SttErrorDto> {
+    check_cancelled(cancel)?;
+    #[cfg(test)]
+    let loaded_at = std::time::Instant::now();
+    let context = load();
+    #[cfg(test)]
+    eprintln!(
+        "whisper load_elapsed_ms={}",
+        loaded_at.elapsed().as_millis()
+    );
+    check_cancelled(cancel)?;
+    let context = context?;
+    #[cfg(test)]
+    let inferred_at = std::time::Instant::now();
+    let result = infer(&context);
+    #[cfg(test)]
+    eprintln!(
+        "whisper inference_elapsed_ms={}",
+        inferred_at.elapsed().as_millis()
+    );
+    check_cancelled(cancel)?;
+    result
+}
+
+pub(super) fn check_cancelled(cancel: Option<&AtomicBool>) -> Result<(), SttErrorDto> {
+    if cancel.is_some_and(|flag| flag.load(Ordering::SeqCst)) {
+        Err(SttErrorDto::new(
+            "cancelled",
+            "Turbo request cancelled or renderer retired",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(feature = "whisper")]
+unsafe extern "C" fn abort_requested(data: *mut std::ffi::c_void) -> bool {
+    // The caller borrows this AtomicBool through synchronous state.full().
+    // It is neither moved nor dropped until full and all callbacks return.
+    unsafe { (&*data.cast::<AtomicBool>()).load(Ordering::SeqCst) }
 }
 
 /// Reject buffers whisper cannot accept (empty / not 16 kHz).
@@ -60,11 +112,30 @@ pub fn transcribe_pcm(
     decode: &SpeechFilterConfig,
     dictionary: &[String],
 ) -> Result<TranscriptDto, SttErrorDto> {
+    transcribe_pcm_cancellable(
+        model_path,
+        samples,
+        sample_rate_hz,
+        decode,
+        dictionary,
+        None,
+    )
+}
+
+pub(super) fn transcribe_pcm_cancellable(
+    model_path: &std::path::Path,
+    samples: &[f32],
+    sample_rate_hz: u32,
+    decode: &SpeechFilterConfig,
+    dictionary: &[String],
+    cancel: Option<&AtomicBool>,
+) -> Result<TranscriptDto, SttErrorDto> {
+    check_cancelled(cancel)?;
     validate_pcm(samples, sample_rate_hz)?;
 
     #[cfg(feature = "whisper")]
     {
-        transcribe_with_whisper(model_path, samples, decode, dictionary)
+        transcribe_with_whisper(model_path, samples, decode, dictionary, cancel)
     }
 
     #[cfg(not(feature = "whisper"))]
@@ -86,64 +157,82 @@ fn transcribe_with_whisper(
     samples: &[f32],
     decode: &SpeechFilterConfig,
     dictionary: &[String],
+    cancel: Option<&AtomicBool>,
 ) -> Result<TranscriptDto, SttErrorDto> {
     use super::initial_prompt::build_initial_prompt;
     use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
-    let ctx = WhisperContext::new_with_params(
-        model_path
-            .to_str()
-            .ok_or_else(|| SttErrorDto::new("model-missing", "Invalid model path"))?,
-        WhisperContextParameters::default(),
+    with_loaded_model(
+        cancel,
+        || {
+            WhisperContext::new_with_params(
+                model_path
+                    .to_str()
+                    .ok_or_else(|| SttErrorDto::new("model-missing", "Invalid model path"))?,
+                WhisperContextParameters::default(),
+            )
+            .map_err(|e| SttErrorDto::new("transcribe-failed", format!("load model: {e}")))
+        },
+        |ctx| {
+            let mut state = ctx
+                .create_state()
+                .map_err(|e| SttErrorDto::new("transcribe-failed", format!("create state: {e}")))?;
+
+            let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+            params.set_language(Some("en"));
+            if let Some(cancel) = cancel {
+                // Use a scoped callback. The pinned wrapper's safe setter boxes a
+                // trait object but casts its pointer to the concrete closure type.
+                // This AtomicBool stays borrowed at a stable address through full().
+                unsafe {
+                    params.set_abort_callback(Some(abort_requested));
+                    params.set_abort_callback_user_data(
+                        (cancel as *const AtomicBool).cast_mut().cast(),
+                    );
+                }
+            }
+            params.set_print_special(false);
+            params.set_print_progress(false);
+            params.set_print_realtime(false);
+            params.set_print_timestamps(false);
+            params.set_suppress_non_speech_tokens(decode.suppress_non_speech_tokens);
+            params.set_suppress_blank(decode.suppress_blank);
+            params.set_no_speech_thold(decode.no_speech_thold);
+            // A token is at least one byte, so this capacity cannot overflow (whisper-rs
+            // reads a "too many tokens" result as a length).
+            let prompt = build_initial_prompt(dictionary, |text| {
+                ctx.tokenize(text, text.len() + 1)
+                    .map_or(usize::MAX, |tokens| tokens.len())
+            });
+            if let Some(prompt) = &prompt {
+                params.set_initial_prompt(prompt);
+            }
+
+            state
+                .full(params, samples)
+                .map_err(|e| SttErrorDto::new("transcribe-failed", format!("full: {e}")))?;
+
+            let n = state
+                .full_n_segments()
+                .map_err(|e| SttErrorDto::new("transcribe-failed", format!("segments: {e}")))?;
+
+            let mut text = String::new();
+            for i in 0..n {
+                let segment = state.full_get_segment_text(i).map_err(|e| {
+                    SttErrorDto::new("transcribe-failed", format!("segment text: {e}"))
+                })?;
+                if !text.is_empty() {
+                    text.push(' ');
+                }
+                text.push_str(segment.trim());
+            }
+
+            Ok(TranscriptDto::raw(
+                text.trim().to_owned(),
+                Some("en".to_owned()),
+            ))
+        },
     )
-    .map_err(|e| SttErrorDto::new("transcribe-failed", format!("load model: {e}")))?;
-
-    let mut state = ctx
-        .create_state()
-        .map_err(|e| SttErrorDto::new("transcribe-failed", format!("create state: {e}")))?;
-
-    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-    params.set_language(Some("en"));
-    params.set_print_special(false);
-    params.set_print_progress(false);
-    params.set_print_realtime(false);
-    params.set_print_timestamps(false);
-    params.set_suppress_non_speech_tokens(decode.suppress_non_speech_tokens);
-    params.set_suppress_blank(decode.suppress_blank);
-    params.set_no_speech_thold(decode.no_speech_thold);
-    // A token is at least one byte, so this capacity cannot overflow (whisper-rs
-    // reads a "too many tokens" result as a length).
-    let prompt = build_initial_prompt(dictionary, |text| {
-        ctx.tokenize(text, text.len() + 1)
-            .map_or(usize::MAX, |tokens| tokens.len())
-    });
-    if let Some(prompt) = &prompt {
-        params.set_initial_prompt(prompt);
-    }
-
-    state
-        .full(params, samples)
-        .map_err(|e| SttErrorDto::new("transcribe-failed", format!("full: {e}")))?;
-
-    let n = state
-        .full_n_segments()
-        .map_err(|e| SttErrorDto::new("transcribe-failed", format!("segments: {e}")))?;
-
-    let mut text = String::new();
-    for i in 0..n {
-        let segment = state
-            .full_get_segment_text(i)
-            .map_err(|e| SttErrorDto::new("transcribe-failed", format!("segment text: {e}")))?;
-        if !text.is_empty() {
-            text.push(' ');
-        }
-        text.push_str(segment.trim());
-    }
-
-    Ok(TranscriptDto::raw(
-        text.trim().to_owned(),
-        Some("en".to_owned()),
-    ))
 }
 
 #[cfg(test)]

@@ -3,7 +3,9 @@ import { Icon } from '../../components/Icon';
 import { ProgressBar } from '../../components/ProgressBar';
 import type { SttDownloadProgress, SttModelInfo } from '../../services/stt/types';
 
-const mb = (bytes: number) => `${Math.round(bytes / 1_000_000)} MB`;
+const modelSize = (bytes: number) => bytes >= 1_000_000_000
+  ? `${(bytes / 1_000_000_000).toFixed(2)} GB`
+  : `${Math.round(bytes / 1_000_000)} MB`;
 
 type Props = {
   model: SttModelInfo;
@@ -35,7 +37,7 @@ export function ModelCard({ model, selected, progress, failure, onSelect, onDown
         <input checked={selected} disabled={unsupported} name="stt-model" onChange={onSelect} type="radio" value={model.id} />
         <span>
           <strong>{model.label}</strong>
-          <span className="stt-model-id"><span>{model.id}</span> · <span className="stt-model-size">{mb(model.sizeBytes)}</span></span>
+          <span className="stt-model-id"><span>{model.id}</span> · <span className="stt-model-size">{modelSize(model.sizeBytes)}</span></span>
         </span>
       </label>
       {unsupported ? <Badge status="failed">Unavailable</Badge> : <Badge status={status} />}
@@ -43,7 +45,7 @@ export function ModelCard({ model, selected, progress, failure, onSelect, onDown
         {unsupported ? null : downloading ? (
           <>
             <ProgressBar
-              caption={progress ? `${pct}% · ${Math.round(progress.bytesReceived / 1_000_000)} of ${mb(total)}` : 'Downloading…'}
+              caption={progress ? `${pct}% · ${total >= 1_000_000_000 ? modelSize(progress.bytesReceived) : Math.round(progress.bytesReceived / 1_000_000)} of ${modelSize(total)}` : 'Downloading…'}
               label={`Downloading ${model.label}`}
               value={progress ? pct : null}
             />
@@ -62,6 +64,9 @@ export function ModelCard({ model, selected, progress, failure, onSelect, onDown
           </button>
         )}
       </div>
+      {model.id === 'whisper-large-v3-turbo' && (
+        <p className="empty-note">Larger download and higher memory use than Tiny or Base.</p>
+      )}
       {unsupported && <p className="empty-note stt-model-error">{model.unavailableReason ?? 'This model is unavailable on this Mac.'}</p>}
       {!unsupported && failed && (
         <p className="form-error stt-model-error" id={errorId} role="alert">

@@ -111,7 +111,7 @@ describe('createSettingsStore', () => {
     expect(result.file).toEqual(defaultSettingsFile());
   });
 
-  it('round-trips save then load', async () => {
+  it.each(['whisper-base.en', 'whisper-large-v3-turbo'])('round-trips save then load with %s selected', async (modelId) => {
     const io = createMemorySettingsIo(null);
     const store = createSettingsStore(io);
     const next = {
@@ -120,7 +120,7 @@ describe('createSettingsStore', () => {
       microphone: 'Built-in Mic',
       style: 'very-casual' as const,
       transcriptRetention: 'off' as const,
-      transcriptionModel: 'whisper-base.en',
+      transcriptionModel: modelId,
     };
     await store.save(next, true);
     const loaded = await store.load();

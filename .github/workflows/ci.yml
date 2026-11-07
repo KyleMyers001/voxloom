@@ -200,8 +200,8 @@ jobs:
         working-directory: src-tauri/worker
 
   rust-macos:
-    # Compiles the macOS-only code paths (AX / text insertion) that the
-    # Linux job never builds. Default features only (whisper is opt-in).
+    # Compiles macOS-only AX/text insertion and the shipping Whisper feature,
+    # including its Metal backend. Model-dependent tests remain opt-in.
     runs-on: macos-latest
     defaults:
       run:
@@ -217,3 +217,4 @@ jobs:
         run: mkdir -p dist
       - run: cargo check --all-targets
       - run: cargo test
+      - run: cargo test --locked --features whisper --lib
