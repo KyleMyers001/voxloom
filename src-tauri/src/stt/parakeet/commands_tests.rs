@@ -63,6 +63,87 @@ fn deposit(state: &SttState) -> String {
     state.buffers.deposit(pcm).id
 }
 #[test]
+#[cfg(feature = "whisper")]
+#[ignore = "requires VOXLOOM_TEST_TURBO_MODEL pointing to the approved pinned model"]
+fn actual_commands_transcribe_verified_turbo_model() {
+    let path = std::path::PathBuf::from(
+        std::env::var_os("VOXLOOM_TEST_TURBO_MODEL").expect("set VOXLOOM_TEST_TURBO_MODEL"),
+    );
+    let spec = catalog::find(turbo::MODEL_ID).unwrap();
+    assert_eq!(path.file_name().unwrap(), spec.filename);
+    let state = SttState::new(
+        ModelStore::new(path.parent().unwrap().to_owned()),
+        Arc::new(PcmBufferStore::new()),
+    );
+    state.models.spawn_verify_existing(|| {}).join().unwrap();
+    assert_eq!(
+        state.models.status(turbo::MODEL_ID).unwrap().status,
+        "available"
+    );
+    let app = mock_builder()
+        .manage(state)
+        .invoke_handler(tauri::generate_handler![
+            stt_prepare,
+            stt_transcribe,
+            stt_release
+        ])
+        .build(crate::app_context())
+        .unwrap();
+    let main = window(&app, "main");
+    let state = app.state::<SttState>();
+    let raw = include_bytes!("../fixtures/trim_corpus/libri_128104-0008_a0.s16");
+    let samples: Vec<f32> = raw
+        .chunks_exact(2)
+        .map(|pair| i16::from_le_bytes([pair[0], pair[1]]) as f32 / 32768.0)
+        .collect();
+    let mut pcm = crate::capture::buffer::CaptureBuffer::new();
+    pcm.push(&samples).unwrap();
+    let buffer_id = state.buffers.deposit(pcm).id;
+    let request_id = "ipc-real-turbo";
+    invoke(
+        &main,
+        "stt_prepare",
+        serde_json::json!({
+            "modelId": turbo::MODEL_ID, "requestId": request_id,
+        }),
+    )
+    .expect("real native Turbo admission");
+    let started = std::time::Instant::now();
+    let result = invoke(
+        &main,
+        "stt_transcribe",
+        serde_json::json!({
+            "modelId": turbo::MODEL_ID, "requestId": request_id,
+            "bufferId": buffer_id, "dictionary": ["Voxloom", "Notion"],
+        }),
+    )
+    .expect("verified model resolution, actual inference and native DTO serialization");
+    assert_eq!(result["language"], "en");
+    assert!(result["text"].as_str().unwrap().split_whitespace().count() >= 3);
+    assert!(result["rawText"].is_string());
+    assert!(result["dropped"].is_null());
+    assert_eq!(state.buffers.len(), 0);
+    invoke(
+        &main,
+        "stt_release",
+        serde_json::json!({
+            "requestId": request_id, "bufferId": buffer_id,
+        }),
+    )
+    .expect("idempotent final PCM and request disposal");
+    eprintln!(
+        "turbo_ipc_receipt={}",
+        serde_json::json!({
+            "modelId": turbo::MODEL_ID,
+            "modelSha256": spec.sha256,
+            "fixture": "libri_128104-0008_a0.s16",
+            "completedMs": started.elapsed().as_millis(),
+            "result": result,
+        })
+    );
+}
+
+#[test]
 fn retirement_is_wired_to_every_native_renderer_lifecycle_callback() {
     let source = include_str!("../../lib.rs");
     for (start, end) in [
@@ -83,6 +164,10 @@ fn retirement_is_wired_to_every_native_renderer_lifecycle_callback() {
             .split_once(end)
             .unwrap()
             .0;
+        assert!(
+            body.contains("stt.turbo.retire_main("),
+            "missing Turbo retirement in {start}"
+        );
         assert!(
             body.contains("stt.parakeet.retire_main("),
             "missing Parakeet retirement in {start}"
@@ -172,6 +257,142 @@ fn actual_commands_transcribe_both_verified_coreml_model_sets() {
             started.elapsed().as_millis()
         );
     }
+}
+
+#[test]
+fn turbo_cancel_before_prepare_is_not_admitted() {
+    let app = app();
+    let main = window(&app, "main");
+    invoke(
+        &main,
+        "stt_cancel",
+        serde_json::json!({"requestId":"turbo-before"}),
+    )
+    .unwrap();
+    let error = invoke(
+        &main,
+        "stt_prepare",
+        serde_json::json!({
+            "modelId":"whisper-large-v3-turbo", "requestId":"turbo-before"
+        }),
+    )
+    .unwrap_err();
+    assert!(error.contains("cancelled"), "{error}");
+}
+
+#[test]
+fn turbo_admission_is_bounded_without_loading_and_release_frees_pending() {
+    let app = app();
+    let main = window(&app, "main");
+    let prepare = |id: &str| {
+        invoke(
+            &main,
+            "stt_prepare",
+            serde_json::json!({
+                "modelId":"whisper-large-v3-turbo", "requestId":id
+            }),
+        )
+    };
+    prepare("one").expect("admission does not load the missing model");
+    prepare("one").expect("same immutable prepare is idempotent");
+    prepare("two").unwrap();
+    assert!(prepare("three").unwrap_err().contains("busy"));
+    invoke(&main, "stt_release", serde_json::json!({"requestId":"two"})).unwrap();
+    prepare("three").unwrap();
+}
+
+#[test]
+fn turbo_requires_exact_preparation_and_consumes_pcm_before_refusal() {
+    let app = app();
+    let main = window(&app, "main");
+    let state = app.state::<SttState>();
+    let error = invoke(&main, "stt_transcribe", serde_json::json!({
+        "modelId":"whisper-large-v3-turbo", "requestId":"not-admitted", "bufferId":deposit(&state)
+    })).unwrap_err();
+    assert!(error.contains("transcribe-failed"), "{error}");
+    assert!(error.contains("preparation"), "{error}");
+    assert_eq!(state.buffers.len(), 0);
+}
+
+#[test]
+fn turbo_live_request_cannot_be_retargeted_to_tiny_or_parakeet() {
+    let app = app();
+    let main = window(&app, "main");
+    let state = app.state::<SttState>();
+    invoke(
+        &main,
+        "stt_prepare",
+        serde_json::json!({
+            "modelId":"whisper-large-v3-turbo", "requestId":"frozen"
+        }),
+    )
+    .unwrap();
+    for model in ["whisper-tiny.en", "parakeet-tdt-0.6b-v3"] {
+        let error = invoke(
+            &main,
+            "stt_transcribe",
+            serde_json::json!({
+                "modelId":model, "requestId":"frozen", "bufferId":deposit(&state)
+            }),
+        )
+        .unwrap_err();
+        assert!(error.contains("immutable"), "{error}");
+        assert_eq!(state.buffers.len(), 0);
+    }
+}
+
+#[test]
+fn turbo_cancel_release_and_epoch_refusal_dispose_exact_pcm() {
+    let app = app();
+    let main = window(&app, "main");
+    let state = app.state::<SttState>();
+    invoke(
+        &main,
+        "stt_prepare",
+        serde_json::json!({"modelId":"whisper-large-v3-turbo", "requestId":"cancelled"}),
+    )
+    .unwrap();
+    let first = deposit(&state);
+    let other = deposit(&state);
+    invoke(
+        &main,
+        "stt_release",
+        serde_json::json!({"requestId":"cancelled", "bufferId":first}),
+    )
+    .unwrap();
+    assert_eq!(
+        state.buffers.len(),
+        1,
+        "release must not discard successor PCM"
+    );
+    assert!(state.buffers.take(&other).is_some());
+    let error = invoke(&main, "stt_transcribe", serde_json::json!({"modelId":"whisper-large-v3-turbo", "requestId":"cancelled", "bufferId":deposit(&state)})).unwrap_err();
+    assert!(error.contains("cancelled"));
+    assert_eq!(state.buffers.len(), 0);
+    invoke(
+        &main,
+        "stt_prepare",
+        serde_json::json!({"modelId":"whisper-large-v3-turbo", "requestId":"retired"}),
+    )
+    .unwrap();
+    let epoch = state.turbo.epoch();
+    state.turbo.retire_main("main");
+    let id = deposit(&state);
+    assert_eq!(
+        transcribe_buffer(
+            &state,
+            epoch,
+            turbo::MODEL_ID,
+            &id,
+            None,
+            Some("retired"),
+            &[]
+        )
+        .unwrap_err()
+        .code,
+        "cancelled"
+    );
+    assert_eq!(state.buffers.len(), 0);
 }
 
 #[test]

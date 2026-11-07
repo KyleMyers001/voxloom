@@ -210,6 +210,35 @@ each time and uses it once it opens, and that file is then checked once more
 in the background. A file that opens but can't be read during the check stays
 failed until Retry download or the next launch.
 
+### Optional Whisper Large v3 Turbo (English)
+
+Settings → Models offers `whisper-large-v3-turbo` alongside Tiny, Base and
+Parakeet. Tiny remains the default. Selecting Turbo does not download it;
+click Download explicitly before dictating. The standard converted model is
+1,624,555,275 bytes (about 1.62 GB), verified against its revision-pinned size
+and SHA-256. Weights are not bundled with the app.
+
+Turbo uses the same local Whisper transcription, Word dictionary, optional
+cleanup, History and completion-time delivery paths. This integration is
+English-first: it does not enable automatic language detection or translation.
+The model is larger than Tiny/Base; download size is not its peak runtime
+memory requirement. Measure memory and stop-to-text latency on the intended
+Mac rather than treating the name "Turbo" as a speed guarantee over Tiny/Base.
+
+macOS Whisper-feature builds include Metal acceleration, with CPU execution
+available when the GPU backend is unavailable. Turbo preparation and inference
+are bounded separately from Tiny/Base and Parakeet. Explicit cancellation
+cooperatively stops decoding; synchronous model loading cannot be interrupted,
+so its active reservation remains held until that work and context cleanup
+actually finish. Ordinary supersession still permits the earlier transcript to
+finish for History, without delivering it into another field. No resident-model
+cache or automatic model download is introduced.
+
+Upstream OpenAI Whisper and whisper.cpp license notices are included under
+`licenses/whisper/THIRD-PARTY-NOTICES.txt` in the app's resources.
+
+### Word dictionary recognition hints
+
 Your Word dictionary also biases recognition: the saved words are passed to
 whisper.cpp as its initial prompt (`Glossary: Word, Word.`, newest added first,
 cut at a whole entry to stay within about 220 tokens). An empty dictionary sets

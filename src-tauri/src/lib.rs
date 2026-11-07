@@ -229,6 +229,7 @@ pub fn run() {
                 }
                 if let Some(stt) = webview.try_state::<SttState>() {
                     stt.parakeet.retire_main(webview.label());
+                    stt.turbo.retire_main(webview.label());
                 }
             }
         })
@@ -239,6 +240,7 @@ pub fn run() {
                 }
                 if let Some(stt) = window.try_state::<SttState>() {
                     stt.parakeet.retire_main(window.label());
+                    stt.turbo.retire_main(window.label());
                 }
             }
             // Only closing main ends capture; closing Settings must not.
@@ -249,6 +251,7 @@ pub fn run() {
                 cancel_scope::close();
                 if let Some(stt) = window.try_state::<SttState>() {
                     stt.parakeet.retire_main(window.label());
+                    stt.turbo.retire_main(window.label());
                 }
                 if let Some(coordinator) = window.try_state::<CaptureCoordinator>() {
                     coordinator.cancel_any();
@@ -268,6 +271,7 @@ pub fn run() {
         }
         if let Some(stt) = webview.try_state::<SttState>() {
             stt.parakeet.retire_main(webview.label());
+            stt.turbo.retire_main(webview.label());
         }
     });
     builder.run(app_context()).expect("failed to run Voxloom");

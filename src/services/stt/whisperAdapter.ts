@@ -183,7 +183,7 @@ export interface SpeechFilterConfig {
 }
 
 export interface WhisperEngineOptions {
-  /** Prepared Parakeet request; omitted on the unchanged Whisper route. */
+  /** Prepared Turbo/Parakeet request; omitted on the Tiny/Base route. */
   requestId?: string;
   /** BUS-23 filter overrides; omitted → native defaults. */
   filter?: SpeechFilterConfig;

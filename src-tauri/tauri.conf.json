@@ -31,6 +31,9 @@
   },
   "bundle": {
     "active": true,
+    "resources": {
+      "licenses/whisper/THIRD-PARTY-NOTICES.txt": "licenses/whisper/THIRD-PARTY-NOTICES.txt"
+    },
     "targets": [
       "app",
       "dmg"

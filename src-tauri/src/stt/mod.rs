@@ -18,7 +18,11 @@ pub mod parakeet_catalog;
 pub mod pipeline;
 pub mod store;
 pub mod trim;
+pub mod turbo;
 pub mod with_dictionary;
+
+#[cfg(all(test, feature = "whisper"))]
+mod real_turbo_tests;
 
 #[cfg(test)]
 mod with_dictionary_eval_tests;
@@ -40,6 +44,7 @@ pub struct SttState {
     pub models: Arc<ModelStore>,
     pub buffers: Arc<PcmBufferStore>,
     pub parakeet: parakeet::ParakeetRuntime,
+    pub turbo: turbo::TurboRuntime,
 }
 
 impl SttState {
@@ -48,6 +53,7 @@ impl SttState {
             models: Arc::new(models),
             buffers,
             parakeet: parakeet::ParakeetRuntime::new(parakeet::worker_path::installed()),
+            turbo: turbo::TurboRuntime::default(),
         }
     }
 }
@@ -110,8 +116,9 @@ fn require_main<R: Runtime>(webview: &Webview<R>) -> Result<(), String> {
     Ok(())
 }
 
-/// Fast admission only. Loading is owned by the background runner and may fail
-/// later; transcribe receives that failure with the same request token.
+/// Fast admission only. Parakeet loads on its background runner; Turbo retains
+/// Whisper's load-on-transcribe behavior (no cache/prewarm). Model failures are
+/// returned by transcription using the exact admitted request token.
 #[tauri::command]
 pub fn stt_prepare<R: Runtime>(
     webview: Webview<R>,
@@ -120,6 +127,12 @@ pub fn stt_prepare<R: Runtime>(
     request_id: String,
 ) -> Result<(), String> {
     require_main(&webview)?;
+    if model_id == turbo::MODEL_ID {
+        return state
+            .turbo
+            .prepare(state.turbo.epoch(), &request_id, &model_id)
+            .map_err(err_string);
+    }
     let epoch = state.parakeet.epoch();
     let spec = parakeet_catalog::find(&model_id)
         .ok_or_else(|| err_string(SttErrorDto::new("model-missing", "Unknown Parakeet model")))?;
@@ -146,6 +159,10 @@ pub fn stt_cancel<R: Runtime>(
 ) -> Result<bool, String> {
     require_main(&webview)?;
     state
+        .turbo
+        .cancel(state.turbo.epoch(), &request_id)
+        .map_err(err_string)?;
+    state
         .parakeet
         .cancel(state.parakeet.epoch(), &request_id)
         .map_err(err_string)
@@ -166,8 +183,8 @@ pub fn stt_release<R: Runtime>(
     stt_cancel(webview, state, request_id)
 }
 
-/// Consume a stopped PCM handle and transcribe off-thread. Parakeet joins the
-/// exact admitted recording; Whisper retains its existing independent pipeline.
+/// Consume a stopped PCM handle and transcribe off-thread. Parakeet and Turbo
+/// join the exact admitted recording; Tiny/Base remain independent.
 /// The dictionary supplies Whisper's initial prompt for non-quiet clips only;
 /// Parakeet does not use Whisper prompt hints.
 #[tauri::command]
@@ -184,7 +201,11 @@ pub async fn stt_transcribe<R: Runtime>(
     let state = state.inner().clone();
     // Reserve renderer ownership before the async boundary. Reload retirement
     // makes this token stale, even if the blocking pool starts it much later.
-    let epoch = state.parakeet.epoch();
+    let epoch = if model_id == turbo::MODEL_ID {
+        state.turbo.epoch()
+    } else {
+        state.parakeet.epoch()
+    };
     let buffers = state.buffers.clone();
     let error_buffer = buffer_id.clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -232,6 +253,9 @@ fn transcribe_buffer(
             ));
         }
         let cfg = filter.unwrap_or_default();
+        if let Some(id) = request_id {
+            state.turbo.check_model_claim(id, model_id)?;
+        }
         if parakeet_catalog::find(model_id).is_some() {
             let id = request_id.ok_or_else(|| {
                 SttErrorDto::new("transcribe-failed", "Parakeet requestId is required")
@@ -239,6 +263,22 @@ fn transcribe_buffer(
             return state
                 .parakeet
                 .transcribe(epoch, id, model_id, samples, rate, &cfg);
+        }
+        if model_id == turbo::MODEL_ID {
+            let id = request_id.ok_or_else(|| {
+                SttErrorDto::new("transcribe-failed", "Turbo requestId is required")
+            })?;
+            return state.turbo.run(epoch, id, model_id, |cancel| {
+                let path = state.models.resolved_path(model_id)?;
+                with_dictionary::transcribe_with_dictionary_cancellable(
+                    &path,
+                    &samples,
+                    rate,
+                    &cfg,
+                    dictionary,
+                    Some(&cancel),
+                )
+            });
         }
         let path = state.models.resolved_path(model_id)?;
         // Preserve main's quiet-clip prompt suppression and Whisper filtering.

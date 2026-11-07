@@ -55,6 +55,14 @@ pub const CATALOG: &[ModelSpec] = &[
         sha256: "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.en.bin",
     },
+    ModelSpec {
+        id: "whisper-large-v3-turbo",
+        label: "Whisper Large v3 Turbo (English)",
+        filename: "ggml-large-v3-turbo.bin",
+        size_bytes: 1_624_555_275,
+        sha256: "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo.bin",
+    },
 ];
 
 pub fn find(model_id: &str) -> Option<&'static ModelSpec> {
@@ -86,6 +94,19 @@ mod tests {
             assert!(spec.size_bytes > 1_000_000);
             assert_eq!(spec.artifact().size_bytes, spec.size_bytes);
         }
+    }
+
+    #[test]
+    fn turbo_is_optional_pinned_and_tiny_remains_default() {
+        assert_eq!(DEFAULT_MODEL_ID, "whisper-tiny.en");
+        let turbo = find("whisper-large-v3-turbo").expect("optional Turbo catalog entry");
+        assert_eq!(turbo.label, "Whisper Large v3 Turbo (English)");
+        assert_eq!(turbo.filename, "ggml-large-v3-turbo.bin");
+        assert_eq!(turbo.size_bytes, 1_624_555_275);
+        assert_eq!(
+            turbo.sha256,
+            "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69"
+        );
     }
 
     #[test]
