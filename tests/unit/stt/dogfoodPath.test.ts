@@ -349,5 +349,39 @@ describe('completion snapshot failures', () => {
       expect(result.transcript.rawText).toBe('[Music] ship it');
     });
   });
+  it('BUS-201: inserts into a focused Voxloom field without AX or Copy', async () => {
+    const clip = clipboard();
+    const snapshotTarget = vi.fn().mockResolvedValue(null);
+    const insertOwnField = vi.fn().mockReturnValue(true);
+
+    const result = await dogfoodTranscribeAndCopy({
+      audio: { duration_ms: 300, id: 'pcm-own', sample_rate_hz: 16_000 },
+      clipboard: clip,
+      createEngine: (modelId) => createMockSttEngine({ modelId, transcriptText: 'voxloom' }),
+      insertOwnField,
+      modelId: 'whisper-base.en',
+      snapshotTarget,
+    });
+
+    expect(insertOwnField).toHaveBeenCalledWith('voxloom');
+    expect(result.delivery.status).toBe('inserted');
+    expect(snapshotTarget).not.toHaveBeenCalled();
+    expect(clip.copy).not.toHaveBeenCalled();
+  });
+
+  it('BUS-201: a stale session never writes into a Voxloom field', async () => {
+    const insertOwnField = vi.fn().mockReturnValue(true);
+
+    await dogfoodTranscribeAndCopy({
+      audio: { duration_ms: 300, id: 'pcm-own-stale', sample_rate_hz: 16_000 },
+      clipboard: clipboard(),
+      createEngine: (modelId) => createMockSttEngine({ modelId, transcriptText: 'late' }),
+      insertOwnField,
+      isCurrent: () => false,
+      modelId: 'whisper-base.en',
+    });
+
+    expect(insertOwnField).not.toHaveBeenCalled();
+  });
 });
 

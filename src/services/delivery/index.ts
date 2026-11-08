@@ -10,6 +10,7 @@ export {
   restoreSkippedSuffix,
   statusLabel,
 } from './messages';
+export { insertIntoOwnField } from './ownField';
 export {
   mayInsert,
   planDelivery,
