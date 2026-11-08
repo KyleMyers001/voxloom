@@ -100,6 +100,11 @@ export const STT_MODEL_CATALOG: readonly Omit<SttModelInfo, 'status'>[] = [
     sizeBytes: 148_000_000,
   },
   {
+    id: 'whisper-large-v3-turbo',
+    label: 'Whisper Large v3 Turbo (English)',
+    sizeBytes: 1_624_555_275,
+  },
+  {
     id: 'parakeet-tdt-0.6b-v2',
     label: 'Parakeet v2 (English)',
     // Sum of the pinned native manifest; covered by the catalog parity test.

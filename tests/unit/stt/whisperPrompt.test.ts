@@ -31,16 +31,16 @@ describe('native transcribe call', () => {
     });
   });
 
-  it('preserves request identity alongside dictionary hints', async () => {
+  it.each(['parakeet-tdt-0.6b-v3', 'whisper-large-v3-turbo'])('preserves %s request identity alongside dictionary hints', async (modelId) => {
     const engine = createWhisperSttEngine({
-      modelId: 'parakeet-tdt-0.6b-v3', requestId: 'prepared-request',
+      modelId, requestId: 'prepared-request',
     });
     await engine.transcribe(HANDLE, { dictionary: ['Voxloom', 'Notion'] });
     expect(mockInvoke).toHaveBeenCalledWith('stt_transcribe', {
       bufferId: 'pcm-1',
       dictionary: ['Voxloom', 'Notion'],
       filter: null,
-      modelId: 'parakeet-tdt-0.6b-v3',
+      modelId,
       requestId: 'prepared-request',
     });
   });

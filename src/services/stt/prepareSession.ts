@@ -11,7 +11,7 @@ export interface PreparedSttSession {
 }
 
 export function prepareSttSession(modelId: string): PreparedSttSession | undefined {
-  if (!['parakeet-tdt-0.6b-v2', 'parakeet-tdt-0.6b-v3'].includes(modelId) || !isTauri()) return undefined;
+  if (!['parakeet-tdt-0.6b-v2', 'parakeet-tdt-0.6b-v3', 'whisper-large-v3-turbo'].includes(modelId) || !isTauri()) return undefined;
   const requestId = `stt-${crypto.randomUUID()}`;
   const admission = invoke<void>('stt_prepare', { modelId, requestId }).catch((error: unknown) => {
     throw mapNativeError(error);

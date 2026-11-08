@@ -42,9 +42,13 @@ export function Dictionary() {
           {query ? `${words.length} of ${count(state.words.length)}` : count(state.words.length)}
         </span>
       </div>
-      <div className="term-grid">
+      <div className="dictionary-list-head">
+        <span>Canonical spelling</span>
+        <span className="dictionary-list-sort">A–Z <span aria-hidden="true">↓</span></span>
+      </div>
+      <div aria-label={words.length ? 'Dictionary words, alphabetical' : undefined} className="term-grid" role={words.length ? 'list' : undefined}>
         {words.map((word) => (
-          <div className="term-row" key={word} tabIndex={0}>
+          <div className="term-row" key={word} role="listitem">
             <strong>{word}</strong>
             <div className="action-group term-row__actions">
               <IconButton icon="edit" label={`Edit ${word}`} onClick={(event) => edit(word, event.currentTarget)} />
@@ -58,6 +62,12 @@ export function Dictionary() {
           </EmptyState>
         )}
       </div>
+      {words.length > 0 && (
+        <div className="dictionary-list-foot">
+          <span>{words[0]} — {words[words.length - 1]}</span>
+          <span>Alphabetical order</span>
+        </div>
+      )}
       {open && (
         <WordDialog
           editing={editing}

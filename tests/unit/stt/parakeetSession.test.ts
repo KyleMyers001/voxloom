@@ -19,17 +19,17 @@ function capture(state: CaptureState): UseCaptureStateResult {
 }
 const audio = { id: 'pcm-parakeet', duration_ms: 500, sample_rate_hz: 16000 };
 
-describe('Parakeet recording sessions', () => {
+describe.each(['parakeet-tdt-0.6b-v2', 'parakeet-tdt-0.6b-v3', 'whisper-large-v3-turbo'])('prepared %s recording sessions', (modelId) => {
   it('disposes stopped PCM when processing fails before native transcription', async () => {
     const store = createMockSttModelStore();
-    await store.download('parakeet-tdt-0.6b-v3');
+    await store.download(modelId);
     const mic = capture({ kind: 'idle' });
     const history = vi.fn();
     const copy = vi.fn();
     // Exercise the real start → preparation → stopped-processing hook chain,
     // with a renderer-side failure before the native PCM consumer is called.
     const dogfood = vi.fn().mockRejectedValue(new Error('Renderer processing failed'));
-    const { result, rerender } = renderHook(({ state }: { state: CaptureState }) => useDogfoodCapture({ captureApi: { ...mic, captureState: state }, clipboard: { copy }, dogfood, modelId: 'parakeet-tdt-0.6b-v3', createModelStore: () => store, onHistoryRecord: history }), { initialProps: { state: { kind: 'idle' } as CaptureState } });
+    const { result, rerender } = renderHook(({ state }: { state: CaptureState }) => useDogfoodCapture({ captureApi: { ...mic, captureState: state }, clipboard: { copy }, dogfood, modelId, createModelStore: () => store, onHistoryRecord: history }), { initialProps: { state: { kind: 'idle' } as CaptureState } });
     await act(async () => { await result.current.start(); });
     const requestId = invoke.mock.calls.find(([c]) => c === 'stt_prepare')![1].requestId;
     rerender({ state: { kind: 'stopped', audio } });
@@ -42,7 +42,7 @@ describe('Parakeet recording sessions', () => {
   });
   it.each(['accepted', 'rejected'] as const)('disposes a late stopped buffer after cancellation with %s admission', async (admission) => {
     const store = createMockSttModelStore();
-    await store.download('parakeet-tdt-0.6b-v3');
+    await store.download(modelId);
     let admit!: () => void;
     let reject!: (error: unknown) => void;
     invoke.mockImplementation((command: string) => command === 'stt_prepare'
@@ -51,7 +51,7 @@ describe('Parakeet recording sessions', () => {
     const mic = capture({ kind: 'idle' });
     const history = vi.fn();
     const copy = vi.fn();
-    const { result, rerender } = renderHook(({ state }: { state: CaptureState }) => useDogfoodCapture({ captureApi: { ...mic, captureState: state }, clipboard: { copy }, modelId: 'parakeet-tdt-0.6b-v3', createModelStore: () => store, onHistoryRecord: history }), { initialProps: { state: { kind: 'idle' } as CaptureState } });
+    const { result, rerender } = renderHook(({ state }: { state: CaptureState }) => useDogfoodCapture({ captureApi: { ...mic, captureState: state }, clipboard: { copy }, modelId, createModelStore: () => store, onHistoryRecord: history }), { initialProps: { state: { kind: 'idle' } as CaptureState } });
     let starting!: Promise<void>;
     act(() => { starting = result.current.start(); });
     await waitFor(() => expect(invoke).toHaveBeenCalledWith('stt_prepare', expect.anything()));
@@ -75,13 +75,13 @@ describe('Parakeet recording sessions', () => {
   });
   it('releases stopped PCM for the cancelled request even when the start binding lookup is still pending', async () => {
     const store = createMockSttModelStore();
-    await store.download('parakeet-tdt-0.6b-v3');
+    await store.download(modelId);
     invoke.mockImplementation((command: string) => command === 'delivery_paste_binding'
       ? new Promise(() => {}) : Promise.resolve());
     const mic = capture({ kind: 'idle' });
     const history = vi.fn();
     const copy = vi.fn();
-    const { result, rerender } = renderHook(({ state }: { state: CaptureState }) => useDogfoodCapture({ captureApi: { ...mic, captureState: state }, clipboard: { copy }, modelId: 'parakeet-tdt-0.6b-v3', createModelStore: () => store, onHistoryRecord: history }), { initialProps: { state: { kind: 'idle' } as CaptureState } });
+    const { result, rerender } = renderHook(({ state }: { state: CaptureState }) => useDogfoodCapture({ captureApi: { ...mic, captureState: state }, clipboard: { copy }, modelId, createModelStore: () => store, onHistoryRecord: history }), { initialProps: { state: { kind: 'idle' } as CaptureState } });
     await act(async () => { await result.current.start(); });
     const requestId = invoke.mock.calls.find(([c]) => c === 'stt_prepare')![1].requestId;
     rerender({ state: { kind: 'stopped', audio } });
@@ -95,7 +95,7 @@ describe('Parakeet recording sessions', () => {
   });
   it.each(['supersede', 'cancel', 'failure'] as const)('settles a stopped request after %s without losing History or cancelling its successor', async (ending) => {
     const store = createMockSttModelStore();
-    await store.download('parakeet-tdt-0.6b-v2');
+    await store.download(modelId);
     let finish!: (value: unknown) => void;
     let fail!: (reason: unknown) => void;
     invoke.mockImplementation((command: string) => command === 'stt_transcribe'
@@ -103,7 +103,7 @@ describe('Parakeet recording sessions', () => {
     const mic = capture({ kind: 'idle' });
     const history = vi.fn();
     const copy = vi.fn();
-    const { result, rerender } = renderHook(({ state }: { state: CaptureState }) => useDogfoodCapture({ captureApi: { ...mic, captureState: state }, clipboard: { copy }, modelId: 'parakeet-tdt-0.6b-v2', createModelStore: () => store, onHistoryRecord: history }), { initialProps: { state: { kind: 'idle' } as CaptureState } });
+    const { result, rerender } = renderHook(({ state }: { state: CaptureState }) => useDogfoodCapture({ captureApi: { ...mic, captureState: state }, clipboard: { copy }, modelId, createModelStore: () => store, onHistoryRecord: history }), { initialProps: { state: { kind: 'idle' } as CaptureState } });
     await act(async () => { await result.current.start(); });
     const requestId = invoke.mock.calls.find(([c]) => c === 'stt_prepare')![1].requestId;
     rerender({ state: { kind: 'stopped', audio } });
@@ -124,7 +124,7 @@ describe('Parakeet recording sessions', () => {
       ? [['stt_cancel', { requestId }], ['stt_release', { requestId, bufferId: audio.id }]]
       : [['stt_release', { requestId, bufferId: audio.id }]]);
     if (ending === 'supersede') {
-      await waitFor(() => expect(history).toHaveBeenCalledWith(expect.objectContaining({ text: 'earlier transcript', model: 'parakeet-tdt-0.6b-v2' })));
+      await waitFor(() => expect(history).toHaveBeenCalledWith(expect.objectContaining({ text: 'earlier transcript', model: modelId })));
       expect(result.current.phase).toBe('recording');
     } else {
       expect(history).not.toHaveBeenCalled();
@@ -134,12 +134,12 @@ describe('Parakeet recording sessions', () => {
   });
   it.each(['permission', 'busy', 'throw', 'no-audio', 'capture-error', 'capture-cancelled', 'supersede', 'unmount'] as const)('retires abandoned preparation after %s', async (ending) => {
     const store = createMockSttModelStore();
-    await store.download('parakeet-tdt-0.6b-v3');
+    await store.download(modelId);
     const mic = capture({ kind: 'idle' });
     if (ending === 'permission') vi.mocked(mic.startFullCaptureSession).mockResolvedValue('error');
     if (ending === 'busy') vi.mocked(mic.startFullCaptureSession).mockResolvedValue('busy');
     if (ending === 'throw') vi.mocked(mic.startFullCaptureSession).mockRejectedValue(new Error('mic unavailable'));
-    const { result, rerender, unmount } = renderHook(({ state }: { state: CaptureState }) => useDogfoodCapture({ captureApi: { ...mic, captureState: state }, clipboard: { copy: vi.fn() }, modelId: 'parakeet-tdt-0.6b-v3', createModelStore: () => store }), { initialProps: { state: { kind: 'idle' } as CaptureState } });
+    const { result, rerender, unmount } = renderHook(({ state }: { state: CaptureState }) => useDogfoodCapture({ captureApi: { ...mic, captureState: state }, clipboard: { copy: vi.fn() }, modelId, createModelStore: () => store }), { initialProps: { state: { kind: 'idle' } as CaptureState } });
     await act(async () => { await result.current.start(); });
     const requestId = invoke.mock.calls.find(([c]) => c === 'stt_prepare')![1].requestId;
     if (ending === 'no-audio') rerender({ state: { kind: 'stopped', audio: undefined } });
@@ -152,7 +152,7 @@ describe('Parakeet recording sessions', () => {
   });
   it('cancels the exact pending preparation and allows an immediate successor', async () => {
     const store = createMockSttModelStore();
-    await store.download('parakeet-tdt-0.6b-v2');
+    await store.download(modelId);
     let admit!: () => void;
     let first = true;
     invoke.mockImplementation((command: string) => {
@@ -164,7 +164,7 @@ describe('Parakeet recording sessions', () => {
     });
     const mic = capture({ kind: 'idle' });
     const history = vi.fn();
-    const { result } = renderHook(() => useDogfoodCapture({ captureApi: mic, clipboard: { copy: vi.fn() }, modelId: 'parakeet-tdt-0.6b-v2', createModelStore: () => store, onHistoryRecord: history }));
+    const { result } = renderHook(() => useDogfoodCapture({ captureApi: mic, clipboard: { copy: vi.fn() }, modelId, createModelStore: () => store, onHistoryRecord: history }));
     let starting!: Promise<void>;
     act(() => { starting = result.current.start(); });
     await waitFor(() => expect(invoke).toHaveBeenCalledWith('stt_prepare', expect.anything()));
@@ -181,7 +181,8 @@ describe('Parakeet recording sessions', () => {
     expect(history).not.toHaveBeenCalled();
   });
   beforeEach(() => { invoke.mockReset().mockResolvedValue(undefined); });
-  it.each(['parakeet-tdt-0.6b-v2', 'parakeet-tdt-0.6b-v3'])('prepares %s at start, captures before readiness, and transcribes the frozen model after stop', async (model) => {
+  it('prepares at start, captures before readiness, and transcribes the frozen model after stop', async () => {
+    const model = modelId;
     const store = createMockSttModelStore();
     await store.download(model);
     await store.download('whisper-tiny.en');

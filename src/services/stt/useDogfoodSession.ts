@@ -96,7 +96,7 @@ export function useDogfoodSession({
       const modelId = await ensureModel(cancellation.modelId);
       if (superseded()) return;
       cancellation.preparation = prepareSttSession(modelId);
-      // This acknowledges admission only; native loading overlaps microphone capture.
+      // Admission only: native model loading must not hold up microphone capture.
       await cancellation.preparation?.admission;
     } catch (error: unknown) {
       if (superseded()) return;
