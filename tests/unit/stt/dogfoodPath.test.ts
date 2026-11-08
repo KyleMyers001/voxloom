@@ -383,5 +383,26 @@ describe('completion snapshot failures', () => {
 
     expect(insertOwnField).not.toHaveBeenCalled();
   });
-});
 
+  it('BUS-201: a throwing Voxloom field insert keeps the transcript, no AX/Copy retry', async () => {
+    const clip = clipboard();
+    const snapshotTarget = vi.fn().mockResolvedValue(null);
+    const insertOwnField = vi.fn(() => { throw new Error('setRangeText failed'); });
+
+    const result = await dogfoodTranscribeAndCopy({
+      audio: { duration_ms: 300, id: 'pcm-own-throw', sample_rate_hz: 16_000 },
+      clipboard: clip,
+      createEngine: (modelId) => createMockSttEngine({ modelId, transcriptText: 'keep me' }),
+      insertOwnField,
+      modelId: 'whisper-base.en',
+      snapshotTarget,
+    });
+
+    expect(result.transcript.text).toBe('keep me');
+    expect(result.delivery.status).toBe('failed');
+    expect(result.delivery.text).toBe('keep me');
+    expect(result.copyWarning).toBe('setRangeText failed');
+    expect(snapshotTarget).not.toHaveBeenCalled();
+    expect(clip.copy).not.toHaveBeenCalled();
+  });
+});

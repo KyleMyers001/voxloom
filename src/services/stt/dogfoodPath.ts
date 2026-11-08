@@ -168,20 +168,20 @@ export async function dogfoodTranscribeAndCopy(
   const clipboardFallback = options.clipboardFallback !== false;
 
   const insertOwnField = options.insertOwnField ?? insertIntoOwnField;
-  if (transcript.text.trim() && (options.isCurrent?.() ?? true)
-    && insertOwnField(transcript.text)) {
-    const delivery: DeliveryOutcome = {
-      clipboardRestored: false,
-      detail: 'Voxloom field',
-      message: deliveryMessage('inserted', null),
-      restoreSkippedReason: null,
-      status: 'inserted',
-      text: transcript.text,
-    };
-    return { cleanup, copied: false, delivery, transcript };
-  }
-
   try {
+    if (transcript.text.trim() && (options.isCurrent?.() ?? true)
+      && insertOwnField(transcript.text)) {
+      const delivery: DeliveryOutcome = {
+        clipboardRestored: false,
+        detail: 'Voxloom field',
+        message: deliveryMessage('inserted', null),
+        restoreSkippedReason: null,
+        status: 'inserted',
+        text: transcript.text,
+      };
+      return { cleanup, copied: false, delivery, transcript };
+    }
+
     let intended: TargetSnapshot | null = null;
     if (transcript.text.trim() && (options.isCurrent?.() ?? true)) {
       try {
