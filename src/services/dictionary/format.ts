@@ -39,7 +39,7 @@ export function normalizeWords(raw: unknown): string[] {
   return words;
 }
 
-/** The words for display and for cleanup: alphabetical, locale-insensitive. */
+/** The words for display: alphabetical, locale-insensitive. */
 export function sortedWords(words: readonly string[]): string[] {
   return [...words].sort((a, b) => a.localeCompare(b, undefined, {
     sensitivity: 'base',
@@ -47,8 +47,9 @@ export function sortedWords(words: readonly string[]): string[] {
 }
 
 /**
- * The words for Whisper's prompt: newest added first, so the newest entries
- * survive the prompt's token cut (BUS-196). Stored order is oldest first.
+ * The words for recognition and cleanup prompts: newest added first, so the
+ * newest entries survive prompt limits (BUS-196, BUS-198). Stored order is
+ * oldest first.
  */
 export function newestFirst(words: readonly string[]): string[] {
   return [...words].reverse();
