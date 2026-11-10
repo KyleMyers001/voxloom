@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, type Page, test } from '@playwright/test';
+import { expect, type Page, test, type TestInfo } from '@playwright/test';
+import { validateWord } from '../../src/domain/dictionary';
 
 async function openDictionary(page: Page) {
   await page.goto('/');
@@ -29,6 +30,116 @@ async function usePreviewWords(page: Page) {
   await expect(page.getByText('No words yet', { exact: true })).toBeVisible();
   await expect(page.getByText('0 words', { exact: true })).toBeVisible();
   for (const word of previewWords) await addWord(page, word);
+}
+
+// The validator and WordDialog have no length cap. This is a bounded stress
+// sample, not a claimed maximum; keep it valid through the production validator.
+const stressWords = ['A'.repeat(8192), 'Z'.repeat(8192)];
+
+async function expectUsableRange(page: Page, testInfo: TestInfo, state: string) {
+  const geometry = await page.locator('.dictionary').evaluate((element) => {
+    const box = (node: Element) => {
+      const { bottom, height, left, right, top, width } = node.getBoundingClientRect();
+      return { bottom, height, left, right, top, width };
+    };
+    const list = element.querySelector('.term-grid')!;
+    const footer = element.querySelector('.dictionary-list-foot')!;
+    return {
+      dictionary: box(element),
+      footer: box(footer),
+      list: { ...box(list), clientHeight: list.clientHeight, scrollHeight: list.scrollHeight, scrollTop: list.scrollTop },
+      controls: [...element.querySelectorAll('.page-head .btn, .search, .history-tools .fine')].map(box),
+      rows: [...list.children].map((row) => ({
+        name: box(row.querySelector('strong')!),
+        actions: box(row.querySelector('.term-row__actions')!),
+        row: box(row),
+      })),
+      pageWidth: document.documentElement.scrollWidth,
+      pageHeight: document.documentElement.scrollHeight,
+      viewport: { height: innerHeight, width: innerWidth },
+    };
+  });
+  await testInfo.attach(`${state}-geometry`, {
+    body: JSON.stringify(geometry, null, 2), contentType: 'application/json',
+  });
+  await page.screenshot({ path: testInfo.outputPath(`${state}.png`) });
+  expect(geometry.list.clientHeight, 'a usable list must not collapse beneath its range').toBeGreaterThanOrEqual(44);
+  expect(geometry.footer.height, 'range stays a compact single line').toBeLessThanOrEqual(36);
+  expect(geometry.footer.height).toBeGreaterThan(16);
+  expect(geometry.list.bottom).toBeLessThanOrEqual(geometry.footer.top + 1);
+  for (const box of [geometry.dictionary, geometry.footer, ...geometry.controls]) {
+    expect(box.left).toBeGreaterThanOrEqual(0);
+    expect(box.right).toBeLessThanOrEqual(geometry.viewport.width);
+    expect(box.top).toBeGreaterThanOrEqual(0);
+    expect(box.bottom).toBeLessThanOrEqual(geometry.viewport.height);
+  }
+  for (const { actions, name, row } of geometry.rows) {
+    expect(name.right).toBeLessThan(actions.left);
+    expect(actions.right).toBeLessThan(row.right);
+  }
+  expect(geometry.pageWidth).toBe(geometry.viewport.width);
+  expect(geometry.pageHeight).toBe(geometry.viewport.height);
+  return geometry;
+}
+
+// 640×620 is the main window's minimum in tauri.conf.json; include the shipped
+// 1120×760 default, a wider window, and both system themes at each size.
+for (const viewport of [
+  { height: 620, width: 640 },
+  { height: 760, width: 640 },
+  { height: 620, width: 1120 },
+  { height: 760, width: 1120 },
+  { height: 900, width: 1600 },
+]) {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    test(`bounded footer with unbounded valid spellings at ${viewport.width}x${viewport.height} ${colorScheme}`, async ({ page }, testInfo) => {
+      test.setTimeout(60_000);
+      await page.setViewportSize(viewport);
+      await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
+      await openDictionary(page);
+      await expectUsableRange(page, testInfo, 'short');
+      await usePreviewWords(page);
+      for (const word of stressWords) {
+        expect(validateWord(word, previewWords).ok).toBe(true);
+        await addWord(page, word);
+      }
+      const list = page.getByRole('list', { name: 'Dictionary words, alphabetical' });
+      await expect(list.getByRole('listitem')).toHaveCount(36);
+      const range = page.locator('.dictionary-list-foot > span').first();
+      await expect(range).toHaveText(`${stressWords[0]} — ${stressWords[1]}`);
+      const dense = await expectUsableRange(page, testInfo, 'dense-long-range');
+      expect(dense.list.scrollHeight).toBeGreaterThan(dense.list.clientHeight);
+      // Focus/activate actions at both scroll extremes, without scrolling the page.
+      const lastEdit = list.getByRole('listitem').last().getByRole('button').first();
+      await lastEdit.focus();
+      await expect(lastEdit).toBeInViewport();
+      await page.keyboard.press('Enter');
+      await expect(page.getByRole('textbox', { name: 'Word', exact: true })).toHaveValue(stressWords[1]);
+      await page.keyboard.press('Escape');
+      await expect(lastEdit).toBeFocused();
+      const scrolled = await expectUsableRange(page, testInfo, 'scrolled-long-range');
+      expect(scrolled.list.scrollTop).toBeGreaterThan(0);
+      await page.getByRole('searchbox').fill('AAAA');
+      await expect(page.getByText('1 of 36 words', { exact: true })).toBeVisible();
+      await expect(list.getByRole('listitem')).toHaveCount(1);
+      await expect(range).toHaveText(`${stressWords[0]} — ${stressWords[0]}`);
+      await expectUsableRange(page, testInfo, 'filtered-single-long');
+      const firstEdit = list.getByRole('button').first();
+      await firstEdit.click();
+      const field = page.getByRole('textbox', { name: 'Word', exact: true });
+      await expect(field).toBeFocused();
+      await field.fill('AAAA-edited');
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      await expect(page.getByRole('button', { name: 'Edit AAAA-edited', exact: true })).toBeVisible();
+      await page.getByRole('button', { name: 'Delete AAAA-edited', exact: true }).click();
+      await expect(page.getByText('No words found.', { exact: true })).toBeVisible();
+      await expect(page.getByText('0 of 35 words', { exact: true })).toBeVisible();
+      await expect(page.locator('.dictionary-list-foot')).toHaveCount(0);
+      await page.getByRole('searchbox').fill('');
+      await expect(list.getByRole('listitem')).toHaveCount(35);
+      await expectUsableRange(page, testInfo, 'restored-range');
+    });
+  }
 }
 
 for (const width of [640, 1120, 1600]) {
