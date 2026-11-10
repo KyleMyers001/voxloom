@@ -4,6 +4,7 @@ version = "0.4.0"
 description = "Voxloom mock-backed UI shell"
 authors = ["Voxloom contributors"]
 edition = "2021"
+license = "MIT"
 
 [lib]
 name = "voxloom_lib"
