@@ -4,7 +4,7 @@ import { validateWord } from '../../src/domain/dictionary';
 
 async function openDictionary(page: Page) {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Skip', exact: true }).click();
+  await page.getByRole('button', { name: 'Set up later', exact: true }).click();
   await page.getByRole('button', { name: 'Dictionary', exact: true }).click();
 }
 

@@ -13,6 +13,7 @@ mod overlay;
 mod overlay_placement;
 mod settings;
 mod settings_window;
+mod setup_permissions;
 mod store_backup;
 mod store_read;
 mod stt;
@@ -170,6 +171,10 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            setup_permissions::setup_query_permissions,
+            setup_permissions::setup_request_permission,
+            setup_permissions::setup_open_permission_settings,
+            setup_permissions::setup_model_readiness,
             cancel_scope::dictation_cancel_arm,
             cancel_scope::dictation_cancel_finish,
             cancel_scope::dictation_cancel_end,

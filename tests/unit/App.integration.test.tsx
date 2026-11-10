@@ -10,14 +10,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/app/App';
 import { renderWithApp } from './testUtils';
 
-/// Advance through onboarding step 1 (mic authorized by mock) and step 2.
-async function reachStep3(user: ReturnType<typeof userEvent.setup>) {
-  // Step 1: permission is authorized by global mock; Next passes.
-  await user.click(screen.getByRole('button', { name: 'Next' }));
-  // Step 2: shortcut — advance.
-  await user.click(screen.getByRole('button', { name: 'Next' }));
-}
-
 const shortcutKey = {
   code: 'Space',
   ctrlKey: true,
@@ -26,32 +18,22 @@ const shortcutKey = {
 };
 
 describe('App integration', () => {
-  it('drives onboarding practices from configured gestures', async () => {
-    let now = 0;
+  it('keeps Set up later visibly incomplete with a resume action rather than claiming Ready', async () => {
     const user = userEvent.setup();
-    renderWithApp(<App />, () => now);
-    await reachStep3(user);
-    vi.useFakeTimers();
-    fireEvent.keyDown(document, shortcutKey);
-    now = 320;
-    act(() => vi.advanceTimersByTime(320));
-    fireEvent.keyUp(document, shortcutKey);
-    expect(screen.getByText(/Press-and-hold · recognized/))
-      .toBeInTheDocument();
-    now = 400;
-    fireEvent.keyDown(document, shortcutKey);
-    fireEvent.keyUp(document, shortcutKey);
-    now = 500;
+    renderWithApp(<App />);
+    await user.click(screen.getByRole('button', { name: 'Set up later' }));
+    expect(screen.getByText(/Setup is incomplete/)).toBeInTheDocument();
+    expect(document.querySelector('.brand__status')).toHaveTextContent('Setup incomplete');
+    await user.click(screen.getByRole('button', { name: 'Resume setup' }));
+    expect(screen.getByRole('dialog', { name: 'Set up Voxloom' })).toBeInTheDocument();
+  });
+  it('does not turn browser gestures into completed dictation practice', async () => {
+    renderWithApp(<App />);
+    expect(screen.getByRole('button', { name: /Start setup/ })).toBeDisabled();
     fireEvent.keyDown(document, shortcutKey);
     fireEvent.keyUp(document, shortcutKey);
-    now = 600;
-    fireEvent.keyDown(document, shortcutKey);
-    fireEvent.keyUp(document, shortcutKey);
-    expect(screen.getByText(/Rapid double-tap · recognized/))
-      .toBeInTheDocument();
-    vi.useRealTimers();
-    await user.click(screen.getByRole('button', { name: 'Finish' }));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Simulate/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Set up Voxloom' })).toBeInTheDocument();
   });
 
   it('gates first run, gesture overlay without synthetic Inserted, shares mutations',
@@ -61,7 +43,7 @@ describe('App integration', () => {
       expect(screen.getByRole('dialog', {
         name: 'Set up Voxloom',
       })).toBeInTheDocument();
-      await user.click(screen.getByRole('button', { name: 'Skip' }));
+      await user.click(screen.getByRole('button', { name: 'Set up later' }));
       vi.useFakeTimers();
       fireEvent.keyDown(document, shortcutKey);
       act(() => vi.advanceTimersByTime(320));
@@ -98,7 +80,7 @@ describe('App integration', () => {
   it('opens help with question mark and closes with Escape', async () => {
     const user = userEvent.setup();
     renderWithApp(<App />);
-    await user.click(screen.getByRole('button', { name: 'Skip' }));
+    await user.click(screen.getByRole('button', { name: 'Set up later' }));
     await user.keyboard('?');
     expect(screen.getByRole('dialog', { name: 'Keyboard shortcuts' }))
       .toBeInTheDocument();
@@ -112,7 +94,7 @@ describe('App integration', () => {
       let now = 0;
       const user = userEvent.setup();
       renderWithApp(<App />, () => now);
-      await user.click(screen.getByRole('button', { name: 'Skip' }));
+      await user.click(screen.getByRole('button', { name: 'Set up later' }));
       await user.click(
         screen.getByRole('button', { name: 'Dictionary' }),
       );
@@ -157,7 +139,7 @@ describe('App integration', () => {
       const user = userEvent.setup();
       renderWithApp(<App />);
       await user.click(
-        screen.getByRole('button', { name: 'Skip' }),
+        screen.getByRole('button', { name: 'Set up later' }),
       );
       await user.click(
         screen.getByRole('button', { name: 'Empty lists' }),
@@ -168,8 +150,8 @@ describe('App integration', () => {
       await user.click(
         screen.getByRole('button', { name: 'Reset session' }),
       );
-      expect(screen.getByText('Step 1 of 3')).toBeInTheDocument();
-      await user.click(screen.getByRole('button', { name: 'Skip' }));
+      expect(screen.getByText(/Less typing/)).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Set up later' }));
       expect(
         screen.getAllByRole('button', { name: 'Copy dictation' }),
       ).toHaveLength(5);
@@ -180,57 +162,30 @@ describe('App integration', () => {
       await user.click(
         screen.getByRole('button', { name: 'Set up shortcuts' }),
       );
-      // Step 1: authorized mock; advance directly.
-      await user.click(
-        screen.getByRole('button', { name: 'Next' }),
-      );
-      await user.click(
-        screen.getByRole('button', { name: 'Next' }),
-      );
-      await user.click(
-        screen.getByRole('button', { name: 'Simulate hold' }),
-      );
-      await user.click(
-        screen.getByRole('button', { name: 'Simulate double-tap' }),
-      );
-      await user.click(screen.getByRole('button', { name: 'Finish' }));
-
-      const setup = screen.getByRole('button', {
-        name: 'Set up shortcuts',
-      });
+      // Real setup cannot be completed by development gesture simulations.
+      expect(screen.getByRole('button', { name: /Start setup/ })).toBeDisabled();
+      await user.keyboard('{Escape}');
+      const setup = screen.getByRole('button', { name: 'Set up shortcuts' });
       await user.click(setup);
-      expect(screen.getByText('Step 1 of 3')).toBeInTheDocument();
-      await user.click(screen.getByRole('button', { name: 'Next' }));
-      await user.click(screen.getByRole('button', { name: 'Next' }));
-      expect(
-        screen.getByText(/Press-and-hold · not tested/),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText(/Rapid double-tap · not tested/),
-      ).toBeInTheDocument();
+      expect(screen.getByText(/Less typing/)).toBeInTheDocument();
       await user.keyboard('{Escape}');
       expect(setup).toHaveFocus();
     },
   );
 
   it(
-    'surfaces shortcut collision scenario from ScenarioPanel',
+    'does not let a development shortcut scenario bypass real setup',
     async () => {
       const user = userEvent.setup();
       renderWithApp(<App />);
       await user.click(
-        screen.getByRole('button', { name: 'Skip' }),
+        screen.getByRole('button', { name: 'Set up later' }),
       );
       await user.click(
         screen.getByRole('button', { name: 'Shortcut collision' }),
       );
-      // Step 2 is shown; advance with the pre-filled collision shortcut.
-      await user.click(
-        screen.getByRole('button', { name: 'Next' }),
-      );
-      expect(
-        screen.getByRole('alert'),
-      ).toHaveTextContent('is in use by another app (simulated)');
+      expect(screen.getByRole('button', { name: /Start setup/ })).toBeDisabled();
+      expect(screen.queryByRole('button', { name: /Finish setup/ })).not.toBeInTheDocument();
     },
   );
 });

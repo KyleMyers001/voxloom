@@ -3,6 +3,7 @@ import type { OverlayResult } from '../services/shortcut/overlayVisibility';
 import { useEffect, useRef } from 'react';
 import { subscribeModal } from './modalState';
 import { handlePractice, interactionContext } from './gestureContext';
+import { subscribePracticeReset } from '../features/onboarding/practiceBridge';
 import { suspendable } from '../services/shortcut/recordingSuspend';
 import { unbindWhileRecording } from '../services/shortcut/recordingUnbind';
 import type { AppState } from './state';
@@ -146,6 +147,12 @@ export function useShortcutGestures(options: GestureOptions) {
   const lostRef = useRef<string | null>(null);
   optionsRef.current = options;
   const phaseGuardRef = useRef<PhaseGuard>({ seen: options.dogfood.phase });
+  useEffect(() => subscribePracticeReset(() => {
+    pendingFinishRef.current?.clear();
+    documentControllerRef.current?.setContext(null);
+    documentControllerRef.current?.setContext(interactionContext(optionsRef.current));
+    nativeControllerRef.current?.resetPartial();
+  }), []);
 
   // Shared pending-finish gate (hold release can race React listening commit).
   // Finish stops audio immediately; this gate handles only overlay teardown.

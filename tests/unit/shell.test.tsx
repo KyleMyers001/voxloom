@@ -20,7 +20,7 @@ const dogfood = (over: Partial<UseDogfoodCaptureResult> = {}): UseDogfoodCapture
 async function renderShell() {
   const user = userEvent.setup();
   renderWithApp(<App />);
-  await user.click(screen.getByRole('button', { name: 'Skip' }));
+  await user.click(screen.getByRole('button', { name: 'Set up later' }));
   return user;
 }
 
@@ -36,7 +36,7 @@ describe('App shell (UI PR 3)', () => {
     expect(within(nav).getAllByRole('button').map((b) => b.getAttribute('aria-label')))
       .toEqual(['Home', 'History', 'Dictionary']);
     const status = document.querySelector('.brand__status')!;
-    expect(status).toHaveTextContent('Ready · ⌃⇧Space');
+    expect(status).toHaveTextContent('Setup incomplete · ⌃⇧Space');
     expect(status).not.toHaveAttribute('aria-label');
     // <=909px: the shortcut moves to its own line as key caps (BUS-41 PR 2).
     expect([...document.querySelectorAll('.brand__caps .kbd')].map((k) => k.textContent)).toEqual(['⌃', '⇧', 'Space']);

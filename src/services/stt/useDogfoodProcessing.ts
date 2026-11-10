@@ -72,6 +72,7 @@ export function useDogfoodProcessing({
     const session = live.session;
     const startBinding = live.pasteBinding;
     const cancellation = live.cancellation;
+    const guard = cancellation.deliveryGuard;
     cancellation.transcribing = true;
     const current = () => session === live.session && !cancellation.cancelled;
     const platform = platformRef.current;
@@ -142,9 +143,14 @@ export function useDogfoodProcessing({
         clipboardFallback: optionsRef.current.clipboardFallback !== false,
         deliveryPlatform: platform,
         dictionary: latest.dictionary,
-        isCurrent: current,
+        isCurrent: () => current() && (!guard || guard.current()),
+        onlyOwnField: Boolean(guard),
+        insertOwnField: guard ? (text) => guard.insert(text) : undefined,
         pasteBinding,
-        beforeDelivery: settleCancellation,
+        beforeDelivery: async () => {
+          if (guard && !(await guard.validate())) throw new Error('Setup access or voice pack changed. Check again before retrying.');
+          await settleCancellation();
+        },
         snapshotTarget: async () => {
           const target = await platform.snapshotTarget();
           if (current()) setIntendedTarget(target);
@@ -158,6 +164,7 @@ export function useDogfoodProcessing({
       await settleCancellation();
       if (cancellation.cancelled) return;
       if (current()) {
+        guard?.result(result);
         setTranscript(result.transcript);
         setHudResult(hudResultFor(result.delivery));
         setPhase('success');

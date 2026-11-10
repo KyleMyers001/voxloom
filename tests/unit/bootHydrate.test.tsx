@@ -116,8 +116,8 @@ describe('boot hydrate polish', () => {
       </AppProvider>,
     );
 
-    // Dismiss fixture onboarding so nav is usable while durable hydrate waits.
-    await user.click(screen.getByRole('button', { name: 'Skip' }));
+    // Dismiss the loading dialog without starting setup while hydration waits.
+    await user.click(screen.getByRole('button', { name: 'Close Set up Voxloom' }));
 
     await user.click(screen.getByRole('button', { name: 'Settings' }));
     expect(screen.getByRole('status')).toHaveTextContent('Loading…');
@@ -185,7 +185,7 @@ describe('boot hydrate polish', () => {
       </AppProvider>,
     );
 
-    await user.click(screen.getByRole('button', { name: 'Skip' }));
+    await user.click(screen.getByRole('button', { name: 'Close Set up Voxloom' }));
     await user.click(screen.getByRole('button', { name: 'Settings' }));
     expect(screen.getByRole('status')).toHaveTextContent('Loading…');
 
@@ -212,7 +212,7 @@ describe('boot hydrate polish', () => {
         <App />
       </AppProvider>,
     );
-    await user.click(screen.getByRole('button', { name: 'Skip' }));
+    await user.click(screen.getByRole('button', { name: 'Set up later' }));
     await user.click(screen.getByRole('button', { name: 'Settings' }));
     expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
     await user.click(await screen.findByRole('tab', { name: 'Privacy' }));

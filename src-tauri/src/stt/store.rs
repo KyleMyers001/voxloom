@@ -168,6 +168,23 @@ impl ModelStore {
         self.root.join(spec.filename)
     }
 
+    /// Stricter setup gate, off the UI thread: unlike ordinary dictation,
+    /// setup waits for a pinned verification instead of accepting a pending hash.
+    pub fn setup_verified(&self, model_id: &str) -> bool {
+        if let Some(spec) = catalog::find(model_id) {
+            if self.is_downloading(model_id) {
+                return false;
+            }
+            return self.verify_existing(spec) == Some(existing::Verdict::Verified)
+                && self.current_verdict(spec) == Some(existing::Verdict::Verified);
+        }
+        super::parakeet_catalog::find(model_id).is_some_and(|spec| {
+            // Ordinary dictation may resolve structurally complete sets while
+            // startup hashing runs. Setup requires a current pinned verdict.
+            !self.is_downloading(model_id) && self.cached_parakeet_verdict(spec) == Some(true)
+        })
+    }
+
     pub fn resolved_path(&self, model_id: &str) -> Result<PathBuf, SttErrorDto> {
         if let Some(spec) = super::parakeet_catalog::find(model_id) {
             return self.parakeet_resolved(spec);
@@ -213,6 +230,8 @@ mod parakeet_tests;
 mod recovery_tests;
 #[cfg(test)]
 mod session_tests;
+#[cfg(test)]
+mod setup_readiness_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

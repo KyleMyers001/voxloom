@@ -34,9 +34,9 @@ impl ModelSpec {
     }
 }
 
-/// Suggested first download — tiny English.
+/// BUS-208 new-user recommendation; callers retain explicit existing choices.
 #[allow(dead_code)]
-pub const DEFAULT_MODEL_ID: &str = "whisper-tiny.en";
+pub const DEFAULT_MODEL_ID: &str = "whisper-base.en";
 
 pub const CATALOG: &[ModelSpec] = &[
     ModelSpec {
@@ -97,8 +97,8 @@ mod tests {
     }
 
     #[test]
-    fn turbo_is_optional_pinned_and_tiny_remains_default() {
-        assert_eq!(DEFAULT_MODEL_ID, "whisper-tiny.en");
+    fn turbo_is_optional_pinned_and_base_is_new_user_default() {
+        assert_eq!(DEFAULT_MODEL_ID, "whisper-base.en");
         let turbo = find("whisper-large-v3-turbo").expect("optional Turbo catalog entry");
         assert_eq!(turbo.label, "Whisper Large v3 Turbo (English)");
         assert_eq!(turbo.filename, "ggml-large-v3-turbo.bin");

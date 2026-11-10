@@ -111,7 +111,7 @@ export function App() {
 
   const status = dogfood.phase === 'recording' ? 'Listening'
     : dogfood.phase === 'transcribing' ? 'Transcribing'
-    : dogfood.phase === 'cleaning' ? 'Cleaning up' : 'Ready';
+    : dogfood.phase === 'cleaning' ? 'Cleaning up' : state.onboarding.complete ? 'Ready' : 'Setup incomplete';
   const gated = (title: string, screen: ReactNode) =>
     bootReady ? screen : <BootHydratePlaceholder title={title} />;
 
@@ -131,6 +131,7 @@ export function App() {
         status={status}
       />
       <main className="main">
+        {bootReady && state.screen === 'home' && !onboardingOpen && !state.onboarding.complete && <div className="banner banner--info"><span className="banner__text">Setup is incomplete. Connect access and try both ways to dictate.</span><button className="btn ghost" onClick={(event) => openSetup(event.currentTarget)} type="button">Resume setup</button></div>}
         {(state.screen === 'home' || (native && state.screen === 'settings')) && <Home dogfood={dogfood} onToast={announce} />}
         {state.screen === 'history' && gated('History', <History onToast={announce} />)}
         {state.screen === 'dictionary' && gated('Dictionary', <Dictionary />)}

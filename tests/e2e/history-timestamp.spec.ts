@@ -16,7 +16,7 @@ for (const screen of screens) {
       test(`${screen.name} timestamp gap + alignment at ${size} ${width}px`, async ({ page }) => {
         await page.setViewportSize({ width, height: 900 });
         await page.goto('/');
-        await page.getByRole('button', { name: 'Skip' }).click();
+        await page.getByRole('button', { name: 'Set up later' }).click();
         await page.evaluate((s) => { document.documentElement.dataset.textsize = s; }, size);
         await page.getByRole('button', { name: screen.nav, exact: true }).first().click();
         const rows = page.locator(screen.row);

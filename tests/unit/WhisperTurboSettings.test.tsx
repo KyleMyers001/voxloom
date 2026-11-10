@@ -34,7 +34,7 @@ describe('Whisper Turbo settings', () => {
     const user = userEvent.setup();
     renderWithApp(<><ModelsTab /><CaptureTab onSetup={vi.fn()} /></>);
     const turbo = await screen.findByRole('radio', { name: /Whisper Large v3 Turbo \(English\)/ });
-    expect(screen.getByRole('radio', { name: /Whisper Tiny/ })).toBeChecked();
+    expect(screen.getByRole('radio', { name: /Whisper Base/ })).toBeChecked();
     await user.click(turbo);
     expect(turbo).toBeChecked();
     const card = within(turbo.closest('li')!);

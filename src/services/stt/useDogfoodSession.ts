@@ -11,8 +11,10 @@ import { errorText } from './dogfoodModel';
 import { prepareSttSession } from './prepareSession';
 import type { DogfoodOrigin, DogfoodPhase, DogfoodViewActions } from './dogfoodPhase';
 import type { Cancellation, DogfoodLiveSession } from './dogfoodSessionState';
+import type { OwnFieldDeliveryGuard } from './dogfoodPath';
 
 export interface DogfoodSessionInput {
+  deliveryGuard?: () => OwnFieldDeliveryGuard | undefined;
   actions: DogfoodViewActions;
   capture: UseCaptureStateResult;
   /** Disposes the native cleanup engine on unmount. */
@@ -34,7 +36,7 @@ export interface DogfoodSessionControls {
 }
 
 export function useDogfoodSession({
-  actions, capture, disposeNativeEngine, ensureModel, live, lookupPasteBinding, phase, preferredDeviceId, selectedModelId,
+  actions, capture, disposeNativeEngine, ensureModel, live, lookupPasteBinding, phase, preferredDeviceId, selectedModelId, deliveryGuard,
 }: DogfoodSessionInput): DogfoodSessionControls {
   const captureRef = useRef(capture);
   captureRef.current = capture;
@@ -59,7 +61,7 @@ export function useDogfoodSession({
       ? Promise.all([live.retirement, retire]).then(() => {})
       : undefined;
     live.retirement = retirement;
-    const cancellation: Cancellation = { cancelled: false, modelId: selectedModelId() };
+    const cancellation: Cancellation = { cancelled: false, modelId: selectedModelId(), deliveryGuard: deliveryGuard?.() };
     live.cancellation = cancellation;
     live.active = true;
     setScopeReady(false);
@@ -83,6 +85,7 @@ export function useDogfoodSession({
           if (session === live.session) live.cancelAction();
         }, () => !superseded() && !cancellation.cancelled);
       } catch (error: unknown) {
+        if (cancellation.deliveryGuard) throw new Error('Escape cancellation could not connect. Check Input Monitoring and try again.', { cause: error });
         // Escape-cancel is optional: a tap failure must never block dictation.
         console.warn('Escape cancellation unavailable; dictating without it.', error);
       }
@@ -136,7 +139,7 @@ export function useDogfoodSession({
       setPhase('error');
       announce(errorText(error));
     }
-  }, [actions, capture, ensureModel, live, lookupPasteBinding, preferredDeviceId, selectedModelId]);
+  }, [actions, capture, ensureModel, live, lookupPasteBinding, preferredDeviceId, selectedModelId, deliveryGuard]);
 
   const stop = useCallback(async () => {
     const session = live.session;

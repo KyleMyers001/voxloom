@@ -64,7 +64,7 @@ export const initialSettings: Settings = {
   transcriptRetention: '30-days',
   // Explicit STT modelId (ADR / BUS-10 settings pick). Legacy simulated
   // labels are resolved to this default via resolveTranscriptionModelId.
-  transcriptionModel: 'whisper-tiny.en',
+  transcriptionModel: 'whisper-base.en',
 };
 
 export const initialWords = [
