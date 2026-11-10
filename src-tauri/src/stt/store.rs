@@ -175,8 +175,16 @@ impl ModelStore {
             if self.is_downloading(model_id) {
                 return false;
             }
-            return self.verify_existing(spec) == Some(existing::Verdict::Verified)
-                && self.current_verdict(spec) == Some(existing::Verdict::Verified);
+            // A known verdict (cached or marker) answers without the shared
+            // hashing lock, so setup never queues behind startup hashing of
+            // another model. Only an unknown verdict waits for the pinned hash.
+            return match self.current_verdict(spec) {
+                Some(verdict) => verdict == existing::Verdict::Verified,
+                None => {
+                    self.verify_existing(spec) == Some(existing::Verdict::Verified)
+                        && self.current_verdict(spec) == Some(existing::Verdict::Verified)
+                }
+            };
         }
         super::parakeet_catalog::find(model_id).is_some_and(|spec| {
             // Ordinary dictation may resolve structurally complete sets while

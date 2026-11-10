@@ -141,3 +141,31 @@ fn setup_readiness_reports_unavailable_engine_instead_of_missing_download() {
     assert_eq!(wire["ready"], false);
     assert_eq!(wire["status"], "unavailable");
 }
+
+#[test]
+fn setup_readiness_answers_a_known_verdict_without_waiting_on_the_hashing_lock() {
+    let (store, dir) = temp_store("setup-known-verdict");
+    fs::create_dir_all(&dir).unwrap();
+    let spec = crate::stt::catalog::find("whisper-base.en").unwrap();
+    let path = store.model_path(spec);
+    // No model download: a fixture recorded as a verified download.
+    fs::write(&path, b"verified fixture").unwrap();
+    store.mark_verified(spec, &path);
+    let store = Arc::new(store);
+    // Startup hashing of another model holds the shared lock.
+    let hashing = store.hashing.lock().unwrap();
+    let (send, receive) = std::sync::mpsc::channel();
+    let probe = store.clone();
+    std::thread::spawn(move || {
+        let _ = send.send(probe.setup_verified(spec.id));
+    });
+    let known = receive.recv_timeout(std::time::Duration::from_secs(5));
+    drop(hashing);
+    // A changed file is no longer vouched for: it waits for the pinned hash,
+    // which rejects these bytes.
+    fs::write(&path, b"changed after verification").unwrap();
+    let changed = store.setup_verified(spec.id);
+    fs::remove_dir_all(dir).unwrap();
+    assert_eq!(known, Ok(true), "known verdict waited on the hashing lock");
+    assert!(!changed, "strict setup accepted a changed file");
+}
