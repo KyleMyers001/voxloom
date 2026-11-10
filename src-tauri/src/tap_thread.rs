@@ -89,12 +89,25 @@ impl<H> TapThread<H> {
     }
 }
 
+/// CFRunLoopRunInMode's kCFRunLoopRunFinished: the mode has no sources or
+/// timers left (macOS invalidated the tap's port and removed its source).
+const RUN_FINISHED: i32 = 1;
+
+/// Whether to run the loop again after it returned `result`. A finished
+/// mode returns at once forever, so looping on it would spin; the thread
+/// ends instead, its teardown still runs on it, and a later `stop` finds
+/// it already gone.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn run_again(result: i32) -> bool {
+    result != RUN_FINISHED
+}
+
 #[cfg(target_os = "macos")]
 pub use run_loop::{run_until_stopped, RunLoop};
 
 #[cfg(target_os = "macos")]
 mod run_loop {
-    use super::Stopping;
+    use super::{run_again, Stopping};
     use std::ffi::c_void;
 
     type Handle = *mut c_void;
@@ -134,12 +147,16 @@ mod run_loop {
         }
     }
 
-    /// Run this thread's run loop until `stopping` is set. The timeout only
-    /// bounds a stop that lands before the loop starts waiting.
+    /// Run this thread's run loop until `stopping` is set, or until nothing
+    /// is left to run (see `run_again`). The timeout only bounds a stop that
+    /// lands before the loop starts waiting.
     pub fn run_until_stopped(stopping: &Stopping) {
         while !stopping.is_set() {
             // SAFETY: runs the current thread's own run loop.
-            unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.25, 0) };
+            let result = unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.25, 0) };
+            if !run_again(result) {
+                return;
+            }
         }
     }
 }
@@ -149,6 +166,30 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
     use std::time::Duration;
+
+    #[test]
+    fn a_finished_run_loop_ends_the_loop_instead_of_spinning() {
+        assert!(!run_again(RUN_FINISHED));
+        // kCFRunLoopRunStopped, TimedOut, HandledSource: check `Stopping`.
+        for result in [2, 3, 4] {
+            assert!(run_again(result), "{result}");
+        }
+    }
+
+    #[test]
+    fn stop_after_the_thread_already_ended_returns() {
+        // The thread tore down on its own (finished run loop) before `stop`.
+        let (ended_tx, ended) = mpsc::channel();
+        let tap = spawn("t", move |ready, _| {
+            ready.report(Ok(()));
+            ended_tx.send(()).unwrap();
+        })
+        .unwrap();
+        ended.recv().unwrap();
+        let mut woken = false;
+        tap.stop(|_| woken = true);
+        assert!(woken);
+    }
 
     #[test]
     fn a_setup_error_is_returned_and_the_thread_ends() {
