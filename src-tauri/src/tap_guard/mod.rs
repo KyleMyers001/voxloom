@@ -5,8 +5,8 @@
 //! still granted and within a budget, and torn down as soon as access goes.
 //!
 //! The permission check waits on the window server, so it runs on its own
-//! checker thread (`monitor`) and publishes a flag. Tap threads and the Esc
-//! timer only read that flag: a thread that services a tap never waits on
+//! checker thread (`monitor`) and publishes the result. Tap threads and the
+//! Esc timer only read it: a thread that services a tap never waits on
 //! the window server while the window server may be waiting on its callback.
 //!
 //! The decisions here are plain `std` (tested everywhere); the probe is

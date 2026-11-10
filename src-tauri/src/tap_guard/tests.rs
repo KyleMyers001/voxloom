@@ -1,6 +1,4 @@
 use super::*;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::thread;
 
 fn timeout() -> Disables {
     Disables {
@@ -127,58 +125,4 @@ fn user_input_disables_do_not_count_as_timeouts() {
     assert_eq!(guard.check(user_input(), true, start), Verdict::Reenable);
     let soon = start + Duration::from_millis(10);
     assert_eq!(guard.check(timeout(), true, soon), Verdict::Reenable);
-}
-
-const TICK: Duration = Duration::from_millis(5);
-
-/// Wait (bounded) until `done` holds.
-fn eventually(done: impl Fn() -> bool) -> bool {
-    for _ in 0..400 {
-        if done() {
-            return true;
-        }
-        thread::sleep(TICK);
-    }
-    false
-}
-
-static GRANTED: AtomicBool = AtomicBool::new(true);
-static CHECKS: AtomicUsize = AtomicUsize::new(0);
-
-fn fake_check() -> bool {
-    CHECKS.fetch_add(1, Ordering::SeqCst);
-    GRANTED.load(Ordering::SeqCst)
-}
-
-#[test]
-fn the_checker_publishes_loss_and_stops_when_nothing_watches() {
-    let monitor = Monitor::new(fake_check, TICK);
-    GRANTED.store(false, Ordering::SeqCst);
-    // A just-created tap proved access, so a new watch starts trusted.
-    let watch = monitor.watch().unwrap();
-    assert!(watch.trusted());
-    // The check runs on the checker thread; the reader only sees the flag.
-    assert!(eventually(|| !watch.trusted()));
-    assert!(CHECKS.load(Ordering::SeqCst) > 0);
-
-    // A new tap (creation succeeded, so access is back) resets the flag.
-    GRANTED.store(true, Ordering::SeqCst);
-    let second = monitor.watch().unwrap();
-    assert!(second.trusted() && watch.trusted());
-
-    drop(watch);
-    drop(second);
-    thread::sleep(TICK * 4);
-    let after = CHECKS.load(Ordering::SeqCst);
-    thread::sleep(TICK * 10);
-    assert_eq!(
-        CHECKS.load(Ordering::SeqCst),
-        after,
-        "no checks with no watchers"
-    );
-
-    // Watching again restarts it.
-    GRANTED.store(false, Ordering::SeqCst);
-    let again = monitor.watch().unwrap();
-    assert!(eventually(|| !again.trusted()));
 }

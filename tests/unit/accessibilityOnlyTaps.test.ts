@@ -128,7 +128,9 @@ describe('accessibility-only key taps', () => {
     expect(guard).toContain('Monitor::new(probe::still_trusted,CHECK_INTERVAL)');
     const monitor = code(read('src-tauri/src/tap_guard/monitor.rs'));
     expect(monitor).toContain('.name("tap-access-check".into()).spawn(move||run(inner))');
-    expect(monitor).toContain('lettrusted=(inner.check)();inner.trusted.store(trusted,Ordering::SeqCst);');
+    // A result applies only to watches no newer than the check (BUS-209).
+    expect(monitor).toContain('inner.epoch.load(Ordering::SeqCst)};if!(inner.check)(){inner.mark_lost(epoch);}');
+    expect(monitor).toContain('self.inner.lost_through.load(Ordering::SeqCst)<self.epoch');
   });
 
   it('probes Accessibility with an active tap, not AXIsProcessTrusted alone', () => {
