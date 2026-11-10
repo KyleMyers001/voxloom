@@ -58,7 +58,7 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
   const sequence = useRef(0);
   const pending = useRef(false);
   const practice = useDogfoodCapture({
-    clipboard, clipboardFallback: false, cleanupActive: false,
+    clipboard, clipboardFallback: false, cleanupActive: false, ownedCaptureOnly: true,
     modelId: state.settings.transcriptionModel,
     preferredDeviceId: state.settings.microphone,
     deliveryGuard: () => guard.current,

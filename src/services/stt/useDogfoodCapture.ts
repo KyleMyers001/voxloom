@@ -51,6 +51,11 @@ export { hudResultFor, type DogfoodPhase } from './dogfoodPhase';
 
 export interface UseDogfoodCaptureOptions {
   deliveryGuard?: OwnFieldDeliveryGuard | (() => OwnFieldDeliveryGuard | undefined);
+  /**
+   * Guided practice: never adopt a capture another hook started, and process
+   * only stopped audio from a session this hook started with a delivery guard.
+   */
+  ownedCaptureOnly?: boolean;
   clipboard: ClipboardAdapter;
   /** Settings `clipboardFallback` (default true). */
   clipboardFallback?: boolean;
@@ -115,7 +120,7 @@ export interface UseDogfoodCaptureResult {
 export function useDogfoodCapture(
   options: UseDogfoodCaptureOptions,
 ): UseDogfoodCaptureResult {
-  const liveCapture = useCaptureState();
+  const liveCapture = useCaptureState({ adoptActive: !options.ownedCaptureOnly });
   const capture = options.captureApi ?? liveCapture;
   const { actions, state } = useDogfoodView(options.onToast);
   const live = useDogfoodLiveSession();

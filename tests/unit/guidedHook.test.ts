@@ -45,3 +45,18 @@ it('keeps an owned practice guard through capture and cancels without late inser
   expect(guard.result).not.toHaveBeenCalled();
   expect(clipboard.copy).not.toHaveBeenCalled();
 });
+
+it('owned-capture-only practice never consumes stopped audio from a session it did not start with a guard', async () => {
+  const store = createMockSttModelStore();
+  await store.download('whisper-base.en');
+  const dogfood = vi.fn(dogfoodTranscribeAndCopy);
+  const { result, rerender } = renderHook(({ captureState }: { captureState: CaptureState }) => useDogfoodCapture({
+    clipboard: { copy: vi.fn() }, modelId: 'whisper-base.en', createModelStore: () => store, dogfood, ownedCaptureOnly: true,
+    deliveryGuard: () => undefined,
+    captureApi: { captureState, startFullCaptureSession: async () => 'started', stopFullCapture: async () => {}, cancelActiveCapture: vi.fn() } as unknown as UseCaptureStateResult,
+  }), { initialProps: { captureState: { kind: 'idle' } as CaptureState } });
+  rerender({ captureState: { kind: 'stopped', audio: { id: 'product-pcm', duration_ms: 1000, sample_rate_hz: 16000 } } });
+  await act(async () => {});
+  expect(dogfood).not.toHaveBeenCalled();
+  expect(result.current.phase).toBe('idle');
+});

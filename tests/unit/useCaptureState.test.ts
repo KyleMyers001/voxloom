@@ -372,6 +372,29 @@ describe('useCaptureState request ownership', () => {
       await waitFor(() => expect(unlisten).toHaveBeenCalledOnce());
     });
 
+  it('without adoption ignores another owner\'s native capture and never cancels it',
+    async () => {
+      mocks.getCaptureStatus.mockResolvedValue({
+        generation: 12,
+        mode: 'full',
+        request_id: 'product-owner',
+      });
+      const { result, unmount } = renderHook(() => useCaptureState({ adoptActive: false }));
+      await waitFor(() => expect(result.current.captureReady).toBe(true));
+      expect(result.current.captureState).toEqual({ kind: 'idle' });
+      act(() => handler?.({
+        audio: { duration_ms: 500, id: 'product-pcm', sample_rate_hz: 16_000 },
+        generation: 12,
+        kind: 'capture-stopped',
+        request_id: 'product-owner',
+      }));
+      expect(result.current.captureState).toEqual({ kind: 'idle' });
+      await act(async () => { await result.current.stopFullCapture(); });
+      expect(mocks.stopCapture).not.toHaveBeenCalled();
+      unmount();
+      expect(mocks.cancelCapture).not.toHaveBeenCalled();
+    });
+
   it('unmount before subscription resolves cancels only its request',
     async () => {
       const listener = deferred<() => void>();

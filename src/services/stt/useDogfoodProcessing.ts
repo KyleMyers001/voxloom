@@ -232,7 +232,10 @@ export function useDogfoodProcessing({
     }
     if (live.handledAudioId === audio.id) return;
     live.handledAudioId = audio.id;
-    if (live.cancellation.cancelled) {
+    // Guided practice consumes only audio from its own guarded session.
+    const unowned = optionsRef.current.ownedCaptureOnly === true
+      && !live.cancellation.deliveryGuard;
+    if (live.cancellation.cancelled || unowned) {
       // A late stopped event must dispose PCM without restarting cancelled STT.
       void live.cancellation.preparation?.release(audio.id).catch(() => {});
       return;
