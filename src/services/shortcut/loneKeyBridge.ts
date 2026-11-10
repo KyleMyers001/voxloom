@@ -3,7 +3,11 @@ import { isTauri } from '@tauri-apps/api/core';
 /** Sent by the native lone-key listener (src-tauri/src/lone_key/commands.rs). */
 export const LONE_KEY_EVENT = 'shortcut:lone-key';
 
-export type LoneKeyEdge = 'pressed' | 'released' | 'cancelled';
+/**
+ * 'access-lost': not a key edge. The listener stopped for good because macOS
+ * Accessibility went away (BUS-209); any hold already got its release.
+ */
+export type LoneKeyEdge = 'pressed' | 'released' | 'cancelled' | 'access-lost';
 
 export interface LoneKeyApi {
   /** Listen for this lone key (a stored token such as "AltRight"). */
@@ -21,7 +25,7 @@ export interface LoneKeyApi {
   listen(onEdge: (edge: LoneKeyEdge) => void): Promise<() => void>;
 }
 
-const EDGES: readonly string[] = ['pressed', 'released', 'cancelled'];
+const EDGES: readonly string[] = ['pressed', 'released', 'cancelled', 'access-lost'];
 
 const asError = (err: unknown) => (err instanceof Error ? err : new Error(String(err)));
 

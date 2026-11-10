@@ -16,6 +16,7 @@ fn edge_name(edge: Edge) -> &'static str {
         Edge::Pressed => "pressed",
         Edge::Released => "released",
         Edge::Cancelled => "cancelled",
+        Edge::AccessLost => "access-lost",
     }
 }
 
@@ -69,7 +70,7 @@ fn arm_impl(app: AppHandle, key: super::LoneKey) -> Result<(), String> {
 
 #[cfg(target_os = "macos")]
 fn request_access_impl() -> bool {
-    super::macos::request_access()
+    super::access::request_access()
 }
 
 #[cfg(target_os = "macos")]
@@ -101,6 +102,7 @@ mod tests {
         assert_eq!(edge_name(Edge::Pressed), "pressed");
         assert_eq!(edge_name(Edge::Released), "released");
         assert_eq!(edge_name(Edge::Cancelled), "cancelled");
+        assert_eq!(edge_name(Edge::AccessLost), "access-lost");
     }
 
     #[test]

@@ -8,7 +8,9 @@ const root = resolve(import.meta.dirname, '../..');
 const read = (path: string) => readFileSync(resolve(root, path), 'utf8');
 const LONE_KEY = 'src-tauri/src/lone_key/macos.rs';
 const HOLD = 'src-tauri/src/hold_release.rs';
-const TAP_THREAD = 'src-tauri/src/tap_thread.rs';
+const TAP_THREAD = 'src-tauri/src/tap_thread/mod.rs';
+const ACCESS = 'src-tauri/src/lone_key/access.rs';
+const ESC = 'src-tauri/src/cancel_scope/macos.rs';
 
 /** Source without comments or whitespace, so checks ignore formatting. */
 const code = (source: string) => source.replace(/\/\/[^\n]*/g, '').replace(/\s+/g, '');
@@ -63,7 +65,7 @@ describe('accessibility-only key taps', () => {
     for (const file of [LONE_KEY, HOLD]) {
       const source = code(read(file));
       expect(source, file).toContain('tap_thread::spawn(');
-      expect(source, file).toContain('tap_thread::run_until_stopped(&stopping)');
+      expect(source, file).toContain('tap_thread::run_until_stopped(&stopping,');
       expect(source, file).toContain('CFRunLoopAddSource(CFRunLoopGetCurrent(),');
       expect(source, file).not.toContain('CFRunLoopAddSource(CFRunLoopGetMain()');
       expect(source, file).toContain('.stop(RunLoop::stop)');
@@ -80,7 +82,7 @@ describe('accessibility-only key taps', () => {
       const source = readFileSync(path, 'utf8');
       expect(source, file).not.toMatch(/CGRequestListenEventAccess|IOHIDRequestAccess|IOHIDCheckAccess/);
       // Esc-cancel diagnostics may still log it as evidence; nothing gates on it.
-      if (file !== 'src-tauri/src/cancel_scope/macos.rs') {
+      if (file !== ESC && file !== 'src-tauri/src/cancel_scope/ffi.rs') {
         expect(source, file).not.toContain('CGPreflightListenEventAccess');
       }
     }
@@ -89,11 +91,48 @@ describe('accessibility-only key taps', () => {
   it('gates the lone key on Accessibility and prompts only from request_access', () => {
     const source = read(LONE_KEY);
     const arm = source.slice(source.indexOf('pub fn arm('), source.indexOf('pub fn disarm('));
-    expect(arm.indexOf('if !accessibility_trusted()')).toBeGreaterThan(-1);
-    expect(arm.indexOf('if !accessibility_trusted()')).toBeLessThan(arm.indexOf('tap_thread::spawn('));
+    const gate = 'if !super::access::accessibility_trusted()';
+    expect(arm.indexOf(gate)).toBeGreaterThan(-1);
+    expect(arm.indexOf(gate)).toBeLessThan(arm.indexOf('tap_thread::spawn('));
     expect(arm).not.toContain('prompt_for_accessibility');
-    expect(source).toContain('request_if_needed(accessibility_trusted, prompt_for_accessibility)');
-    expect(source.match(/AXIsProcessTrustedWithOptions\(/g)).toHaveLength(1);
+    const access = read(ACCESS);
+    expect(access).toContain('request_if_needed(accessibility_trusted, prompt_for_accessibility)');
+    expect(access.match(/AXIsProcessTrustedWithOptions\(/g)).toHaveLength(1);
+    expect(source).not.toContain('AXIsProcessTrustedWithOptions(');
+  });
+
+  it('never re-enables a tap from its callback; the watchdog decides', () => {
+    for (const [file, name] of [[LONE_KEY, 'callback'], [HOLD, 'tap_callback'], [ESC, 'callback']]) {
+      const body = code(callbackBody(read(file), name));
+      expect(body, file).not.toContain('CGEventTapEnable');
+      expect(body, file).not.toContain('still_trusted');
+    }
+    for (const file of [LONE_KEY, HOLD]) {
+      const source = code(read(file));
+      expect(source, file).toContain('tap_thread::wake_current()');
+      expect(source, file).toContain('guard.check(');
+      expect(source, file).toContain('tap_guard::still_trusted');
+    }
+  });
+
+  it('probes Accessibility with an active tap, not AXIsProcessTrusted alone', () => {
+    const probe = code(read('src-tauri/src/tap_guard.rs'));
+    expect(probe).toContain('ifAXIsProcessTrusted()==0{returnfalse;}');
+    expect(probe).toContain('CGEventTapCreate(TAP_SESSION,TAP_TAIL,TAP_DEFAULT,MASK_NULL,');
+    expect(probe).toContain('constTAP_DEFAULT:u32=0;');
+    expect(probe).toContain('CFMachPortInvalidate(probe);CFRelease(probe);');
+  });
+
+  it('watches the Escape tap while armed and closes every tap on quit', () => {
+    const esc = code(read(ESC));
+    expect(esc).toContain('Watch::start(on_watch)');
+    expect(esc).toContain('fnon_watch(_timer:Handle,_info:Handle){ifcrate::tap_guard::still_trusted(){return;}');
+    const lib = code(read('src-tauri/src/lib.rs'));
+    expect(lib).toContain('iflettauri::RunEvent::Exit=event{close_taps();}');
+    const close = lib.slice(lib.indexOf('fnclose_taps()'));
+    for (const call of ['cancel_scope::close()', 'lone_key_disarm()', 'hold_release_disarm()']) {
+      expect(close).toContain(call);
+    }
   });
 
   it('checks Accessibility before the hold tap and never prompts there', () => {

@@ -14,7 +14,10 @@
 //! main: an active tap holds each event until its callback returns. That
 //! thread also frees the tap and its `TapCtx` after its run loop stops, so
 //! a disarm from the poll thread or the callback never frees state a
-//! running callback still reads.
+//! running callback still reads. Between run-loop slices it checks
+//! Accessibility (`crate::tap_guard`): a disabled tap is re-enabled only
+//! while access is granted and within budget, and on loss the tap is torn
+//! down while the poll keeps covering the hold.
 //!
 //! Tear-down on disarm / cancel / error / latch paths. Does **not** grab Escape.
 //! Non-macOS builds expose no-op commands so Linux `cargo check` stays green.
@@ -78,14 +81,15 @@ pub fn note_broken_poll_tick(streak: u32, held: bool) -> (u32, bool) {
 #[cfg(target_os = "macos")]
 mod macos {
     use std::ffi::c_void;
-    use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::{Arc, Mutex};
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use tauri::{AppHandle, Emitter};
 
     use super::{chord_held_from_sample, note_broken_poll_tick, tap_if_trusted};
+    use crate::tap_guard::{self, TapGuard, Verdict};
     use crate::tap_thread::{self, RunLoop, TapThread};
 
     pub const HOLD_RELEASE_EVENT: &str = "shortcut:hold-release";
@@ -229,8 +233,8 @@ mod macos {
         app: AppHandle,
         chord: Chord,
         generation: u64,
-        /// Set right after creation; the callback uses it to re-enable.
-        port: AtomicPtr<c_void>,
+        /// macOS disabled the tap since the watchdog last looked.
+        disabled: AtomicBool,
     }
 
     struct Armed {
@@ -357,12 +361,11 @@ mod macos {
         }
         let ctx = &*(user_info as *const TapCtx);
         if etype == EVENT_TAP_DISABLED_BY_TIMEOUT || etype == EVENT_TAP_DISABLED_BY_USER_INPUT {
-            // The tap returns every event unchanged, so turning it back on is safe;
-            // the poll keeps covering the hold meanwhile.
-            let port = ctx.port.load(Ordering::SeqCst);
-            if !port.is_null() {
-                CGEventTapEnable(port, true);
-            }
+            // The poll keeps covering the hold. Re-enabling needs a
+            // permission check, which must not run in a callback: end this
+            // run-loop slice so the watchdog decides now.
+            ctx.disabled.store(true, Ordering::SeqCst);
+            tap_thread::wake_current();
             return event;
         }
         // flagsChanged: do not emit here (poll debounce). Letter key-up: emit
@@ -384,7 +387,7 @@ mod macos {
                 app,
                 chord,
                 generation,
-                port: AtomicPtr::new(std::ptr::null_mut()),
+                disabled: AtomicBool::new(false),
             }));
             // SAFETY: FFI to CoreGraphics / CoreFoundation for an active tap
             // whose callback returns every event unchanged. The callback
@@ -412,11 +415,24 @@ mod macos {
                     ready.report(Err("hold-release tap source unavailable".into()));
                     return;
                 }
-                (*ctx).port.store(tap, Ordering::SeqCst);
                 CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes);
                 CGEventTapEnable(tap, true);
                 if ready.report(Ok(RunLoop::current())) {
-                    tap_thread::run_until_stopped(&stopping);
+                    // Lost or stopped, the teardown below is the same: the
+                    // poll alone finishes the hold, as without Accessibility.
+                    let disabled = &(*ctx).disabled;
+                    let mut guard = TapGuard::default();
+                    tap_thread::run_until_stopped(&stopping, || {
+                        let was = disabled.swap(false, Ordering::SeqCst);
+                        match guard.check(was, tap_guard::still_trusted, Instant::now()) {
+                            Verdict::Keep => true,
+                            Verdict::Reenable => {
+                                CGEventTapEnable(tap, true);
+                                true
+                            }
+                            Verdict::TearDown => false,
+                        }
+                    });
                 }
                 CGEventTapEnable(tap, false);
                 CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes);

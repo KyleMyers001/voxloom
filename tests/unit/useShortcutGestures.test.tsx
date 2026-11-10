@@ -1133,6 +1133,27 @@ describe('HUD result states (UI PR 8)', () => {
   });
 });
 
+describe('useShortcutGestures lone key lost Accessibility (BUS-209)', () => {
+  afterEach(() => { resetActiveShortcut(); vi.mocked(isTauri).mockReturnValue(false); });
+
+  it('onBindingLost reports nothing active, like a failed re-bind', async () => {
+    vi.mocked(isTauri).mockReturnValue(true);
+    mocks.createNativeShortcutController.mockReturnValue(makeNativeController());
+    mocks.createOverlayBridge.mockReturnValue(makeOverlay());
+    const state = createInitialState(0);
+    const combo = state.settings.shortcut;
+    const { unmount } = renderHook(() => useShortcutGestures(makeOptions({ now: () => 0, state })));
+    await waitFor(() => expect(getActiveShortcut()).toBe(combo));
+    const { onBindingLost, onSuspendRecovered } = mocks.createNativeShortcutController.mock.calls[0][0];
+    act(() => onBindingLost('Accessibility permission was turned off.'));
+    expect(getActiveShortcut()).toBeNull();
+    // Not a suspend: a later resume has nothing to restore.
+    act(() => onSuspendRecovered());
+    expect(getActiveShortcut()).toBeNull();
+    unmount();
+  });
+});
+
 describe('useShortcutGestures native suspend recovery (BUS-74)', () => {
   afterEach(() => { resetActiveShortcut(); vi.mocked(isTauri).mockReturnValue(false); });
 

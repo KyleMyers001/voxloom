@@ -38,6 +38,7 @@ export function createNativeShortcutController({
   holdRelease = createTauriHoldReleaseApi(),
   loneKey = createTauriLoneKeyApi(),
   onGesture,
+  onBindingLost,
   onRegisterFailure,
   onSuspendFailure,
   onSuspendRecovered,
@@ -153,6 +154,12 @@ export function createNativeShortcutController({
     isDisposed: () => disposed,
     isLoneKeyActive: () => active !== null && isLoneKey(active),
     machine,
+    onAccessLost: () => {
+      // The native tap is already gone: nothing holds a shortcut now.
+      active = null;
+      generation += 1;
+      onBindingLost?.('Accessibility permission was turned off.');
+    },
   });
 
   // Serialize setShortcut / suspendBinding so boot (mount + Settings effects)

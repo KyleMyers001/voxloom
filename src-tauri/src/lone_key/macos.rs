@@ -11,14 +11,19 @@
 //! stall never delays other apps' input. The callback never calls the sink:
 //! edges go to a delivery thread (see `delivery`), so nothing the app does
 //! with an edge can re-enter or free the tap.
+//! Between run-loop slices the tap thread checks Accessibility (see
+//! `crate::tap_guard`): it re-enables a disabled tap only while access is
+//! granted and within budget, and on loss tears the tap down, fails closed
+//! and sends `AccessLost`. Re-arming waits for the next save or launch.
 
 use super::context::{active_context, Context, Tap, ACTIVE, LIVE};
 use super::delivery::{Delivery, Sink};
 use super::machine::Kind;
 use super::tap_ffi::*;
 use super::LoneKey;
-use crate::tap_thread::{self, RunLoop, TapThread};
-use std::{ptr, rc::Rc, sync::Mutex};
+use crate::tap_guard::{self, TapGuard, Verdict};
+use crate::tap_thread::{self, Ended, RunLoop, TapThread};
+use std::{ptr, rc::Rc, sync::Mutex, time::Instant};
 
 /// The running tap thread, if armed. Only `arm` / `disarm` touch it.
 static THREAD: Mutex<Option<TapThread<RunLoop>>> = Mutex::new(None);
@@ -57,22 +62,36 @@ unsafe extern "C" fn callback(_: Handle, event_type: u32, event: Handle, info: H
     };
     context.step(kind, keycode, flags);
     if disabled {
-        // Fail closed (the machine already released any hold), then listen
-        // again: the tap returns every event unchanged, so re-enabling is
-        // safe.
+        // Fail closed (the machine already released any hold). Whether to
+        // listen again needs a permission check, which must not run in a
+        // callback: end this run-loop slice so the watchdog decides now.
         #[cfg(debug_assertions)]
-        eprintln!("[lone-key] tap disabled (type {event_type:#x}); re-enabling");
-        ACTIVE.with(|slot| {
-            if let Some(tap) = slot
-                .borrow()
-                .as_ref()
-                .filter(|tap| Rc::ptr_eq(&tap.context, &context))
-            {
-                CGEventTapEnable(tap.port, true);
-            }
-        });
+        eprintln!("[lone-key] tap disabled (type {event_type:#x})");
+        context.note_disabled();
+        tap_thread::wake_current();
     }
     event
+}
+
+/// Between run-loop slices: keep, re-enable or give up the tap. Returns
+/// whether it stays.
+fn watch(guard: &mut TapGuard) -> bool {
+    ACTIVE.with(|slot| {
+        let slot = slot.borrow();
+        let Some(tap) = slot.as_ref() else {
+            return false;
+        };
+        let disabled = tap.context.take_disabled();
+        match guard.check(disabled, tap_guard::still_trusted, Instant::now()) {
+            Verdict::Keep => true,
+            Verdict::Reenable => {
+                // SAFETY: the tap thread, outside the callback; a live port.
+                unsafe { CGEventTapEnable(tap.port, true) };
+                true
+            }
+            Verdict::TearDown => false,
+        }
+    })
 }
 
 fn on_main_thread() -> Result<(), String> {
@@ -84,49 +103,11 @@ fn on_main_thread() -> Result<(), String> {
     }
 }
 
-fn accessibility_trusted() -> bool {
-    // SAFETY: preflight query only; never prompts or changes TCC state.
-    unsafe { AXIsProcessTrusted() != 0 }
-}
-
-/// Show the system Accessibility prompt. Returns whether access is granted
-/// now (normally `false`: the user answers in System Settings later).
-fn prompt_for_accessibility() -> bool {
-    // SAFETY: a one-entry CF dictionary built from Apple's constant key and
-    // kCFBooleanTrue, released exactly once after the call.
-    unsafe {
-        let keys = [kAXTrustedCheckOptionPrompt];
-        let values = [kCFBooleanTrue];
-        let options = CFDictionaryCreate(
-            ptr::null_mut(),
-            keys.as_ptr(),
-            values.as_ptr(),
-            1,
-            ptr::addr_of!(kCFTypeDictionaryKeyCallBacks).cast(),
-            ptr::addr_of!(kCFTypeDictionaryValueCallBacks).cast(),
-        );
-        if options.is_null() {
-            return false;
-        }
-        let trusted = AXIsProcessTrustedWithOptions(options) != 0;
-        CFRelease(options);
-        trusted
-    }
-}
-
-/// Ask for Accessibility if it is not granted yet. Returns whether it is
-/// granted *now*: the system prompt answers later, so a first request is
-/// normally `false`. Runs off the main thread (the call may wait on the
-/// system); it touches no tap state.
-pub fn request_access() -> bool {
-    super::commands::request_if_needed(accessibility_trusted, prompt_for_accessibility)
-}
-
 /// Start listening for `key`, replacing any earlier listener.
 pub fn arm(key: LoneKey, sink: Sink) -> Result<(), String> {
     on_main_thread()?;
     disarm()?;
-    if !accessibility_trusted() {
+    if !super::access::accessibility_trusted() {
         return Err(
             "Accessibility permission is needed to use a single key as the shortcut".into(),
         );
@@ -139,10 +120,16 @@ pub fn arm(key: LoneKey, sink: Sink) -> Result<(), String> {
             ready.report(Err(e));
             return;
         }
-        if ready.report(Ok(RunLoop::current())) {
-            tap_thread::run_until_stopped(&stopping);
+        if !ready.report(Ok(RunLoop::current())) {
+            uninstall();
+            return;
         }
-        uninstall();
+        let mut guard = TapGuard::default();
+        let ended = tap_thread::run_until_stopped(&stopping, || watch(&mut guard));
+        let context = uninstall();
+        if let (Ended::Lost, Some(context)) = (ended, context) {
+            context.lose();
+        }
     })?;
     *THREAD.lock().map_err(|e| e.to_string())? = Some(thread);
     Ok(())
@@ -196,11 +183,9 @@ fn install(context: Rc<Context>) -> Result<(), String> {
 }
 
 /// Tear the tap down on its own thread, after its run loop stopped, so no
-/// callback can be running.
-fn uninstall() {
-    let Some(tap) = ACTIVE.with(|slot| slot.borrow_mut().take()) else {
-        return;
-    };
+/// callback can be running. Returns its context for a last word.
+fn uninstall() -> Option<Rc<Context>> {
+    let tap = ACTIVE.with(|slot| slot.borrow_mut().take())?;
     // SAFETY: the tap thread, outside the callback. Stop callbacks before the
     // context drops; each create-rule object is released exactly once.
     unsafe {
@@ -210,6 +195,7 @@ fn uninstall() {
         CFRelease(tap.source);
         CFRelease(tap.port);
     }
+    Some(tap.context)
 }
 
 /// Stop listening. Any hold in progress is dropped without an edge, so the

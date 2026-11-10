@@ -25,6 +25,8 @@ pub(super) struct Context {
     started: Instant,
     /// A debounce wake-up is already queued.
     tick_queued: Cell<bool>,
+    /// macOS disabled the tap since the watchdog last looked.
+    disabled: Cell<bool>,
 }
 
 pub(super) struct Tap {
@@ -45,7 +47,25 @@ impl Context {
             delivery,
             started: Instant::now(),
             tick_queued: Cell::new(false),
+            disabled: Cell::new(false),
         }
+    }
+
+    /// From the callback: macOS disabled the tap; the watchdog decides.
+    pub(super) fn note_disabled(&self) {
+        self.disabled.set(true);
+    }
+
+    /// For the watchdog: whether the tap was disabled since the last call.
+    pub(super) fn take_disabled(&self) -> bool {
+        self.disabled.replace(false)
+    }
+
+    /// The tap is already torn down for good: fail closed (a hold gets its
+    /// Released and Cancelled) and tell the app it is no longer listening.
+    pub(super) fn lose(&self) {
+        self.step(Kind::TapDisabled, 0, 0);
+        self.delivery.send(vec![Edge::AccessLost]);
     }
 
     fn now(&self) -> u64 {

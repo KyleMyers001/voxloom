@@ -9,6 +9,8 @@
 //! macOS only. Elsewhere `arm` refuses, and the pure parts below are built
 //! (and tested) but unused, hence the `dead_code` allows.
 
+#[cfg(target_os = "macos")]
+mod access;
 pub mod commands;
 #[cfg(target_os = "macos")]
 mod context;

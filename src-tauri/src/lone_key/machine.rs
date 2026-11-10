@@ -40,6 +40,9 @@ pub enum Edge {
     Released,
     /// Discard the interrupted press (see module docs).
     Cancelled,
+    /// Never from the machine: the listener stopped for good because
+    /// Accessibility went away (BUS-209), so the app shows it as not active.
+    AccessLost,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

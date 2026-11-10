@@ -49,11 +49,13 @@ function setup(opts: { armError?: string | ((token: string) => string | undefine
     now += ms;
     for (const [id, t] of [...timers]) if (t.at <= now) { timers.delete(id); t.cb(); }
   };
+  const lost: string[] = [];
   const controller = createNativeShortcutController({
-    api, clock: () => now, holdRelease, loneKey, onGesture: (g) => gestures.push(g), scheduler,
+    api, clock: () => now, holdRelease, loneKey, onBindingLost: (m) => lost.push(m),
+    onGesture: (g) => gestures.push(g), scheduler,
   });
   return {
-    advance, calls, controller, gestures, holdArm,
+    advance, calls, controller, gestures, holdArm, lost,
     lone: (edge: LoneKeyEdge) => loneEdge!(edge),
     plugin: (edge: 'pressed' | 'released') => pluginEdge!(edge),
     listening: () => loneEdge !== null,
@@ -164,6 +166,33 @@ describe('a lone key as the shortcut', () => {
     expect(t.gestures).toEqual(['latch-start', 'latch-finish']);
     t.lone('pressed'); t.lone('released'); // the next tap must not think it is a latch
     expect(t.gestures).toEqual(['latch-start', 'latch-finish']);
+  });
+
+  it('access-lost (BUS-209) finishes a hold and leaves nothing active until a save', async () => {
+    const t = setup();
+    await t.controller.setShortcut('AltRight');
+    t.lone('pressed');
+    t.advance(320);
+    t.lone('access-lost'); // native already sent released + cancelled, maybe lost
+    expect(t.gestures).toEqual(['hold-start', 'hold-finish']);
+    expect(t.controller.activeHotkey()).toBeNull();
+    expect(t.lost).toHaveLength(1);
+    t.lone('pressed');
+    t.advance(320);
+    expect(t.gestures).toEqual(['hold-start', 'hold-finish']);
+    t.calls.length = 0;
+    await t.controller.setShortcut('AltRight', { userInitiated: true });
+    expect(t.calls).toEqual(['requestAccess', 'arm AltRight']);
+    expect(t.controller.activeHotkey()).toBe('AltRight');
+  });
+
+  it('a late access-lost is ignored once a combo is the shortcut', async () => {
+    const t = setup();
+    await t.controller.setShortcut('AltRight');
+    await t.controller.setShortcut('Ctrl + Shift + Space');
+    t.lone('access-lost');
+    expect(t.controller.activeHotkey()).toBe('Control+Shift+Space');
+    expect(t.lost).toEqual([]);
   });
 
   it('ignores edges while a combo, or nothing, is the shortcut', async () => {

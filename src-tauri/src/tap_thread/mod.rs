@@ -102,12 +102,45 @@ fn run_again(result: i32) -> bool {
     result != RUN_FINISHED
 }
 
+/// Why a tap thread's run loop ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ended {
+    /// The owner asked (`TapThread::stop`).
+    Stopped,
+    /// The tap is gone or must go: macOS invalidated it, or the watchdog
+    /// found Accessibility off. The owner did not ask, so the thread fails
+    /// closed and says so (BUS-209).
+    Lost,
+}
+
+/// Run `slice` until stopped, calling `watch` after each slice the owner
+/// did not stop. `watch` returning false ends the loop as `Lost`.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn drive(
+    stopping: &Stopping,
+    mut slice: impl FnMut() -> i32,
+    mut watch: impl FnMut() -> bool,
+) -> Ended {
+    while !stopping.is_set() {
+        if !run_again(slice()) {
+            return Ended::Lost;
+        }
+        if stopping.is_set() {
+            break;
+        }
+        if !watch() {
+            return Ended::Lost;
+        }
+    }
+    Ended::Stopped
+}
+
 #[cfg(target_os = "macos")]
-pub use run_loop::{run_until_stopped, RunLoop};
+pub use run_loop::{run_until_stopped, wake_current, RunLoop};
 
 #[cfg(target_os = "macos")]
 mod run_loop {
-    use super::{run_again, Stopping};
+    use super::{drive, Ended, Stopping};
     use std::ffi::c_void;
 
     type Handle = *mut c_void;
@@ -147,104 +180,23 @@ mod run_loop {
         }
     }
 
-    /// Run this thread's run loop until `stopping` is set, or until nothing
-    /// is left to run (see `run_again`). The timeout only bounds a stop that
+    /// Run this thread's run loop until `stopping` is set, the mode has
+    /// nothing left to run, or `watch` (called between 0.25 s slices, off
+    /// the tap callback) returns false. The timeout also bounds a stop that
     /// lands before the loop starts waiting.
-    pub fn run_until_stopped(stopping: &Stopping) {
-        while !stopping.is_set() {
-            // SAFETY: runs the current thread's own run loop.
-            let result = unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.25, 0) };
-            if !run_again(result) {
-                return;
-            }
-        }
+    pub fn run_until_stopped(stopping: &Stopping, watch: impl FnMut() -> bool) -> Ended {
+        // SAFETY: runs the current thread's own run loop.
+        let slice = || unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.25, 0) };
+        drive(stopping, slice, watch)
+    }
+
+    /// From a tap callback: end the current slice now, so `watch` runs
+    /// without waiting out the rest of it.
+    pub fn wake_current() {
+        // SAFETY: the calling thread's own run loop.
+        unsafe { CFRunLoopStop(CFRunLoopGetCurrent()) }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::Mutex;
-    use std::time::Duration;
-
-    #[test]
-    fn a_finished_run_loop_ends_the_loop_instead_of_spinning() {
-        assert!(!run_again(RUN_FINISHED));
-        // kCFRunLoopRunStopped, TimedOut, HandledSource: check `Stopping`.
-        for result in [2, 3, 4] {
-            assert!(run_again(result), "{result}");
-        }
-    }
-
-    #[test]
-    fn stop_after_the_thread_already_ended_returns() {
-        // The thread tore down on its own (finished run loop) before `stop`.
-        let (ended_tx, ended) = mpsc::channel();
-        let tap = spawn("t", move |ready, _| {
-            ready.report(Ok(()));
-            ended_tx.send(()).unwrap();
-        })
-        .unwrap();
-        ended.recv().unwrap();
-        let mut woken = false;
-        tap.stop(|_| woken = true);
-        assert!(woken);
-    }
-
-    #[test]
-    fn a_setup_error_is_returned_and_the_thread_ends() {
-        let result = spawn::<()>("t", |ready, _| {
-            ready.report(Err("no tap".into()));
-        });
-        assert_eq!(result.err().as_deref(), Some("no tap"));
-    }
-
-    #[test]
-    fn a_thread_that_never_reports_is_an_error_not_a_hang() {
-        let result = spawn::<()>("t", |ready, _| drop(ready));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn stop_wakes_the_thread_and_waits_for_its_teardown() {
-        let log = Arc::new(Mutex::new(Vec::new()));
-        let seen = Arc::clone(&log);
-        let tap = spawn("t", move |ready, stopping| {
-            seen.lock().unwrap().push("listening");
-            assert!(ready.report(Ok(7)));
-            while !stopping.is_set() {
-                thread::sleep(Duration::from_millis(1));
-            }
-            seen.lock().unwrap().push("torn down");
-        })
-        .unwrap();
-        let mut woken = None;
-        tap.stop(|handle| woken = Some(*handle));
-        assert_eq!(woken, Some(7));
-        assert_eq!(*log.lock().unwrap(), ["listening", "torn down"]);
-    }
-
-    #[test]
-    fn stop_from_the_tap_thread_returns_and_teardown_follows() {
-        let slot: Arc<Mutex<Option<TapThread<()>>>> = Arc::default();
-        let (done_tx, done) = mpsc::channel();
-        let own = Arc::clone(&slot);
-        let tap = spawn("t", move |ready, stopping| {
-            ready.report(Ok(()));
-            // Stand-in for a callback that disarms its own tap.
-            let me = loop {
-                if let Some(me) = own.lock().unwrap().take() {
-                    break me;
-                }
-                thread::sleep(Duration::from_millis(1));
-            };
-            me.stop(|_| {});
-            assert!(stopping.is_set());
-            done_tx.send("torn down").unwrap();
-        })
-        .unwrap();
-        *slot.lock().unwrap() = Some(tap);
-        let teardown = done.recv_timeout(Duration::from_secs(5));
-        assert_eq!(teardown, Ok("torn down"));
-    }
-}
+mod tests;
