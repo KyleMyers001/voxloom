@@ -3,6 +3,7 @@ import { act } from '@testing-library/react';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import { useApp } from '../../src/app/AppContext';
 import { Onboarding } from '../../src/features/onboarding/Onboarding';
 import type { SetupBoundary } from '../../src/features/onboarding/guidedSetup';
 import { renderWithApp } from './testUtils';
@@ -38,6 +39,16 @@ describe('B guided setup', () => {
     expect(io.download).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Set up later' }));
     expect(close).toHaveBeenCalledOnce();
+  });
+  it('Skip setup marks setup complete from a later step without requiring practice', async () => {
+    const user = userEvent.setup();
+    const close = vi.fn();
+    function Complete() { return <output data-testid="complete">{String(useApp().state.onboarding.complete)}</output>; }
+    renderWithApp(<><Onboarding boundary={setupBoundary()} onClose={close} progressStorage={{ read: () => JSON.stringify({ version: 1, step: 3 }), write: vi.fn() }} /><Complete /></>);
+    expect(screen.getByTestId('complete')).toHaveTextContent('false');
+    await user.click(screen.getByRole('button', { name: 'Skip setup' }));
+    expect(close).toHaveBeenCalledOnce();
+    expect(screen.getByTestId('complete')).toHaveTextContent('true');
   });
   it('requires all three permissions and a ready pack before the accepted shortcut and writable two-try note', async () => {
     const user = userEvent.setup();

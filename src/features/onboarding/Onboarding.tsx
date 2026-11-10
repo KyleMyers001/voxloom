@@ -179,6 +179,9 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
   const finish = () => action(async () => {
     if (await controller.finish()) { setup.update({ complete: true }); close(); }
   });
+  // Explicit opt-out (parity with the pre-guided Skip): marks setup complete
+  // without practice so it stops reopening at launch. Set up later stays incomplete.
+  function skip() { setup.update({ complete: true }); close(); }
 
   return <Dialog label="Set up Voxloom" onClose={close} onEscape={() => { if (pending.current || ['starting', 'recording', 'transcribing', 'cleaning'].includes(live.current.phase)) cancel(); else close(); }} opener={opener}>
     <div className="guided-setup">
@@ -246,6 +249,7 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
         {guided.step === 0 && <p className="guided-mini guided-disclosure">{modelId === 'whisper-base.en' ? 'Starting setup downloads Whisper Base (English)' : `Starting setup prepares your selected ${modelLabel}`} ({size}) if needed. Your dictation is processed on this Mac. Larger voice packs are optional in Settings.</p>}
         <footer className="guided-footer">
           {guided.step > 0 ? <button className="btn ghost" onClick={() => { cancel(); controller.back(); }} type="button">Back</button> : <button className="btn ghost" onClick={close} type="button">Set up later</button>}
+          <button className="btn ghost" onClick={skip} type="button">Skip setup</button>
           <span />
           {guided.step === 0 ? <button className="btn primary" disabled={!io.native} onClick={() => void action(controller.start)} type="button">Start setup →</button>
             : guided.step === 1 ? <button className="btn primary" disabled={!connected} onClick={() => void next()} type="button">Continue →</button>

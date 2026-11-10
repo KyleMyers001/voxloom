@@ -27,6 +27,14 @@ describe('App integration', () => {
     await user.click(screen.getByRole('button', { name: 'Resume setup' }));
     expect(screen.getByRole('dialog', { name: 'Set up Voxloom' })).toBeInTheDocument();
   });
+  it('Skip setup finishes setup without practice so it no longer blocks the shortcut', async () => {
+    const user = userEvent.setup();
+    renderWithApp(<App />);
+    await user.click(screen.getByRole('button', { name: 'Skip setup' }));
+    expect(screen.queryByRole('dialog', { name: 'Set up Voxloom' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Setup is incomplete/)).not.toBeInTheDocument();
+    expect(document.querySelector('.brand__status')).toHaveTextContent('Ready');
+  });
   it('does not turn browser gestures into completed dictation practice', async () => {
     renderWithApp(<App />);
     expect(screen.getByRole('button', { name: /Start setup/ })).toBeDisabled();

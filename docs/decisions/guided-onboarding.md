@@ -60,9 +60,11 @@ only version, step, model/shortcut configuration, tutorial mode and the two resu
 flags. It does not hold speech text, permissions, engine readiness or registration
 claims. Missing/corrupt progress safely starts over; a save error is visible.
 Legacy gesture-only flags do not count. Final `onboardingComplete` remains in the
-existing durable settings file and is set only from Ready after both real result
-gates and a fresh prerequisites check. Set up later/Close leave incomplete state,
-with a visible Resume setup action. Existing completed users remain complete;
+existing durable settings file and is set from Ready after both real result
+gates and a fresh prerequisites check, or by an explicit Skip setup on any step
+(parity with the earlier Skip), which completes setup without practice so it no
+longer reopens at launch. Set up later/Close leave incomplete state, with a
+visible Resume setup action. Existing completed users remain complete;
 they are not silently forced into the new tutorial or an automatic download.
 
 ## Evidence boundary
