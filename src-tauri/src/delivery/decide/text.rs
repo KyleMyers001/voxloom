@@ -12,6 +12,21 @@ pub fn check_insert_text(text: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Whole-payload guard for Unicode key events. Controls and line separators
+/// can act as input commands in a host, so refuse rather than rewriting text.
+/// AX writes keep the less restrictive `check_insert_text` contract.
+/// No terminal-specific length limit belongs here.
+pub fn check_typing_text(text: &str) -> Result<(), String> {
+    check_insert_text(text)?;
+    if text
+        .chars()
+        .any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}'))
+    {
+        return Err("Transcript contains control or line separator — nothing sent".into());
+    }
+    Ok(())
+}
+
 /// Max UTF-16 units per CGEventKeyboardSetUnicodeString event (AppKit limit).
 pub const KEY_EVENT_UTF16_MAX: usize = 20;
 
@@ -43,6 +58,18 @@ mod tests {
         assert!(check_insert_text("").is_err());
         assert!(check_insert_text("a\0b").is_err());
         assert!(check_insert_text("héllo 👋 你好").is_ok());
+    }
+
+    #[test]
+    fn ax_validation_keeps_multiline_text_and_no_terminal_length_cap() {
+        let text = format!(
+            "{}\nsecond\r\nthird\t\u{2028}fourth\u{2029}",
+            "x".repeat(4097)
+        );
+        assert_eq!(check_insert_text(&text), Ok(()));
+        assert!(check_typing_text(&text).is_err());
+        assert_eq!(check_typing_text(&"x".repeat(4097)), Ok(()));
+        assert!(super::super::terminal::check_terminal_text(&"x".repeat(4097)).is_err());
     }
 
     #[test]
