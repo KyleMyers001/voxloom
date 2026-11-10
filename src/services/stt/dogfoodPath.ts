@@ -11,6 +11,8 @@ import {
   createStubDeliveryAdapter,
   createTauriDeliveryAdapter,
   deliverTranscript,
+  deliveryMessage,
+  insertIntoOwnField,
   type DeliveryOutcome,
   type DeliveryPlatformAdapter,
   type PasteBinding,
@@ -77,6 +79,11 @@ export interface DogfoodTranscribeOptions {
   createEngine?: (modelId: string) => SttEngine;
   /** Injectable delivery platform (tests). */
   deliveryPlatform?: DeliveryPlatformAdapter;
+  /**
+   * BUS-201: write into a focused Voxloom text field; false = not one, so
+   * delivery continues normally. Defaults to `insertIntoOwnField` (tests).
+   */
+  insertOwnField?: (text: string) => boolean;
 }
 
 export interface DogfoodResult {
@@ -160,7 +167,21 @@ export async function dogfoodTranscribeAndCopy(
   );
   const clipboardFallback = options.clipboardFallback !== false;
 
+  const insertOwnField = options.insertOwnField ?? insertIntoOwnField;
   try {
+    if (transcript.text.trim() && (options.isCurrent?.() ?? true)
+      && insertOwnField(transcript.text)) {
+      const delivery: DeliveryOutcome = {
+        clipboardRestored: false,
+        detail: 'Voxloom field',
+        message: deliveryMessage('inserted', null),
+        restoreSkippedReason: null,
+        status: 'inserted',
+        text: transcript.text,
+      };
+      return { cleanup, copied: false, delivery, transcript };
+    }
+
     let intended: TargetSnapshot | null = null;
     if (transcript.text.trim() && (options.isCurrent?.() ?? true)) {
       try {
