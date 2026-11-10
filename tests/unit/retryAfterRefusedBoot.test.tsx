@@ -1,6 +1,6 @@
 // BUS-46 slice 3: a launch that refused the saved lone key keeps it saved with
 // nothing active. Saving the same key again can't change the value, so
-// Settings asks main to retry; that retry is a user save, so Input Monitoring
+// Settings asks main to retry; that retry is a user save, so Accessibility
 // is requested, and a grant makes the key active without a relaunch of the UI.
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { MutableRefObject } from 'react';
@@ -28,7 +28,7 @@ function harness() {
   const loneKey: LoneKeyApi = {
     async arm(token) {
       calls.push(`arm ${token}`);
-      if (!granted) throw new Error('Input Monitoring permission is needed');
+      if (!granted) throw new Error('Accessibility permission is needed');
     },
     async disarm() { calls.push('disarm'); },
     async listen() { return () => undefined; },

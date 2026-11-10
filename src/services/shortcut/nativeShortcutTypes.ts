@@ -8,7 +8,7 @@ import type { NativeShortcutApi } from './tauriShortcutApi';
 export interface SetShortcutOptions {
   /**
    * The user just saved this shortcut. Only then may a lone key ask macOS for
-   * Input Monitoring (a system prompt); boot and revert never do.
+   * Accessibility (a system prompt); boot and revert never do.
    */
   userInitiated?: boolean;
 }

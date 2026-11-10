@@ -20,7 +20,7 @@ fn edge_name(edge: Edge) -> &'static str {
 }
 
 /// Listen for the lone key `token` (e.g. `AltRight`, `F13`), replacing any
-/// earlier one. macOS needs Input Monitoring; this only checks, never asks
+/// earlier one. macOS needs Accessibility; this only checks, never asks
 /// (see `lone_key_request_access`).
 #[tauri::command]
 pub fn lone_key_arm(app: AppHandle, token: String) -> Result<(), String> {
@@ -28,7 +28,7 @@ pub fn lone_key_arm(app: AppHandle, token: String) -> Result<(), String> {
     arm_impl(app, key)
 }
 
-/// The user just saved a lone key: ask macOS for Input Monitoring if it is
+/// The user just saved a lone key: ask macOS for Accessibility if it is
 /// not granted (this is the only place that prompts). Returns whether access
 /// is granted right now; the prompt is answered later, so the caller still
 /// arms through `lone_key_arm` and reports a refusal in words. Never called

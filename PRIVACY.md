@@ -87,6 +87,13 @@ None of this is saved, and insertion itself never uses the clipboard. The
 only exception is the paste route (terminals and Messages), which runs only when clipboard
 fallback is on (see Clipboard below).
 
+The same permission lets Voxloom watch for its own keys: Esc while you
+dictate, a single-key shortcut (such as right ⌥ or F13), and the key release
+that ends a hold-to-talk. Voxloom only compares each key event with its
+shortcut, then passes it on to your apps unchanged; the one exception is Esc,
+which is held back only to cancel a dictation in progress. No keystrokes are
+saved or sent anywhere. Voxloom does not use the Input Monitoring permission.
+
 ## Clipboard
 
 If clipboard fallback is on and direct insertion isn't safe, the transcript

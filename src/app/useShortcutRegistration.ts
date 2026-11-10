@@ -20,7 +20,7 @@ interface RegistrationCallbacks {
  * lastKnownGood on refusal; `active: null` means that failed too). That combo
  * is the revert target, and it is broadcast as `active` so the Settings
  * recorder uses the same truth. A change here is a user save, so a lone key may
- * ask for Input Monitoring (boot never does). The Settings status line reports refusals;
+ * ask for Accessibility (boot never does). The Settings status line reports refusals;
  * main only toasts (in words, never the raw error) when Settings is closed.
  */
 export function useShortcutRegistration(
@@ -41,7 +41,7 @@ export function useShortcutRegistration(
     const native = nativeRef.current;
     if (!native) return;
     // A save by the user (a change here, or Settings asking to retry), so a
-    // lone key may ask for Input Monitoring.
+    // lone key may ask for Accessibility.
     const outcome = await native.setShortcut(target, { userInitiated: true });
     // Record what the OS holds even if a newer change superseded us.
     if (outcome.ok) registeredRef.current = target;

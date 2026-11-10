@@ -1,6 +1,6 @@
 //! BUS-46: native detection of a lone key as the whole dictation
 //! shortcut (a right-hand modifier or F13-F19). The global-shortcut plugin
-//! cannot register these, so a listen-only event tap feeds a pure state
+//! cannot register these, so a pass-through event tap feeds a pure state
 //! machine that emits the same Pressed/Released edges the plugin does.
 //!
 //! `commands` wire it to the app (arm / disarm / request access / the edge

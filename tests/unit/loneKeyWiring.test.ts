@@ -101,8 +101,8 @@ describe('a lone key as the shortcut', () => {
     expect(t.calls).toEqual(['disarm', 'arm F13']);
   });
 
-  it('a refusal (no Input Monitoring) puts the previous combo back', async () => {
-    const t = setup({ armError: 'Input Monitoring permission is needed' });
+  it('a refusal (no Accessibility) puts the previous combo back', async () => {
+    const t = setup({ armError: 'Accessibility permission is needed' });
     await t.controller.setShortcut('Ctrl + Shift + Space');
     t.calls.length = 0;
     const outcome = await t.controller.setShortcut('AltRight');
@@ -220,7 +220,7 @@ describe('a lone key as the shortcut', () => {
     expect(t.listening()).toBe(false);
   });
 
-  describe('Input Monitoring request', () => {
+  describe('Accessibility request', () => {
     it('is asked for once, before arming, when the user saves a lone key', async () => {
       const t = setup();
       await t.controller.setShortcut('AltRight', { userInitiated: true });
@@ -246,7 +246,7 @@ describe('a lone key as the shortcut', () => {
     });
 
     it('is not asked for again when a refused save restores the previous lone key', async () => {
-      const t = setup({ armError: (token) => (token === 'F13' ? 'Input Monitoring permission is needed' : undefined) });
+      const t = setup({ armError: (token) => (token === 'F13' ? 'Accessibility permission is needed' : undefined) });
       await t.controller.setShortcut('AltRight');
       t.calls.length = 0;
       const outcome = await t.controller.setShortcut('F13', { userInitiated: true });
@@ -255,7 +255,7 @@ describe('a lone key as the shortcut', () => {
     });
 
     it('still arms (and reports the refusal) when the request says not yet', async () => {
-      const t = setup({ armError: 'Input Monitoring permission is needed', granted: false });
+      const t = setup({ armError: 'Accessibility permission is needed', granted: false });
       const outcome = await t.controller.setShortcut('F13', { userInitiated: true });
       expect(t.calls).toEqual(['requestAccess', 'arm F13']);
       expect(outcome).toMatchObject({ ok: false });

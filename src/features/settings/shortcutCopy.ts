@@ -82,12 +82,12 @@ export function invalidText(invalid: InvalidCapture, mac = isMacPlatform()): str
   }
 }
 
-const INPUT_MONITORING = 'System Settings › Privacy & Security › Input Monitoring';
+const ACCESSIBILITY = 'System Settings › Privacy & Security › Accessibility';
 
-/** Why a lone key was refused: macOS Input Monitoring is off, or this isn't macOS. */
+/** Why a lone key was refused: macOS Accessibility is off, or this isn't macOS. */
 function loneReason(combo: string, mac: boolean) {
   return mac
-    ? `${L(combo, mac)} needs Input Monitoring. Allow Voxloom in ${INPUT_MONITORING}.`
+    ? `${L(combo, mac)} needs Accessibility. Allow Voxloom in ${ACCESSIBILITY}.`
     : `${L(combo, mac)} on its own only works on macOS.`;
 }
 

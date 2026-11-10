@@ -2,9 +2,12 @@
 //!
 //! Carbon `RegisterEventHotKey` installs `kEventHotKeyReleased`, but macOS
 //! often never delivers Released when modifiers lift before the key. While a
-//! hold is active we install a listen-only CGEvent tap for key-up and
-//! flagsChanged on the bound chord; if the tap cannot be created we fall back
-//! to a short CGEvent session-state poll. Either path emits
+//! hold is active we install an active (default-option) CGEvent tap for key-up
+//! and flagsChanged on the bound chord, which passes every event through
+//! unchanged. An active tap needs Accessibility, not Input Monitoring
+//! (BUS-209), so it is only created when Accessibility is already granted:
+//! a hold never prompts. Without it, or if the tap cannot be created, a short
+//! CGEvent session-state poll does the job alone. Either path emits
 //! `shortcut:hold-release` once so the TS gesture machine can finish.
 //!
 //! Tear-down on disarm / cancel / error / latch paths. Does **not** grab Escape.
@@ -42,6 +45,20 @@ pub fn chord_held_from_sample(requires_modifiers: bool, key_down: bool, mods_mat
     key_down
 }
 
+/// Install the key-up tap only when Accessibility is already granted, so a
+/// hold never raises a permission prompt. `None` means poll only.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn tap_if_trusted<T>(
+    trusted: impl FnOnce() -> bool,
+    install: impl FnOnce() -> Option<T>,
+) -> Option<T> {
+    if trusted() {
+        install()
+    } else {
+        None
+    }
+}
+
 /// Update broken-tick streak; returns `(new_streak, should_emit_release)`.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn note_broken_poll_tick(streak: u32, held: bool) -> (u32, bool) {
@@ -55,14 +72,14 @@ pub fn note_broken_poll_tick(streak: u32, held: bool) -> (u32, bool) {
 #[cfg(target_os = "macos")]
 mod macos {
     use std::ffi::c_void;
-    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
     use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::Duration;
 
     use tauri::{AppHandle, Emitter};
 
-    use super::{chord_held_from_sample, note_broken_poll_tick};
+    use super::{chord_held_from_sample, note_broken_poll_tick, tap_if_trusted};
 
     pub const HOLD_RELEASE_EVENT: &str = "shortcut:hold-release";
 
@@ -77,6 +94,8 @@ mod macos {
     // CGEventType
     const EVENT_KEY_UP: u32 = 11;
     const EVENT_FLAGS_CHANGED: u32 = 12;
+    const EVENT_TAP_DISABLED_BY_TIMEOUT: u32 = 0xFFFF_FFFE;
+    const EVENT_TAP_DISABLED_BY_USER_INPUT: u32 = 0xFFFF_FFFF;
 
     // CGEventField
     const FIELD_KEYBOARD_EVENT_KEYCODE: u32 = 9;
@@ -84,7 +103,10 @@ mod macos {
     // CGEventTapLocation / Placement / Options
     const TAP_SESSION: u32 = 1; // kCGSessionEventTap
     const TAP_HEAD: u32 = 0; // kCGHeadInsertEventTap
-    const TAP_LISTEN_ONLY: u32 = 1; // kCGEventTapOptionListenOnly
+
+    // kCGEventTapOptionDefault: Accessibility, not Input Monitoring. The
+    // callback still returns every event unchanged.
+    const TAP_DEFAULT: u32 = 0;
 
     const MASK_KEY_UP: u64 = 1u64 << EVENT_KEY_UP;
     const MASK_FLAGS_CHANGED: u64 = 1u64 << EVENT_FLAGS_CHANGED;
@@ -101,6 +123,12 @@ mod macos {
         event: CGEventRef,
         user_info: *mut c_void,
     ) -> CGEventRef;
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        // Apple AXUIElement.h: Boolean (UInt8). Never prompts.
+        fn AXIsProcessTrusted() -> u8;
+    }
 
     #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" {
@@ -194,6 +222,8 @@ mod macos {
         app: AppHandle,
         chord: Chord,
         generation: u64,
+        /// Set right after creation; the callback uses it to re-enable.
+        port: AtomicPtr<c_void>,
     }
 
     struct Armed {
@@ -325,6 +355,15 @@ mod macos {
             return event;
         }
         let ctx = &*(user_info as *const TapCtx);
+        if etype == EVENT_TAP_DISABLED_BY_TIMEOUT || etype == EVENT_TAP_DISABLED_BY_USER_INPUT {
+            // The tap never holds events back, so turning it back on is safe;
+            // the poll keeps covering the hold meanwhile.
+            let port = ctx.port.load(Ordering::SeqCst);
+            if !port.is_null() {
+                CGEventTapEnable(port, true);
+            }
+            return event;
+        }
         // flagsChanged: do not emit here (poll debounce). Letter key-up: emit
         // for key-first release (event tap is trustworthy; KeyState poll is not).
         if ctx.chord.tap_emits_release(etype, event) {
@@ -342,13 +381,15 @@ mod macos {
             app,
             chord,
             generation,
+            port: AtomicPtr::new(std::ptr::null_mut()),
         }));
-        // SAFETY: FFI to CoreGraphics / CoreFoundation for a listen-only tap.
+        // SAFETY: FFI to CoreGraphics / CoreFoundation for an active tap whose
+        // callback returns every event unchanged.
         unsafe {
             let tap = CGEventTapCreate(
                 TAP_SESSION,
                 TAP_HEAD,
-                TAP_LISTEN_ONLY,
+                TAP_DEFAULT,
                 MASK_KEY_UP | MASK_FLAGS_CHANGED,
                 tap_callback,
                 ctx as *mut c_void,
@@ -364,6 +405,7 @@ mod macos {
                 drop(Box::from_raw(ctx));
                 return None;
             }
+            (*ctx).port.store(tap, Ordering::SeqCst);
             CFRunLoopAddSource(CFRunLoopGetMain(), source, kCFRunLoopCommonModes);
             CGEventTapEnable(tap, true);
             Some((tap, source, ctx))
@@ -398,7 +440,12 @@ mod macos {
     }
 
     fn start_watch(app: AppHandle, chord: Chord, generation: u64) -> Armed {
-        if let Some((tap, source, ctx)) = try_install_tap(app.clone(), chord, generation) {
+        let installed = tap_if_trusted(
+            // SAFETY: preflight query only; never prompts or changes TCC state.
+            || unsafe { AXIsProcessTrusted() != 0 },
+            || try_install_tap(app.clone(), chord, generation),
+        );
+        if let Some((tap, source, ctx)) = installed {
             // Poll owns mods-first finish (mods-primary + debounce). Tap owns
             // letter key-up (key-first); flagsChanged does not emit from tap.
             let poll_stop = start_poll_fallback(app, chord, generation);
@@ -409,7 +456,8 @@ mod macos {
                 ctx: Some(ctx),
             }
         } else {
-            // No Accessibility / tap denied — session-state poll still works.
+            // No Accessibility (never prompted) or the tap failed: the
+            // session-state poll still finishes the hold.
             let poll_stop = start_poll_fallback(app, chord, generation);
             Armed {
                 poll_stop,
@@ -497,7 +545,33 @@ pub fn hold_release_disarm() -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{chord_held_from_sample, note_broken_poll_tick, BROKEN_POLL_DEBOUNCE_TICKS};
+    use super::{
+        chord_held_from_sample, note_broken_poll_tick, tap_if_trusted, BROKEN_POLL_DEBOUNCE_TICKS,
+    };
+    use std::cell::Cell;
+
+    #[test]
+    fn without_accessibility_the_tap_is_never_created_so_nothing_prompts() {
+        let installs = Cell::new(0);
+        let install = || {
+            installs.set(installs.get() + 1);
+            Some(())
+        };
+        assert_eq!(tap_if_trusted(|| false, install), None);
+        assert_eq!(installs.get(), 0, "untrusted: poll only, no tap attempt");
+    }
+
+    #[test]
+    fn with_accessibility_the_tap_is_tried_and_a_failure_means_poll_only() {
+        let installs = Cell::new(0);
+        let attempt = |result: Option<u8>| {
+            installs.set(installs.get() + 1);
+            result
+        };
+        assert_eq!(tap_if_trusted(|| true, || attempt(Some(7))), Some(7));
+        assert_eq!(tap_if_trusted(|| true, || attempt(None)), None);
+        assert_eq!(installs.get(), 2);
+    }
 
     #[test]
     fn mods_still_down_means_held_even_when_letter_keystate_false() {

@@ -76,7 +76,7 @@ describe('useShortcutRegistration', () => {
     await waitFor(() => expect(errors).toEqual(['⌃⌥B is in use by another app. Using ⌃⇧Space instead.']));
   });
 
-  it('a change is a user save (may ask for Input Monitoring); the first value is not', async () => {
+  it('a change is a user save (may ask for Accessibility); the first value is not', async () => {
     const ok: RegisterOutcome = { active: 'F13', lastKnownGood: 'F13', ok: true };
     const { hook, native } = setup(ok, false);
     await act(async () => undefined);
@@ -87,7 +87,7 @@ describe('useShortcutRegistration', () => {
 
   describe('Settings re-saves a saved shortcut that nothing holds (refused launch)', () => {
     const refused: RegisterOutcome = {
-      active: null, attempted: 'F13', lastKnownGood: null, message: 'Input Monitoring permission is needed', ok: false,
+      active: null, attempted: 'F13', lastKnownGood: null, message: 'Accessibility permission is needed', ok: false,
     };
 
     it('tries again as a user save, and says so to every window', async () => {

@@ -1,8 +1,10 @@
-//! macOS glue: a listen-only CGEventTap that feeds `LoneKeyMachine`.
-//! Listen-only needs Input Monitoring, not Accessibility. `arm` never prompts:
-//! it preflights and reports (same stance as `cancel_scope::macos`). The one
-//! prompt is `request_access`, which the webview calls when the user saves a
-//! lone key, never at launch.
+//! macOS glue: an active (default-option) CGEventTap that feeds
+//! `LoneKeyMachine`. An active tap needs Accessibility, which insertion and
+//! Esc-to-cancel already need; a listen-only tap would need Input Monitoring
+//! (BUS-209). The callback passes every event through unchanged. `arm` never
+//! prompts: it preflights and reports (same stance as `cancel_scope::macos`).
+//! The one prompt is `request_access`, which the webview calls when the user
+//! saves a lone key, never at launch.
 //! The tap and `arm` / `disarm` run on the main run loop. The callback never
 //! calls the sink: edges go to a delivery thread (see `delivery`), so
 //! nothing the app does with an edge can re-enter or free the tap.
@@ -50,7 +52,7 @@ unsafe extern "C" fn callback(_: Handle, event_type: u32, event: Handle, info: H
     context.step(kind, keycode, flags);
     if disabled {
         // Fail closed (the machine already released any hold), then listen
-        // again: a timeout-disabled listen-only tap is safe to re-enable.
+        // again: the tap never holds events back, so re-enabling is safe.
         #[cfg(debug_assertions)]
         eprintln!("[lone-key] tap disabled (type {event_type:#x}); re-enabling");
         ACTIVE.with(|slot| {
@@ -75,27 +77,51 @@ fn on_main_thread() -> Result<(), String> {
     }
 }
 
-/// Ask for Input Monitoring if it is not granted yet. Returns whether it is
+fn accessibility_trusted() -> bool {
+    // SAFETY: preflight query only; never prompts or changes TCC state.
+    unsafe { AXIsProcessTrusted() != 0 }
+}
+
+/// Show the system Accessibility prompt. Returns whether access is granted
+/// now (normally `false`: the user answers in System Settings later).
+fn prompt_for_accessibility() -> bool {
+    // SAFETY: a one-entry CF dictionary built from Apple's constant key and
+    // kCFBooleanTrue, released exactly once after the call.
+    unsafe {
+        let keys = [kAXTrustedCheckOptionPrompt];
+        let values = [kCFBooleanTrue];
+        let options = CFDictionaryCreate(
+            ptr::null_mut(),
+            keys.as_ptr(),
+            values.as_ptr(),
+            1,
+            ptr::addr_of!(kCFTypeDictionaryKeyCallBacks).cast(),
+            ptr::addr_of!(kCFTypeDictionaryValueCallBacks).cast(),
+        );
+        if options.is_null() {
+            return false;
+        }
+        let trusted = AXIsProcessTrustedWithOptions(options) != 0;
+        CFRelease(options);
+        trusted
+    }
+}
+
+/// Ask for Accessibility if it is not granted yet. Returns whether it is
 /// granted *now*: the system prompt answers later, so a first request is
 /// normally `false`. Runs off the main thread (the call may wait on the
 /// system); it touches no tap state.
 pub fn request_access() -> bool {
-    // SAFETY: plain TCC queries; the request shows the system prompt at most
-    // once per install and never changes tap state.
-    super::commands::request_if_needed(
-        || unsafe { CGPreflightListenEventAccess() },
-        || unsafe { CGRequestListenEventAccess() },
-    )
+    super::commands::request_if_needed(accessibility_trusted, prompt_for_accessibility)
 }
 
 /// Start listening for `key`, replacing any earlier listener.
 pub fn arm(app: AppHandle, key: LoneKey, sink: Sink) -> Result<(), String> {
     on_main_thread()?;
     disarm()?;
-    // SAFETY: preflight query only; never prompts or changes TCC state.
-    if !unsafe { CGPreflightListenEventAccess() } {
+    if !accessibility_trusted() {
         return Err(
-            "Input Monitoring permission is needed to use a single key as the shortcut".into(),
+            "Accessibility permission is needed to use a single key as the shortcut".into(),
         );
     }
     let generation = LIVE.advance();
@@ -111,21 +137,20 @@ pub fn arm(app: AppHandle, key: LoneKey, sink: Sink) -> Result<(), String> {
     ]
     .iter()
     .fold(0u64, |mask, kind| mask | (1 << kind));
-    // SAFETY: listen-only session tap; the context is only reached through
-    // `ACTIVE` by generation, so the callback holds no pointer to it.
+    // SAFETY: active session tap whose callback returns every event as is;
+    // the context is only reached through `ACTIVE` by generation, so the
+    // callback holds no pointer to it.
     unsafe {
         let port = CGEventTapCreate(
             TAP_SESSION,
             TAP_HEAD,
-            TAP_LISTEN_ONLY,
+            TAP_DEFAULT,
             mask,
             callback,
             generation as usize as Handle,
         );
         if port.is_null() {
-            return Err(
-                "Could not listen for the shortcut key (Input Monitoring may be off)".into(),
-            );
+            return Err("Could not listen for the shortcut key (Accessibility may be off)".into());
         }
         let source = CFMachPortCreateRunLoopSource(ptr::null_mut(), port, 0);
         if source.is_null() {
