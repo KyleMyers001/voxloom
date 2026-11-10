@@ -117,6 +117,129 @@ impl Events for FakeEvents {
 }
 
 #[test]
+fn typing_unsafe_lf_suffix_is_refused_before_any_os_calls() {
+    let api = FakeEvents::default();
+    let (posted, result) = type_text_with(
+        &api,
+        &format!("{}\n", "x".repeat(KEY_EVENT_UTF16_MAX * 3)),
+        || {
+            api.record(Call::Focus);
+            Ok(())
+        },
+        |text| {
+            api.record(Call::Confirm(text.into()));
+            true
+        },
+    );
+    assert_eq!(posted, 0, "unsafe payload must not be partially typed");
+    assert!(result.is_err());
+    assert!(
+        api.calls.borrow().is_empty(),
+        "preflight must precede all OS calls"
+    );
+    api.assert_released();
+}
+
+#[test]
+fn typing_controls_and_line_separators_are_refused_before_any_os_calls() {
+    // Every C0/C1 control plus DEL, LINE SEPARATOR and PARAGRAPH SEPARATOR.
+    for ch in (0..=0x9f)
+        .filter(|n| *n < 0x20 || *n >= 0x7f)
+        .chain([0x2028, 0x2029])
+        .map(|n| char::from_u32(n).unwrap())
+    {
+        // A late unsafe suffix must be found even beyond Terminal's length cap.
+        for prefix in [String::new(), "safe prefix ".repeat(400)] {
+            let api = FakeEvents::default();
+            let text = format!("{prefix}{ch}suffix");
+            let (posted, result) = type_text_with(
+                &api,
+                &text,
+                || {
+                    api.record(Call::Focus);
+                    Ok(())
+                },
+                |text| {
+                    api.record(Call::Confirm(text.into()));
+                    true
+                },
+            );
+            assert_eq!(posted, 0, "U+{:04X}", ch as u32);
+            let error = result.expect_err("unsafe typing must refuse, not sanitize");
+            assert!(
+                error.contains("control or line separator") || ch == '\0',
+                "U+{:04X}: {error}",
+                ch as u32
+            );
+            assert!(
+                api.calls.borrow().is_empty(),
+                "U+{:04X}: preflight must precede source, events, focus and read-back",
+                ch as u32
+            );
+            api.assert_released();
+        }
+    }
+}
+
+#[test]
+fn typing_empty_payload_is_refused_before_any_os_calls() {
+    let api = FakeEvents::default();
+    assert_eq!(
+        type_text_with(&api, "", || panic!("no focus"), |_| panic!("no read-back")),
+        (0, Err("empty transcript — insert skipped".into()))
+    );
+    assert!(api.calls.borrow().is_empty());
+}
+
+#[test]
+fn typing_printable_text_is_unchanged_without_terminal_length_cap() {
+    let ascii: String = (' '..='~').collect();
+    for text in [
+        ascii,
+        "café 日本語 中文 العربية हिन्दी 🙂👩🏽‍💻".into(),
+        "x".repeat(4097),
+    ] {
+        let api = FakeEvents::default();
+        let confirmed = RefCell::new(String::new());
+        let focus_checks = Cell::new(0);
+        let (posted, result) = type_text_with(
+            &api,
+            &text,
+            || {
+                focus_checks.set(focus_checks.get() + 1);
+                Ok(())
+            },
+            |so_far| {
+                *confirmed.borrow_mut() = so_far.into();
+                true
+            },
+        );
+        assert_eq!(result, Ok(()));
+        assert!(posted > 0);
+        assert_eq!(focus_checks.get(), posted);
+        assert_eq!(api.posted(), posted * 2);
+        assert_eq!(*confirmed.borrow(), text);
+        let calls = api.calls.borrow();
+        let units: Vec<u16> = calls
+            .iter()
+            .filter_map(|call| match call {
+                Call::Unicode(_, units) => Some(units.as_slice()),
+                _ => None,
+            })
+            .flatten()
+            .copied()
+            .collect();
+        assert_eq!(String::from_utf16(&units).unwrap(), text);
+        assert!(calls.iter().all(|call| match call {
+            Call::Keyboard(_, keycode, _, _) => *keycode == 0,
+            Call::Flags(_, flags) => *flags == 0,
+            _ => true,
+        }));
+        api.assert_released();
+    }
+}
+
+#[test]
 fn ownership_spy_rejects_invalid_release_traces() {
     let api = FakeEvents::default();
     assert_eq!(

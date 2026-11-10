@@ -4,7 +4,7 @@
 //! Apple Terminal path only reports events posted, never input confirmation.
 
 use super::ax::{release, CFTypeRef};
-use crate::delivery::decide::{utf16_chunks, KEY_EVENT_UTF16_MAX};
+use crate::delivery::decide::{check_typing_text, utf16_chunks, KEY_EVENT_UTF16_MAX};
 
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {
@@ -173,6 +173,11 @@ fn type_text_with(
     still_target: impl Fn() -> Result<(), String>,
     confirm: impl Fn(&str) -> bool,
 ) -> (usize, Result<(), String>) {
+    // Validate the entire payload before even allocating a source: an unsafe
+    // suffix must never leave a safe-looking prefix partially dispatched.
+    if let Err(error) = check_typing_text(text) {
+        return (0, Err(error));
+    }
     let source = OwnedEvent(api, api.source(SOURCE_PRIVATE_STATE));
     if source.1.is_null() {
         return (0, Err("could not create private event source".into()));
