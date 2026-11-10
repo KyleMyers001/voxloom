@@ -63,6 +63,8 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
   const guard = useRef<OwnFieldDeliveryGuard | undefined>(undefined);
   const sequence = useRef(0);
   const pending = useRef(false);
+  // A practice capture was started and has not reached a result yet.
+  const capturing = useRef(false);
   const practice = useDogfoodCapture({
     clipboard, clipboardFallback: false, cleanupActive: false, ownedCaptureOnly: true,
     modelId: state.settings.transcriptionModel,
@@ -82,7 +84,10 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
     pending.current = false;
     controller.cancelPractice();
     guard.current = undefined;
-    live.current.cancel();
+    // Only a live capture is cancelled: after a result, Try double-tap/Back
+    // must not replace it with "Capture cancelled — nothing transcribed."
+    if (capturing.current || ['starting', 'recording', 'transcribing', 'cleaning'].includes(live.current.phase)) live.current.cancel();
+    capturing.current = false;
     resetPracticeGestures();
   }
   function close() { cancel(); onClose(); }
@@ -143,6 +148,7 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
           result: (result) => controller.result(lease, result),
         };
         pending.current = false;
+        capturing.current = true;
         await live.current.start('gesture');
       }).catch((e: unknown) => { pending.current = false; setError(String(e)); });
     } else if (gesture === 'hold-finish' || gesture === 'latch-finish') {
@@ -152,6 +158,7 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
   }), [controller]);
   useEffect(() => {
     if (practice.phase === 'cancelled' || practice.phase === 'error' || practice.phase === 'success') {
+      capturing.current = false;
       controller.cancelPractice();
       resetPracticeGestures();
     }
