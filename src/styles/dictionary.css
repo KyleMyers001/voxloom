@@ -32,7 +32,8 @@
 .dictionary-list-head { font-size: var(--fs-label); padding: 0 var(--s-7) var(--s-5); }
 .dictionary-list-sort { flex: none; }
 .dictionary-list-foot { align-items: flex-start; font-size: var(--fs-micro); padding-top: var(--s-5); }
-.dictionary-list-foot > :first-child { min-width: 0; overflow-wrap: anywhere; }
+/* Keep the non-shrinking range bounded so long valid terms cannot consume the list. */
+.dictionary-list-foot > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dictionary-list-foot > :last-child { flex: none; }
 
 .dictionary .term-grid {
