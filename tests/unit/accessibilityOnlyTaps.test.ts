@@ -8,6 +8,10 @@ const root = resolve(import.meta.dirname, '../..');
 const read = (path: string) => readFileSync(resolve(root, path), 'utf8');
 const LONE_KEY = 'src-tauri/src/lone_key/macos.rs';
 const HOLD = 'src-tauri/src/hold_release.rs';
+const TAP_THREAD = 'src-tauri/src/tap_thread.rs';
+
+/** Source without comments or whitespace, so checks ignore formatting. */
+const code = (source: string) => source.replace(/\/\/[^\n]*/g, '').replace(/\s+/g, '');
 
 function rustSources(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -47,8 +51,27 @@ describe('accessibility-only key taps', () => {
       expect(returns.length, file).toBeGreaterThan(0);
       for (const ret of returns) expect(ret, file).toBe('return event;');
       expect(body.trimEnd().endsWith('event'), file).toBe(true);
-      expect(body, file).not.toMatch(/CGEventSet|null_mut\(\)/);
+      expect(body, file).not.toMatch(/null_mut\(\)/);
     }
+    // Not in the callback, nor in any helper it could call.
+    for (const file of [LONE_KEY, HOLD, 'src-tauri/src/lone_key/context.rs', TAP_THREAD]) {
+      expect(read(file), file).not.toMatch(/CGEventSet|CGEventCreate|CGEventPost/);
+    }
+  });
+
+  it('runs both taps on their own thread, never the main run loop', () => {
+    for (const file of [LONE_KEY, HOLD]) {
+      const source = code(read(file));
+      expect(source, file).toContain('tap_thread::spawn(');
+      expect(source, file).toContain('tap_thread::run_until_stopped(&stopping)');
+      expect(source, file).toContain('CFRunLoopAddSource(CFRunLoopGetCurrent(),');
+      expect(source, file).not.toContain('CFRunLoopAddSource(CFRunLoopGetMain()');
+      expect(source, file).toContain('.stop(RunLoop::stop)');
+    }
+    // The debounce wake-up stays on the tap thread too.
+    const context = code(read('src-tauri/src/lone_key/context.rs'));
+    expect(context).toContain('CFRunLoopAddTimer(CFRunLoopGetCurrent(),');
+    expect(context).not.toContain('run_on_main_thread');
   });
 
   it('never asks for or depends on Input Monitoring', () => {
@@ -67,7 +90,7 @@ describe('accessibility-only key taps', () => {
     const source = read(LONE_KEY);
     const arm = source.slice(source.indexOf('pub fn arm('), source.indexOf('pub fn disarm('));
     expect(arm.indexOf('if !accessibility_trusted()')).toBeGreaterThan(-1);
-    expect(arm.indexOf('if !accessibility_trusted()')).toBeLessThan(arm.indexOf('CGEventTapCreate('));
+    expect(arm.indexOf('if !accessibility_trusted()')).toBeLessThan(arm.indexOf('tap_thread::spawn('));
     expect(arm).not.toContain('prompt_for_accessibility');
     expect(source).toContain('request_if_needed(accessibility_trusted, prompt_for_accessibility)');
     expect(source.match(/AXIsProcessTrustedWithOptions\(/g)).toHaveLength(1);
@@ -75,8 +98,8 @@ describe('accessibility-only key taps', () => {
 
   it('checks Accessibility before the hold tap and never prompts there', () => {
     const source = read(HOLD);
-    const watch = source.slice(source.indexOf('fn start_watch('), source.indexOf('fn disarm_inner('));
-    expect(watch).toMatch(/tap_if_trusted\(\s*\/\/[^\n]*\n\s*\|\| unsafe \{ AXIsProcessTrusted\(\) != 0 \},\s*\|\| try_install_tap\(/);
+    const watch = code(source.slice(source.indexOf('fn start_watch('), source.indexOf('fn disarm_inner(')));
+    expect(watch).toContain('tap_if_trusted(||unsafe{AXIsProcessTrusted()!=0},||try_install_tap(');
     expect(source).not.toContain('AXIsProcessTrustedWithOptions');
   });
 });

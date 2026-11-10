@@ -58,13 +58,11 @@ pub fn lone_key_disarm() -> Result<(), String> {
 #[cfg(target_os = "macos")]
 fn arm_impl(app: AppHandle, key: super::LoneKey) -> Result<(), String> {
     use tauri::Emitter;
-    let target = app.clone();
     super::macos::arm(
-        app,
         key,
         Box::new(move |edge| {
             // Only the main window runs gestures.
-            let _ = target.emit_to("main", LONE_KEY_EVENT, edge_name(edge));
+            let _ = app.emit_to("main", LONE_KEY_EVENT, edge_name(edge));
         }),
     )
 }

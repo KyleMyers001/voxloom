@@ -5,17 +5,23 @@
 //! prompts: it preflights and reports (same stance as `cancel_scope::macos`).
 //! The one prompt is `request_access`, which the webview calls when the user
 //! saves a lone key, never at launch.
-//! The tap and `arm` / `disarm` run on the main run loop. The callback never
-//! calls the sink: edges go to a delivery thread (see `delivery`), so
-//! nothing the app does with an edge can re-enter or free the tap.
+//! `arm` / `disarm` run on the main thread; the tap itself lives on its own
+//! thread and run loop (`crate::tap_thread`), which creates it, owns its
+//! state (`ACTIVE`, the debounce timer) and tears it down, so a main-thread
+//! stall never delays other apps' input. The callback never calls the sink:
+//! edges go to a delivery thread (see `delivery`), so nothing the app does
+//! with an edge can re-enter or free the tap.
 
 use super::context::{active_context, Context, Tap, ACTIVE, LIVE};
 use super::delivery::{Delivery, Sink};
 use super::machine::Kind;
 use super::tap_ffi::*;
 use super::LoneKey;
-use std::{ptr, rc::Rc};
-use tauri::AppHandle;
+use crate::tap_thread::{self, RunLoop, TapThread};
+use std::{ptr, rc::Rc, sync::Mutex};
+
+/// The running tap thread, if armed. Only `arm` / `disarm` touch it.
+static THREAD: Mutex<Option<TapThread<RunLoop>>> = Mutex::new(None);
 
 fn event_kind(event_type: u32) -> Option<Kind> {
     match event_type {
@@ -52,7 +58,8 @@ unsafe extern "C" fn callback(_: Handle, event_type: u32, event: Handle, info: H
     context.step(kind, keycode, flags);
     if disabled {
         // Fail closed (the machine already released any hold), then listen
-        // again: the tap never holds events back, so re-enabling is safe.
+        // again: the tap returns every event unchanged, so re-enabling is
+        // safe.
         #[cfg(debug_assertions)]
         eprintln!("[lone-key] tap disabled (type {event_type:#x}); re-enabling");
         ACTIVE.with(|slot| {
@@ -116,7 +123,7 @@ pub fn request_access() -> bool {
 }
 
 /// Start listening for `key`, replacing any earlier listener.
-pub fn arm(app: AppHandle, key: LoneKey, sink: Sink) -> Result<(), String> {
+pub fn arm(key: LoneKey, sink: Sink) -> Result<(), String> {
     on_main_thread()?;
     disarm()?;
     if !accessibility_trusted() {
@@ -125,8 +132,25 @@ pub fn arm(app: AppHandle, key: LoneKey, sink: Sink) -> Result<(), String> {
         );
     }
     let generation = LIVE.advance();
-    let delivery = Delivery::spawn(LIVE.clone(), generation, sink)?;
-    let context = Rc::new(Context::new(app, generation, key, delivery));
+    let thread = tap_thread::spawn("lone-key-tap", move |ready, stopping| {
+        let installed = Delivery::spawn(LIVE.clone(), generation, sink)
+            .and_then(|delivery| install(Rc::new(Context::new(generation, key, delivery))));
+        if let Err(e) = installed {
+            ready.report(Err(e));
+            return;
+        }
+        if ready.report(Ok(RunLoop::current())) {
+            tap_thread::run_until_stopped(&stopping);
+        }
+        uninstall();
+    })?;
+    *THREAD.lock().map_err(|e| e.to_string())? = Some(thread);
+    Ok(())
+}
+
+/// Create the tap on this (tap) thread's run loop and park its state in
+/// `ACTIVE`.
+fn install(context: Rc<Context>) -> Result<(), String> {
     let mask = [
         LEFT_MOUSE_DOWN,
         RIGHT_MOUSE_DOWN,
@@ -147,7 +171,7 @@ pub fn arm(app: AppHandle, key: LoneKey, sink: Sink) -> Result<(), String> {
             TAP_DEFAULT,
             mask,
             callback,
-            generation as usize as Handle,
+            context.generation as usize as Handle,
         );
         if port.is_null() {
             return Err("Could not listen for the shortcut key (Accessibility may be off)".into());
@@ -158,7 +182,7 @@ pub fn arm(app: AppHandle, key: LoneKey, sink: Sink) -> Result<(), String> {
             CFRelease(port);
             return Err("Could not create the shortcut key monitor".into());
         }
-        CFRunLoopAddSource(CFRunLoopGetMain(), source, kCFRunLoopCommonModes);
+        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes);
         CGEventTapEnable(port, true);
         ACTIVE.with(|slot| {
             *slot.borrow_mut() = Some(Tap {
@@ -171,23 +195,33 @@ pub fn arm(app: AppHandle, key: LoneKey, sink: Sink) -> Result<(), String> {
     Ok(())
 }
 
+/// Tear the tap down on its own thread, after its run loop stopped, so no
+/// callback can be running.
+fn uninstall() {
+    let Some(tap) = ACTIVE.with(|slot| slot.borrow_mut().take()) else {
+        return;
+    };
+    // SAFETY: the tap thread, outside the callback. Stop callbacks before the
+    // context drops; each create-rule object is released exactly once.
+    unsafe {
+        CGEventTapEnable(tap.port, false);
+        CFRunLoopRemoveSource(CFRunLoopGetCurrent(), tap.source, kCFRunLoopCommonModes);
+        CFMachPortInvalidate(tap.port);
+        CFRelease(tap.source);
+        CFRelease(tap.port);
+    }
+}
+
 /// Stop listening. Any hold in progress is dropped without an edge, so the
 /// caller finishes it (its existing teardown). Edges already queued for the
-/// old listener are dropped, not delivered late.
+/// old listener are dropped, not delivered late. Returns once the tap
+/// thread has torn the tap down.
 pub fn disarm() -> Result<(), String> {
     on_main_thread()?;
     LIVE.advance();
-    let tap = ACTIVE.with(|slot| slot.borrow_mut().take());
-    if let Some(tap) = tap {
-        // SAFETY: main thread, outside the callback. Stop callbacks before the
-        // context drops; each create-rule object is released exactly once.
-        unsafe {
-            CGEventTapEnable(tap.port, false);
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), tap.source, kCFRunLoopCommonModes);
-            CFMachPortInvalidate(tap.port);
-            CFRelease(tap.source);
-            CFRelease(tap.port);
-        }
+    let thread = THREAD.lock().map_err(|e| e.to_string())?.take();
+    if let Some(thread) = thread {
+        thread.stop(RunLoop::stop);
     }
     Ok(())
 }

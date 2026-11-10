@@ -5,6 +5,17 @@ use std::ffi::c_void;
 
 pub(super) type Handle = *mut c_void;
 pub(super) type Callback = unsafe extern "C" fn(Handle, u32, Handle, Handle) -> Handle;
+pub(super) type TimerCallback = unsafe extern "C" fn(Handle, Handle);
+
+/// CFRunLoopTimerContext; the callbacks stay null (`info` is a plain id).
+#[repr(C)]
+pub(super) struct TimerContext {
+    pub(super) version: isize,
+    pub(super) info: Handle,
+    pub(super) retain: *const c_void,
+    pub(super) release: *const c_void,
+    pub(super) copy_description: *const c_void,
+}
 
 // CGEventType
 pub(super) const LEFT_MOUSE_DOWN: u32 = 1;
@@ -59,6 +70,17 @@ extern "C" {
     pub(super) fn CFRunLoopGetCurrent() -> Handle;
     pub(super) fn CFRunLoopAddSource(run_loop: Handle, source: Handle, mode: *const c_void);
     pub(super) fn CFRunLoopRemoveSource(run_loop: Handle, source: Handle, mode: *const c_void);
+    pub(super) fn CFAbsoluteTimeGetCurrent() -> f64;
+    pub(super) fn CFRunLoopTimerCreate(
+        allocator: Handle,
+        fire_date: f64,
+        interval: f64,
+        flags: usize,
+        order: isize,
+        callout: TimerCallback,
+        context: *mut TimerContext,
+    ) -> Handle;
+    pub(super) fn CFRunLoopAddTimer(run_loop: Handle, timer: Handle, mode: *const c_void);
     pub(super) fn CFRelease(value: *const c_void);
     pub(super) fn CFDictionaryCreate(
         allocator: Handle,

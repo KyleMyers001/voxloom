@@ -16,6 +16,7 @@ mod settings_window;
 mod store_backup;
 mod store_read;
 mod stt;
+mod tap_thread;
 
 use std::sync::Arc;
 

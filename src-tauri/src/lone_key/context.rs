@@ -1,23 +1,23 @@
 //! The armed listener's state: one `Context` per arming, owned by `ACTIVE`
-//! (main thread only) and found by generation, never by address.
+//! on the tap's own thread (see `crate::tap_thread`) and found by
+//! generation, never by address.
 
 use super::delivery::{Delivery, Generations};
 use super::machine::{Edge, Kind, LoneKeyMachine, DEBOUNCE_MS};
-use super::tap_ffi::Handle;
+use super::tap_ffi::*;
 use super::LoneKey;
 use std::{
     cell::{Cell, RefCell},
+    ptr,
     rc::Rc,
     sync::LazyLock,
-    time::{Duration, Instant},
+    time::Instant,
 };
-use tauri::AppHandle;
 
 /// Current listener generation, shared with wake-ups and the delivery thread.
 pub(super) static LIVE: LazyLock<Generations> = LazyLock::new(Generations::default);
 
 pub(super) struct Context {
-    app: AppHandle,
     /// Id of this arming; the tap's `info` carries it (never a pointer).
     pub(super) generation: u64,
     machine: RefCell<LoneKeyMachine>,
@@ -38,9 +38,8 @@ thread_local! {
 }
 
 impl Context {
-    pub(super) fn new(app: AppHandle, generation: u64, key: LoneKey, delivery: Delivery) -> Self {
+    pub(super) fn new(generation: u64, key: LoneKey, delivery: Delivery) -> Self {
         Self {
-            app,
             generation,
             machine: RefCell::new(LoneKeyMachine::new(key)),
             delivery,
@@ -73,16 +72,44 @@ impl Context {
         }
     }
 
-    /// No event arrives while a modifier is simply held, so wake the main
-    /// thread after the debounce (a short-lived thread per press).
+    /// No event arrives while a modifier is simply held, so wake this tap
+    /// thread after the debounce with a one-shot timer on its run loop.
     fn queue_tick(&self, wait_ms: u64) {
-        let app = self.app.clone();
-        let generation = self.generation;
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(wait_ms));
-            let _ = app.run_on_main_thread(move || tick(generation));
-        });
+        let mut timer_context = TimerContext {
+            version: 0,
+            info: self.generation as usize as Handle,
+            retain: ptr::null(),
+            release: ptr::null(),
+            copy_description: ptr::null(),
+        };
+        // SAFETY: called on the tap thread (from its callback or a tick).
+        // `info` is the generation, not a pointer; CF copies the context.
+        // The run loop retains the timer, so ours is released at once; a
+        // one-shot timer is invalidated after it fires.
+        unsafe {
+            let fire_at = CFAbsoluteTimeGetCurrent() + wait_ms as f64 / 1000.0;
+            let timer = CFRunLoopTimerCreate(
+                ptr::null_mut(),
+                fire_at,
+                0.0,
+                0,
+                0,
+                on_tick,
+                &mut timer_context,
+            );
+            if timer.is_null() {
+                // The next key or mouse event still steps the machine.
+                self.tick_queued.set(false);
+                return;
+            }
+            CFRunLoopAddTimer(CFRunLoopGetCurrent(), timer, kCFRunLoopCommonModes);
+            CFRelease(timer);
+        }
     }
+}
+
+unsafe extern "C" fn on_tick(_timer: Handle, info: Handle) {
+    tick(info as usize as u64);
 }
 
 /// The armed context, only if it is `generation` and still current (a

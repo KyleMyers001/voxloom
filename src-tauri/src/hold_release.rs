@@ -10,6 +10,12 @@
 //! CGEvent session-state poll does the job alone. Either path emits
 //! `shortcut:hold-release` once so the TS gesture machine can finish.
 //!
+//! The tap runs on its own thread and run loop (`crate::tap_thread`), not
+//! main: an active tap holds each event until its callback returns. That
+//! thread also frees the tap and its `TapCtx` after its run loop stops, so
+//! a disarm from the poll thread or the callback never frees state a
+//! running callback still reads.
+//!
 //! Tear-down on disarm / cancel / error / latch paths. Does **not** grab Escape.
 //! Non-macOS builds expose no-op commands so Linux `cargo check` stays green.
 //!
@@ -80,6 +86,7 @@ mod macos {
     use tauri::{AppHandle, Emitter};
 
     use super::{chord_held_from_sample, note_broken_poll_tick, tap_if_trusted};
+    use crate::tap_thread::{self, RunLoop, TapThread};
 
     pub const HOLD_RELEASE_EVENT: &str = "shortcut:hold-release";
 
@@ -157,7 +164,7 @@ mod macos {
         fn CFMachPortInvalidate(port: CFMachPortRef);
         fn CFRunLoopAddSource(rl: CFRunLoopRef, source: CFRunLoopSourceRef, mode: *const c_void);
         fn CFRunLoopRemoveSource(rl: CFRunLoopRef, source: CFRunLoopSourceRef, mode: *const c_void);
-        fn CFRunLoopGetMain() -> CFRunLoopRef;
+        fn CFRunLoopGetCurrent() -> CFRunLoopRef;
         fn CFRelease(cf: *mut c_void);
         static kCFRunLoopCommonModes: *const c_void;
     }
@@ -228,15 +235,9 @@ mod macos {
 
     struct Armed {
         poll_stop: Arc<AtomicBool>,
-        tap: Option<CFMachPortRef>,
-        source: Option<CFRunLoopSourceRef>,
-        /// Leaked only while armed; freed on disarm.
-        ctx: Option<*mut TapCtx>,
+        /// The key-up tap's thread; it owns the tap and its `TapCtx`.
+        tap: Option<TapThread<RunLoop>>,
     }
-
-    // SAFETY: CFMachPort / run-loop source are only touched from the main
-    // thread on arm/disarm; the tap callback only reads TapCtx immutably.
-    unsafe impl Send for Armed {}
 
     static ARMED: Mutex<Option<Armed>> = Mutex::new(None);
     static GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -356,7 +357,7 @@ mod macos {
         }
         let ctx = &*(user_info as *const TapCtx);
         if etype == EVENT_TAP_DISABLED_BY_TIMEOUT || etype == EVENT_TAP_DISABLED_BY_USER_INPUT {
-            // The tap never holds events back, so turning it back on is safe;
+            // The tap returns every event unchanged, so turning it back on is safe;
             // the poll keeps covering the hold meanwhile.
             let port = ctx.port.load(Ordering::SeqCst);
             if !port.is_null() {
@@ -372,44 +373,60 @@ mod macos {
         event
     }
 
+    /// Start the key-up tap on its own thread. `None` means poll only.
     fn try_install_tap(
         app: AppHandle,
         chord: Chord,
         generation: u64,
-    ) -> Option<(CFMachPortRef, CFRunLoopSourceRef, *mut TapCtx)> {
-        let ctx = Box::into_raw(Box::new(TapCtx {
-            app,
-            chord,
-            generation,
-            port: AtomicPtr::new(std::ptr::null_mut()),
-        }));
-        // SAFETY: FFI to CoreGraphics / CoreFoundation for an active tap whose
-        // callback returns every event unchanged.
-        unsafe {
-            let tap = CGEventTapCreate(
-                TAP_SESSION,
-                TAP_HEAD,
-                TAP_DEFAULT,
-                MASK_KEY_UP | MASK_FLAGS_CHANGED,
-                tap_callback,
-                ctx as *mut c_void,
-            );
-            if tap.is_null() {
-                drop(Box::from_raw(ctx));
-                return None;
-            }
-            let source = CFMachPortCreateRunLoopSource(std::ptr::null_mut(), tap, 0);
-            if source.is_null() {
+    ) -> Option<TapThread<RunLoop>> {
+        tap_thread::spawn("voxloom-hold-release-tap", move |ready, stopping| {
+            let ctx = Box::into_raw(Box::new(TapCtx {
+                app,
+                chord,
+                generation,
+                port: AtomicPtr::new(std::ptr::null_mut()),
+            }));
+            // SAFETY: FFI to CoreGraphics / CoreFoundation for an active tap
+            // whose callback returns every event unchanged. The callback
+            // only runs on this thread's run loop, and `ctx` is freed here
+            // after that loop stopped, so it outlives every callback.
+            unsafe {
+                let tap = CGEventTapCreate(
+                    TAP_SESSION,
+                    TAP_HEAD,
+                    TAP_DEFAULT,
+                    MASK_KEY_UP | MASK_FLAGS_CHANGED,
+                    tap_callback,
+                    ctx as *mut c_void,
+                );
+                if tap.is_null() {
+                    drop(Box::from_raw(ctx));
+                    ready.report(Err("hold-release tap unavailable".into()));
+                    return;
+                }
+                let source = CFMachPortCreateRunLoopSource(std::ptr::null_mut(), tap, 0);
+                if source.is_null() {
+                    CFMachPortInvalidate(tap);
+                    CFRelease(tap);
+                    drop(Box::from_raw(ctx));
+                    ready.report(Err("hold-release tap source unavailable".into()));
+                    return;
+                }
+                (*ctx).port.store(tap, Ordering::SeqCst);
+                CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes);
+                CGEventTapEnable(tap, true);
+                if ready.report(Ok(RunLoop::current())) {
+                    tap_thread::run_until_stopped(&stopping);
+                }
+                CGEventTapEnable(tap, false);
+                CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes);
                 CFMachPortInvalidate(tap);
+                CFRelease(source);
                 CFRelease(tap);
                 drop(Box::from_raw(ctx));
-                return None;
             }
-            (*ctx).port.store(tap, Ordering::SeqCst);
-            CFRunLoopAddSource(CFRunLoopGetMain(), source, kCFRunLoopCommonModes);
-            CGEventTapEnable(tap, true);
-            Some((tap, source, ctx))
-        }
+        })
+        .ok()
     }
 
     fn start_poll_fallback(app: AppHandle, chord: Chord, generation: u64) -> Arc<AtomicBool> {
@@ -440,52 +457,34 @@ mod macos {
     }
 
     fn start_watch(app: AppHandle, chord: Chord, generation: u64) -> Armed {
-        let installed = tap_if_trusted(
+        // No Accessibility (never prompted) or a failed tap: the
+        // session-state poll alone finishes the hold. With the tap, the poll
+        // owns mods-first finish (mods-primary + debounce) and the tap owns
+        // letter key-up (key-first); flagsChanged does not emit from tap.
+        let tap = tap_if_trusted(
             // SAFETY: preflight query only; never prompts or changes TCC state.
             || unsafe { AXIsProcessTrusted() != 0 },
             || try_install_tap(app.clone(), chord, generation),
         );
-        if let Some((tap, source, ctx)) = installed {
-            // Poll owns mods-first finish (mods-primary + debounce). Tap owns
-            // letter key-up (key-first); flagsChanged does not emit from tap.
-            let poll_stop = start_poll_fallback(app, chord, generation);
-            Armed {
-                poll_stop,
-                tap: Some(tap),
-                source: Some(source),
-                ctx: Some(ctx),
-            }
-        } else {
-            // No Accessibility (never prompted) or the tap failed: the
-            // session-state poll still finishes the hold.
-            let poll_stop = start_poll_fallback(app, chord, generation);
-            Armed {
-                poll_stop,
-                tap: None,
-                source: None,
-                ctx: None,
-            }
-        }
+        let poll_stop = start_poll_fallback(app, chord, generation);
+        Armed { poll_stop, tap }
     }
 
     fn disarm_inner() -> Result<(), String> {
-        let mut guard = ARMED.lock().map_err(|e| e.to_string())?;
-        if let Some(armed) = guard.take() {
-            armed.poll_stop.store(true, Ordering::SeqCst);
-            GENERATION.fetch_add(1, Ordering::SeqCst);
-            // SAFETY: tear down tap/source/ctx we installed on arm.
-            unsafe {
-                if let (Some(tap), Some(source)) = (armed.tap, armed.source) {
-                    CGEventTapEnable(tap, false);
-                    CFRunLoopRemoveSource(CFRunLoopGetMain(), source, kCFRunLoopCommonModes);
-                    CFMachPortInvalidate(tap);
-                    CFRelease(source);
-                    CFRelease(tap);
-                }
-                if let Some(ctx) = armed.ctx {
-                    drop(Box::from_raw(ctx));
-                }
+        let armed = {
+            let mut guard = ARMED.lock().map_err(|e| e.to_string())?;
+            let armed = guard.take();
+            if let Some(armed) = &armed {
+                armed.poll_stop.store(true, Ordering::SeqCst);
+                GENERATION.fetch_add(1, Ordering::SeqCst);
             }
+            armed
+        };
+        // Unlocked: a callback that is itself waiting on `ARMED` must be able
+        // to finish before its thread can be joined. From that callback,
+        // `stop` does not wait; the thread tears down once it returns.
+        if let Some(tap) = armed.and_then(|armed| armed.tap) {
+            tap.stop(RunLoop::stop);
         }
         Ok(())
     }
@@ -498,9 +497,10 @@ mod macos {
         let _ = disarm_inner();
         EMITTED.store(false, Ordering::SeqCst);
         let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
-        let armed = start_watch(app, chord, generation);
+        // Held across `start_watch` so a release that fires before the watch
+        // is stored still finds (and tears down) this watch.
         let mut guard = ARMED.lock().map_err(|e| e.to_string())?;
-        *guard = Some(armed);
+        *guard = Some(start_watch(app, chord, generation));
         Ok(true)
     }
 
