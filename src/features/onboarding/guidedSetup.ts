@@ -56,6 +56,7 @@ export function createGuidedSetup(io: SetupBoundary, modelId: () => string, shor
   const listeners = new Set<() => void>();
   let generation = 0;
   let checkedModel: string | null = null;
+  let verdictFor: string | null = null;
   let pendingCheck: { id: string; binding: string; promise: Promise<boolean> } | null = null;
   let practicedModel = modelId();
   let practicedShortcut = shortcut();
@@ -86,7 +87,11 @@ export function createGuidedSetup(io: SetupBoundary, modelId: () => string, shor
     if (pendingCheck?.id === id && pendingCheck.binding === binding) return pendingCheck.promise;
     const own = ++generation;
     checkedModel = null;
-    patch({ ready: false, modelReady: false, modelState: 'pending', checking: true });
+    // A background recheck of the same model/binding keeps the last verdict
+    // until it resolves (a failed one still retires the lease), so it cannot
+    // fail or uncredit an in-flight practice. A new configuration never inherits it.
+    const config = `${id}\n${binding}`;
+    patch(verdictFor === config ? { checking: true } : { ready: false, modelReady: false, modelState: 'pending', checking: true });
     const promise = (async () => {
       try {
         const model = await io.readiness(id);
@@ -102,6 +107,7 @@ export function createGuidedSetup(io: SetupBoundary, modelId: () => string, shor
         const modelReady = model.ready === true && modelState === 'available';
         const ready = io.native && modelReady && permissionsAuthorized(permissions) && io.activeShortcut() === binding;
         if (!ready) cancelPractice();
+        verdictFor = config;
         patch({ permissions, modelReady, modelState, ready, downloading, error: modelReady ? null : model.reason });
         return ready;
       } catch (error) {

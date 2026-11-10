@@ -177,6 +177,54 @@ describe('guided setup lifecycle', () => {
     io.query = async () => ({ ...authorized, inputMonitoring: 'not-granted' });
     expect(await setup.refresh()).toBe(false);
   });
+  it('keeps a same-configuration verdict through a background recheck between validate and result', async () => {
+    const io = boundary();
+    const setup = createGuidedSetup(io, () => 'whisper-base.en', () => 'Ctrl + Shift + Space');
+    await setup.start(); await setup.next(); await setup.next();
+    const field = document.createElement('textarea');
+    document.body.append(field);
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    field.focus();
+    const lease = await setup.begin('hold');
+    // The delivery guard's validate(): a fresh check confirms the lease.
+    expect((await setup.refresh()) && setup.current(lease!)).toBe(true);
+    // Window focus, visibility or models-changed rechecks before insertion.
+    let resume!: (value: { modelId: string; ready: boolean; reason: null }) => void;
+    io.readiness = () => new Promise((resolve) => { resume = resolve; });
+    const background = setup.refresh();
+    expect(setup.getSnapshot()).toMatchObject({ ready: true, modelReady: true, modelState: 'available', checking: true });
+    expect(setup.insert(lease!, 'Spoken words', field)).toBe(true);
+    setup.result(lease!, { transcript: { text: 'Spoken words' }, delivery: { text: 'Spoken words', status: 'inserted', detail: 'Voxloom field' } } as DogfoodResult);
+    expect(setup.getSnapshot().holdDone).toBe(true);
+    resume({ modelId: 'whisper-base.en', ready: true, reason: null });
+    expect(await background).toBe(true);
+    expect(setup.getSnapshot()).toMatchObject({ ready: true, checking: false, holdDone: true });
+    field.remove();
+    vi.restoreAllMocks();
+  });
+  it('drops readiness at once when a recheck follows a model change and retires a lease on a failed recheck', async () => {
+    const io = boundary();
+    let id = 'whisper-base.en';
+    io.readiness = async (modelId) => ({ modelId, ready: true, reason: null });
+    const setup = createGuidedSetup(io, () => id, () => 'Ctrl + Shift + Space');
+    await setup.start(); await setup.next(); await setup.next();
+    const lease = await setup.begin('hold');
+    let resume!: (value: { modelId: string; ready: boolean; reason: null }) => void;
+    io.readiness = () => new Promise((resolve) => { resume = resolve; });
+    io.query = async () => ({ ...authorized, microphone: 'denied' });
+    const revoked = setup.refresh();
+    expect(setup.current(lease!)).toBe(true);
+    resume({ modelId: id, ready: true, reason: null });
+    expect(await revoked).toBe(false);
+    expect(setup.current(lease!)).toBe(false);
+    io.readiness = async (modelId) => ({ modelId, ready: true, reason: null });
+    io.query = async () => authorized;
+    expect(await setup.refresh()).toBe(true);
+    io.readiness = () => new Promise(() => {});
+    id = 'whisper-tiny.en';
+    void setup.refresh();
+    expect(setup.getSnapshot()).toMatchObject({ ready: false, modelReady: false, modelState: 'pending', checking: true });
+  });
   it('discloses then downloads only on explicit Start while querying all prerequisites without prompting', async () => {
     const io = boundary();
     vi.mocked(io.readiness).mockResolvedValue({ modelId: 'whisper-base.en', ready: false, status: 'missing', reason: 'Missing' });
