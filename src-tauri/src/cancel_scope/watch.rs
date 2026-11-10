@@ -1,15 +1,15 @@
 //! The Escape tap's Accessibility watchdog (BUS-209). The tap lives on the
-//! main run loop, so the check cannot sit between run-loop slices as it does
-//! for the key taps; a repeating main-run-loop timer runs it instead, never
-//! the tap callback. The Escape tap is never re-enabled, so there is no
-//! budget: on loss the timer's callout tears the tap down.
+//! main run loop, so a repeating main-run-loop timer reads the checker
+//! thread's flag (`crate::tap_guard`); the blocking probe never runs on
+//! main. The Escape tap is never re-enabled, so there is no budget: on loss
+//! the timer's callout tears the tap down.
 
 use std::{ffi::c_void, ptr};
 
 type Handle = *mut c_void;
 type Callout = unsafe extern "C" fn(Handle, Handle);
 
-/// How often the armed tap re-checks Accessibility (the key taps' slice).
+/// How often the armed tap reads the Accessibility flag (the key taps' slice).
 const INTERVAL_S: f64 = 0.25;
 
 /// CFRunLoopTimerContext; all null (the callout needs no `info`).

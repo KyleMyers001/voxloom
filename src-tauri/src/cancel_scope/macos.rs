@@ -1,6 +1,7 @@
 use super::ffi::*;
 use super::watch::Watch;
 use super::{Action, ScopeState};
+use crate::tap_guard::AccessWatch;
 use std::{cell::RefCell, ptr, rc::Rc};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -14,9 +15,11 @@ struct Tap {
     port: Handle,
     source: Handle,
     context: *mut Context,
-    /// Re-checks Accessibility while armed; dropped first, so no check runs
-    /// against a torn-down tap.
+    /// Reads the checker's Accessibility flag while armed; dropped first,
+    /// so no check runs against a torn-down tap.
     watch: Option<Watch>,
+    /// This tap's interest in the checker thread's flag.
+    access: Option<AccessWatch>,
 }
 
 // No unsafe Send/Sync: all resources and callbacks are main-run-loop confined.
@@ -83,11 +86,18 @@ fn cancel_dictation(app: &AppHandle, session: String) {
     let _ = app.emit_to("main", "dictation:cancel", session);
 }
 
-/// The watchdog's callout (main run loop, outside the tap callback). With
-/// Accessibility gone the tap can't be trusted to pass input, so it is torn
-/// down at once, and the dictation fails closed like a disabled tap's.
+/// The watchdog's callout (main run loop, outside the tap callback). It
+/// only reads the checker thread's flag: main never waits on the window
+/// server. With Accessibility gone the tap can't be trusted to pass input,
+/// so it is torn down at once, and the dictation fails closed like a
+/// disabled tap's.
 unsafe extern "C" fn on_watch(_timer: Handle, _info: Handle) {
-    if crate::tap_guard::still_trusted() {
+    let lost = ACTIVE.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .is_some_and(|tap| !tap.access.as_ref().is_some_and(AccessWatch::trusted))
+    });
+    if !lost {
         return;
     }
     let Some(tap) = ACTIVE.with(|slot| slot.borrow_mut().take()) else {
@@ -144,7 +154,11 @@ impl Tap {
                 source,
                 context,
                 watch: None,
+                access: None,
             };
+            // Just created, so access is proven; the checker thread watches
+            // it from here on.
+            tap.access = Some(crate::tap_guard::watch_access()?);
             // Without its watchdog the tap could outlive Accessibility, so
             // it is not kept (`tap` drops here and tears down).
             tap.watch = Some(Watch::start(on_watch).ok_or("Could not watch Escape cancellation")?);
@@ -162,6 +176,7 @@ impl Drop for Tap {
         // SAFETY: main thread, outside callback; stop callbacks before freeing
         // the context. Exactly one owner releases each create-rule object.
         self.watch.take();
+        self.access.take();
         unsafe {
             CGEventTapEnable(self.port, false);
             CFRunLoopRemoveSource(CFRunLoopGetMain(), self.source, kCFRunLoopCommonModes);

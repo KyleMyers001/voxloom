@@ -111,12 +111,28 @@ describe('accessibility-only key taps', () => {
       const source = code(read(file));
       expect(source, file).toContain('tap_thread::wake_current()');
       expect(source, file).toContain('guard.check(');
-      expect(source, file).toContain('tap_guard::still_trusted');
+      expect(source, file).toContain('tap_guard::watch_access()');
+      expect(source, file).toContain('access.trusted(),Instant::now())');
     }
   });
 
+  it('runs the blocking probe only on the checker thread', () => {
+    // CR a8b75bd item 2: a thread that services a tap (main, for Esc) only
+    // reads the published flag; it never waits on the window server.
+    for (const path of rustSources(resolve(root, 'src-tauri/src'))) {
+      const file = relative(root, path);
+      if (file.startsWith('src-tauri/src/tap_guard/')) continue;
+      expect(readFileSync(path, 'utf8'), file).not.toContain('still_trusted');
+    }
+    const guard = code(read('src-tauri/src/tap_guard/mod.rs'));
+    expect(guard).toContain('Monitor::new(probe::still_trusted,CHECK_INTERVAL)');
+    const monitor = code(read('src-tauri/src/tap_guard/monitor.rs'));
+    expect(monitor).toContain('.name("tap-access-check".into()).spawn(move||run(inner))');
+    expect(monitor).toContain('lettrusted=(inner.check)();inner.trusted.store(trusted,Ordering::SeqCst);');
+  });
+
   it('probes Accessibility with an active tap, not AXIsProcessTrusted alone', () => {
-    const probe = code(read('src-tauri/src/tap_guard.rs'));
+    const probe = code(read('src-tauri/src/tap_guard/probe.rs'));
     expect(probe).toContain('ifAXIsProcessTrusted()==0{returnfalse;}');
     expect(probe).toContain('CGEventTapCreate(TAP_SESSION,TAP_TAIL,TAP_DEFAULT,MASK_NULL,');
     expect(probe).toContain('constTAP_DEFAULT:u32=0;');
@@ -126,7 +142,9 @@ describe('accessibility-only key taps', () => {
   it('watches the Escape tap while armed and closes every tap on quit', () => {
     const esc = code(read(ESC));
     expect(esc).toContain('Watch::start(on_watch)');
-    expect(esc).toContain('fnon_watch(_timer:Handle,_info:Handle){ifcrate::tap_guard::still_trusted(){return;}');
+    expect(esc).toContain('fnon_watch(_timer:Handle,_info:Handle){letlost=ACTIVE.with(');
+    expect(esc).toContain('.is_some_and(AccessWatch::trusted)');
+    expect(esc).toContain('tap.access=Some(crate::tap_guard::watch_access()?);');
     const lib = code(read('src-tauri/src/lib.rs'));
     expect(lib).toContain('iflettauri::RunEvent::Exit=event{close_taps();}');
     const close = lib.slice(lib.indexOf('fnclose_taps()'));

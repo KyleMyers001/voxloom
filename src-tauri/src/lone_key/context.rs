@@ -6,6 +6,7 @@ use super::delivery::{Delivery, Generations};
 use super::machine::{Edge, Kind, LoneKeyMachine, DEBOUNCE_MS};
 use super::tap_ffi::*;
 use super::LoneKey;
+use crate::tap_guard::Disables;
 use std::{
     cell::{Cell, RefCell},
     ptr,
@@ -25,8 +26,8 @@ pub(super) struct Context {
     started: Instant,
     /// A debounce wake-up is already queued.
     tick_queued: Cell<bool>,
-    /// macOS disabled the tap since the watchdog last looked.
-    disabled: Cell<bool>,
+    /// What macOS disabled the tap with since the watchdog last looked.
+    disabled: Cell<Disables>,
 }
 
 pub(super) struct Tap {
@@ -47,18 +48,20 @@ impl Context {
             delivery,
             started: Instant::now(),
             tick_queued: Cell::new(false),
-            disabled: Cell::new(false),
+            disabled: Cell::new(Disables::default()),
         }
     }
 
     /// From the callback: macOS disabled the tap; the watchdog decides.
-    pub(super) fn note_disabled(&self) {
-        self.disabled.set(true);
+    pub(super) fn note_disabled(&self, timeout: bool) {
+        let mut disables = self.disabled.get();
+        disables.note(timeout);
+        self.disabled.set(disables);
     }
 
-    /// For the watchdog: whether the tap was disabled since the last call.
-    pub(super) fn take_disabled(&self) -> bool {
-        self.disabled.replace(false)
+    /// For the watchdog: the disables since the last call.
+    pub(super) fn take_disabled(&self) -> Disables {
+        self.disabled.take()
     }
 
     /// The tap is already torn down for good: fail closed (a hold gets its

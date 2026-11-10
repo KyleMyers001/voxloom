@@ -155,9 +155,10 @@ export function createNativeShortcutController({
     isLoneKeyActive: () => active !== null && isLoneKey(active),
     machine,
     onAccessLost: () => {
-      // The native tap is already gone: nothing holds a shortcut now.
+      // The native tap is already gone: nothing holds a shortcut now. No
+      // generation bump: lone-key edges are gated by isLoneKeyActive, and a
+      // bump would kill a combo whose registration is in flight.
       active = null;
-      generation += 1;
       onBindingLost?.('Accessibility permission was turned off.');
     },
   });

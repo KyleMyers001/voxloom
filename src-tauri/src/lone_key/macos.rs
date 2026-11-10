@@ -11,8 +11,8 @@
 //! stall never delays other apps' input. The callback never calls the sink:
 //! edges go to a delivery thread (see `delivery`), so nothing the app does
 //! with an edge can re-enter or free the tap.
-//! Between run-loop slices the tap thread checks Accessibility (see
-//! `crate::tap_guard`): it re-enables a disabled tap only while access is
+//! Between run-loop slices the tap thread reads the Accessibility flag the
+//! checker thread publishes (see `crate::tap_guard`): it re-enables a disabled tap only while access is
 //! granted and within budget, and on loss tears the tap down, fails closed
 //! and sends `AccessLost`. Re-arming waits for the next save or launch.
 
@@ -21,7 +21,7 @@ use super::delivery::{Delivery, Sink};
 use super::machine::Kind;
 use super::tap_ffi::*;
 use super::LoneKey;
-use crate::tap_guard::{self, TapGuard, Verdict};
+use crate::tap_guard::{self, AccessWatch, TapGuard, Verdict};
 use crate::tap_thread::{self, Ended, RunLoop, TapThread};
 use std::{ptr, rc::Rc, sync::Mutex, time::Instant};
 
@@ -67,22 +67,22 @@ unsafe extern "C" fn callback(_: Handle, event_type: u32, event: Handle, info: H
         // callback: end this run-loop slice so the watchdog decides now.
         #[cfg(debug_assertions)]
         eprintln!("[lone-key] tap disabled (type {event_type:#x})");
-        context.note_disabled();
+        context.note_disabled(event_type == DISABLED_BY_TIMEOUT);
         tap_thread::wake_current();
     }
     event
 }
 
 /// Between run-loop slices: keep, re-enable or give up the tap. Returns
-/// whether it stays.
-fn watch(guard: &mut TapGuard) -> bool {
+/// whether it stays. Reads the checker's flag; never probes here.
+fn watch(guard: &mut TapGuard, access: &AccessWatch) -> bool {
     ACTIVE.with(|slot| {
         let slot = slot.borrow();
         let Some(tap) = slot.as_ref() else {
             return false;
         };
         let disabled = tap.context.take_disabled();
-        match guard.check(disabled, tap_guard::still_trusted, Instant::now()) {
+        match guard.check(disabled, access.trusted(), Instant::now()) {
             Verdict::Keep => true,
             Verdict::Reenable => {
                 // SAFETY: the tap thread, outside the callback; a live port.
@@ -116,16 +116,27 @@ pub fn arm(key: LoneKey, sink: Sink) -> Result<(), String> {
     let thread = tap_thread::spawn("lone-key-tap", move |ready, stopping| {
         let installed = Delivery::spawn(LIVE.clone(), generation, sink)
             .and_then(|delivery| install(Rc::new(Context::new(generation, key, delivery))));
-        if let Err(e) = installed {
-            ready.report(Err(e));
-            return;
-        }
+        // The tap was just created, which proves access; without its
+        // watch it could outlive Accessibility, so it is not kept.
+        let access = installed.and_then(|()| {
+            tap_guard::watch_access().inspect_err(|_| {
+                uninstall();
+            })
+        });
+        let access = match access {
+            Ok(access) => access,
+            Err(e) => {
+                ready.report(Err(e));
+                return;
+            }
+        };
         if !ready.report(Ok(RunLoop::current())) {
             uninstall();
             return;
         }
         let mut guard = TapGuard::default();
-        let ended = tap_thread::run_until_stopped(&stopping, || watch(&mut guard));
+        let ended = tap_thread::run_until_stopped(&stopping, || watch(&mut guard, &access));
+        drop(access);
         let context = uninstall();
         if let (Ended::Lost, Some(context)) = (ended, context) {
             context.lose();

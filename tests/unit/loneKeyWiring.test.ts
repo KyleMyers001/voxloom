@@ -9,14 +9,23 @@ import { beginRecordingSuspend, resetRecordingSuspend } from '../../src/services
 
 afterEach(() => resetRecordingSuspend());
 
-function setup(opts: { armError?: string | ((token: string) => string | undefined); granted?: boolean; requestThrows?: boolean } = {}) {
+function setup(opts: {
+  armError?: string | ((token: string) => string | undefined);
+  granted?: boolean;
+  registerGate?: () => Promise<void>;
+  requestThrows?: boolean;
+} = {}) {
   const calls: string[] = [];
   const gestures: ShortcutGesture[] = [];
   let pluginEdge: ((edge: 'pressed' | 'released') => void) | null = null;
   let loneEdge: ((edge: LoneKeyEdge) => void) | null = null;
   const api: NativeShortcutApi = {
     isAvailable: () => true,
-    async register(hotkey, edge) { calls.push(`register ${hotkey}`); pluginEdge = edge; },
+    async register(hotkey, edge) {
+      calls.push(`register ${hotkey}`);
+      pluginEdge = edge;
+      await opts.registerGate?.();
+    },
     async unregister(hotkey) { calls.push(`unregister ${hotkey}`); },
     async unregisterAll() { calls.push('unregisterAll'); },
   };
@@ -184,6 +193,22 @@ describe('a lone key as the shortcut', () => {
     await t.controller.setShortcut('AltRight', { userInitiated: true });
     expect(t.calls).toEqual(['requestAccess', 'arm AltRight']);
     expect(t.controller.activeHotkey()).toBe('AltRight');
+  });
+
+  it('access-lost while a combo is registering does not kill the new combo', async () => {
+    let open: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { open = resolve; });
+    const t = setup({ registerGate: () => gate });
+    await t.controller.setShortcut('AltRight');
+    const pending = t.controller.setShortcut('Ctrl + Shift + Space');
+    await vi.waitFor(() => expect(t.calls).toContain('register Control+Shift+Space'));
+    t.lone('access-lost'); // the lone key is still active until register resolves
+    expect(t.lost).toHaveLength(1);
+    open();
+    await expect(pending).resolves.toMatchObject({ active: 'Control+Shift+Space', ok: true });
+    t.plugin('pressed');
+    t.advance(320);
+    expect(t.gestures).toEqual(['hold-start']);
   });
 
   it('a late access-lost is ignored once a combo is the shortcut', async () => {

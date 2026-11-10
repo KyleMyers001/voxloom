@@ -14,8 +14,8 @@
 //! main: an active tap holds each event until its callback returns. That
 //! thread also frees the tap and its `TapCtx` after its run loop stops, so
 //! a disarm from the poll thread or the callback never frees state a
-//! running callback still reads. Between run-loop slices it checks
-//! Accessibility (`crate::tap_guard`): a disabled tap is re-enabled only
+//! running callback still reads. Between run-loop slices it reads the
+//! checker thread's Accessibility flag (`crate::tap_guard`): a disabled tap is re-enabled only
 //! while access is granted and within budget, and on loss the tap is torn
 //! down while the poll keeps covering the hold.
 //!
@@ -80,6 +80,7 @@ pub fn note_broken_poll_tick(streak: u32, held: bool) -> (u32, bool) {
 
 #[cfg(target_os = "macos")]
 mod macos {
+    use std::cell::Cell;
     use std::ffi::c_void;
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::{Arc, Mutex};
@@ -89,7 +90,7 @@ mod macos {
     use tauri::{AppHandle, Emitter};
 
     use super::{chord_held_from_sample, note_broken_poll_tick, tap_if_trusted};
-    use crate::tap_guard::{self, TapGuard, Verdict};
+    use crate::tap_guard::{self, Disables, TapGuard, Verdict};
     use crate::tap_thread::{self, RunLoop, TapThread};
 
     pub const HOLD_RELEASE_EVENT: &str = "shortcut:hold-release";
@@ -233,8 +234,9 @@ mod macos {
         app: AppHandle,
         chord: Chord,
         generation: u64,
-        /// macOS disabled the tap since the watchdog last looked.
-        disabled: AtomicBool,
+        /// What macOS disabled the tap with since the watchdog last looked
+        /// (callback and watchdog both run on the tap thread).
+        disabled: Cell<Disables>,
     }
 
     struct Armed {
@@ -364,7 +366,9 @@ mod macos {
             // The poll keeps covering the hold. Re-enabling needs a
             // permission check, which must not run in a callback: end this
             // run-loop slice so the watchdog decides now.
-            ctx.disabled.store(true, Ordering::SeqCst);
+            let mut disables = ctx.disabled.get();
+            disables.note(etype == EVENT_TAP_DISABLED_BY_TIMEOUT);
+            ctx.disabled.set(disables);
             tap_thread::wake_current();
             return event;
         }
@@ -387,7 +391,7 @@ mod macos {
                 app,
                 chord,
                 generation,
-                disabled: AtomicBool::new(false),
+                disabled: Cell::new(Disables::default()),
             }));
             // SAFETY: FFI to CoreGraphics / CoreFoundation for an active tap
             // whose callback returns every event unchanged. The callback
@@ -415,6 +419,19 @@ mod macos {
                     ready.report(Err("hold-release tap source unavailable".into()));
                     return;
                 }
+                // Just created, so access is proven; without its watch the
+                // tap could outlive Accessibility, so it is not kept.
+                let access = match tap_guard::watch_access() {
+                    Ok(access) => access,
+                    Err(e) => {
+                        CFRelease(source);
+                        CFMachPortInvalidate(tap);
+                        CFRelease(tap);
+                        drop(Box::from_raw(ctx));
+                        ready.report(Err(e));
+                        return;
+                    }
+                };
                 CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes);
                 CGEventTapEnable(tap, true);
                 if ready.report(Ok(RunLoop::current())) {
@@ -423,8 +440,8 @@ mod macos {
                     let disabled = &(*ctx).disabled;
                     let mut guard = TapGuard::default();
                     tap_thread::run_until_stopped(&stopping, || {
-                        let was = disabled.swap(false, Ordering::SeqCst);
-                        match guard.check(was, tap_guard::still_trusted, Instant::now()) {
+                        let was = disabled.take();
+                        match guard.check(was, access.trusted(), Instant::now()) {
                             Verdict::Keep => true,
                             Verdict::Reenable => {
                                 CGEventTapEnable(tap, true);
