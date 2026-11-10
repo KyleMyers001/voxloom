@@ -1,4 +1,4 @@
-import type { SttDownloadProgress, SttModelInfo } from '../../services/stt/types';
+import { SttError, type SttDownloadProgress, type SttModelInfo } from '../../services/stt/types';
 import { insertIntoOwnField } from '../../services/delivery/ownField';
 import type { DogfoodResult } from '../../services/stt/dogfoodPath';
 
@@ -140,7 +140,11 @@ export function createGuidedSetup(io: SetupBoundary, modelId: () => string, shor
     cancelPractice();
     patch({ downloading: id, modelState: 'downloading', error: null, modelReady: false, ready: false });
     try { await io.download(id, (progress) => patch({ progress })); }
-    catch (error) { failure = `Download failed: ${String(error)}. Retry when network and disk space are available. Nothing unverified is used.`; }
+    catch (error) {
+      failure = error instanceof SttError && error.code === 'cancelled'
+        ? 'Download cancelled. Nothing unverified is used. Choose Retry download when you’re ready.'
+        : `Download failed: ${String(error)}. Retry when network and disk space are available. Nothing unverified is used.`;
+    }
     finally { ownedDownload = null; patch({ downloading: null, progress: null }); }
     await refresh();
     if (failure && id === modelId() && binding === shortcut()) patch({ error: failure });

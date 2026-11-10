@@ -1,6 +1,7 @@
 import type { DogfoodResult } from '../../src/services/stt/dogfoodPath';
 import { describe, expect, it, vi } from 'vitest';
 import { createGuidedSetup, type SetupBoundary } from '../../src/features/onboarding/guidedSetup';
+import { SttError } from '../../src/services/stt/types';
 
 const authorized = { microphone: 'authorized', accessibility: 'authorized', inputMonitoring: 'authorized' } as const;
 export function boundary(): SetupBoundary {
@@ -108,6 +109,15 @@ describe('guided setup lifecycle', () => {
     io.readiness = async () => ({ modelId: 'whisper-base.en', ready: false, status: 'missing', reason: 'not verified' });
     await setup.download();
     expect(setup.getSnapshot().error).toContain('Disk full');
+  });
+  it('reports a user-cancelled download neutrally rather than as a failure', async () => {
+    const io = boundary();
+    io.download = async () => { throw new SttError('cancelled', 'Download cancelled: whisper-base.en'); };
+    io.readiness = async () => ({ modelId: 'whisper-base.en', ready: false, status: 'missing', reason: 'not verified' });
+    const setup = createGuidedSetup(io, () => 'whisper-base.en', () => 'Ctrl + Shift + Space');
+    await setup.download();
+    expect(setup.getSnapshot().error).toBe('Download cancelled. Nothing unverified is used. Choose Retry download when you’re ready.');
+    expect(setup.getSnapshot()).toMatchObject({ downloading: null, modelReady: false, ready: false });
   });
   it('persists unfinished steps and both results without persisting readiness or transcript', async () => {
     let saved = '';
