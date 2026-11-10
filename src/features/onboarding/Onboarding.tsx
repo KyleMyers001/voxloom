@@ -24,10 +24,16 @@ interface OnboardingProps {
   boundary?: SetupBoundary;
   progressStorage?: SetupProgressStorage;
 }
+const PROGRESS_KEY = 'voxloom.guided-setup.v1';
 const localProgress: SetupProgressStorage = {
-  read: () => localStorage.getItem('voxloom.guided-setup.v1'),
-  write: (value) => localStorage.setItem('voxloom.guided-setup.v1', value),
+  read: () => localStorage.getItem(PROGRESS_KEY),
+  write: (value) => localStorage.setItem(PROGRESS_KEY, value),
+  clear: () => localStorage.removeItem(PROGRESS_KEY),
 };
+/** Reopening setup starts the tutorial over; Resume setup keeps unfinished progress. */
+export function clearGuidedProgress(): void {
+  try { localProgress.clear?.(); } catch { /* Unavailable storage has nothing to resume. */ }
+}
 const permissions = [
   { kind: 'microphone', key: 'microphone', title: 'Hear your voice', name: 'Microphone', copy: 'Microphone access captures your speech when you dictate.' },
   { kind: 'accessibility', key: 'accessibility', title: 'Type where you’re writing', name: 'Accessibility', copy: 'Accessibility lets Voxloom insert words into your text field.' },
@@ -177,11 +183,11 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
         : practice.message ?? 'Ready when you are';
   const next = () => action(async () => { cancel(); await controller.next(); });
   const finish = () => action(async () => {
-    if (await controller.finish()) { setup.update({ complete: true }); close(); }
+    if (await controller.finish()) { controller.clearProgress(); setup.update({ complete: true }); close(); }
   });
   // Explicit opt-out (parity with the pre-guided Skip): marks setup complete
   // without practice so it stops reopening at launch. Set up later stays incomplete.
-  function skip() { setup.update({ complete: true }); close(); }
+  function skip() { controller.clearProgress(); setup.update({ complete: true }); close(); }
 
   return <Dialog label="Set up Voxloom" onClose={close} onEscape={() => { if (pending.current || ['starting', 'recording', 'transcribing', 'cleaning'].includes(live.current.phase)) cancel(); else close(); }} opener={opener}>
     <div className="guided-setup">

@@ -5,7 +5,7 @@ import type { Screen } from '../domain/types';
 import { Dictionary } from '../features/dictionary/Dictionary';
 import { History } from '../features/history/History';
 import { Home } from '../features/home/Home';
-import { Onboarding } from '../features/onboarding/Onboarding';
+import { clearGuidedProgress, Onboarding } from '../features/onboarding/Onboarding';
 import { Settings } from '../features/settings/Settings';
 import { isTauriEnv } from '../services/capture/captureService';
 import { listenOnboardingOpen, openSettingsWindow, subscribe } from '../services/settingsWindow';
@@ -26,6 +26,7 @@ import { useToastMessages } from './useToastMessages';
 export function App() {
   const { bootReady, clipboard, dictation, dispatch, now, setup, state } = useApp();
   const [onboardingOpen, setOnboardingOpen] = useState(!state.onboarding.complete);
+  const [setupRun, setSetupRun] = useState(0);
   const [shortcutOpen, setShortcutOpen] = useState(false);
   const modalOpener = useRef<HTMLElement | null>(null);
   useTheme(state.settings.appearance);
@@ -101,9 +102,13 @@ export function App() {
     () => { modalOpener.current = null; },
   );
 
+  // Reopening setup starts the guided tutorial over (fresh instance and saved
+  // progress); the Resume setup banner keeps unfinished progress instead.
   const openSetup = useCallback((opener: HTMLElement | null) => {
     modalOpener.current = opener;
     setup.reopen();
+    clearGuidedProgress();
+    setSetupRun((run) => run + 1);
     setOnboardingOpen(true);
   }, [setup]);
   // "Set up shortcuts…" in the Settings window opens onboarding here.
@@ -131,14 +136,14 @@ export function App() {
         status={status}
       />
       <main className="main">
-        {bootReady && state.screen === 'home' && !onboardingOpen && !state.onboarding.complete && <div className="banner banner--info"><span className="banner__text">Setup is incomplete. Connect access and try both ways to dictate.</span><button className="btn ghost" onClick={(event) => openSetup(event.currentTarget)} type="button">Resume setup</button></div>}
+        {bootReady && state.screen === 'home' && !onboardingOpen && !state.onboarding.complete && <div className="banner banner--info"><span className="banner__text">Setup is incomplete. Connect access and try both ways to dictate.</span><button className="btn ghost" onClick={(event) => { modalOpener.current = event.currentTarget; setOnboardingOpen(true); }} type="button">Resume setup</button></div>}
         {(state.screen === 'home' || (native && state.screen === 'settings')) && <Home dogfood={dogfood} onToast={announce} />}
         {state.screen === 'history' && gated('History', <History onToast={announce} />)}
         {state.screen === 'dictionary' && gated('Dictionary', <Dictionary />)}
         {!native && state.screen === 'settings' && gated('Settings', <Settings onSetup={openSetup} />)}
       </main>
     </div>
-    {onboardingOpen && <Onboarding onClose={() => setOnboardingOpen(false)}
+    {onboardingOpen && <Onboarding key={setupRun} onClose={() => setOnboardingOpen(false)}
       opener={modalOpener.current} />}
     {shortcutOpen && <ShortcutsDialog onClose={() => setShortcutOpen(false)}
       opener={modalOpener.current} shortcut={state.settings.shortcut} />}

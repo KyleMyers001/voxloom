@@ -64,8 +64,10 @@ existing durable settings file and is set from Ready after both real result
 gates and a fresh prerequisites check, or by an explicit Skip setup on any step
 (parity with the earlier Skip), which completes setup without practice so it no
 longer reopens at launch. Set up later/Close leave incomplete state, with a
-visible Resume setup action. Existing completed users remain complete;
-they are not silently forced into the new tutorial or an automatic download.
+visible Resume setup action that restores saved progress. Finishing or skipping
+clears saved progress, and reopening setup from Settings starts it over.
+Existing completed users remain complete; they are not silently forced into the
+new tutorial or an automatic download.
 
 ## Evidence boundary
 

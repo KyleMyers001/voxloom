@@ -3,7 +3,7 @@ import { insertIntoOwnField } from '../../services/delivery/ownField';
 import type { DogfoodResult } from '../../services/stt/dogfoodPath';
 
 export interface PracticeLease { id: number; mode: 'hold' | 'tap'; model: string; shortcut: string }
-export interface SetupProgressStorage { read(): string | null; write(value: string): void }
+export interface SetupProgressStorage { read(): string | null; write(value: string): void; clear?(): void }
 
 export type PermissionKind = 'microphone' | 'accessibility' | 'input-monitoring';
 export type PermissionState = 'authorized' | 'not-determined' | 'denied' | 'restricted' | 'not-granted' | 'unknown' | 'unsupported';
@@ -68,10 +68,16 @@ export function createGuidedSetup(io: SetupBoundary, modelId: () => string, shor
   const current = (owned: PracticeLease) => lease === owned && owned.id === attempt
     && state.step === 3 && owned.model === modelId() && owned.shortcut === shortcut()
     && io.activeShortcut() === owned.shortcut;
+  const progress = () => JSON.stringify({ version: 1, step: state.step, holdDone: state.holdDone, tapDone: state.tapDone, mode: state.mode, modelId: practicedModel, shortcut: practicedShortcut });
+  let saved: string | null = null;
   const patch = (changes: Partial<GuidedState>) => {
     state = { ...state, ...changes };
-    try { storage?.write(JSON.stringify({ version: 1, step: state.step, holdDone: state.holdDone, tapDone: state.tapDone, mode: state.mode, modelId: practicedModel, shortcut: practicedShortcut })); }
-    catch { state.error = 'Setup progress could not be saved. Keep this window open or repeat setup next time.'; }
+    // Readiness-only patches never rewrite progress, so a late check cannot resurrect cleared progress.
+    const value = progress();
+    if (value !== saved) {
+      try { storage?.write(value); saved = value; }
+      catch { state.error = 'Setup progress could not be saved. Keep this window open or repeat setup next time.'; }
+    }
     listeners.forEach((fn) => fn());
   };
   const refresh = () => {
@@ -179,6 +185,12 @@ export function createGuidedSetup(io: SetupBoundary, modelId: () => string, shor
       cancelPractice();
     },
     download,
+    /** Completion or skip: forget saved progress so a later reopen starts over. */
+    clearProgress: () => {
+      cancelPractice();
+      saved = progress();
+      try { storage?.clear?.(); } catch { /* Nothing resumable was readable either. */ }
+    },
     start: async () => { patch({ step: 1 }); if (state.downloading) await refresh(); else await download(); },
   };
 }

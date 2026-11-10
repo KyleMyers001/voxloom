@@ -125,6 +125,19 @@ describe('guided setup lifecycle', () => {
     expect(resumed.getSnapshot().step).toBe(1);
     expect(resumed.getSnapshot().holdDone).toBe(false);
   });
+  it('clears saved progress on completion and a later readiness check never resurrects it', async () => {
+    const shortcut = 'Ctrl + Shift + Space';
+    let saved: string | null = JSON.stringify({ version: 1, step: 4, holdDone: true, tapDone: true, mode: 'tap', modelId: 'whisper-base.en', shortcut });
+    const storage = { read: () => saved, write: (value: string) => { saved = value; }, clear: () => { saved = null; } };
+    const setup = createGuidedSetup(boundary(), () => 'whisper-base.en', () => shortcut, storage);
+    expect(await setup.finish()).toBe(true);
+    setup.clearProgress();
+    expect(saved).toBeNull();
+    await setup.refresh();
+    expect(saved).toBeNull();
+    expect(createGuidedSetup(boundary(), () => 'whisper-base.en', () => shortcut, storage).getSnapshot())
+      .toMatchObject({ step: 0, holdDone: false, tapDone: false, mode: 'hold' });
+  });
   it('counts only both owned real insertion results, retaining hold through cancellation and retry', async () => {
     const setup = createGuidedSetup(boundary(), () => 'whisper-base.en', () => 'Ctrl + Shift + Space');
     await setup.start();

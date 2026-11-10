@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/app/App';
 import { renderWithApp } from './testUtils';
 
+const progressKey = 'voxloom.guided-setup.v1';
 const shortcutKey = {
   code: 'Space',
   ctrlKey: true,
@@ -28,12 +29,32 @@ describe('App integration', () => {
     expect(screen.getByRole('dialog', { name: 'Set up Voxloom' })).toBeInTheDocument();
   });
   it('Skip setup finishes setup without practice so it no longer blocks the shortcut', async () => {
-    const user = userEvent.setup();
-    renderWithApp(<App />);
-    await user.click(screen.getByRole('button', { name: 'Skip setup' }));
-    expect(screen.queryByRole('dialog', { name: 'Set up Voxloom' })).not.toBeInTheDocument();
-    expect(screen.queryByText(/Setup is incomplete/)).not.toBeInTheDocument();
-    expect(document.querySelector('.brand__status')).toHaveTextContent('Ready');
+    localStorage.setItem(progressKey, JSON.stringify({ version: 1, step: 2 }));
+    try {
+      const user = userEvent.setup();
+      renderWithApp(<App />);
+      await user.click(screen.getByRole('button', { name: 'Skip setup' }));
+      expect(screen.queryByRole('dialog', { name: 'Set up Voxloom' })).not.toBeInTheDocument();
+      expect(screen.queryByText(/Setup is incomplete/)).not.toBeInTheDocument();
+      expect(document.querySelector('.brand__status')).toHaveTextContent('Ready');
+      expect(localStorage.getItem(progressKey)).toBeNull();
+    } finally { localStorage.clear(); }
+  });
+  it('Resume setup restores unfinished progress while reopening setup from Settings starts practice over', async () => {
+    localStorage.setItem(progressKey, JSON.stringify({ version: 1, step: 3, holdDone: true, tapDone: false, mode: 'tap', modelId: 'whisper-base.en', shortcut: 'Ctrl + Shift + Space' }));
+    try {
+      const user = userEvent.setup();
+      renderWithApp(<App />);
+      expect(screen.getByRole('heading', { name: 'Now, go hands-free.' })).toBeInTheDocument();
+      await user.keyboard('{Escape}');
+      await user.click(screen.getByRole('button', { name: 'Resume setup' }));
+      expect(screen.getByRole('heading', { name: 'Now, go hands-free.' })).toBeInTheDocument();
+      await user.keyboard('{Escape}');
+      await user.click(screen.getByRole('button', { name: 'Settings' }));
+      await user.click(screen.getByRole('button', { name: 'Set up shortcuts' }));
+      expect(screen.getByText(/Less typing/)).toBeInTheDocument();
+      expect(JSON.parse(localStorage.getItem(progressKey) ?? 'null')).toMatchObject({ step: 0, holdDone: false, tapDone: false, mode: 'hold' });
+    } finally { localStorage.clear(); }
   });
   it('does not turn browser gestures into completed dictation practice', async () => {
     renderWithApp(<App />);
