@@ -97,8 +97,9 @@ export function App() {
   }, []);
   useAppKeys({ blocked: onboardingOpen || shortcutOpen, onHelp: openHelp, onNavigate: navigate });
 
+  // A dev session reset is a first run: the guided tutorial starts over too.
   const dev = useDevSession(
-    () => setOnboardingOpen(true),
+    () => { clearGuidedProgress(); setSetupRun((run) => run + 1); setOnboardingOpen(true); },
     () => { modalOpener.current = null; },
   );
 
@@ -133,7 +134,6 @@ export function App() {
       <Sidebar
         onNavigate={navigate}
         onReset={dev.requestReset}
-        onScenario={dev.openScenario}
         screen={state.screen}
         shortcut={state.settings.shortcut}
         status={status}

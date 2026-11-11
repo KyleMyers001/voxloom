@@ -27,16 +27,16 @@ describe('mock application services', () => {
     const settings = createSettingsService(dispatch);
     const setup = createSetupService(dispatch);
     settings.update({ key: 'startAtLogin', value: true });
-    setup.update({ holdTested: true });
+    setup.update({ step: 2 });
     setup.reopen();
-    setup.replace({ ...initialOnboarding, permissionDenied: true });
+    setup.replace({ ...initialOnboarding, complete: true });
     expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
       { key: 'startAtLogin', type: 'set-setting', value: true },
-      { changes: { holdTested: true }, type: 'update-onboarding' },
+      { changes: { step: 2 }, type: 'update-onboarding' },
       { type: 'reopen-onboarding' },
       {
         type: 'set-onboarding',
-        value: { ...initialOnboarding, permissionDenied: true },
+        value: { ...initialOnboarding, complete: true },
       },
     ]);
   });

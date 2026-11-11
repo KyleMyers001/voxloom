@@ -1,7 +1,7 @@
 import { AppTile } from '../../components/AppTile';
 import { Icon } from '../../components/Icon';
 import { comboLabel, isMacPlatform, KeyCombo } from '../../components/KeyCombo';
-import { ScenarioPanel, type OnboardingScenario } from '../../dev/ScenarioPanel';
+import { ScenarioPanel } from '../../dev/ScenarioPanel';
 import type { Screen } from '../../domain/types';
 import { navScreens } from './screens';
 import { useShortcutActive } from '../../services/shortcut/activeShortcut';
@@ -12,11 +12,10 @@ type Props = {
   shortcut: string;
   status: string;
   onNavigate: (screen: Screen) => void;
-  onScenario: (scenario: OnboardingScenario) => void;
   onReset: () => void;
 };
 
-export function Sidebar({ screen, shortcut, status, onNavigate, onScenario, onReset }: Props) {
+export function Sidebar({ screen, shortcut, status, onNavigate, onReset }: Props) {
   const active = useShortcutActive();
   return (
     <aside className="sidebar">
@@ -53,7 +52,7 @@ export function Sidebar({ screen, shortcut, status, onNavigate, onScenario, onRe
         {import.meta.env.DEV && (
           <details className="dev-panel">
             <summary>Developer</summary>
-            <ScenarioPanel onOnboarding={onScenario} onReset={onReset} />
+            <ScenarioPanel onReset={onReset} />
           </details>
         )}
         <p className="sidebar__hint">

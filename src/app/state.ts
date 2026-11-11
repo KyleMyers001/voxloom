@@ -86,7 +86,6 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       onboarding: {
         ...initialOnboarding,
         complete: state.onboarding.complete,
-        microphoneGranted: state.onboarding.microphoneGranted,
       },
     };
   }

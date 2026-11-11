@@ -187,7 +187,7 @@ describe('off-Mac shell labels (QA #45)', () => {
       render(<TitleBar onHelp={() => {}} onSettings={() => {}} settingsOpen={false} />);
       expect(screen.getByRole('button', { name: 'Settings' })).toHaveTextContent('Settings… Ctrl+,');
       renderWithApp(
-        <Sidebar onNavigate={() => {}} onReset={() => {}} onScenario={() => {}} screen="home" shortcut="Control+Shift+Space" status="Ready" />,
+        <Sidebar onNavigate={() => {}} onReset={() => {}} screen="home" shortcut="Control+Shift+Space" status="Ready" />,
       );
       expect(document.querySelector('.brand__status')).toHaveTextContent('Ready · Ctrl+Shift+Space');
       expect(document.body.textContent).toContain('Alt+1');

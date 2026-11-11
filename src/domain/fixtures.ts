@@ -36,13 +36,7 @@ export function createRecords(now: number): DictationRecord[] {
 
 export const initialOnboarding: OnboardingState = {
   complete: false,
-  holdTested: false,
-  microphoneGranted: false,
-  permissionDenied: false,
-  recognizedText: '',
-  shortcutCollision: false,
   step: 1,
-  tapTested: false,
 };
 
 export const initialSettings: Settings = {

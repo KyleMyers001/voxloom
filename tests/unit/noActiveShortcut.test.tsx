@@ -29,7 +29,7 @@ describe('no active shortcut in the main window', () => {
   it('the sidebar says so too', () => {
     setActiveShortcut(null);
     renderWithApp(
-      <Sidebar onNavigate={vi.fn()} onReset={vi.fn()} onScenario={vi.fn()} screen="home" shortcut={DEFAULT} status="Ready" />,
+      <Sidebar onNavigate={vi.fn()} onReset={vi.fn()} screen="home" shortcut={DEFAULT} status="Ready" />,
     );
     expect(NO_SHORTCUT).toBe('No shortcut is active. Record one in Settings.');
     expect(screen.getAllByText(NO_SHORTCUT).length).toBeGreaterThan(0);

@@ -202,19 +202,17 @@ describe('App integration', () => {
     },
   );
 
-  it(
-    'does not let a development shortcut scenario bypass real setup',
-    async () => {
+  it('development First-run setup starts the guided tutorial over instead of resuming it', async () => {
+    localStorage.setItem(progressKey, JSON.stringify({ version: 1, step: 2 }));
+    try {
       const user = userEvent.setup();
       renderWithApp(<App />);
-      await user.click(
-        screen.getByRole('button', { name: 'Set up later' }),
-      );
-      await user.click(
-        screen.getByRole('button', { name: 'Shortcut collision' }),
-      );
+      expect(screen.getByRole('heading', { name: /Your shortcut/ })).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Close Set up Voxloom' }));
+      await user.click(screen.getByRole('button', { name: 'First-run setup' }));
+      expect(screen.getByText(/Less typing/)).toBeInTheDocument();
+      // Real setup still cannot be completed by development controls.
       expect(screen.getByRole('button', { name: /Start setup/ })).toBeDisabled();
-      expect(screen.queryByRole('button', { name: /Finish setup/ })).not.toBeInTheDocument();
-    },
-  );
+    } finally { localStorage.clear(); }
+  });
 });
