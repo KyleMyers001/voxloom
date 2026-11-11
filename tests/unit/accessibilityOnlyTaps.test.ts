@@ -112,7 +112,10 @@ describe('accessibility-only key taps', () => {
       expect(source, file).toContain('tap_thread::wake_current()');
       expect(source, file).toContain('guard.check(');
       expect(source, file).toContain('tap_guard::watch_access()');
-      expect(source, file).toContain('access.trusted(),Instant::now())');
+      // A disabled tap stays off until a check started after the disable
+      // reports (the published flag can predate the revoke); it nudges one.
+      expect(source, file).toContain('access.snapshot(),Instant::now())');
+      expect(source, file).toContain('Verdict::AwaitCheck=>{access.nudge();true}');
     }
   });
 
@@ -129,7 +132,11 @@ describe('accessibility-only key taps', () => {
     const monitor = code(read('src-tauri/src/tap_guard/monitor.rs'));
     expect(monitor).toContain('.name("tap-access-check".into()).spawn(move||run(inner))');
     // A result applies only to watches no newer than the check (BUS-209).
-    expect(monitor).toContain('inner.epoch.load(Ordering::SeqCst)};if!(inner.check)(){inner.mark_lost(epoch);}');
+    // A check is numbered when it starts; only a pass bumps `granted`.
+    expect(monitor).toContain(
+      '(inner.epoch.load(Ordering::SeqCst),inner.started.fetch_add(1,Ordering::SeqCst)+1,)};'
+      + 'if(inner.check)(){inner.granted.fetch_max(number,Ordering::SeqCst);}else{inner.mark_lost(epoch);}',
+    );
     expect(monitor).toContain('self.inner.lost_through.load(Ordering::SeqCst)<self.epoch');
   });
 
