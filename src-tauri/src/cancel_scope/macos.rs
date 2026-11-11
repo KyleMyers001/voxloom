@@ -1,45 +1,11 @@
+use super::ffi::*;
+use super::watch::Watch;
 use super::{Action, ScopeState};
-use std::{cell::RefCell, ffi::c_void, ptr, rc::Rc};
+use crate::tap_guard::AccessWatch;
+use std::{cell::RefCell, ptr, rc::Rc};
 use tauri::{AppHandle, Emitter, Manager};
 
 const OVERLAY: &str = "dictation-overlay";
-type Handle = *mut c_void;
-type Callback = unsafe extern "C" fn(Handle, u32, Handle, Handle) -> Handle;
-
-#[link(name = "ApplicationServices", kind = "framework")]
-extern "C" {
-    // Apple AXUIElement.h: Boolean (UInt8), available since macOS 10.4.
-    // No options/prompting; queries this app process, not an external helper.
-    fn AXIsProcessTrusted() -> u8;
-    fn CGEventTapCreate(
-        location: u32,
-        place: u32,
-        options: u32,
-        mask: u64,
-        callback: Callback,
-        context: Handle,
-    ) -> Handle;
-    fn CGEventGetIntegerValueField(event: Handle, field: u32) -> i64;
-    fn CGEventTapEnable(tap: Handle, enable: bool);
-}
-#[link(name = "CoreGraphics", kind = "framework")]
-extern "C" {
-    // Apple CGEvent.h: bool; macOS 10.15 (the app's minimum). Preflight only:
-    // never call the corresponding CGRequest* APIs or change TCC state here.
-    fn CGPreflightListenEventAccess() -> bool;
-    fn CGPreflightPostEventAccess() -> bool;
-}
-#[link(name = "CoreFoundation", kind = "framework")]
-extern "C" {
-    fn CFMachPortCreateRunLoopSource(allocator: Handle, tap: Handle, order: isize) -> Handle;
-    fn CFMachPortInvalidate(tap: Handle);
-    fn CFRunLoopGetMain() -> Handle;
-    fn CFRunLoopGetCurrent() -> Handle;
-    fn CFRunLoopAddSource(loop_: Handle, source: Handle, mode: *const c_void);
-    fn CFRunLoopRemoveSource(loop_: Handle, source: Handle, mode: *const c_void);
-    fn CFRelease(value: *const c_void);
-    static kCFRunLoopCommonModes: *const c_void;
-}
 
 struct Context {
     app: AppHandle,
@@ -49,6 +15,11 @@ struct Tap {
     port: Handle,
     source: Handle,
     context: *mut Context,
+    /// Reads the checker's Accessibility flag while armed; dropped first,
+    /// so no check runs against a torn-down tap.
+    watch: Option<Watch>,
+    /// This tap's interest in the checker thread's flag.
+    access: Option<AccessWatch>,
 }
 
 // No unsafe Send/Sync: all resources and callbacks are main-run-loop confined.
@@ -93,24 +64,52 @@ unsafe extern "C" fn callback(
         return event;
     }
     let session = context.state.borrow().session.clone();
+    cancel_dictation(&context.app, session);
+    if action == Action::CancelAndSwallow {
+        ptr::null_mut()
+    } else {
+        event
+    }
+}
+
+fn cancel_dictation(app: &AppHandle, session: String) {
     // Cancellation is latched natively before notifying JS. A concurrent STT
     // response cannot claim delivery even if the notification arrives later.
-    if let Some(coordinator) = context
-        .app
-        .try_state::<crate::capture::coordinator::CaptureCoordinator>()
-    {
+    if let Some(coordinator) = app.try_state::<crate::capture::coordinator::CaptureCoordinator>() {
         if let Some(status) = coordinator.status() {
             if status.mode == crate::capture::coordinator::CaptureMode::Full {
                 coordinator.cancel_request(&status.request_id);
             }
         }
     }
-    hide(&context.app);
-    let _ = context.app.emit_to("main", "dictation:cancel", session);
-    if action == Action::CancelAndSwallow {
-        ptr::null_mut()
-    } else {
-        event
+    hide(app);
+    let _ = app.emit_to("main", "dictation:cancel", session);
+}
+
+/// The watchdog's callout (main run loop, outside the tap callback). It
+/// only reads the checker thread's flag: main never waits on the window
+/// server. With Accessibility gone the tap can't be trusted to pass input,
+/// so it is torn down at once, and the dictation fails closed like a
+/// disabled tap's.
+unsafe extern "C" fn on_watch(_timer: Handle, _info: Handle) {
+    let lost = ACTIVE.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .is_some_and(|tap| !tap.access.as_ref().is_some_and(AccessWatch::trusted))
+    });
+    if !lost {
+        return;
+    }
+    let Some(tap) = ACTIVE.with(|slot| slot.borrow_mut().take()) else {
+        return;
+    };
+    let action = tap.state().borrow_mut().event(u32::MAX, -1);
+    let session = tap.state().borrow().session.clone();
+    // SAFETY: the context outlives `tap`; clone what the cancel needs first.
+    let app = (*tap.context).app.clone();
+    drop(tap);
+    if action == Action::Cancel {
+        cancel_dictation(&app, session);
     }
 }
 
@@ -150,11 +149,20 @@ impl Tap {
             }
             CFRunLoopAddSource(CFRunLoopGetMain(), source, kCFRunLoopCommonModes);
             CGEventTapEnable(port, true);
-            Ok(Self {
+            let mut tap = Self {
                 port,
                 source,
                 context,
-            })
+                watch: None,
+                access: None,
+            };
+            // Just created, so access is proven; the checker thread watches
+            // it from here on.
+            tap.access = Some(crate::tap_guard::watch_access()?);
+            // Without its watchdog the tap could outlive Accessibility, so
+            // it is not kept (`tap` drops here and tears down).
+            tap.watch = Some(Watch::start(on_watch).ok_or("Could not watch Escape cancellation")?);
+            Ok(tap)
         }
     }
 
@@ -167,6 +175,8 @@ impl Drop for Tap {
     fn drop(&mut self) {
         // SAFETY: main thread, outside callback; stop callbacks before freeing
         // the context. Exactly one owner releases each create-rule object.
+        self.watch.take();
+        self.access.take();
         unsafe {
             CGEventTapEnable(self.port, false);
             CFRunLoopRemoveSource(CFRunLoopGetMain(), self.source, kCFRunLoopCommonModes);

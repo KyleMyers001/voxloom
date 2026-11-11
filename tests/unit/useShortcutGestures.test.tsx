@@ -18,6 +18,13 @@ import type { RegisterOutcome } from
 import { getActiveShortcut, resetActiveShortcut } from '../../src/services/shortcut/activeShortcut';
 import type { OverlayBridge } from
   '../../src/services/shortcut/overlayBridge';
+import {
+  createNativeShortcutController as createRealNativeController,
+  type NativeShortcutApi,
+} from '../../src/services/shortcut/nativeRegistration';
+import type { LoneKeyApi, LoneKeyEdge } from '../../src/services/shortcut/loneKeyBridge';
+import type { HoldReleaseApi } from '../../src/services/shortcut/holdReleaseBridge';
+import { usingInsteadText } from '../../src/features/settings/shortcutCopy';
 
 const mocks = vi.hoisted(() => ({
   createNativeShortcutController: vi.fn(),
@@ -1130,6 +1137,73 @@ describe('HUD result states (UI PR 8)', () => {
       expect(overlay.showResult).not.toHaveBeenCalled();
       expect(overlay.sync).toHaveBeenCalledWith({ kind: 'ready' });
     }
+  });
+});
+
+describe('useShortcutGestures lone key lost Accessibility (BUS-209)', () => {
+  afterEach(() => { resetActiveShortcut(); vi.mocked(isTauri).mockReturnValue(false); });
+
+  it('onBindingLost reports nothing active, like a failed re-bind', async () => {
+    vi.mocked(isTauri).mockReturnValue(true);
+    mocks.createNativeShortcutController.mockReturnValue(makeNativeController());
+    mocks.createOverlayBridge.mockReturnValue(makeOverlay());
+    const state = createInitialState(0);
+    const combo = state.settings.shortcut;
+    const { unmount } = renderHook(() => useShortcutGestures(makeOptions({ now: () => 0, state })));
+    await waitFor(() => expect(getActiveShortcut()).toBe(combo));
+    const { onBindingLost, onSuspendRecovered } = mocks.createNativeShortcutController.mock.calls[0][0];
+    act(() => onBindingLost('Accessibility permission was turned off.'));
+    expect(getActiveShortcut()).toBeNull();
+    // Not a suspend: a later resume has nothing to restore.
+    act(() => onSuspendRecovered());
+    expect(getActiveShortcut()).toBeNull();
+    unmount();
+  });
+
+  it('revoke, re-grant, then a combo another app owns: shows and keeps the lone key native restored', async () => {
+    vi.mocked(isTauri).mockReturnValue(true);
+    let loneEdge: ((edge: LoneKeyEdge) => void) | null = null;
+    // Every combo is owned by another app; the lone key arms (Accessibility granted).
+    const api: NativeShortcutApi = {
+      isAvailable: () => true,
+      register: async () => { throw new Error('HotKey already registered'); },
+      unregister: async () => undefined,
+      unregisterAll: async () => undefined,
+    };
+    const loneKey: LoneKeyApi = {
+      arm: async () => undefined,
+      disarm: async () => undefined,
+      listen: async (onEdge) => { loneEdge = onEdge; return () => { loneEdge = null; }; },
+      requestAccess: async () => true,
+    };
+    const holdRelease: HoldReleaseApi = {
+      arm: async () => true, disarm: async () => undefined, isAvailable: () => true, listen: async () => () => undefined,
+    };
+    mocks.createNativeShortcutController.mockImplementationOnce(
+      (opts: Parameters<typeof createRealNativeController>[0]) => createRealNativeController({
+        ...opts, api, holdRelease, loneKey,
+      }),
+    );
+    mocks.createOverlayBridge.mockReturnValue(makeOverlay());
+    const onShortcutError = vi.fn();
+    const onShortcutRevert = vi.fn();
+    const baseState = createInitialState(0);
+    const withShortcut = (shortcut: string) => ({ ...baseState, settings: { ...baseState.settings, shortcut } });
+    const first = { ...makeOptions({ now: () => 0, onShortcutError, state: withShortcut('AltRight') }), onShortcutRevert };
+    const { rerender, unmount } = renderHook((props) => useShortcutGestures(props), { initialProps: first });
+    await waitFor(() => expect(getActiveShortcut()).toBe('AltRight'));
+    await waitFor(() => expect(loneEdge).not.toBeNull());
+
+    act(() => loneEdge!('access-lost')); // Accessibility turned off
+    expect(getActiveShortcut()).toBeNull();
+
+    // Accessibility is back; the user saves a combo another app owns. Native
+    // refuses it and restores its last-known-good lone key.
+    rerender({ ...first, state: withShortcut('Ctrl + Shift + K') });
+    await waitFor(() => expect(onShortcutRevert).toHaveBeenCalledWith('AltRight'));
+    expect(getActiveShortcut()).toBe('AltRight');
+    expect(onShortcutError).toHaveBeenLastCalledWith(usingInsteadText('Ctrl + Shift + K', 'AltRight'));
+    unmount();
   });
 });
 

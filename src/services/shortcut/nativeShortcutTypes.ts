@@ -8,7 +8,7 @@ import type { NativeShortcutApi } from './tauriShortcutApi';
 export interface SetShortcutOptions {
   /**
    * The user just saved this shortcut. Only then may a lone key ask macOS for
-   * Input Monitoring (a system prompt); boot and revert never do.
+   * Accessibility (a system prompt); boot and revert never do.
    */
   userInitiated?: boolean;
 }
@@ -49,6 +49,11 @@ export interface NativeShortcutControllerOptions {
   /** BUS-46: native listener for a lone key as the shortcut. */
   loneKey?: LoneKeyApi;
   onGesture: (gesture: ShortcutGesture) => void;
+  /**
+   * BUS-209: the active lone key stopped listening (macOS Accessibility was
+   * turned off). Nothing is active now; a save or relaunch re-arms it.
+   */
+  onBindingLost?: (message: string) => void;
   onRegisterFailure?: (message: string) => void;
   /**
    * BUS-69: suspendBinding could not unbind ('unbind': the hotkey stays

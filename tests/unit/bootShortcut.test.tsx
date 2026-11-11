@@ -1,5 +1,5 @@
 // BUS-46 L4: a saved shortcut that native refuses at boot (a lone key without
-// Input Monitoring, a combo another app holds) must stay saved. Binding the
+// Accessibility, a combo another app holds) must stay saved. Binding the
 // default first, before settings loaded, made the refusal rewrite the settings
 // file with the default.
 import { act, renderHook, waitFor } from '@testing-library/react';
@@ -24,7 +24,7 @@ vi.mock('../../src/services/shortcut', async (importOriginal) => {
 
 const SAVED = 'AltRight';
 const refused: RegisterOutcome = {
-  active: null, attempted: SAVED, lastKnownGood: null, message: 'Input Monitoring', ok: false,
+  active: null, attempted: SAVED, lastKnownGood: null, message: 'Accessibility', ok: false,
 };
 
 function fakeController(outcome: RegisterOutcome) {
@@ -99,7 +99,7 @@ describe('boot binding waits for the saved shortcut', () => {
     expect(native.setShortcut.mock.calls).toEqual([[SAVED]]);
     expect(revert).not.toHaveBeenCalled();
     expect(errors[0]).toMatch(/No shortcut is active\. Record it again in Settings\.$/);
-    expect(errors[0]).toMatch(/Input Monitoring|only works on macOS/);
+    expect(errors[0]).toMatch(/Accessibility|only works on macOS/);
     unmount();
   });
 

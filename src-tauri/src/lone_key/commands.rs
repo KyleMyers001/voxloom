@@ -16,11 +16,12 @@ fn edge_name(edge: Edge) -> &'static str {
         Edge::Pressed => "pressed",
         Edge::Released => "released",
         Edge::Cancelled => "cancelled",
+        Edge::AccessLost => "access-lost",
     }
 }
 
 /// Listen for the lone key `token` (e.g. `AltRight`, `F13`), replacing any
-/// earlier one. macOS needs Input Monitoring; this only checks, never asks
+/// earlier one. macOS needs Accessibility; this only checks, never asks
 /// (see `lone_key_request_access`).
 #[tauri::command]
 pub fn lone_key_arm(app: AppHandle, token: String) -> Result<(), String> {
@@ -28,7 +29,7 @@ pub fn lone_key_arm(app: AppHandle, token: String) -> Result<(), String> {
     arm_impl(app, key)
 }
 
-/// The user just saved a lone key: ask macOS for Input Monitoring if it is
+/// The user just saved a lone key: ask macOS for Accessibility if it is
 /// not granted (this is the only place that prompts). Returns whether access
 /// is granted right now; the prompt is answered later, so the caller still
 /// arms through `lone_key_arm` and reports a refusal in words. Never called
@@ -58,20 +59,18 @@ pub fn lone_key_disarm() -> Result<(), String> {
 #[cfg(target_os = "macos")]
 fn arm_impl(app: AppHandle, key: super::LoneKey) -> Result<(), String> {
     use tauri::Emitter;
-    let target = app.clone();
     super::macos::arm(
-        app,
         key,
         Box::new(move |edge| {
             // Only the main window runs gestures.
-            let _ = target.emit_to("main", LONE_KEY_EVENT, edge_name(edge));
+            let _ = app.emit_to("main", LONE_KEY_EVENT, edge_name(edge));
         }),
     )
 }
 
 #[cfg(target_os = "macos")]
 fn request_access_impl() -> bool {
-    super::macos::request_access()
+    super::access::request_access()
 }
 
 #[cfg(target_os = "macos")]
@@ -103,6 +102,7 @@ mod tests {
         assert_eq!(edge_name(Edge::Pressed), "pressed");
         assert_eq!(edge_name(Edge::Released), "released");
         assert_eq!(edge_name(Edge::Cancelled), "cancelled");
+        assert_eq!(edge_name(Edge::AccessLost), "access-lost");
     }
 
     #[test]

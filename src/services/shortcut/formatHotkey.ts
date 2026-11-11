@@ -19,6 +19,27 @@ export function toPluginHotkey(shortcut: string): string {
   return [...modifiers, normalizeKey(key)].join('+');
 }
 
+const SETTINGS_MODIFIER: Record<string, string> = {
+  Alt: 'Alt', Command: 'Meta', Control: 'Ctrl', Shift: 'Shift', Super: 'Super',
+};
+
+/**
+ * Plugin format back to the stored Settings format ("Control+Shift+Space" to
+ * "Ctrl + Shift + Space"), for a combo native reports it holds. Undoes
+ * toPluginHotkey for every recorded shortcut; a lone key is the same in both.
+ */
+export function fromPluginHotkey(hotkey: string): string {
+  const lone = canonicalLoneKey(hotkey);
+  if (lone) return lone;
+  const parts = hotkey
+    .split('+')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return hotkey.trim();
+  const modifiers = parts.slice(0, -1).map((part) => SETTINGS_MODIFIER[part] ?? part);
+  return [...modifiers, parts.at(-1)!].join(' + ');
+}
+
 function normalizeModifier(part: string): string {
   const lower = part.toLowerCase();
   if (lower === 'ctrl' || lower === 'control') return 'Control';

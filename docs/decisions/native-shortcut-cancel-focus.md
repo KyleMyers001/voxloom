@@ -91,9 +91,11 @@ for the one user-configured combo.
 
 **Escalation (only if Pressed/Released prove insufficient for hold timing or
 modifier edge cases on a Mac trial):** a dedicated CGEvent tap / HID
-monitor for that combo. That path typically needs **Accessibility** and may
-prompt **Input Monitoring**. Do not start there for BUS-13 without a recorded
-failure of the plugin path.
+monitor for that combo. Use an active (default-option) tap that passes every
+event through: it needs **Accessibility** only. A listen-only tap or an IOHID
+monitor would need **Input Monitoring**, which Voxloom does not ask for
+(BUS-209). Do not start there for BUS-13 without a recorded failure of the
+plugin path.
 
 ### Conflict detection and last-known-good
 
@@ -112,8 +114,8 @@ Hard-coded collision strings in the mock Settings UI are prototypes only.
 | Permission | When needed | Notes |
 |------------|-------------|-------|
 | **Microphone** | Capture (already BUS-9/10) | Separate from shortcuts. |
-| **Accessibility** | Text insertion into other apps (AX / synthetic typing alternatives); CGEvent-tap escalation | Not required solely to *try* `plugin-global-shortcut` registration. Required before promising insert. |
-| **Input Monitoring** | Some global key monitors / taps | Call out in onboarding only if the escalated tap path is chosen. |
+| **Accessibility** | Text insertion into other apps (AX / synthetic typing alternatives); the Esc-cancel, single-key and hold-release event taps (all active, pass-through) | Not required solely to *try* `plugin-global-shortcut` registration. Required before promising insert. |
+| **Input Monitoring** | Not used (BUS-209). Listen-only taps and IOHID monitors would need it. | Not requested; a stale Voxloom entry from an older build can be removed. |
 | Clipboard | Write (and read-for-restore) via existing clipboard plugin / APIs | Write already used by Copy sink. |
 
 TCC **deny / revoke UX** is an explicit non-goal of BUS-12 (see Non-goals).
