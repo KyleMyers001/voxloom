@@ -8,7 +8,7 @@ import type { CaptureState } from '../../src/services/capture/types';
 import type { UseCaptureStateResult } from '../../src/services/capture/useCaptureState';
 
 it('requires an armed Escape scope in guided practice without changing ordinary degraded capture', async () => {
-  const spy = vi.spyOn(cancelScope, 'beginCancelScope').mockRejectedValue(new Error('Input Monitoring off'));
+  const spy = vi.spyOn(cancelScope, 'beginCancelScope').mockRejectedValue(new Error('Escape tap refused'));
   const store = createMockSttModelStore();
   await store.download('whisper-base.en');
   const start = vi.fn(async () => 'started');
@@ -19,6 +19,8 @@ it('requires an armed Escape scope in guided practice without changing ordinary 
   }));
   await act(async () => result.current.start('gesture'));
   expect(result.current.phase).toBe('error');
+  // The Escape tap is an active tap, which macOS gates on Accessibility.
+  expect(result.current.message).toBe('Escape cancellation could not connect. Check that Voxloom is allowed in Accessibility, then try again.');
   expect(start).not.toHaveBeenCalled();
   spy.mockRestore();
 });

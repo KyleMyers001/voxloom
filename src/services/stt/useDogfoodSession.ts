@@ -85,7 +85,7 @@ export function useDogfoodSession({
           if (session === live.session) live.cancelAction();
         }, () => !superseded() && !cancellation.cancelled);
       } catch (error: unknown) {
-        if (cancellation.deliveryGuard) throw new Error('Escape cancellation could not connect. Check Input Monitoring and try again.', { cause: error });
+        if (cancellation.deliveryGuard) throw new Error('Escape cancellation could not connect. Check that Voxloom is allowed in Accessibility, then try again.', { cause: error });
         // Escape-cancel is optional: a tap failure must never block dictation.
         console.warn('Escape cancellation unavailable; dictating without it.', error);
       }
