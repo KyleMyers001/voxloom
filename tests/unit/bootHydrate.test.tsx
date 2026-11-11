@@ -159,6 +159,25 @@ describe('boot hydrate polish', () => {
     expect(screen.queryByText('JSON')).not.toBeInTheDocument();
   });
 
+  it('does not flash Setup incomplete in the sidebar before a finished user hydrates', async () => {
+    const { gate, release } = deferredGate();
+    const settingsStore = delaySettingsLoad(
+      createSettingsStore(createMemorySettingsIo(serializeSettingsFile(initialSettings, true))),
+      gate,
+    );
+    render(
+      <AppProvider clock={() => 1_800_000_000_000} settingsPersistence={{ enabled: true, store: settingsStore }}>
+        <App />
+      </AppProvider>,
+    );
+    const status = () => document.querySelector('.brand__status');
+    expect(status()).toHaveTextContent('Loading…');
+    expect(status()).not.toHaveTextContent('Setup incomplete');
+    release();
+    await waitFor(() => expect(status()).toHaveTextContent('Ready'));
+    expect(status()).not.toHaveTextContent('Setup incomplete');
+  });
+
   it('marks boot ready after fail-safe corrupt load (toast + defaults)', async () => {
     const { gate, release } = deferredGate();
     const settingsStore = delaySettingsLoad(

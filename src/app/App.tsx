@@ -114,9 +114,12 @@ export function App() {
   // "Set up shortcuts…" in the Settings window opens onboarding here.
   useEffect(() => subscribe(() => listenOnboardingOpen(() => openSetup(null))), [openSetup]);
 
+  // Completion is unknown until durable settings hydrate: a finished user must
+  // not see "Setup incomplete" flash first.
   const status = dogfood.phase === 'recording' ? 'Listening'
     : dogfood.phase === 'transcribing' ? 'Transcribing'
-    : dogfood.phase === 'cleaning' ? 'Cleaning up' : state.onboarding.complete ? 'Ready' : 'Setup incomplete';
+    : dogfood.phase === 'cleaning' ? 'Cleaning up'
+    : !bootReady ? 'Loading…' : state.onboarding.complete ? 'Ready' : 'Setup incomplete';
   const gated = (title: string, screen: ReactNode) =>
     bootReady ? screen : <BootHydratePlaceholder title={title} />;
 
