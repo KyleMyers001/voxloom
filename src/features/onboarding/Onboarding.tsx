@@ -36,7 +36,7 @@ export function clearGuidedProgress(): void {
 }
 const permissions = [
   { kind: 'microphone', key: 'microphone', title: 'Hear your voice', name: 'Microphone', copy: 'Microphone access captures your speech when you dictate.' },
-  { kind: 'accessibility', key: 'accessibility', title: 'Type where you’re writing', name: 'Accessibility', copy: 'Accessibility lets Voxloom insert words into your text field, and lets Esc cancel dictation and single-key shortcuts work.' },
+  { kind: 'accessibility', key: 'accessibility', title: 'Type where you’re writing', name: 'Accessibility', copy: 'Accessibility lets Voxloom insert words into your text field. It also lets Esc cancel dictation and makes single-key shortcuts work.' },
 ] as const;
 /** The other gesture than this try expects: say which one it wants instead of ignoring it. */
 const wrongGesture = {
@@ -237,7 +237,7 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
                 {status !== 'authorized' && <div className="guided-permission-actions"><button className="btn" disabled={!io.native} onClick={() => void permission(item.kind)} type="button">{item.kind === 'accessibility' ? 'Open Accessibility Settings' : `Allow ${item.name}`}</button>{status !== 'not-determined' && item.kind !== 'accessibility' && <button className="btn ghost" disabled={!io.native} onClick={() => void permission(item.kind, true)} type="button">Open {item.name} Settings</button>}</div>}
               </div>;
             })}</div>
-            <p className="guided-mini">Enable Voxloom in System Settings → Privacy &amp; Security, then return and check again. If macOS asks you to quit and reopen Voxloom, do so, then resume setup. An off Accessibility check cannot tell whether access was denied or never requested.</p>
+            <p className="guided-mini">Enable Voxloom in System Settings → Privacy &amp; Security, then return and check again. If macOS asks you to quit and reopen Voxloom, do so, then resume setup. If Accessibility shows as off, Voxloom can’t tell whether access was denied or never requested.</p>
             <button className="btn ghost" onClick={() => void action(controller.refresh)} type="button">Check again</button>
             <div className="guided-pack"><strong>{guided.modelReady ? '✓ Voice pack verified · engine available' : guided.downloading ? `Downloading ${STT_MODEL_CATALOG.find((item) => item.id === guided.downloading)?.label ?? guided.downloading}…` : 'Voice pack needs attention'}</strong><span>{modelLabel} · {size}</span>
               {guided.progress && <progress aria-label="Voice pack download" max={guided.progress.bytesTotal || undefined} value={guided.progress.bytesReceived} />}
