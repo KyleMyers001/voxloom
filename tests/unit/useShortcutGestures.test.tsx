@@ -18,6 +18,8 @@ import type { RegisterOutcome } from
 import { getActiveShortcut, resetActiveShortcut } from '../../src/services/shortcut/activeShortcut';
 import type { OverlayBridge } from
   '../../src/services/shortcut/overlayBridge';
+import { registerPracticeHandler, resetPracticeGestures } from
+  '../../src/features/onboarding/practiceBridge';
 
 const mocks = vi.hoisted(() => ({
   createNativeShortcutController: vi.fn(),
@@ -211,6 +213,50 @@ describe('useShortcutGestures', () => {
       act(() => { onGesture(`${mode}-start`); });
       act(() => { onGesture(`${mode}-finish`); });
       expect(dogfood.stop).toHaveBeenCalledOnce();
+    });
+
+    it('lets the shortcut finish a product recording that setup opened over, and start nothing meanwhile', async () => {
+      vi.mocked(isTauri).mockReturnValue(true);
+      const native = makeNativeController();
+      mocks.createNativeShortcutController.mockReturnValue(native);
+      mocks.createOverlayBridge.mockReturnValue(makeOverlay());
+      const dictation = makeDictation();
+      const recording = makeDogfood({ origin: 'gesture', phase: 'recording' });
+      const practice = vi.fn();
+      const unregister = registerPracticeHandler(practice);
+      const state = {
+        ...createInitialState(0),
+        dictation: { kind: 'listening' as const, runId: 1, waveform: 'silent' as const },
+        onboarding: { complete: false, step: 3 as const },
+      };
+      const { rerender } = renderHook(({ dogfood, onboardingOpen }) =>
+        useShortcutGestures({ ...makeOptions({ dictation, dogfood, state }), onboardingOpen }),
+      { initialProps: { dogfood: recording, onboardingOpen: false } });
+      await waitFor(() => expect(native.setContext).toHaveBeenCalledWith('product'));
+      native.setContext.mockClear();
+      native.resetPartial.mockClear();
+
+      // Setup opens over a hands-free run and resets practice on mount.
+      rerender({ dogfood: recording, onboardingOpen: true });
+      act(() => resetPracticeGestures());
+      // The context stays 'product' and nothing resets, so the latch survives.
+      expect(native.setContext).not.toHaveBeenCalledWith('practice');
+      expect(native.setContext).not.toHaveBeenCalledWith(null);
+      expect(native.resetPartial).not.toHaveBeenCalled();
+      const { onGesture } = mocks.createNativeShortcutController.mock.calls[0][0];
+      act(() => { onGesture('latch-start'); });
+      expect(recording.start).not.toHaveBeenCalled();
+      expect(dictation.start).not.toHaveBeenCalled();
+      act(() => { onGesture('latch-finish'); });
+      expect(recording.stop).toHaveBeenCalledOnce();
+      expect(practice).not.toHaveBeenCalled();
+
+      // Once the product capture ends, the shortcut belongs to practice again.
+      rerender({ dogfood: makeDogfood({ origin: 'gesture', phase: 'transcribing' }), onboardingOpen: true });
+      expect(native.setContext).toHaveBeenLastCalledWith('practice');
+      act(() => { onGesture('hold-start'); });
+      expect(practice).toHaveBeenCalledWith('hold-start');
+      unregister();
     });
 
     it('does not resetPartial on visibilitychange or pagehide', async () => {
