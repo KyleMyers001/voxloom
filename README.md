@@ -22,8 +22,8 @@ focused-window shortcuts; state clears on reload. The Tauri shell persists
 saved audio retention are not implemented. Transcripts in `history.json` are
 stored as **plain text**; see [PRIVACY.md](PRIVACY.md) for where they live,
 how to delete them, and why the app enables Tauri's `macOSPrivateApi`. Guided setup
-requires Microphone, Accessibility and Input Monitoring, a verified voice pack,
-and a registered shortcut. Its two practice tries use real capture and local
+requires Microphone and Accessibility (Input Monitoring is not used; see
+BUS-209), a verified voice pack, and a registered shortcut. Its two practice tries use real capture and local
 inference, and only pass after text is inserted into the focused practice note.
 The browser cannot complete real setup; Set up later leaves it incomplete.
 Unfinished progress resumes without persisting the practice transcript or

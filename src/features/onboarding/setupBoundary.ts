@@ -10,7 +10,7 @@ export function createSetupBoundary(): SetupBoundary {
   return {
     native: isTauri(),
     activeShortcut: getActiveShortcut,
-    query: () => isTauri() ? invoke('setup_query_permissions') : Promise.resolve({ microphone: 'unsupported', accessibility: 'unsupported', inputMonitoring: 'unsupported' }),
+    query: () => isTauri() ? invoke('setup_query_permissions') : Promise.resolve({ microphone: 'unsupported', accessibility: 'unsupported' }),
     request: (kind) => isTauri() ? invoke('setup_request_permission', { kind }) : unsupported(),
     openSettings: (kind) => isTauri() ? invoke('setup_open_permission_settings', { kind }) : unsupported(),
     readiness: (modelId) => isTauri() ? invoke('setup_model_readiness', { modelId }) : Promise.resolve({ modelId, ready: false, reason: 'Real dictation practice requires the macOS desktop app.' }),

@@ -12,7 +12,7 @@ import * as cancelScope from '../../src/services/shortcut/cancelScope';
 import { renderWithApp } from './testUtils';
 
 vi.mock('../../src/features/onboarding/setupBoundary', () => ({ createSetupBoundary: () => ({
-  native: true, query: async () => ({ microphone: 'authorized', accessibility: 'authorized', inputMonitoring: 'authorized' }),
+  native: true, query: async () => ({ microphone: 'authorized', accessibility: 'authorized' }),
   readiness: async (modelId: string) => ({ modelId, ready: true, reason: null }),
   request: vi.fn(), openSettings: vi.fn(), download: vi.fn(), cancelDownload: vi.fn(), activeShortcut: () => 'Ctrl + Shift + Space',
 }) }));

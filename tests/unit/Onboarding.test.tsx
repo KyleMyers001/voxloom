@@ -10,7 +10,7 @@ import { renderWithApp } from './testUtils';
 
 export function setupBoundary(): SetupBoundary {
   return {
-    native: true, query: vi.fn().mockResolvedValue({ microphone: 'authorized', accessibility: 'authorized', inputMonitoring: 'authorized' }),
+    native: true, query: vi.fn().mockResolvedValue({ microphone: 'authorized', accessibility: 'authorized' }),
     readiness: vi.fn(async (modelId) => ({ modelId, ready: true, reason: null })),
     request: vi.fn(), openSettings: vi.fn(), download: vi.fn(), cancelDownload: vi.fn(), activeShortcut: () => 'Ctrl + Shift + Space',
   };
@@ -33,7 +33,7 @@ describe('B guided setup', () => {
     const io = setupBoundary();
     renderWithApp(<Onboarding boundary={io} onClose={vi.fn()} progressStorage={{ read: () => JSON.stringify({ version: 1, step: 3 }), write: vi.fn() }} />);
     await waitFor(() => expect(io.readiness).toHaveBeenCalled());
-    vi.mocked(io.query).mockResolvedValue({ microphone: 'authorized', accessibility: 'not-granted', inputMonitoring: 'authorized' });
+    vi.mocked(io.query).mockResolvedValue({ microphone: 'authorized', accessibility: 'not-granted' });
     const reset = vi.fn();
     const unsubscribe = subscribePracticeReset(reset);
     try {
@@ -63,22 +63,26 @@ describe('B guided setup', () => {
     expect(close).toHaveBeenCalledOnce();
     expect(screen.getByTestId('complete')).toHaveTextContent('true');
   });
-  it('requires all three permissions and a ready pack before the accepted shortcut and writable two-try note', async () => {
+  it('requires only Microphone and Accessibility and a ready pack before the accepted shortcut and writable two-try note', async () => {
     const user = userEvent.setup();
     const io = setupBoundary();
-    vi.mocked(io.query).mockResolvedValue({ microphone: 'authorized', accessibility: 'authorized', inputMonitoring: 'not-granted' });
+    vi.mocked(io.query).mockResolvedValue({ microphone: 'authorized', accessibility: 'not-granted' });
     renderWithApp(<Onboarding boundary={io} onClose={vi.fn()} progressStorage={storage()} />);
     await user.click(screen.getByRole('button', { name: /Start setup/ }));
     expect(screen.getByRole('heading', { name: /A few permissions/ })).toBeInTheDocument();
+    expect(screen.getByText(/Two permissions connect/)).toBeInTheDocument();
+    expect(screen.queryByText(/Input Monitoring/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Continue/ })).toBeDisabled();
-    expect(screen.getByText(/Input Monitoring detects Escape/)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Allow Input Monitoring' }));
-    expect(io.request).toHaveBeenCalledWith('input-monitoring');
-    vi.mocked(io.query).mockResolvedValue({ microphone: 'authorized', accessibility: 'authorized', inputMonitoring: 'authorized' });
+    expect(screen.getByText(/Accessibility lets Voxloom insert words/)).toHaveTextContent(/Esc/);
+    await user.click(screen.getByRole('button', { name: 'Open Accessibility Settings' }));
+    expect(io.request).toHaveBeenCalledWith('accessibility');
+    vi.mocked(io.query).mockResolvedValue({ microphone: 'authorized', accessibility: 'authorized' });
     await user.click(screen.getByRole('button', { name: 'Check again' }));
     await waitFor(() => expect(screen.getByRole('button', { name: /Continue/ })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: /Continue/ }));
     expect(screen.getByRole('heading', { name: /Your shortcut/ })).toBeInTheDocument();
+    expect(screen.getByText(/Single keys are optional/)).toHaveTextContent('same Accessibility access');
+    expect(screen.queryByText(/Input Monitoring/)).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Use this shortcut/ }));
     const note = screen.getByRole('textbox', { name: 'Practice dictation field' });
     expect(note).not.toHaveAttribute('readonly');

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createGuidedSetup, type SetupBoundary } from '../../src/features/onboarding/guidedSetup';
 import { SttError } from '../../src/services/stt/types';
 
-const authorized = { microphone: 'authorized', accessibility: 'authorized', inputMonitoring: 'authorized' } as const;
+const authorized = { microphone: 'authorized', accessibility: 'authorized' } as const;
 export function boundary(): SetupBoundary {
   return {
     query: vi.fn().mockResolvedValue(authorized),
@@ -197,7 +197,7 @@ describe('guided setup lifecycle', () => {
     expect(await setup.refresh()).toBe(false);
     io.activeShortcut = () => 'Ctrl + Shift + Space';
     expect(await setup.refresh()).toBe(true);
-    io.query = async () => ({ ...authorized, inputMonitoring: 'not-granted' });
+    io.query = async () => ({ ...authorized, accessibility: 'not-granted' });
     expect(await setup.refresh()).toBe(false);
   });
   it('keeps a same-configuration verdict through a background recheck between validate and result', async () => {

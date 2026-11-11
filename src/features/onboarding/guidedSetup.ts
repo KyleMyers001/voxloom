@@ -5,9 +5,9 @@ import type { DogfoodResult } from '../../services/stt/dogfoodPath';
 export interface PracticeLease { id: number; mode: 'hold' | 'tap'; model: string; shortcut: string }
 export interface SetupProgressStorage { read(): string | null; write(value: string): void; clear?(): void }
 
-export type PermissionKind = 'microphone' | 'accessibility' | 'input-monitoring';
+export type PermissionKind = 'microphone' | 'accessibility';
 export type PermissionState = 'authorized' | 'not-determined' | 'denied' | 'restricted' | 'not-granted' | 'unknown' | 'unsupported';
-export interface Permissions { microphone: PermissionState; accessibility: PermissionState; inputMonitoring: PermissionState }
+export interface Permissions { microphone: PermissionState; accessibility: PermissionState }
 export type SetupModelState = 'pending' | 'missing' | 'available' | 'downloading' | 'unavailable';
 export interface ModelReadiness { modelId: string; ready: boolean; reason: string | null; status?: SetupModelState }
 export interface SetupBoundary {
@@ -35,9 +35,9 @@ export interface GuidedState {
   tapDone: boolean;
   mode: 'hold' | 'tap';
 }
-const unknown: Permissions = { microphone: 'unknown', accessibility: 'unknown', inputMonitoring: 'unknown' };
+const unknown: Permissions = { microphone: 'unknown', accessibility: 'unknown' };
 export function permissionsAuthorized(value: Permissions): boolean {
-  return value?.microphone === 'authorized' && value?.accessibility === 'authorized' && value?.inputMonitoring === 'authorized';
+  return value?.microphone === 'authorized' && value?.accessibility === 'authorized';
 }
 
 /** Setup authority: readiness is ephemeral; persisted progress never grants it. */

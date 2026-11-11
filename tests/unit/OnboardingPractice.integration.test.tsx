@@ -15,7 +15,7 @@ vi.mock('../../src/services/stt/factory', () => ({
 
 it('joins real capture/STT/delivery hooks for hold then hands-free, preserves hold on Escape and completes only both field results', async () => {
   const io = {
-    native: true, query: async () => ({ microphone: 'authorized', accessibility: 'authorized', inputMonitoring: 'authorized' } as const),
+    native: true, query: async () => ({ microphone: 'authorized', accessibility: 'authorized' } as const),
     request: vi.fn(), openSettings: vi.fn(), readiness: async (modelId: string) => ({ modelId, ready: true, reason: null }),
     download: vi.fn(), cancelDownload: vi.fn(), activeShortcut: () => 'Ctrl + Shift + Space',
   };
@@ -61,7 +61,7 @@ it('moving on after a successful try neither cancels capture nor reports a cance
   fake.start.mockClear();
   fake.cancel.mockClear();
   const io = {
-    native: true, query: async () => ({ microphone: 'authorized', accessibility: 'authorized', inputMonitoring: 'authorized' } as const),
+    native: true, query: async () => ({ microphone: 'authorized', accessibility: 'authorized' } as const),
     request: vi.fn(), openSettings: vi.fn(), readiness: async (modelId: string) => ({ modelId, ready: true, reason: null }),
     download: vi.fn(), cancelDownload: vi.fn(), activeShortcut: () => 'Ctrl + Shift + Space',
   };

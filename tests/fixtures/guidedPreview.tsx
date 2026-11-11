@@ -10,7 +10,7 @@ const appearance = params.get('theme') ?? 'dark';
 document.documentElement.dataset.appearanceResolved = appearance;
 const boundary: SetupBoundary = {
   native: true,
-  query: async () => ({ microphone: 'authorized', accessibility: 'authorized', inputMonitoring: 'authorized' }),
+  query: async () => ({ microphone: 'authorized', accessibility: 'authorized' }),
   request: async () => {}, openSettings: async () => {},
   readiness: async (modelId) => ({ modelId, ready: true, reason: null }),
   download: async () => {}, cancelDownload: async () => {},

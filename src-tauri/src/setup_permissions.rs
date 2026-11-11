@@ -9,7 +9,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 pub enum PermissionKind {
     Microphone,
     Accessibility,
-    InputMonitoring,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
@@ -30,7 +29,6 @@ pub enum PermissionState {
 pub struct Permissions {
     microphone: PermissionState,
     accessibility: PermissionState,
-    input_monitoring: PermissionState,
 }
 
 trait PermissionBackend {
@@ -48,7 +46,6 @@ fn query_all(backend: &impl PermissionBackend) -> Permissions {
     Permissions {
         microphone: backend.query(PermissionKind::Microphone),
         accessibility: backend.query(PermissionKind::Accessibility),
-        input_monitoring: backend.query(PermissionKind::InputMonitoring),
     }
 }
 fn request_one(
@@ -67,9 +64,6 @@ fn settings_url(kind: PermissionKind) -> &'static str {
         }
         PermissionKind::Accessibility => {
             "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
-        }
-        PermissionKind::InputMonitoring => {
-            "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
         }
     }
 }
@@ -104,8 +98,6 @@ extern "C" {
     // with the prompt option macOS shows its alert asynchronously when untrusted.
     fn AXIsProcessTrustedWithOptions(options: *const c_void) -> u8;
     static kAXTrustedCheckOptionPrompt: *const c_void;
-    fn CGPreflightListenEventAccess() -> bool;
-    fn CGRequestListenEventAccess() -> bool;
 }
 #[cfg(target_os = "macos")]
 #[link(name = "CoreFoundation", kind = "framework")]
@@ -161,9 +153,6 @@ impl PermissionBackend for System {
                 PermissionKind::Accessibility => {
                     from_preflight(unsafe { AXIsProcessTrusted() } != 0)
                 }
-                PermissionKind::InputMonitoring => {
-                    from_preflight(unsafe { CGPreflightListenEventAccess() })
-                }
             }
         }
         #[cfg(not(target_os = "macos"))]
@@ -192,12 +181,6 @@ impl PermissionBackend for System {
             }
             PermissionKind::Accessibility => {
                 request_accessibility(&AX_PROMPTED, prompt_accessibility, || open_settings(kind))
-            }
-            PermissionKind::InputMonitoring => {
-                unsafe {
-                    CGRequestListenEventAccess();
-                }
-                Ok(())
             }
         }
         #[cfg(not(target_os = "macos"))]
@@ -322,7 +305,6 @@ mod tests {
         let states = query_all(&fake);
         assert_eq!(states.microphone, PermissionState::Denied);
         assert_eq!(states.accessibility, PermissionState::NotGranted);
-        assert_eq!(states.input_monitoring, PermissionState::NotGranted);
         assert!(fake.0.borrow().is_empty());
         assert_eq!(from_preflight(true), PermissionState::Authorized);
     }
@@ -330,16 +312,24 @@ mod tests {
     fn explicit_request_only_requests_the_named_permission_then_requeries() {
         let fake = Fake(RefCell::new(vec![]));
         assert_eq!(
-            request_one(&fake, PermissionKind::InputMonitoring).unwrap(),
+            request_one(&fake, PermissionKind::Accessibility).unwrap(),
             PermissionState::NotGranted
         );
-        assert_eq!(*fake.0.borrow(), vec![PermissionKind::InputMonitoring]);
+        assert_eq!(*fake.0.borrow(), vec![PermissionKind::Accessibility]);
         assert_eq!(
             settings_url(PermissionKind::Microphone),
             "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
         );
         assert!(settings_url(PermissionKind::Accessibility).ends_with("Privacy_Accessibility"));
-        assert!(settings_url(PermissionKind::InputMonitoring).ends_with("Privacy_ListenEvent"));
+    }
+    #[test]
+    fn setup_asks_only_for_microphone_and_accessibility() {
+        // BUS-209: Input Monitoring is not used, so setup cannot query or request it.
+        assert!(serde_json::from_str::<PermissionKind>("\"input-monitoring\"").is_err());
+        let states = serde_json::to_value(query_all(&Fake(RefCell::new(vec![])))).unwrap();
+        let mut keys: Vec<_> = states.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, ["accessibility", "microphone"]);
     }
     #[test]
     fn accessibility_prompts_once_per_launch_then_opens_settings() {

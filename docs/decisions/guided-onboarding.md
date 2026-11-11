@@ -8,9 +8,12 @@ serve hold/speak/release, then double-tap/speak/press-once-to-finish.
 ## Permission and model authority
 
 - Microphone uses the existing AVFoundation bridge. Only microphone can report
-  `not-determined`, `denied` and `restricted` distinctly. Accessibility and Input
-  Monitoring boolean preflights report `not-granted` when false, never an invented
+  `not-determined`, `denied` and `restricted` distinctly. The Accessibility
+  boolean preflight reports `not-granted` when false, never an invented
   denied/not-yet-requested distinction. Non-Mac adapters return unsupported.
+- Setup asks only for Microphone and Accessibility. Input Monitoring is not used
+  (BUS-209): shortcut, hold-release and Esc taps run on Accessibility, so setup
+  never queries or requests it.
 - Querying, rechecking, returning to the window and model polling never request
   permissions. Allow is explicit. The first Accessibility request in a launch
   asks macOS to prompt (`AXIsProcessTrustedWithOptions` with the prompt option),
@@ -18,8 +21,7 @@ serve hold/speak/release, then double-tap/speak/press-once-to-finish.
   system's own Open System Settings button, so Voxloom does not also open the
   pane as a second handoff. macOS may not repeat that alert, so later requests in
   the same launch open the Accessibility pane. Microphone requests only if not
-  determined and otherwise hands off; Input Monitoring has an explicit request
-  and separate Settings action.
+  determined and otherwise hands off with a separate Settings action.
 - The new-user recommendation is **Whisper Base English**, `whisper-base.en`,
   **147,964,211 bytes** (148 MB). Its native revision, URL, hash and size pin are
   unchanged. No RAM, latency or quality benchmark motivated or accompanies this

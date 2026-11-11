@@ -36,8 +36,7 @@ export function clearGuidedProgress(): void {
 }
 const permissions = [
   { kind: 'microphone', key: 'microphone', title: 'Hear your voice', name: 'Microphone', copy: 'Microphone access captures your speech when you dictate.' },
-  { kind: 'accessibility', key: 'accessibility', title: 'Type where you’re writing', name: 'Accessibility', copy: 'Accessibility lets Voxloom insert words into your text field.' },
-  { kind: 'input-monitoring', key: 'inputMonitoring', title: 'Stop with Esc. Use your shortcut.', name: 'Input Monitoring', copy: 'Input Monitoring detects Escape to cancel dictation and supports certain shortcuts.' },
+  { kind: 'accessibility', key: 'accessibility', title: 'Type where you’re writing', name: 'Accessibility', copy: 'Accessibility lets Voxloom insert words into your text field, and lets Esc cancel dictation and single-key shortcuts work.' },
 ] as const;
 /** The other gesture than this try expects: say which one it wants instead of ignoring it. */
 const wrongGesture = {
@@ -52,7 +51,7 @@ export function Onboarding(props: OnboardingProps) {
   return <HydratedOnboarding {...props} />;
 }
 
-/** Approved B / v3: a setup spine, three requirements and two real tries in one note. */
+/** Approved B / v3: a setup spine, two permissions and two real tries in one note. */
 function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: OnboardingProps) {
   const { clipboard, settings, setup, state } = useApp();
   const latest = useRef(state.settings);
@@ -230,7 +229,7 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
 
           </>}
           {guided.step === 1 && <>
-            <p className="guided-intro">Three permissions connect your microphone, typing and keyboard controls. We’ll check each before moving on.</p>
+            <p className="guided-intro">Two permissions connect your microphone, typing and keyboard controls. We’ll check each before moving on.</p>
             <div className="guided-permissions">{permissions.map((item) => {
               const status = guided.permissions[item.key];
               return <div className="guided-permission" key={item.kind}>
@@ -238,7 +237,7 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
                 {status !== 'authorized' && <div className="guided-permission-actions"><button className="btn" disabled={!io.native} onClick={() => void permission(item.kind)} type="button">{item.kind === 'accessibility' ? 'Open Accessibility Settings' : `Allow ${item.name}`}</button>{status !== 'not-determined' && item.kind !== 'accessibility' && <button className="btn ghost" disabled={!io.native} onClick={() => void permission(item.kind, true)} type="button">Open {item.name} Settings</button>}</div>}
               </div>;
             })}</div>
-            <p className="guided-mini">Enable Voxloom in System Settings → Privacy &amp; Security, then return and check again. If macOS asks you to quit and reopen Voxloom, do so, then resume setup. An off Accessibility or Input Monitoring check cannot tell whether access was denied or never requested.</p>
+            <p className="guided-mini">Enable Voxloom in System Settings → Privacy &amp; Security, then return and check again. If macOS asks you to quit and reopen Voxloom, do so, then resume setup. An off Accessibility check cannot tell whether access was denied or never requested.</p>
             <button className="btn ghost" onClick={() => void action(controller.refresh)} type="button">Check again</button>
             <div className="guided-pack"><strong>{guided.modelReady ? '✓ Voice pack verified · engine available' : guided.downloading ? `Downloading ${STT_MODEL_CATALOG.find((item) => item.id === guided.downloading)?.label ?? guided.downloading}…` : 'Voice pack needs attention'}</strong><span>{modelLabel} · {size}</span>
               {guided.progress && <progress aria-label="Voice pack download" max={guided.progress.bytesTotal || undefined} value={guided.progress.bytesReceived} />}
@@ -254,7 +253,7 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
             <div className="guided-shortcut"><span>Dictation shortcut · {state.settings.shortcut === initialSettings.shortcut ? 'Recommended' : 'Custom'}</span><KeyCombo combo={state.settings.shortcut} /><p>Hold to speak. Release to finish.</p></div>
             <div className="field"><span id="onboarding-shortcut-label">Global shortcut</span><small id="onboarding-shortcut-help">{SHORTCUT_HELP}</small><ShortcutRecorder defaultValue={initialSettings.shortcut} helpId="onboarding-shortcut-help" id="onboarding-shortcut" labelId="onboarding-shortcut-label" onChange={(value) => settings.update({ key: 'shortcut', value })} value={state.settings.shortcut} /></div>
             <p className="guided-mini" role="status">{io.activeShortcut() === state.settings.shortcut ? `✓ Registered: ${state.settings.shortcut}` : 'Waiting for a working native binding. A refused shortcut keeps the last working binding; choose another or restore the recommended shortcut.'}</p>
-            <details><summary>Prefer a single key or hands-free?</summary><p>Single keys are optional on Mac and need Input Monitoring. Double-tap the same shortcut for hands-free, then press once to finish. We’ll try both ways next.</p></details>
+            <details><summary>Prefer a single key or hands-free?</summary><p>Single keys are optional on Mac and use the same Accessibility access. Double-tap the same shortcut for hands-free, then press once to finish. We’ll try both ways next.</p></details>
             <p className="guided-mini">You can change this anytime in Settings.</p>
           </>}
           {guided.step === 3 && <>

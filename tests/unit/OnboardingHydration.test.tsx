@@ -17,7 +17,7 @@ function deferredSettings() {
 }
 function boundary(): SetupBoundary {
   return {
-    native: true, query: vi.fn(async () => ({ microphone: 'authorized', accessibility: 'authorized', inputMonitoring: 'authorized' } as const)),
+    native: true, query: vi.fn(async () => ({ microphone: 'authorized', accessibility: 'authorized' } as const)),
     readiness: vi.fn(async (modelId) => ({ modelId, ready: true, reason: null })),
     request: vi.fn(), openSettings: vi.fn(), download: vi.fn(), cancelDownload: vi.fn(), activeShortcut: () => shortcut,
   };

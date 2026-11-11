@@ -3,7 +3,7 @@ import { createGuidedSetup, type SetupBoundary } from '../../src/features/onboar
 
 function boundary(): SetupBoundary {
   return {
-    native: true, query: vi.fn().mockResolvedValue({ microphone: 'authorized', accessibility: 'authorized', inputMonitoring: 'authorized' }),
+    native: true, query: vi.fn().mockResolvedValue({ microphone: 'authorized', accessibility: 'authorized' }),
     readiness: vi.fn(async (modelId) => ({ modelId, ready: true, reason: null })),
     request: vi.fn(), openSettings: vi.fn(), download: vi.fn(), cancelDownload: vi.fn(), activeShortcut: () => 'Ctrl + Shift + Space',
   };

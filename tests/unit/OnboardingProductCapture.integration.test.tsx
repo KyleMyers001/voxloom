@@ -52,7 +52,7 @@ it('Resume setup during a product recording leaves Home the only transcription c
   const copy = vi.fn(async () => undefined);
   const product: { current: UseDogfoodCaptureResult | null } = { current: null };
   const io: SetupBoundary = {
-    native: true, query: async () => ({ microphone: 'authorized', accessibility: 'authorized', inputMonitoring: 'authorized' }),
+    native: true, query: async () => ({ microphone: 'authorized', accessibility: 'authorized' }),
     readiness: async (modelId) => ({ modelId, ready: true, reason: null }),
     request: vi.fn(), openSettings: vi.fn(), download: vi.fn(), cancelDownload: vi.fn(), activeShortcut: () => 'Ctrl + Shift + Space',
   };
