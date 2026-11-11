@@ -91,8 +91,11 @@ The same permission lets Voxloom watch for its own keys: Esc while you
 dictate, a single-key shortcut (such as right ⌥ or F13), and the key release
 that ends a hold-to-talk. Voxloom only compares each key event with its
 shortcut, then passes it on to your apps unchanged; the one exception is Esc,
-which is held back only to cancel a dictation in progress. No keystrokes are
-saved or sent anywhere. Voxloom does not use the Input Monitoring permission.
+which is held back only to cancel a dictation in progress. A single-key
+shortcut also notes mouse clicks, so a key held for a click (such as ⌥-click)
+isn't taken for the shortcut; it doesn't record where or what you clicked, and
+passes the click on unchanged. No keystrokes or clicks are saved or sent
+anywhere. Voxloom does not use the Input Monitoring permission.
 
 ## Clipboard
 
