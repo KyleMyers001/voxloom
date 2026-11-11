@@ -39,6 +39,11 @@ const permissions = [
   { kind: 'accessibility', key: 'accessibility', title: 'Type where you’re writing', name: 'Accessibility', copy: 'Accessibility lets Voxloom insert words into your text field.' },
   { kind: 'input-monitoring', key: 'inputMonitoring', title: 'Stop with Esc. Use your shortcut.', name: 'Input Monitoring', copy: 'Input Monitoring detects Escape to cancel dictation and supports certain shortcuts.' },
 ] as const;
+/** The other gesture than this try expects: say which one it wants instead of ignoring it. */
+const wrongGesture = {
+  hold: 'That was a double-tap. For this try, hold your shortcut, speak, then release.',
+  tap: 'That was a hold. For this try, double-tap your shortcut, speak, then press it once to finish.',
+} as const;
 
 /** Do not construct the controller or expose setup actions against boot defaults. */
 export function Onboarding(props: OnboardingProps) {
@@ -58,6 +63,7 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
     () => latest.current.shortcut, progressStorage ?? localProgress));
   const guided = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const [error, setError] = useState('');
+  const [hint, setHint] = useState<string | null>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const guard = useRef<OwnFieldDeliveryGuard | undefined>(undefined);
@@ -82,6 +88,7 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
   function cancel() {
     sequence.current++;
     pending.current = false;
+    setHint(null);
     controller.cancelPractice();
     guard.current = undefined;
     // Only a live capture is cancelled: after a result, Try double-tap/Back
@@ -137,10 +144,19 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
     if (controller.getSnapshot().step !== 3) return;
     if (gesture === 'hold-start' || gesture === 'latch-start') {
       if (pending.current || ['starting', 'recording', 'transcribing', 'cleaning'].includes(live.current.phase)) return;
+      const mode = gesture === 'hold-start' ? 'hold' : 'tap';
+      const expected = controller.getSnapshot().mode;
+      // A start that will not become a try must not leave the gesture machine
+      // latched/holding: a stray latch would turn the next hold into its finish.
+      if (mode !== expected) { setHint(wrongGesture[expected]); resetPracticeGestures(); return; }
+      setHint(null);
       const own = ++sequence.current;
       pending.current = true;
-      void controller.begin(gesture === 'hold-start' ? 'hold' : 'tap').then(async (lease) => {
-        if (!lease || own !== sequence.current) { if (own === sequence.current) pending.current = false; return; }
+      void controller.begin(mode).then(async (lease) => {
+        if (!lease || own !== sequence.current) {
+          if (own === sequence.current) { pending.current = false; resetPracticeGestures(); }
+          return;
+        }
         guard.current = {
           current: () => controller.current(lease),
           validate: async () => (await controller.refresh()) && controller.current(lease),
@@ -187,7 +203,7 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
   const status = practice.phase === 'recording' ? (guided.mode === 'tap' ? 'Listening hands-free · press once to finish' : 'Listening · release to finish')
     : practice.phase === 'starting' ? 'Preparing microphone…'
       : practice.phase === 'transcribing' || practice.phase === 'cleaning' ? 'Turning speech into text…'
-        : practice.message ?? 'Ready when you are';
+        : hint ?? practice.message ?? 'Ready when you are';
   const next = () => action(async () => { cancel(); await controller.next(); });
   const finish = () => action(async () => {
     if (await controller.finish()) { controller.clearProgress(); setup.update({ complete: true }); close(); }

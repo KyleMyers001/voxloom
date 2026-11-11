@@ -1,4 +1,4 @@
-import { dispatchPracticeGesture } from '../../src/features/onboarding/practiceBridge';
+import { dispatchPracticeGesture, subscribePracticeReset } from '../../src/features/onboarding/practiceBridge';
 import { act } from '@testing-library/react';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -28,6 +28,19 @@ describe('B guided setup', () => {
     act(() => dispatchPracticeGesture('hold-start'));
     await user.click(screen.getByRole('button', { name: 'Close Set up Voxloom' }));
     expect(close).toHaveBeenCalledOnce();
+  });
+  it('a start refused by a failed recheck resets the gesture machine so no stray latch remains', async () => {
+    const io = setupBoundary();
+    renderWithApp(<Onboarding boundary={io} onClose={vi.fn()} progressStorage={{ read: () => JSON.stringify({ version: 1, step: 3 }), write: vi.fn() }} />);
+    await waitFor(() => expect(io.readiness).toHaveBeenCalled());
+    vi.mocked(io.query).mockResolvedValue({ microphone: 'authorized', accessibility: 'not-granted', inputMonitoring: 'authorized' });
+    const reset = vi.fn();
+    const unsubscribe = subscribePracticeReset(reset);
+    try {
+      act(() => dispatchPracticeGesture('hold-start'));
+      await waitFor(() => expect(reset).toHaveBeenCalled());
+      expect(screen.getByText(/Check permissions, voice pack and registered shortcut/)).toBeInTheDocument();
+    } finally { unsubscribe(); }
   });
   it('discloses Base English before Start and Set up later leaves setup incomplete', async () => {
     const user = userEvent.setup();
