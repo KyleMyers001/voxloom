@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   browser-app:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       PLAYWRIGHT_BROWSERS_PATH: .playwright-browsers
     steps:
@@ -36,7 +36,7 @@ jobs:
     # Release-mode Playwright suite (playwright.release.config.ts): serves the
     # production build via `vite preview` and checks onboarding with no dev
     # scenarios. Separate job so it runs in parallel with browser-app.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       PLAYWRIGHT_BROWSERS_PATH: .playwright-browsers
     steps:
@@ -60,7 +60,7 @@ jobs:
           retention-days: 14
 
   rust:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: src-tauri
@@ -92,7 +92,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-24.04, macos-latest]
     runs-on: ${{ matrix.os }}
     env:
       # The worker never uses cpp-httplib's HTTPS (LLAMA_CURL is off, models
@@ -147,7 +147,7 @@ jobs:
     # Builds and tests with the opt-in `whisper` feature (whisper-rs ->
     # whisper.cpp via cmake + bindgen/libclang), which the other Rust jobs
     # never compile. Separate cache key: whisper.cpp objects differ.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: src-tauri
@@ -175,7 +175,7 @@ jobs:
     # RustSec advisories for src-tauri/Cargo.lock (BUS-63). Runs inside
     # src-tauri so .cargo/audit.toml (the reasoned ignore list) is loaded;
     # -D warnings fails on any advisory not ignored there.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     defaults:
