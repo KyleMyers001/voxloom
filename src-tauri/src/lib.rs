@@ -17,6 +17,8 @@ mod setup_permissions;
 mod store_backup;
 mod store_read;
 mod stt;
+mod tap_guard;
+mod tap_thread;
 
 use std::sync::Arc;
 
@@ -279,7 +281,24 @@ pub fn run() {
             stt.turbo.retire_main(webview.label());
         }
     });
-    builder.run(app_context()).expect("failed to run Voxloom");
+    let app = builder
+        .build(app_context())
+        .expect("failed to build Voxloom");
+    app.run(|_, event| {
+        if let tauri::RunEvent::Exit = event {
+            close_taps();
+        }
+    });
+}
+
+/// On quit, tear down every event tap before the process goes (BUS-209):
+/// the Escape tap, the lone-key tap and the hold-release key-up tap.
+/// Best effort: the app is going either way. Runs on the main thread, which
+/// the lone-key disarm requires.
+fn close_taps() {
+    cancel_scope::close();
+    let _ = lone_key::commands::lone_key_disarm();
+    let _ = hold_release::hold_release_disarm();
 }
 
 /// The single `generate_context!` expansion. Invoking the macro twice in one

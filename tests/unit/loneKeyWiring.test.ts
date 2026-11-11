@@ -9,14 +9,23 @@ import { beginRecordingSuspend, resetRecordingSuspend } from '../../src/services
 
 afterEach(() => resetRecordingSuspend());
 
-function setup(opts: { armError?: string | ((token: string) => string | undefined); granted?: boolean; requestThrows?: boolean } = {}) {
+function setup(opts: {
+  armError?: string | ((token: string) => string | undefined);
+  granted?: boolean;
+  registerGate?: () => Promise<void>;
+  requestThrows?: boolean;
+} = {}) {
   const calls: string[] = [];
   const gestures: ShortcutGesture[] = [];
   let pluginEdge: ((edge: 'pressed' | 'released') => void) | null = null;
   let loneEdge: ((edge: LoneKeyEdge) => void) | null = null;
   const api: NativeShortcutApi = {
     isAvailable: () => true,
-    async register(hotkey, edge) { calls.push(`register ${hotkey}`); pluginEdge = edge; },
+    async register(hotkey, edge) {
+      calls.push(`register ${hotkey}`);
+      pluginEdge = edge;
+      await opts.registerGate?.();
+    },
     async unregister(hotkey) { calls.push(`unregister ${hotkey}`); },
     async unregisterAll() { calls.push('unregisterAll'); },
   };
@@ -49,11 +58,13 @@ function setup(opts: { armError?: string | ((token: string) => string | undefine
     now += ms;
     for (const [id, t] of [...timers]) if (t.at <= now) { timers.delete(id); t.cb(); }
   };
+  const lost: string[] = [];
   const controller = createNativeShortcutController({
-    api, clock: () => now, holdRelease, loneKey, onGesture: (g) => gestures.push(g), scheduler,
+    api, clock: () => now, holdRelease, loneKey, onBindingLost: (m) => lost.push(m),
+    onGesture: (g) => gestures.push(g), scheduler,
   });
   return {
-    advance, calls, controller, gestures, holdArm,
+    advance, calls, controller, gestures, holdArm, lost,
     lone: (edge: LoneKeyEdge) => loneEdge!(edge),
     plugin: (edge: 'pressed' | 'released') => pluginEdge!(edge),
     listening: () => loneEdge !== null,
@@ -101,8 +112,8 @@ describe('a lone key as the shortcut', () => {
     expect(t.calls).toEqual(['disarm', 'arm F13']);
   });
 
-  it('a refusal (no Input Monitoring) puts the previous combo back', async () => {
-    const t = setup({ armError: 'Input Monitoring permission is needed' });
+  it('a refusal (no Accessibility) puts the previous combo back', async () => {
+    const t = setup({ armError: 'Accessibility permission is needed' });
     await t.controller.setShortcut('Ctrl + Shift + Space');
     t.calls.length = 0;
     const outcome = await t.controller.setShortcut('AltRight');
@@ -166,6 +177,49 @@ describe('a lone key as the shortcut', () => {
     expect(t.gestures).toEqual(['latch-start', 'latch-finish']);
   });
 
+  it('access-lost (BUS-209) finishes a hold and leaves nothing active until a save', async () => {
+    const t = setup();
+    await t.controller.setShortcut('AltRight');
+    t.lone('pressed');
+    t.advance(320);
+    t.lone('access-lost'); // native already sent released + cancelled, maybe lost
+    expect(t.gestures).toEqual(['hold-start', 'hold-finish']);
+    expect(t.controller.activeHotkey()).toBeNull();
+    expect(t.lost).toHaveLength(1);
+    t.lone('pressed');
+    t.advance(320);
+    expect(t.gestures).toEqual(['hold-start', 'hold-finish']);
+    t.calls.length = 0;
+    await t.controller.setShortcut('AltRight', { userInitiated: true });
+    expect(t.calls).toEqual(['requestAccess', 'arm AltRight']);
+    expect(t.controller.activeHotkey()).toBe('AltRight');
+  });
+
+  it('access-lost while a combo is registering does not kill the new combo', async () => {
+    let open: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { open = resolve; });
+    const t = setup({ registerGate: () => gate });
+    await t.controller.setShortcut('AltRight');
+    const pending = t.controller.setShortcut('Ctrl + Shift + Space');
+    await vi.waitFor(() => expect(t.calls).toContain('register Control+Shift+Space'));
+    t.lone('access-lost'); // the lone key is still active until register resolves
+    expect(t.lost).toHaveLength(1);
+    open();
+    await expect(pending).resolves.toMatchObject({ active: 'Control+Shift+Space', ok: true });
+    t.plugin('pressed');
+    t.advance(320);
+    expect(t.gestures).toEqual(['hold-start']);
+  });
+
+  it('a late access-lost is ignored once a combo is the shortcut', async () => {
+    const t = setup();
+    await t.controller.setShortcut('AltRight');
+    await t.controller.setShortcut('Ctrl + Shift + Space');
+    t.lone('access-lost');
+    expect(t.controller.activeHotkey()).toBe('Control+Shift+Space');
+    expect(t.lost).toEqual([]);
+  });
+
   it('ignores edges while a combo, or nothing, is the shortcut', async () => {
     const t = setup();
     await t.controller.setShortcut('Ctrl + Shift + Space');
@@ -220,7 +274,7 @@ describe('a lone key as the shortcut', () => {
     expect(t.listening()).toBe(false);
   });
 
-  describe('Input Monitoring request', () => {
+  describe('Accessibility request', () => {
     it('is asked for once, before arming, when the user saves a lone key', async () => {
       const t = setup();
       await t.controller.setShortcut('AltRight', { userInitiated: true });
@@ -246,7 +300,7 @@ describe('a lone key as the shortcut', () => {
     });
 
     it('is not asked for again when a refused save restores the previous lone key', async () => {
-      const t = setup({ armError: (token) => (token === 'F13' ? 'Input Monitoring permission is needed' : undefined) });
+      const t = setup({ armError: (token) => (token === 'F13' ? 'Accessibility permission is needed' : undefined) });
       await t.controller.setShortcut('AltRight');
       t.calls.length = 0;
       const outcome = await t.controller.setShortcut('F13', { userInitiated: true });
@@ -255,7 +309,7 @@ describe('a lone key as the shortcut', () => {
     });
 
     it('still arms (and reports the refusal) when the request says not yet', async () => {
-      const t = setup({ armError: 'Input Monitoring permission is needed', granted: false });
+      const t = setup({ armError: 'Accessibility permission is needed', granted: false });
       const outcome = await t.controller.setShortcut('F13', { userInitiated: true });
       expect(t.calls).toEqual(['requestAccess', 'arm F13']);
       expect(outcome).toMatchObject({ ok: false });

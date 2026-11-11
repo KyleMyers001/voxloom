@@ -145,6 +145,17 @@ export function useShortcutGestures(options: GestureOptions) {
   const registeredRef = useRef<string | null>(null);
   /** BUS-69: combo lost by a failed re-bind after recording (until recovered). */
   const lostRef = useRef<string | null>(null);
+  /** Nothing holds the registered combo any more: tell every window. Returns it. */
+  const reportLost = (message: string): string | null => {
+    const lost = registeredRef.current;
+    if (lost === null) return null;
+    registeredRef.current = null;
+    emitShortcutBound({ active: null, message, ok: false, previous: lost, shortcut: lost });
+    void isSettingsWindowOpen().then((open) => {
+      if (!open) optionsRef.current.onShortcutError?.(bootRefusedText(lost, null));
+    }, () => undefined);
+    return lost;
+  };
   optionsRef.current = options;
   const phaseGuardRef = useRef<PhaseGuard>({ seen: options.dogfood.phase });
   useEffect(() => subscribePracticeReset(() => {
@@ -212,15 +223,12 @@ export function useShortcutGestures(options: GestureOptions) {
           console.warn('[shortcut] unbind while recording failed:', message);
           return;
         }
-        const lost = registeredRef.current;
-        if (lost === null) return;
-        lostRef.current = lost;
-        registeredRef.current = null;
-        emitShortcutBound({ active: null, message, ok: false, previous: lost, shortcut: lost });
-        void isSettingsWindowOpen().then((open) => {
-          if (!open) optionsRef.current.onShortcutError?.(bootRefusedText(lost, null));
-        }, () => undefined);
+        const lost = reportLost(message);
+        if (lost !== null) lostRef.current = lost;
       },
+      // BUS-209: a lone key lost Accessibility; same report, no recovery
+      // (a save or relaunch re-arms it).
+      onBindingLost: (message) => { reportLost(message); },
       onSuspendRecovered: () => {
         const back = lostRef.current;
         lostRef.current = null;

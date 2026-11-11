@@ -63,9 +63,9 @@ describe('ShortcutRecorder waits for native registration', () => {
     await user.click(field());
     act(() => { fireEvent.keyDown(window, { code: 'F13', key: 'F13' }); });
     expect(onChange).toHaveBeenLastCalledWith('F13');
-    await report({ message: 'Input Monitoring permission is needed', ok: false, shortcut: 'F13' });
+    await report({ message: 'Accessibility permission is needed', ok: false, shortcut: 'F13' });
     expect(onChange).toHaveBeenLastCalledWith(DEFAULT);
-    expect(status()).toHaveTextContent(/^F13 (needs Input Monitoring\. Allow Voxloom in System Settings › Privacy & Security › Input Monitoring\. Then record it again; relaunch Voxloom if that doesn't help|on its own only works on macOS)\. Kept /);
+    expect(status()).toHaveTextContent(/^F13 (needs Accessibility\. Allow Voxloom in System Settings › Privacy & Security › Accessibility\. Then record it again; relaunch Voxloom if that doesn't help|on its own only works on macOS)\. Kept /);
     expect(status()).not.toHaveTextContent('Permission is needed'); // never the raw error
   });
 
@@ -247,8 +247,8 @@ describe('ShortcutRecorder waits for native registration', () => {
     await user.click(field());
     act(() => { fireEvent.keyDown(window, { code: 'F13', key: 'F13' }); });
     expect(retries).toEqual(['F13']);
-    await report({ active: null, message: 'Input Monitoring permission is needed', ok: false, shortcut: 'F13' });
-    expect(status()).toHaveTextContent(/^F13 (needs Input Monitoring|on its own only works on macOS)/);
+    await report({ active: null, message: 'Accessibility permission is needed', ok: false, shortcut: 'F13' });
+    expect(status()).toHaveTextContent(/^F13 (needs Accessibility|on its own only works on macOS)/);
     expect(status()).toHaveTextContent('No shortcut is active.');
   });
 

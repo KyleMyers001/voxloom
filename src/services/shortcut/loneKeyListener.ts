@@ -10,6 +10,8 @@ interface Options {
   /** True while a lone key is the active shortcut. */
   isLoneKeyActive(): boolean;
   machine: GestureMachine;
+  /** The native listener stopped because Accessibility went away. */
+  onAccessLost(): void;
 }
 
 /**
@@ -19,12 +21,18 @@ interface Options {
  * Returns a stop function that is safe before the subscription resolves.
  */
 export function listenForLoneKey({
-  api, disarmHoldWatch, isDisposed, isLoneKeyActive, machine,
+  api, disarmHoldWatch, isDisposed, isLoneKeyActive, machine, onAccessLost,
 }: Options): () => void {
   let unlisten: (() => void) | null = null;
   let stopped = false;
   void api.listen((edge) => {
     if (stopped || isDisposed() || !isLoneKeyActive()) return;
+    if (edge === 'access-lost') {
+      disarmHoldWatch();
+      machine.finishActive();
+      onAccessLost();
+      return;
+    }
     if (edge === 'cancelled') {
       // An active latch (the double-tap's second press survived the debounce
       // before a chord key joined it) gets its finish, so capture stops.

@@ -1,6 +1,6 @@
 # Voxloom — macOS-first local dictation (work in progress)
 
-**Download:** [latest release](https://github.com/KyleMyers001/voxloom/releases/latest) (macOS; see [Releases](#releases)).
+**Download:** [latest release](https://github.com/voxloom-app/voxloom/releases/latest) (macOS; see [Releases](#releases)).
 
 The Tauri desktop shell captures real microphone audio, can transcribe it
 locally using explicitly downloaded Whisper models (`--features whisper`) or
@@ -86,7 +86,7 @@ terminals, including Warp, are not on this route. Messages is matched by its
 system app path, and a paste lands wherever Messages has keyboard focus.
 
 The marketing website is maintained separately in
-[`voxloom-site`](https://github.com/KyleMyers001/voxloom-site) and hosted at
+[`voxloom-site`](https://github.com/voxloom-app/voxloom-site) and hosted at
 https://voxloom-site-seven.vercel.app. Website changes and deployments do not
 require a desktop app release.
 

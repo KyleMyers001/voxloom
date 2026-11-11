@@ -5,8 +5,8 @@ identity and Team ID (section b). Release builds sign and notarize from the
 secrets in the protected `release` Environment (section e).
 
 Why it matters: an ad-hoc build gets a new code hash on every rebuild, so
-macOS forgets the Accessibility, Input Monitoring and Microphone permissions
-you granted to the previous build. With a Developer ID signature, macOS ties
+macOS forgets the Accessibility and Microphone permissions you granted to the
+previous build. With a Developer ID signature, macOS ties
 the permissions to the bundle id (`com.voxloom.prototype`) plus your Team ID,
 and both stay the same across rebuilds. (BUS-96)
 
@@ -63,9 +63,10 @@ tccutil reset Microphone com.voxloom.prototype
 ```
 
 Open the new build, then allow Voxloom again in System Settings → Privacy &
-Security, under Accessibility, Input Monitoring if it's listed, and
-Microphone. If an old Voxloom entry is still listed, remove it with **−** and
-add the new app with **+**. Quit and reopen Voxloom.
+Security, under Accessibility and Microphone. If an old Voxloom entry is
+still listed, remove it with **−** and add the new app with **+**. Voxloom no
+longer uses Input Monitoring (BUS-209); the `ListenEvent` reset above only
+clears a grant left by an older build. Quit and reopen Voxloom.
 
 From then on, grants survive rebuilds as long as you sign with the same
 Team ID. Do this on each Mac (Mac mini and Air).

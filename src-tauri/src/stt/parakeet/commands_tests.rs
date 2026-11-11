@@ -154,7 +154,7 @@ fn retirement_is_wired_to_every_native_renderer_lifecycle_callback() {
         ),
         (
             "let builder = builder.on_web_content_process_terminate",
-            "builder.run(",
+            "let app = builder",
         ),
     ] {
         let body = source

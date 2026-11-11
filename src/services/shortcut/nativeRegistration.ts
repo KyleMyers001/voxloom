@@ -38,6 +38,7 @@ export function createNativeShortcutController({
   holdRelease = createTauriHoldReleaseApi(),
   loneKey = createTauriLoneKeyApi(),
   onGesture,
+  onBindingLost,
   onRegisterFailure,
   onSuspendFailure,
   onSuspendRecovered,
@@ -99,7 +100,7 @@ export function createNativeShortcutController({
   const binder: ShortcutBinder = {
     async register(hotkey) {
       // BUS-46: a lone key is listened for by the native tap, not the plugin.
-      // A refusal (no Input Monitoring, not macOS) goes through
+      // A refusal (no Accessibility, not macOS) goes through
       // register-or-revert like a combo conflict does.
       if (isLoneKey(hotkey)) {
         await loneKey.arm(hotkey);
@@ -153,6 +154,13 @@ export function createNativeShortcutController({
     isDisposed: () => disposed,
     isLoneKeyActive: () => active !== null && isLoneKey(active),
     machine,
+    onAccessLost: () => {
+      // The native tap is already gone: nothing holds a shortcut now. No
+      // generation bump: lone-key edges are gated by isLoneKeyActive, and a
+      // bump would kill a combo whose registration is in flight.
+      active = null;
+      onBindingLost?.('Accessibility permission was turned off.');
+    },
   });
 
   // Serialize setShortcut / suspendBinding so boot (mount + Settings effects)
@@ -223,7 +231,7 @@ export function createNativeShortcutController({
     async setShortcut(settingsShortcut, options) {
       const next = toPluginHotkey(settingsShortcut);
       const run = async () => {
-        // A saved lone key may ask for Input Monitoring once. Never at boot,
+        // A saved lone key may ask for Accessibility once. Never at boot,
         // and not when it is already the active key.
         if (options?.userInitiated && isLoneKey(next) && active !== next) {
           await loneKey.requestAccess().catch(() => false);
