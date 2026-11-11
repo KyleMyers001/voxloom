@@ -17,6 +17,8 @@ pub enum PermissionState {
     Denied,
     Restricted,
     NotGranted,
+    /// Only the non-Mac adapter reports this.
+    #[cfg(not(target_os = "macos"))]
     Unsupported,
 }
 
