@@ -8,6 +8,7 @@ src-tauri/target/
 src-tauri/gen/
 test-results/
 test-results-release/
+test-results-guided/
 .cargo-local/
 .target-cpal17/
 *.tsbuildinfo

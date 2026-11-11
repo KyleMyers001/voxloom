@@ -11,6 +11,7 @@
     "tauri": "tauri",
     "test:e2e": "PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers playwright test",
     "test:e2e:release": "PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers playwright test --config playwright.release.config.ts",
+    "test:e2e:guided": "playwright test --config playwright.guided.config.ts",
     "test:unit": "vitest run",
     "typecheck": "tsc -b --pretty false",
     "macos:assert-entitlements": "bash scripts/macos-assert-entitlements.sh",
