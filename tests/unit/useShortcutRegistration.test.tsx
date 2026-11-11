@@ -17,6 +17,7 @@ vi.mock('../../src/services/shortcut/bindingEvents', () => ({
 
 import { useShortcutRegistration } from '../../src/app/useShortcutRegistration';
 import type { NativeShortcutController, RegisterOutcome } from '../../src/services/shortcut';
+import { usingInsteadText } from '../../src/features/settings/shortcutCopy';
 
 function setup(outcome: RegisterOutcome, settingsOpen: boolean, registered: string | null = 'Ctrl + Shift + Space') {
   emitted.length = 0;
@@ -74,6 +75,34 @@ describe('useShortcutRegistration', () => {
     }, false);
     await act(async () => hook.rerender({ shortcut: 'Ctrl + Alt + B' }));
     await waitFor(() => expect(errors).toEqual(['⌃⌥B is in use by another app. Using ⌃⇧Space instead.']));
+  });
+
+  describe('refused after a lost binding cleared registeredRef (BUS-209)', () => {
+    it('records and reports the lone key native restored, and reverts settings to it', async () => {
+      const { errors, hook, registeredRef, reverts } = setup({
+        active: 'AltRight', attempted: 'Control+Shift+K', lastKnownGood: 'AltRight',
+        message: 'Could not bind (HotKey already registered)', ok: false,
+      }, false, null);
+      await act(async () => hook.rerender({ shortcut: 'Ctrl + Shift + K' }));
+      await waitFor(() => expect(errors).toHaveLength(1));
+      expect(registeredRef.current).toBe('AltRight');
+      expect(emitted).toEqual([expect.objectContaining({
+        active: 'AltRight', ok: false, previous: 'AltRight', shortcut: 'Ctrl + Shift + K',
+      })]);
+      expect(reverts).toEqual(['AltRight']);
+      expect(errors[0]).toBe(usingInsteadText('Ctrl + Shift + K', 'AltRight'));
+    });
+
+    it('keeps a restored combo in Settings format', async () => {
+      const { hook, registeredRef, reverts } = setup({
+        active: 'Control+Shift+Space', attempted: 'Control+Alt+B', lastKnownGood: 'Control+Shift+Space',
+        message: 'Could not bind (HotKey already registered)', ok: false,
+      }, true, null);
+      await act(async () => hook.rerender({ shortcut: 'Ctrl + Alt + B' }));
+      await waitFor(() => expect(reverts).toEqual(['Ctrl + Shift + Space']));
+      expect(registeredRef.current).toBe('Ctrl + Shift + Space');
+      expect(emitted).toEqual([expect.objectContaining({ active: 'Ctrl + Shift + Space', ok: false })]);
+    });
   });
 
   it('a change is a user save (may ask for Accessibility); the first value is not', async () => {

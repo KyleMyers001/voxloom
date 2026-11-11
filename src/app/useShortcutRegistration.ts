@@ -2,8 +2,14 @@ import { isTauri } from '@tauri-apps/api/core';
 import { useEffect, useRef, type MutableRefObject } from 'react';
 import type { NativeShortcutController } from '../services/shortcut';
 import { emitShortcutBound, listenShortcutRetry } from '../services/shortcut/bindingEvents';
+import { fromPluginHotkey, toPluginHotkey } from '../services/shortcut/formatHotkey';
 import { isSettingsWindowOpen } from '../services/settingsWindow';
 import { noneActiveText, usingInsteadText } from '../features/settings/shortcutCopy';
+
+/** `held` (plugin format, from native) as a Settings value: the registered one if it matches. */
+function settingsFormOf(held: string, registered: string | null): string {
+  return registered !== null && toPluginHotkey(registered) === held ? registered : fromPluginHotkey(held);
+}
 
 interface RegistrationCallbacks {
   onShortcutError?: (message: string) => void;
@@ -17,7 +23,9 @@ interface RegistrationCallbacks {
  * boot outcome. Native setShortcut calls are serialized, so ok results arrive
  * in order; every ok is recorded *before* the cancelled check, which keeps
  * `registeredRef` equal to what the OS actually holds (native re-binds its
- * lastKnownGood on refusal; `active: null` means that failed too). That combo
+ * lastKnownGood on refusal; `active: null` means that failed too). A refusal
+ * records the combo native restored even when a lost binding (BUS-69,
+ * BUS-209) had cleared `registeredRef`, since native still kept it. That combo
  * is the revert target, and it is broadcast as `active` so the Settings
  * recorder uses the same truth. A change here is a user save, so a lone key may
  * ask for Accessibility (boot never does). The Settings status line reports refusals;
@@ -43,8 +51,10 @@ export function useShortcutRegistration(
     // A save by the user (a change here, or Settings asking to retry), so a
     // lone key may ask for Accessibility.
     const outcome = await native.setShortcut(target, { userInitiated: true });
-    // Record what the OS holds even if a newer change superseded us.
+    // Record what the OS holds even if a newer change superseded us. Refused:
+    // native restored its last-known-good, which may no longer be registeredRef.
     if (outcome.ok) registeredRef.current = target;
+    else if (outcome.active !== null) registeredRef.current = settingsFormOf(outcome.active, registeredRef.current);
     const previous = registeredRef.current;
     // Refused and restore failed: nothing is registered any more.
     if (!outcome.ok && outcome.active === null) registeredRef.current = null;
