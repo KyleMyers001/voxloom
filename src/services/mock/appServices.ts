@@ -23,7 +23,7 @@ export function createHistoryService(dispatch: Dispatch): HistoryDeletion {
 
 export function createSettingsService(dispatch: Dispatch): SettingsStore {
   return {
-    update: (change) => dispatch({ ...change, type: 'set-setting' }),
+    update: (change) => dispatch({ ...change, now: Date.now(), type: 'set-setting' }),
   };
 }
 

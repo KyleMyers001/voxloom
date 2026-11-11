@@ -3,13 +3,13 @@ import type { SettingsStore } from '../../src/services/contracts';
 
 const validSetting: AppAction = {
   key: 'startAtLogin',
-  type: 'set-setting',
+  now: Date.now(), type: 'set-setting',
   value: true,
 };
 
 const invalidSetting: AppAction = {
   key: 'startAtLogin',
-  type: 'set-setting',
+  now: Date.now(), type: 'set-setting',
   // @ts-expect-error Boolean settings reject string values.
   value: 'yes',
 };

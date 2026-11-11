@@ -96,7 +96,7 @@ describe('BUS-45 dictations made before history hydrate', () => {
     await settle();
     expect(api!.bootReady).toBe(false);
 
-    act(() => api!.dispatch({ record: early, type: 'append-record' }));
+    act(() => api!.dispatch({ now: NOW, record: early, type: 'append-record' }));
     await settle();
     // Nothing writes before the load (and its backup) finishes.
     expect(io.snapshot()).toBe(V2);
@@ -122,7 +122,7 @@ describe('BUS-45 dictations made before history hydrate', () => {
     boot(gated.store);
     await settle();
 
-    act(() => api!.dispatch({ record: early, type: 'append-record' }));
+    act(() => api!.dispatch({ now: NOW, record: early, type: 'append-record' }));
     await act(async () => gated.release());
     await waitFor(() => expect(api?.bootReady).toBe(true));
     await settle();
@@ -140,7 +140,7 @@ describe('BUS-45 dictations made before history hydrate', () => {
     boot(gated.store, { read: corrupt.read, write: corrupt.write } as typeof corrupt);
     await settle();
 
-    act(() => api!.dispatch({ record: early, type: 'append-record' }));
+    act(() => api!.dispatch({ now: NOW, record: early, type: 'append-record' }));
     await act(async () => gated.release());
     await waitFor(() => expect(api?.bootReady).toBe(true));
     await settle();
@@ -178,9 +178,9 @@ describe('BUS-45 dictations made before history hydrate', () => {
     const early2 = { ...early, id: 'before-hydrate-2' };
     // A stale queued row only the save-time prune can drop.
     const staleEarly = { ...early, createdAt: NOW - 400 * DAY, id: 'stale-early' };
-    act(() => api!.dispatch({ record: staleEarly, type: 'append-record' }));
-    act(() => api!.dispatch({ record: early, type: 'append-record' }));
-    act(() => api!.dispatch({ record: early2, type: 'append-record' }));
+    act(() => api!.dispatch({ now: NOW, record: staleEarly, type: 'append-record' }));
+    act(() => api!.dispatch({ now: NOW, record: early, type: 'append-record' }));
+    act(() => api!.dispatch({ now: NOW, record: early2, type: 'append-record' }));
     await settle();
     expect(io.snapshot()).toBe(original);
     expect(io.backups()).toEqual([]);

@@ -132,7 +132,7 @@ export function AppProvider({
     [clock],
   );
   const dictionary = useMemo(() => createDictionaryService(dispatch), []);
-  const history = useMemo(() => createHistoryService(dispatch), []);
+  const historyDispatch = useMemo(() => createHistoryService(dispatch), []);
   const settings = useMemo(() => createSettingsService(dispatch), []);
   const setup = useMemo(() => createSetupService(dispatch), []);
 
@@ -148,12 +148,175 @@ export function AppProvider({
   /** False after a corrupt-load so we never overwrite the broken file. */
   const allowHistoryPersistRef = useRef(!historyPers.enabled);
   const historyPersistGenRef = useRef(0);
+  /** One queue for history.json writes/reloads so an Off wipe cannot race a restore. */
+  const historyChainRef = useRef<Promise<void>>(Promise.resolve());
+  /** Latest records/retention for queued history jobs (avoid stale closures). */
+  const historySnapshotRef = useRef({
+    records: state.records,
+    retention: state.settings.transcriptRetention,
+  });
+  historySnapshotRef.current = {
+    records: state.records,
+    retention: state.settings.transcriptRetention,
+  };
+  /**
+   * True from the moment the UI enters Off before settings.json confirms Off,
+   * until that Off is confirmed (wipe) or abandoned (reload from disk). While
+   * set, in-memory records are Off-filtered but history.json still holds the
+   * pre-Off rows, so no snapshot save may run. Survives switching away from
+   * Off: leaving a pending Off must not persist the filtered list.
+   */
+  const historyDivergedRef = useRef(false);
+  if (
+    state.settings.transcriptRetention === 'off'
+    && lastSavedSettingsRef.current?.settings.transcriptRetention !== 'off'
+  ) {
+    historyDivergedRef.current = true;
+  }
+  /**
+   * While reloadHistoryFromDisk awaits load, deletes must not be undone by the
+   * merge. Null when no reload is in flight.
+   */
+  const reloadDeletedIdsRef = useRef<Set<string> | null>(null);
 
   const dictionaryHydratedRef = useRef(!dictionaryPers.enabled);
   const allowDictionaryPersistRef = useRef(!dictionaryPers.enabled);
   const dictionaryPersistGenRef = useRef(0);
   /** Last successfully saved words — roll back UI on save failure. */
   const lastSavedWordsRef = useRef<string[] | null>(null);
+
+  const enqueueHistoryJob = (job: () => Promise<void>) => {
+    historyChainRef.current = historyChainRef.current.then(job, job);
+  };
+
+  /** Memory is Off-filtered but history.json not yet wiped (Off pending or abandoned). */
+  const retentionOffPending = () => historyDivergedRef.current;
+
+  const saveHistorySnapshot = async () => {
+    if (!historyPers.enabled || !historyHydratedRef.current || !allowHistoryPersistRef.current) {
+      return;
+    }
+    // Leave history.json alone until Off is confirmed on settings.json.
+    if (retentionOffPending()) return;
+    const gen = historyPersistGenRef.current;
+    const { records, retention } = historySnapshotRef.current;
+    try {
+      await historyPers.store.save(records, retention, clock());
+      if (gen !== historyPersistGenRef.current) return;
+      dispatch({ message: null, type: 'set-history-error' });
+    } catch (error: unknown) {
+      if (gen !== historyPersistGenRef.current) return;
+      const message = error instanceof Error ? error.message : String(error);
+      dispatch({
+        message: `Failed to save history: ${message}`,
+        type: 'set-history-error',
+      });
+    }
+  };
+
+  const reloadHistoryFromDisk = async (retention: typeof state.settings.transcriptRetention) => {
+    if (!historyPers.enabled || !historyHydratedRef.current) return;
+    // Supersede any in-flight wipe: bump gen, then load after prior jobs finish.
+    historyPersistGenRef.current += 1;
+    const gen = historyPersistGenRef.current;
+    const deletedDuringReload = new Set<string>();
+    reloadDeletedIdsRef.current = deletedDuringReload;
+    try {
+      const result = await historyPers.store.load(retention, clock());
+      if (gen !== historyPersistGenRef.current) return;
+      if (result.ok) {
+        // Prefer in-memory for shared ids (live edits / deletes already applied).
+        // Drop ids deleted while load was in flight so an explicit Delete is not
+        // undone. Memory-only rows added during the load stay first; disk order
+        // is preserved for restored rows.
+        const current = historySnapshotRef.current.records;
+        const diskIds = new Set(result.records.map((record) => record.id));
+        const memoryById = new Map(
+          current
+            .filter((record) => !deletedDuringReload.has(record.id))
+            .map((record) => [record.id, record]),
+        );
+        const memoryOnly = current.filter(
+          (record) => !deletedDuringReload.has(record.id) && !diskIds.has(record.id),
+        );
+        const fromDisk = result.records
+          .filter((record) => !deletedDuringReload.has(record.id))
+          .map((record) => memoryById.get(record.id) ?? record);
+        const merged = [...memoryOnly, ...fromDisk];
+        historyDivergedRef.current = false;
+        // Queued saves run before React re-renders; give them the merged list.
+        historySnapshotRef.current = { ...historySnapshotRef.current, records: merged };
+        dispatch({ now: clock(), records: merged, type: 'hydrate-records' });
+        dispatch({ message: null, type: 'set-history-error' });
+      } else {
+        dispatch({
+          message: result.error,
+          sticky: true,
+          type: 'set-history-error',
+        });
+      }
+    } finally {
+      if (reloadDeletedIdsRef.current === deletedDuringReload) {
+        reloadDeletedIdsRef.current = null;
+      }
+    }
+  };
+
+  const patchHistoryDeleteOnDisk = async (id: string) => {
+    if (!historyPers.enabled || !historyHydratedRef.current || !allowHistoryPersistRef.current) {
+      return;
+    }
+    if (!retentionOffPending()) return;
+    const diskRetention = lastSavedSettingsRef.current?.settings.transcriptRetention ?? 'forever';
+    if (diskRetention === 'off') return;
+    const gen = historyPersistGenRef.current;
+    try {
+      const loaded = await historyPers.store.load(diskRetention, clock());
+      if (gen !== historyPersistGenRef.current || !loaded.ok) return;
+      const next = loaded.records.filter((record) => record.id !== id);
+      await historyPers.store.save(next, diskRetention, clock());
+      if (gen !== historyPersistGenRef.current) return;
+      dispatch({ message: null, type: 'set-history-error' });
+    } catch (error: unknown) {
+      if (gen !== historyPersistGenRef.current) return;
+      const message = error instanceof Error ? error.message : String(error);
+      dispatch({
+        message: `Failed to save history: ${message}`,
+        type: 'set-history-error',
+      });
+    }
+  };
+
+  /**
+   * settings.json now holds `retention` (confirmed save or rollback target).
+   * Only acts when a local Off transition left memory ahead of disk:
+   * Off confirmed → wipe history.json; Off abandoned → reload pre-Off rows.
+   * Any other save/rollback leaves history alone (no reload while already Off).
+   */
+  const settleRetentionOff = (retention: typeof state.settings.transcriptRetention) => {
+    if (!historyDivergedRef.current) {
+      if (retention === 'off') enqueueHistoryJob(() => saveHistorySnapshot());
+      return;
+    }
+    if (retention === 'off') {
+      historyDivergedRef.current = false;
+      enqueueHistoryJob(() => saveHistorySnapshot());
+    } else {
+      enqueueHistoryJob(() => reloadHistoryFromDisk(retention));
+    }
+  };
+
+  const history = useMemo(() => ({
+    delete: (id: string) => {
+      historyDispatch.delete(id);
+      // Tombstone for an in-flight failed-Off reload merge (prefer memory /
+      // drop deleted ids so Delete is not silently undone).
+      reloadDeletedIdsRef.current?.add(id);
+      // While Off is optimistic, memory no longer mirrors disk — patch disk so a
+      // failed Off save + reload cannot revive a row the user just deleted.
+      enqueueHistoryJob(() => patchHistoryDeleteOnDisk(id));
+    },
+  }), [historyDispatch]);
 
   const needsBootHydrate = settingsPers.enabled
     || historyPers.enabled
@@ -198,7 +361,7 @@ export function AppProvider({
           dispatch({
             onboardingComplete: result.file.onboardingComplete,
             settings: result.file.settings,
-            type: 'hydrate-settings',
+            now: Date.now(), type: 'hydrate-settings',
           });
           lastSavedSettingsRef.current = result.file;
           lastRequestedSettingsRef.current = result.file;
@@ -219,7 +382,7 @@ export function AppProvider({
           dispatch({
             onboardingComplete: result.file.onboardingComplete,
             settings: result.file.settings,
-            type: 'hydrate-settings',
+            now: Date.now(), type: 'hydrate-settings',
           });
           lastSavedSettingsRef.current = result.file;
           lastRequestedSettingsRef.current = result.file;
@@ -295,7 +458,7 @@ export function AppProvider({
       if (historyResult.ok && (settingsBlocked || historyBackupFailed)) {
         // Any history version: show it, but never rewrite or prune it on
         // default retention while settings writes are blocked.
-        dispatch({ records: historyResult.records, type: 'hydrate-records' });
+        dispatch({ records: historyResult.records, now: Date.now(), type: 'hydrate-records' });
         allowHistoryPersistRef.current = false;
         dispatch({
           message: settingsBlocked
@@ -305,13 +468,13 @@ export function AppProvider({
           type: 'set-history-error',
         });
       } else if (historyResult.ok) {
-        dispatch({ records: historyResult.records, type: 'hydrate-records' });
+        dispatch({ records: historyResult.records, now: Date.now(), type: 'hydrate-records' });
         allowHistoryPersistRef.current = true;
       } else {
         // Unreadable / unknown-version history.json: never write over it
         // (the store already tried to back it up). BUS-42. Dictations made
         // before this load stay visible in memory but are never written.
-        dispatch({ records: [], type: 'hydrate-records' });
+        dispatch({ records: [], now: Date.now(), type: 'hydrate-records' });
         allowHistoryPersistRef.current = false;
         dispatch({
           message: historyResult.error,
@@ -347,6 +510,8 @@ export function AppProvider({
     lastRequestedRef: lastRequestedSettingsRef,
     lastSavedRef: lastSavedSettingsRef,
     onboardingComplete: state.onboarding.complete,
+    onRolledBack: (file) => settleRetentionOff(file.settings.transcriptRetention),
+    onSaved: (file) => settleRetentionOff(file.settings.transcriptRetention),
     persistence: settingsPers,
     persistGenRef: settingsPersistGenRef,
     settings: state.settings,
@@ -389,35 +554,12 @@ export function AppProvider({
     })();
   }, [dictionaryPers, state.words]);
 
-  // Persist history after a successful hydrate whenever records or retention
-  // change.
+  // Persist history after hydrate whenever records or retention change.
+  // Writes are serialized. Optimistic Retention Off skips the wipe until
+  // settings.json confirms Off (onSaved); foreign Off already updated
+  // lastSavedSettingsRef before hydrate, so the wipe runs here.
   useEffect(() => {
-    if (
-      !historyPers.enabled
-      || !historyHydratedRef.current
-      || !allowHistoryPersistRef.current
-    ) {
-      return;
-    }
-    const gen = historyPersistGenRef.current;
-    void (async () => {
-      try {
-        await historyPers.store.save(
-          state.records,
-          state.settings.transcriptRetention,
-          clock(),
-        );
-        if (gen !== historyPersistGenRef.current) return;
-        dispatch({ message: null, type: 'set-history-error' });
-      } catch (error: unknown) {
-        if (gen !== historyPersistGenRef.current) return;
-        const message = error instanceof Error ? error.message : String(error);
-        dispatch({
-          message: `Failed to save history: ${message}`,
-          type: 'set-history-error',
-        });
-      }
-    })();
+    enqueueHistoryJob(() => saveHistorySnapshot());
   }, [
     clock,
     historyPers,
