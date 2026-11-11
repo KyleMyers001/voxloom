@@ -11,10 +11,11 @@
 //! stall never delays other apps' input. The callback never calls the sink:
 //! edges go to a delivery thread (see `delivery`), so nothing the app does
 //! with an edge can re-enter or free the tap.
-//! Between run-loop slices the tap thread reads the Accessibility flag the
-//! checker thread publishes (see `crate::tap_guard`): it re-enables a disabled tap only while access is
-//! granted and within budget, and on loss tears the tap down, fails closed
-//! and sends `AccessLost`. Re-arming waits for the next save or launch.
+//! Between run-loop slices the tap thread reads what the checker thread
+//! publishes (see `crate::tap_guard`): it re-enables a disabled tap only once
+//! a check that started after the disable finds access granted, and within
+//! budget; on loss it tears the tap down, fails closed and sends
+//! `AccessLost`. Re-arming waits for the next save or launch.
 
 use super::context::{active_context, Context, Tap, ACTIVE, LIVE};
 use super::delivery::{Delivery, Sink};
@@ -63,8 +64,8 @@ unsafe extern "C" fn callback(_: Handle, event_type: u32, event: Handle, info: H
     context.step(kind, keycode, flags);
     if disabled {
         // Fail closed (the machine already released any hold). Whether to
-        // listen again needs a permission check, which must not run in a
-        // callback: end this run-loop slice so the watchdog decides now.
+        // listen again needs a fresh permission check, which must not run in
+        // a callback: end this run-loop slice so the watchdog asks for one.
         #[cfg(debug_assertions)]
         eprintln!("[lone-key] tap disabled (type {event_type:#x})");
         context.note_disabled(event_type == DISABLED_BY_TIMEOUT);
@@ -74,7 +75,7 @@ unsafe extern "C" fn callback(_: Handle, event_type: u32, event: Handle, info: H
 }
 
 /// Between run-loop slices: keep, re-enable or give up the tap. Returns
-/// whether it stays. Reads the checker's flag; never probes here.
+/// whether it stays. Reads what the checker published; never probes here.
 fn watch(guard: &mut TapGuard, access: &AccessWatch) -> bool {
     ACTIVE.with(|slot| {
         let slot = slot.borrow();
@@ -82,8 +83,12 @@ fn watch(guard: &mut TapGuard, access: &AccessWatch) -> bool {
             return false;
         };
         let disabled = tap.context.take_disabled();
-        match guard.check(disabled, access.trusted(), Instant::now()) {
+        match guard.check(disabled, access.snapshot(), Instant::now()) {
             Verdict::Keep => true,
+            Verdict::AwaitCheck => {
+                access.nudge();
+                true
+            }
             Verdict::Reenable => {
                 // SAFETY: the tap thread, outside the callback; a live port.
                 unsafe { CGEventTapEnable(tap.port, true) };

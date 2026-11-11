@@ -8,9 +8,15 @@
 //! can't fail that tap with a stale result, and a new tap can't hide a loss
 //! from the taps that were watching when it was found. A loss is final for
 //! the watches it covers: their taps tear down.
+//!
+//! Checks are also numbered in the order they start, and the newest one that
+//! found access granted is published. A disabled tap waits for a check that
+//! started after the disable (see `TapGuard`), since the published flag can
+//! predate a revoke that caused it; `nudge` runs that check without waiting
+//! out the interval.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 
@@ -27,7 +33,14 @@ struct Inner {
     epoch: AtomicU64,
     /// The newest epoch a check found access lost in (0: never).
     lost_through: AtomicU64,
+    /// The number of the newest check that has started (0: none yet).
+    /// Bumped under the state lock, just before the check runs.
+    started: AtomicU64,
+    /// The number of the newest check that found access granted (0: none).
+    granted: AtomicU64,
     state: Mutex<State>,
+    /// Wakes the checker early (`AccessWatch::nudge`).
+    wake: Condvar,
     check: fn() -> bool,
     interval: Duration,
 }
@@ -36,6 +49,8 @@ struct Inner {
 struct State {
     watchers: usize,
     running: bool,
+    /// Run the next check now instead of after the interval.
+    nudged: bool,
 }
 
 impl Inner {
@@ -47,6 +62,29 @@ impl Inner {
     fn mark_lost(&self, epoch: u64) {
         self.lost_through.fetch_max(epoch, Ordering::SeqCst);
     }
+
+    /// Wait out the interval unless nudged. A spurious wake-up only runs a
+    /// check early.
+    fn wait<'a>(&self, state: MutexGuard<'a, State>) -> MutexGuard<'a, State> {
+        if state.nudged {
+            return state;
+        }
+        match self.wake.wait_timeout(state, self.interval) {
+            Ok((state, _)) => state,
+            Err(e) => e.into_inner().0,
+        }
+    }
+}
+
+/// What the checker has published, as one watch sees it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Access {
+    /// See `AccessWatch::trusted`.
+    pub trusted: bool,
+    /// The number of the newest check that has started (0: none yet).
+    pub started: u64,
+    /// The number of the newest check that found access granted (0: none).
+    pub granted: u64,
 }
 
 /// One tap's interest in the result. Dropping the last one ends the checker
@@ -64,6 +102,27 @@ impl AccessWatch {
     pub fn trusted(&self) -> bool {
         self.inner.lost_through.load(Ordering::SeqCst) < self.epoch
     }
+
+    /// The latest published results. `trusted` is read last, so a loss
+    /// that lands while this reads is not missed behind a newer `granted`.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub fn snapshot(&self) -> Access {
+        let granted = self.inner.granted.load(Ordering::SeqCst);
+        let started = self.inner.started.load(Ordering::SeqCst);
+        Access {
+            trusted: self.trusted(),
+            started,
+            granted,
+        }
+    }
+
+    /// Ask the checker to run its next check now. Only takes the short
+    /// state lock (never held across a check), so a tap thread may call it.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub fn nudge(&self) {
+        self.inner.state().nudged = true;
+        self.inner.wake.notify_one();
+    }
 }
 
 impl Drop for AccessWatch {
@@ -80,7 +139,10 @@ impl Monitor {
             inner: Arc::new(Inner {
                 epoch: AtomicU64::new(0),
                 lost_through: AtomicU64::new(0),
+                started: AtomicU64::new(0),
+                granted: AtomicU64::new(0),
                 state: Mutex::default(),
+                wake: Condvar::new(),
                 check,
                 interval,
             }),
@@ -131,16 +193,21 @@ impl Drop for PanicGuard<'_> {
 fn run(inner: Arc<Inner>) {
     let _guard = PanicGuard(&inner);
     loop {
-        thread::sleep(inner.interval);
-        let epoch = {
-            let mut state = inner.state();
+        let (epoch, number) = {
+            let mut state = inner.wait(inner.state());
+            state.nudged = false;
             if state.watchers == 0 {
                 state.running = false;
                 return;
             }
-            inner.epoch.load(Ordering::SeqCst)
+            (
+                inner.epoch.load(Ordering::SeqCst),
+                inner.started.fetch_add(1, Ordering::SeqCst) + 1,
+            )
         };
-        if !(inner.check)() {
+        if (inner.check)() {
+            inner.granted.fetch_max(number, Ordering::SeqCst);
+        } else {
             inner.mark_lost(epoch);
         }
     }

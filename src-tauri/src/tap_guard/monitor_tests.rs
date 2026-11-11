@@ -1,5 +1,7 @@
 use super::*;
+use crate::tap_guard::{Disables, TapGuard, Verdict};
 use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::time::Instant;
 
 const TICK: Duration = Duration::from_millis(5);
 
@@ -111,4 +113,149 @@ fn a_panicked_checker_fails_closed_and_can_restart() {
     assert!(monitor.running());
     assert!(next.trusted());
     assert!(eventually(|| !next.trusted()));
+}
+
+/// A check the test steps through: each call reads `granted` when it
+/// starts (as the probe does), then waits until the test releases it.
+struct Gate {
+    granted: AtomicBool,
+    entered: AtomicUsize,
+    released: AtomicUsize,
+}
+
+impl Gate {
+    const fn new() -> Self {
+        Self {
+            granted: AtomicBool::new(true),
+            entered: AtomicUsize::new(0),
+            released: AtomicUsize::new(0),
+        }
+    }
+
+    fn run(&self) -> bool {
+        let granted = self.granted.load(Ordering::SeqCst);
+        let call = self.entered.fetch_add(1, Ordering::SeqCst) + 1;
+        while self.released.load(Ordering::SeqCst) < call {
+            thread::sleep(Duration::from_millis(1));
+        }
+        granted
+    }
+
+    /// Wait until check `n` has started (it is held until released).
+    fn started(&self, n: usize) -> bool {
+        eventually(|| self.entered.load(Ordering::SeqCst) >= n)
+    }
+
+    fn release(&self, through: usize) {
+        self.released.store(through, Ordering::SeqCst);
+    }
+}
+
+fn user_input() -> Disables {
+    let mut disables = Disables::default();
+    disables.note(false);
+    disables
+}
+
+static REVOKE_GATE: Gate = Gate::new();
+
+fn revoke_gate_check() -> bool {
+    REVOKE_GATE.run()
+}
+
+#[test]
+fn a_disable_before_the_first_post_revoke_check_lands_is_never_reenabled() {
+    let gate = &REVOKE_GATE;
+    let monitor = Monitor::new(revoke_gate_check, TICK);
+    let watch = monitor.watch().unwrap();
+    let mut guard = TapGuard::default();
+    let now = Instant::now();
+    // Check 1 started while access was still granted, and is held.
+    assert!(gate.started(1));
+    // Access is revoked and macOS disables the tap before a check sees it.
+    gate.granted.store(false, Ordering::SeqCst);
+    assert!(watch.trusted(), "the published flag is stale");
+    assert_eq!(
+        guard.check(user_input(), watch.snapshot(), now),
+        Verdict::AwaitCheck
+    );
+    // Check 1 lands "granted", but it started before the disable.
+    gate.release(1);
+    assert!(eventually(|| watch.snapshot().granted == 1));
+    assert!(watch.trusted());
+    assert_eq!(
+        guard.check(Disables::default(), watch.snapshot(), now),
+        Verdict::AwaitCheck
+    );
+    // Check 2 started after the revoke and finds it.
+    assert!(gate.started(2));
+    gate.release(2);
+    assert!(eventually(|| !watch.trusted()));
+    assert_eq!(
+        guard.check(Disables::default(), watch.snapshot(), now),
+        Verdict::TearDown
+    );
+
+    drop(watch);
+    gate.release(usize::MAX);
+    assert!(eventually(|| !monitor.running()));
+}
+
+static GRANTED_GATE: Gate = Gate::new();
+
+fn granted_gate_check() -> bool {
+    GRANTED_GATE.run()
+}
+
+#[test]
+fn a_disabled_tap_is_reenabled_once_a_check_started_after_the_disable_passes() {
+    let gate = &GRANTED_GATE;
+    let monitor = Monitor::new(granted_gate_check, TICK);
+    let watch = monitor.watch().unwrap();
+    let mut guard = TapGuard::default();
+    let now = Instant::now();
+    assert!(gate.started(1));
+    assert_eq!(
+        guard.check(user_input(), watch.snapshot(), now),
+        Verdict::AwaitCheck
+    );
+    // The check in flight at the disable passes; it doesn't count.
+    gate.release(1);
+    assert!(eventually(|| watch.snapshot().granted == 1));
+    assert_eq!(
+        guard.check(Disables::default(), watch.snapshot(), now),
+        Verdict::AwaitCheck
+    );
+    // The next one does.
+    assert!(gate.started(2));
+    gate.release(2);
+    assert!(eventually(|| watch.snapshot().granted == 2));
+    assert_eq!(
+        guard.check(Disables::default(), watch.snapshot(), now),
+        Verdict::Reenable
+    );
+    assert_eq!(
+        guard.check(Disables::default(), watch.snapshot(), now),
+        Verdict::Keep
+    );
+
+    drop(watch);
+    gate.release(usize::MAX);
+    assert!(eventually(|| !monitor.running()));
+}
+
+fn granted_check() -> bool {
+    true
+}
+
+#[test]
+fn a_nudge_runs_the_next_check_without_waiting_out_the_interval() {
+    // An interval no test run reaches: only a nudge starts a check in time.
+    let monitor = Monitor::new(granted_check, Duration::from_secs(3600));
+    let watch = monitor.watch().unwrap();
+    watch.nudge();
+    assert!(eventually(|| watch.snapshot().granted >= 1));
+    let first = watch.snapshot().granted;
+    watch.nudge();
+    assert!(eventually(|| watch.snapshot().granted > first));
 }

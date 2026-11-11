@@ -14,10 +14,11 @@
 //! main: an active tap holds each event until its callback returns. That
 //! thread also frees the tap and its `TapCtx` after its run loop stops, so
 //! a disarm from the poll thread or the callback never frees state a
-//! running callback still reads. Between run-loop slices it reads the
-//! checker thread's Accessibility flag (`crate::tap_guard`): a disabled tap is re-enabled only
-//! while access is granted and within budget, and on loss the tap is torn
-//! down while the poll keeps covering the hold.
+//! running callback still reads. Between run-loop slices it reads what the
+//! Accessibility checker thread publishes (`crate::tap_guard`): a disabled
+//! tap is re-enabled only once a check that started after the disable finds
+//! access granted, and within budget; on loss the tap is torn down while
+//! the poll keeps covering the hold.
 //!
 //! Tear-down on disarm / cancel / error / latch paths. Does **not** grab Escape.
 //! Non-macOS builds expose no-op commands so Linux `cargo check` stays green.
@@ -363,9 +364,9 @@ mod macos {
         }
         let ctx = &*(user_info as *const TapCtx);
         if etype == EVENT_TAP_DISABLED_BY_TIMEOUT || etype == EVENT_TAP_DISABLED_BY_USER_INPUT {
-            // The poll keeps covering the hold. Re-enabling needs a
+            // The poll keeps covering the hold. Re-enabling needs a fresh
             // permission check, which must not run in a callback: end this
-            // run-loop slice so the watchdog decides now.
+            // run-loop slice so the watchdog asks for one.
             let mut disables = ctx.disabled.get();
             disables.note(etype == EVENT_TAP_DISABLED_BY_TIMEOUT);
             ctx.disabled.set(disables);
@@ -441,8 +442,12 @@ mod macos {
                     let mut guard = TapGuard::default();
                     tap_thread::run_until_stopped(&stopping, || {
                         let was = disabled.take();
-                        match guard.check(was, access.trusted(), Instant::now()) {
+                        match guard.check(was, access.snapshot(), Instant::now()) {
                             Verdict::Keep => true,
+                            Verdict::AwaitCheck => {
+                                access.nudge();
+                                true
+                            }
                             Verdict::Reenable => {
                                 CGEventTapEnable(tap, true);
                                 true

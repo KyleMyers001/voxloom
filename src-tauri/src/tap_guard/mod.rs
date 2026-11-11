@@ -1,8 +1,9 @@
 //! Keeps an active CGEventTap from outliving its Accessibility grant
 //! (BUS-209). An active tap holds every event it matches until its callback
 //! returns; one left armed after Accessibility is turned off can stop all
-//! keyboard and trackpad input. So a tap is only re-enabled while access is
-//! still granted and within a budget, and torn down as soon as access goes.
+//! keyboard and trackpad input. So a disabled tap stays off until a check
+//! that started after the disable finds access still granted, is then
+//! re-enabled within a budget, and is torn down as soon as access goes.
 //!
 //! The permission check waits on the window server, so it runs on its own
 //! checker thread (`monitor`) and publishes the result. Tap threads and the
@@ -22,9 +23,9 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 #[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
-pub use monitor::AccessWatch;
-#[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
 use monitor::Monitor;
+#[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
+pub use monitor::{Access, AccessWatch};
 
 /// Re-enables allowed per `REENABLE_WINDOW`; one more and the tap fails
 /// closed (a tap macOS keeps disabling is not worth fighting).
@@ -65,40 +66,58 @@ impl Disables {
 /// What to do with a tap after one watchdog check.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Verdict {
+    /// Leave it as it is.
     Keep,
+    /// It is disabled: leave it off until a check that started after the
+    /// disable reports. Nudge the checker (`AccessWatch::nudge`).
+    AwaitCheck,
     Reenable,
     TearDown,
 }
 
-/// Per-tap watchdog state: recent re-enables and the last timeout.
+/// Per-tap watchdog state: recent re-enables, the last timeout, and
+/// whether the tap is disabled awaiting a fresh check.
 #[derive(Default)]
 pub struct TapGuard {
     reenabled: VecDeque<Instant>,
     last_timeout: Option<Instant>,
+    /// While the tap is disabled: the newest check that had started when
+    /// the disable was seen. Only a later check can clear a re-enable.
+    disabled_after: Option<u64>,
 }
 
 impl TapGuard {
     /// Decide after a run-loop slice, from the disables seen since the last
-    /// check and the checker's latest verdict. Lost access always tears
-    /// down; so do consecutive timeouts. Otherwise a disabled tap is
-    /// re-enabled within the budget.
+    /// check and what the checker has published. Lost access always tears
+    /// down; so do consecutive timeouts. A disabled tap stays off until a
+    /// check that started after the disable finds access granted: the
+    /// published `trusted` can predate the revoke that caused the disable.
+    /// Then it is re-enabled within the budget.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    pub fn check(&mut self, disables: Disables, trusted: bool, now: Instant) -> Verdict {
-        if !trusted {
+    pub fn check(&mut self, disables: Disables, access: Access, now: Instant) -> Verdict {
+        if !access.trusted {
             return Verdict::TearDown;
         }
-        if !disables.any() {
-            return Verdict::Keep;
-        }
-        if disables.timeouts > 0 {
-            let recent = self
-                .last_timeout
-                .is_some_and(|at| now.saturating_duration_since(at) < TIMEOUT_REPEAT_WINDOW);
-            self.last_timeout = Some(now);
-            if recent || disables.timeouts > 1 {
-                return Verdict::TearDown;
+        if disables.any() {
+            if disables.timeouts > 0 {
+                let recent = self
+                    .last_timeout
+                    .is_some_and(|at| now.saturating_duration_since(at) < TIMEOUT_REPEAT_WINDOW);
+                self.last_timeout = Some(now);
+                if recent || disables.timeouts > 1 {
+                    return Verdict::TearDown;
+                }
             }
+            // `started` only grows, so a later disable waits at least as long.
+            self.disabled_after = Some(access.started);
         }
+        let Some(after) = self.disabled_after else {
+            return Verdict::Keep;
+        };
+        if access.granted <= after {
+            return Verdict::AwaitCheck;
+        }
+        self.disabled_after = None;
         while let Some(&oldest) = self.reenabled.front() {
             if now.saturating_duration_since(oldest) < REENABLE_WINDOW {
                 break;
