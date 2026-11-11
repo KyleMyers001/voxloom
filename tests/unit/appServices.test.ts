@@ -31,7 +31,7 @@ describe('mock application services', () => {
     setup.reopen();
     setup.replace({ ...initialOnboarding, permissionDenied: true });
     expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
-      { key: 'startAtLogin', type: 'set-setting', value: true },
+      { key: 'startAtLogin', now: expect.any(Number), type: 'set-setting', value: true },
       { changes: { holdTested: true }, type: 'update-onboarding' },
       { type: 'reopen-onboarding' },
       {
@@ -39,5 +39,17 @@ describe('mock application services', () => {
         value: { ...initialOnboarding, permissionDenied: true },
       },
     ]);
+  });
+
+  it('createSettingsService uses the injected clock for now', () => {
+    const dispatch = vi.fn();
+    const settings = createSettingsService(dispatch, () => 1_700_000_000_000);
+    settings.update({ key: 'startAtLogin', value: false });
+    expect(dispatch.mock.calls[0][0]).toEqual({
+      key: 'startAtLogin',
+      now: 1_700_000_000_000,
+      type: 'set-setting',
+      value: false,
+    });
   });
 });

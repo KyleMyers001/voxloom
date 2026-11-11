@@ -61,7 +61,7 @@ describe('store read errors (BUS-42)', () => {
       act(() => api!.dispatch({
         settings: { ...api!.state.settings, transcriptRetention: 'off' },
         onboardingComplete: true,
-        type: 'hydrate-settings',
+        now: Date.now(), type: 'hydrate-settings',
       }));
       await settle();
       expect(settingsIo.writes).toEqual([]);
@@ -96,7 +96,7 @@ describe('store read errors (BUS-42)', () => {
     await waitFor(() => expect(api?.bootReady).toBe(true));
     await settle();
     expect(api!.state.historyError).toMatch(/read-only until settings/);
-    act(() => api!.dispatch({ record: { ...row, createdAt: NOW, id: 'new' }, type: 'append-record' }));
+    act(() => api!.dispatch({ now: NOW, record: { ...row, createdAt: NOW, id: 'new' }, type: 'append-record' }));
     await settle();
     expect(historyIo.snapshot()).toBe(v1);
     expect(settingsIo.writes).toEqual([]);
@@ -144,7 +144,7 @@ describe('store read errors (BUS-42)', () => {
     expect(api!.state.settingsError).toMatch(/reset to defaults/);
     expect(api!.state.settings.transcriptRetention).not.toBe('forever');
     expect(historyIo.backups()).toEqual([v1]);
-    act(() => api!.dispatch({ record: { ...row, createdAt: NOW, id: 'new' }, type: 'append-record' }));
+    act(() => api!.dispatch({ now: NOW, record: { ...row, createdAt: NOW, id: 'new' }, type: 'append-record' }));
     await waitFor(() => expect(writes.length).toBeGreaterThan(0));
     expect(historyIo.backups()).toEqual([v1]);
   });
@@ -171,6 +171,7 @@ describe('store read errors (BUS-42)', () => {
     await settle();
     expect(api!.state.historyError).toMatch(/read-only/);
     act(() => api!.dispatch({
+      now: NOW,
       record: { createdAt: NOW, durationSeconds: 1, id: 'n', model: null, recoveryExpiresAt: null, status: 'copied', style: 'formal', text: 'x' },
       type: 'append-record',
     }));
@@ -203,6 +204,7 @@ describe('store read errors (BUS-42)', () => {
       expect(api!.state.historyError).toBe(expected);
       expect(backups).toBe(1);
       act(() => api!.dispatch({
+        now: NOW,
         record: { createdAt: NOW, durationSeconds: 1, id: 'n', model: null, recoveryExpiresAt: null, status: 'copied', style: 'formal', text: 'x' },
         type: 'append-record',
       }));

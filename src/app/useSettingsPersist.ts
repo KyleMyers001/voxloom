@@ -12,9 +12,15 @@ interface Options {
   /** Last value confirmed on disk; the rollback target. */
   lastSavedRef: MutableRefObject<SettingsFile | null>;
   onboardingComplete: boolean;
+  /** After a confirmed save (lastSavedRef already updated). */
+  onSaved?: (file: SettingsFile) => void;
+  /** After UI rolled back to lastSaved (hydrate-settings already dispatched). */
+  onRolledBack?: (file: SettingsFile) => void;
   persistence: { enabled: boolean; store: DurableSettingsStore };
   persistGenRef: MutableRefObject<number>;
   settings: Settings;
+  /** AppProvider clock; defaults to Date.now for standalone call sites. */
+  now?: () => number;
 }
 
 const same = (a: SettingsFile | null, b: SettingsFile) =>
@@ -26,12 +32,23 @@ const same = (a: SettingsFile | null, b: SettingsFile) =>
  * change. Optimistic UI with rollback to the last successful save on failure.
  * Skips only when the value equals the last REQUESTED save, so A→B→A with B
  * still in flight still writes the final A. Saves run one at a time, in order.
+ *
+ * Retention Off clears transcripts in the reducer immediately; history.json is
+ * wiped only after onSaved (confirmed Off). onRolledBack reloads history from
+ * disk so a failed Off save cannot leave memory empty while settings roll back.
  */
 export function useSettingsPersist({
   allowRef, dispatch, hydratedRef, lastRequestedRef, lastSavedRef,
-  onboardingComplete, persistence, persistGenRef, settings,
+  onboardingComplete, onRolledBack, onSaved, persistence, persistGenRef, settings,
+  now = Date.now,
 }: Options) {
   const chain = useRef<Promise<void>>(Promise.resolve());
+  const nowRef = useRef(now);
+  nowRef.current = now;
+  const onSavedRef = useRef(onSaved);
+  onSavedRef.current = onSaved;
+  const onRolledBackRef = useRef(onRolledBack);
+  onRolledBackRef.current = onRolledBack;
   useEffect(() => {
     if (!persistence.enabled || !hydratedRef.current || !allowRef.current) return;
     const snapshot: SettingsFile = { onboardingComplete, settings, version: SETTINGS_FILE_VERSION };
@@ -43,6 +60,8 @@ export function useSettingsPersist({
         await persistence.store.save(snapshot.settings, snapshot.onboardingComplete);
         if (gen !== persistGenRef.current) return;
         lastSavedRef.current = snapshot;
+        // Off is confirmed on disk only if no newer save is queued.
+        if (lastRequestedRef.current === snapshot) onSavedRef.current?.(snapshot);
         dispatch({ message: null, type: 'set-settings-error' });
       } catch (error: unknown) {
         if (gen !== persistGenRef.current) return;
@@ -54,7 +73,13 @@ export function useSettingsPersist({
         if (rollback && lastRequestedRef.current === snapshot) {
           // The rollback is what we now expect on disk; don't re-save it.
           lastRequestedRef.current = rollback;
-          dispatch({ onboardingComplete: rollback.onboardingComplete, settings: rollback.settings, type: 'hydrate-settings' });
+          dispatch({
+            onboardingComplete: rollback.onboardingComplete,
+            settings: rollback.settings,
+            now: nowRef.current(),
+            type: 'hydrate-settings',
+          });
+          onRolledBackRef.current?.(rollback);
         }
         dispatch({ message: `Failed to save settings: ${message}`, type: 'set-settings-error' });
       }

@@ -1,3 +1,8 @@
+import {
+  keepRecoverable,
+  recordsAfterSettingsChange,
+  recordsForRetention,
+} from './retentionClear';
 import { dictationReducer } from '../domain/dictationMachine';
 import { initialOnboarding } from '../domain/fixtures';
 import {
@@ -92,9 +97,11 @@ export function appReducer(state: AppState, action: AppAction): AppState {
   }
   if (action.type === 'set-screen') return { ...state, screen: action.screen };
   if (action.type === 'set-setting') {
+    const settings = { ...state.settings, [action.key]: action.value };
     return {
       ...state,
-      settings: { ...state.settings, [action.key]: action.value },
+      records: recordsAfterSettingsChange(state, settings, action.now),
+      settings,
     };
   }
   if (action.type === 'set-onboarding') {
@@ -133,10 +140,13 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     };
   }
   if (action.type === 'append-record') {
+    const records = [action.record, ...state.records];
     return {
       ...state,
       historyError: state.historyErrorSticky ? state.historyError : null,
-      records: [action.record, ...state.records],
+      records: state.settings.transcriptRetention === 'off'
+        ? keepRecoverable(records, action.now)
+        : records,
     };
   }
   if (action.type === 'hydrate-records') {
@@ -145,10 +155,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       historyError: null,
       historyErrorSticky: false,
       historyHydrated: true,
-      records: mergePreHydrateRecords(
+      records: recordsForRetention(state.settings, mergePreHydrateRecords(
         action.records,
         pendingPreHydrateRecords(state.historyHydrated, state.records),
-      ),
+      ), action.now),
     };
   }
   if (action.type === 'set-history-error') {
@@ -165,6 +175,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         ...state.onboarding,
         complete: action.onboardingComplete,
       },
+      records: recordsAfterSettingsChange(state, action.settings, action.now),
       settings: action.settings,
       settingsError: null,
     };
@@ -244,7 +255,13 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     const records = sourceId
       ? state.records.map((item) => item.id === sourceId ? record : item)
       : [record, ...state.records];
-    return { ...state, dictation, records };
+    return {
+      ...state,
+      dictation,
+      records: state.settings.transcriptRetention === 'off'
+        ? keepRecoverable(records, action.now)
+        : records,
+    };
   }
   if (action.type === 'fail-dictation') {
     const sourceId = state.dictation.kind === 'processing'
@@ -288,3 +305,4 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 export function canStartDictation(dictation: DictationState): boolean {
   return dictation.kind !== 'listening' && dictation.kind !== 'processing';
 }
+
