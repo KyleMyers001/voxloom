@@ -26,7 +26,7 @@ describe('B guided setup', () => {
     await waitFor(() => expect(io.readiness).toHaveBeenCalled());
     io.readiness = () => new Promise(() => {});
     act(() => dispatchPracticeGesture('hold-start'));
-    await user.click(screen.getByRole('button', { name: 'Close Set up Voxloom' }));
+    await user.click(screen.getByRole('button', { name: 'Set up later' }));
     expect(close).toHaveBeenCalledOnce();
   });
   it('a start refused by a failed recheck resets the gesture machine so no stray latch remains', async () => {

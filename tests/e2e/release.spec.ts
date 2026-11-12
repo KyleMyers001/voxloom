@@ -13,5 +13,5 @@ test('release setup cannot be passed by simulated gestures without macOS capture
   await page.getByRole('button', { name: 'Set up later' }).click();
   await expect(page.getByText(/Setup is incomplete/)).toBeVisible();
   await page.getByRole('button', { name: 'Resume setup' }).click();
-  await expect(page.getByRole('dialog', { name: 'Set up Voxloom' })).toBeVisible();
+  await expect(page.getByRole('main', { name: 'Set up Voxloom' })).toBeVisible();
 });

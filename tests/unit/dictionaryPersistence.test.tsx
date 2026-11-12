@@ -49,7 +49,7 @@ describe('durable dictionary persistence', () => {
     );
 
     await waitFor(() => {
-      expect(screen.queryByText(/Step 1 of/i)).not.toBeInTheDocument();
+      expect(screen.queryByRole('main', { name: 'Set up Voxloom' })).not.toBeInTheDocument();
     });
     await user.click(screen.getByRole('button', { name: 'Dictionary' }));
     expect(await screen.findByText('PersistedWord')).toBeInTheDocument();
@@ -75,7 +75,7 @@ describe('durable dictionary persistence', () => {
     );
 
     await waitFor(() => {
-      expect(screen.queryByText(/Step 1 of/i)).not.toBeInTheDocument();
+      expect(screen.queryByRole('main', { name: 'Set up Voxloom' })).not.toBeInTheDocument();
     });
     await user.click(screen.getByRole('button', { name: 'Dictionary' }));
     await user.click(screen.getByRole('button', { name: 'Add term' }));

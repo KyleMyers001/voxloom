@@ -1,10 +1,6 @@
-import {
-  type KeyboardEvent,
-  type ReactNode,
-  useEffect,
-  useRef,
-} from 'react';
+import { type ReactNode, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { focusableSelector as selector, trapTab } from './focusTrap';
 import { Icon } from './Icon';
 import { beginModal } from '../app/modalState';
 
@@ -18,13 +14,6 @@ interface DialogProps {
   onEscape?: () => void;
   opener?: HTMLElement | null;
 }
-
-const selector = [
-  'button:not([disabled])',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
-].join(',');
 
 export function Dialog({ children, initialFocus, label, onClose, onEscape, opener }: DialogProps) {
   const panel = useRef<HTMLDivElement>(null);
@@ -62,21 +51,6 @@ export function Dialog({ children, initialFocus, label, onClose, onEscape, opene
     return () => document.removeEventListener('keydown', handleEscape);
   }, [onClose, onEscape]);
 
-  function handleKeyDown(event: KeyboardEvent) {
-    if (event.key !== 'Tab' || !panel.current) return;
-    const focusable = [...panel.current.querySelectorAll<HTMLElement>(selector)]
-      .filter((element) => !element.hidden);
-    const first = focusable[0];
-    const last = focusable.at(-1);
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last?.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first?.focus();
-    }
-  }
-
   return createPortal(
     <div
       aria-label={label}
@@ -85,7 +59,7 @@ export function Dialog({ children, initialFocus, label, onClose, onEscape, opene
       onMouseDown={(event) => {
         if (event.currentTarget === event.target) onClose();
       }}
-      onKeyDown={handleKeyDown}
+      onKeyDown={(event) => trapTab(event, panel.current)}
       role="dialog"
     >
       <div className="overlay__panel" onMouseDown={(event) =>

@@ -26,7 +26,7 @@ describe('App integration', () => {
     expect(screen.getByText(/Setup is incomplete/)).toBeInTheDocument();
     expect(document.querySelector('.brand__status')).toHaveTextContent('Setup incomplete');
     await user.click(screen.getByRole('button', { name: 'Resume setup' }));
-    expect(screen.getByRole('dialog', { name: 'Set up Voxloom' })).toBeInTheDocument();
+    expect(screen.getByRole('main', { name: 'Set up Voxloom' })).toBeInTheDocument();
   });
   it('Skip setup finishes setup without practice so it no longer blocks the shortcut', async () => {
     localStorage.setItem(progressKey, JSON.stringify({ version: 1, step: 2 }));
@@ -34,7 +34,7 @@ describe('App integration', () => {
       const user = userEvent.setup();
       renderWithApp(<App />);
       await user.click(screen.getByRole('button', { name: 'Skip setup' }));
-      expect(screen.queryByRole('dialog', { name: 'Set up Voxloom' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('main', { name: 'Set up Voxloom' })).not.toBeInTheDocument();
       expect(screen.queryByText(/Setup is incomplete/)).not.toBeInTheDocument();
       expect(document.querySelector('.brand__status')).toHaveTextContent('Ready');
       expect(localStorage.getItem(progressKey)).toBeNull();
@@ -62,14 +62,14 @@ describe('App integration', () => {
     fireEvent.keyDown(document, shortcutKey);
     fireEvent.keyUp(document, shortcutKey);
     expect(screen.queryByRole('button', { name: /Simulate/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('dialog', { name: 'Set up Voxloom' })).toBeInTheDocument();
+    expect(screen.getByRole('main', { name: 'Set up Voxloom' })).toBeInTheDocument();
   });
 
   it('gates first run, gesture overlay without synthetic Inserted, shares mutations',
     async () => {
       const user = userEvent.setup();
       renderWithApp(<App />);
-      expect(screen.getByRole('dialog', {
+      expect(screen.getByRole('main', {
         name: 'Set up Voxloom',
       })).toBeInTheDocument();
       await user.click(screen.getByRole('button', { name: 'Set up later' }));
@@ -208,7 +208,7 @@ describe('App integration', () => {
       const user = userEvent.setup();
       renderWithApp(<App />);
       expect(screen.getByRole('heading', { name: /Your shortcut/ })).toBeInTheDocument();
-      await user.click(screen.getByRole('button', { name: 'Close Set up Voxloom' }));
+      await user.click(screen.getByRole('button', { name: 'Set up later' }));
       await user.click(screen.getByRole('button', { name: 'First-run setup' }));
       expect(screen.getByText(/Less typing/)).toBeInTheDocument();
       // Real setup still cannot be completed by development controls.

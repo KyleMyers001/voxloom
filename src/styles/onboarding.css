@@ -1,12 +1,7 @@
 /* BUS-208 · approved B / Guided setup. The spine stays put; long content scrolls. */
-.overlay:has(.guided-setup) { padding: 12px; }
-.overlay__panel:has(.guided-setup) {
-  width: min(880px, calc(100vw - 24px));
-  max-width: none;
-  padding: 0;
-  overflow: hidden;
-  height: min(650px, calc(100dvh - 24px));
-}
+/* BUS-216: setup is the window itself (v3 mock), not a sheet over Home. */
+.setup-window { height: 100vh; height: 100dvh; overflow: hidden; background: var(--panel); }
+.setup-window__loading { display: grid; place-content: center; justify-items: center; gap: 12px; height: 100%; color: var(--mut); }
 .guided-setup { display: grid; grid-template-columns: 205px minmax(0, 1fr); height: 100%; }
 .guided-rail { background: var(--side); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 30px 24px; }
 .guided-brand { display: flex; align-items: center; gap: 10px; font-size: var(--fs-emph); font-weight: 650; letter-spacing: -.025em; margin-bottom: 46px; }
@@ -26,7 +21,7 @@
 .guided-disclosure { padding: 10px 36px; margin: 0; background: var(--sheet); }
 .guided-content { padding: 34px 36px 18px; overflow: auto; overflow-wrap: anywhere; }
 .guided-kicker { color: var(--mut); text-transform: uppercase; letter-spacing: .13em; font-size: var(--fs-micro); font-weight: 650; margin-bottom: 16px; }
-.overlay__panel .guided-content h2 { font-size: var(--fs-hero); font-weight: 600; line-height: 1.12; letter-spacing: -.04em; margin: 0 0 16px; padding: 0 10px 0 0; outline: none; }
+.guided-content h2 { font-size: var(--fs-hero); font-weight: 600; line-height: 1.12; letter-spacing: -.04em; margin: 0 0 16px; padding: 0 10px 0 0; outline: none; }
 .guided-content .guided-intro { line-height: 1.55; margin: 0 0 22px; max-width: 430px; font-size: var(--fs-body); }
 .guided-content p { line-height: 1.55; }
 .guided-mini { font-size: var(--fs-label); line-height: 1.65; }
@@ -60,9 +55,12 @@
 .guided-note textarea { width: 100%; min-height: 145px; resize: vertical; border: none; border-radius: 0; background: transparent; color: var(--fg); padding: 20px; font: inherit; font-size: var(--fs-bigkey); line-height: 1.5; }
 .guided-note textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
 .guided-practice-actions { display: flex; gap: 12px; flex-wrap: wrap; }
-.guided-footer { display: flex; align-items: center; gap: 10px; padding: 18px 36px 24px; border-top: 1px solid var(--line); background: var(--sheet); }
+.guided-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 18px 36px 24px; border-top: 1px solid var(--line); background: var(--sheet); }
 .guided-footer > span { flex: 1; }
-.guided-footer .btn { min-height: 42px; }
+.guided-footer .btn { min-height: 42px; white-space: nowrap; }
+.guided-footer .btn.primary { margin-left: auto; }
+/* In a large window, the column keeps the approved frame's reading width. */
+.guided-content, .guided-disclosure, .guided-footer { padding-inline-end: max(36px, calc(100% - 640px)); }
 .guided-content :focus-visible, .guided-footer :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 [data-appearance-resolved="light"] .guided-rail li[aria-current] b { color: white; }
 @media (max-width: 760px) {
@@ -72,7 +70,6 @@
   .guided-brand { font-size: var(--fs-secondary); gap: 7px; }
   .guided-content { padding: 30px 22px 18px; }
   .guided-footer { padding: 14px 22px 18px; }
-  .overlay__panel .guided-content h2 { font-size: var(--fs-hero); }
   .guided-permission { align-items: flex-start; flex-wrap: wrap; }
   .guided-permission-actions { max-width: 100%; align-items: flex-start; flex-direction: row; flex-wrap: wrap; }
   .guided-content .btn { min-height: 44px; }

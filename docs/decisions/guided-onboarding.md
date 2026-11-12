@@ -5,6 +5,11 @@ Your shortcut → First words → Ready. First words contains two progressive tr
 not a permanent mode selection. The same writable note and accepted shortcut
 serve hold/speak/release, then double-tap/speak/press-once-to-finish.
 
+Setup is the app window itself (BUS-216), titled "Set up Voxloom": the spine
+fills the frame, with no Home/History/Dictionary shell, backdrop or dialog close
+button around it. First run, Resume setup and reopening from Settings all use
+this layout. Set up later is on every step and returns to the normal app.
+
 ## Permission and model authority
 
 - Microphone uses the existing AVFoundation bridge. Only microphone can report
@@ -54,7 +59,7 @@ permission failure/revocation, configuration change, Back, Close or cancellation
 Permission queries run after slow model verification, with generation and model/
 shortcut checks after awaits. Guided practice requires an armed Escape scope;
 ordinary product dictation retains its existing degraded-capture behavior.
-Escape cancels recording or processing without closing the note. Explicit Close
+Escape cancels recording or processing without closing the note. Set up later
 cancels and closes. Cancelling hands-free keeps a completed hold check. Changing
 the shortcut or speech model retires both checks, so tries never silently mix
 configurations. Product completion-time targeting and clipboard contracts are
@@ -70,7 +75,7 @@ Legacy gesture-only flags do not count. Final `onboardingComplete` remains in th
 existing durable settings file and is set from Ready after both real result
 gates and a fresh prerequisites check, or by an explicit Skip setup on any step
 (parity with the earlier Skip), which completes setup without practice so it no
-longer reopens at launch. Set up later/Close leave incomplete state, with a
+longer reopens at launch. Set up later/Escape leave incomplete state, with a
 visible Resume setup action that restores saved progress. Finishing or skipping
 clears saved progress, and reopening setup from Settings starts it over.
 Existing completed users remain complete; they are not silently forced into the

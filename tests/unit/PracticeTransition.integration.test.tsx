@@ -49,7 +49,7 @@ describe('practice interaction transitions', () => {
     renderWithApp(<><App /><DictationStatus /></>, () => now);
     await reachPractice(user);
     tap();
-    await user.click(screen.getByRole('button', { name: 'Close Set up Voxloom' }));
+    await user.click(screen.getByRole('button', { name: 'Set up later' }));
 
     vi.useFakeTimers();
     now = 100;
@@ -79,7 +79,7 @@ describe('practice interaction transitions', () => {
       now = 100;
       tap();
       expect(screen.getByRole('textbox', { name: 'Practice dictation field' })).toHaveValue('');
-      await user.click(screen.getByRole('button', { name: 'Close Set up Voxloom' }));
+      await user.click(screen.getByRole('button', { name: 'Set up later' }));
 
       vi.useFakeTimers();
       now = 150;

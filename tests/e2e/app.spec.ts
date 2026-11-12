@@ -42,7 +42,7 @@ async function skipOnboarding(page: Page) {
 
 test('first run cannot fake real practice in a browser and can remain incomplete', async ({ page }) => {
   await page.goto('/');
-  const onboarding = page.getByRole('dialog', { name: 'Set up Voxloom' });
+  const onboarding = page.getByRole('main', { name: 'Set up Voxloom' });
   await expect(onboarding).toBeVisible();
   await expectAccessible(page);
   await page.screenshot({ path: 'artifacts/screenshots/onboarding.png' });
@@ -297,7 +297,7 @@ test('onboarding records the shortcut with the shared recorder (BUS-47)', async 
   const shots = process.env.BUS47_ONBOARDING_DIR;
   // Isolated synthetic prerequisites, using the production component; no native claims.
   await page.goto('/tests/fixtures/guided-preview.html?step=2');
-  const onboarding = page.getByRole('dialog', { name: 'Set up Voxloom' });
+  const onboarding = page.getByRole('main', { name: 'Set up Voxloom' });
   await expect(onboarding.getByRole('textbox')).toHaveCount(0);
   const field = onboarding.getByRole('button', { name: /^(Shortcut|App-local shortcut|Global shortcut) / });
   await expectAccessible(page);
