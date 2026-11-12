@@ -2,8 +2,8 @@
  * BUS-47: every line the shortcut recorder shows (designer's final copy).
  * On macOS modifiers are glyphs (⌃⌥⌘); elsewhere they are words.
  */
-import { comboLabel, isMacPlatform } from '../../components/KeyCombo';
-import { isLoneKey } from '../../services/shortcut/loneKey';
+import { comboKeys, comboLabel, isMacPlatform } from '../../components/KeyCombo';
+import { isLoneKey, loneKeyCap, spokenLoneKey } from '../../services/shortcut/loneKey';
 import type { InvalidCapture } from '../../services/shortcut/shortcutCapture';
 
 export const HELP = 'Click, then press keys. Hold to dictate; double-tap to latch.';
@@ -24,7 +24,7 @@ export const addAKey = (mac = isMacPlatform()) =>
   `Add a key: hold ${mods(mac)} and press a letter, number or Space.`;
 export const pendingText = (combo: string, mac = isMacPlatform()) => `Setting ${L(combo, mac)}…`;
 /** Shift is held while typing capitals, so a lone Shift shortcut can misfire. */
-const shiftWarning = (mac: boolean) =>
+export const shiftWarning = (mac: boolean) =>
   ` Right ${mac ? '⇧' : 'Shift'} is also used for typing, so it may start dictation by accident.`;
 export const successText = (combo: string, mac = isMacPlatform()) =>
   `Shortcut set to ${L(combo, mac)}.${combo === 'ShiftRight' ? shiftWarning(mac) : ''}`;
@@ -112,3 +112,36 @@ export function bootRefusedText(combo: string, active: string | null | undefined
   // The key stays saved, so recording it again retries it.
   return `${why}${now} Record it again in Settings.`;
 }
+
+/**
+ * BUS-219: guided setup step 2 ("Your shortcut") card, Option A. Written for
+ * a first-time user: no raw key codes, no "latch" or "binding".
+ */
+export const CARD_LABEL = 'Your shortcut';
+export const CARD_DEFAULT_PILL = 'Default';
+export const CARD_CHANGE = 'Change shortcut';
+export const CARD_RECORDING_LABEL = 'Now press the keys you want to use';
+export const CARD_PROMPT = 'Waiting for your keys…';
+export const CARD_RECORDING_HELP = 'Press them together, like ⌃ ⌥ Space, or press one key, like Right Option. Changed your mind? Press Esc or choose Cancel to keep your current shortcut.';
+export const CARD_CANCEL = 'Cancel';
+
+/** "key" for a lone key such as Right Option, "keys" for a combo. */
+export const holdHint = (shortcut: string) =>
+  `Hold the ${isLoneKey(shortcut) ? 'key' : 'keys'} while you talk. Let go when you’re done.`;
+
+/** Lone key: "Right Option (⌥)"; combo: "⌃⇧Space". */
+export function shortcutName(shortcut: string, mac = isMacPlatform()): string {
+  const spoken = spokenLoneKey(shortcut, mac);
+  if (!spoken) return L(shortcut, mac);
+  const cap = loneKeyCap(shortcut, mac);
+  return cap && cap !== spoken ? `${spoken} (${cap})` : spoken;
+}
+
+export const resetLinkText = (combo: string, mac = isMacPlatform()) =>
+  `Go back to the default (${comboKeys(combo, mac).join(' ')})`;
+export const savedText = (combo: string, mac = isMacPlatform()) =>
+  `Saved. On the next step, hold ${shortcutName(combo, mac)} to try it.${combo === 'ShiftRight' ? shiftWarning(mac) : ''}`;
+export const cardInUseText = (combo: string, kept: string, mac = isMacPlatform()) =>
+  `Another app already uses ${shortcutName(combo, mac)}, so we kept your current shortcut, ${shortcutName(kept, mac)}. Try different keys.`;
+export const cardNoneActiveText = (combo: string, mac = isMacPlatform()) =>
+  `${shortcutName(combo, mac)} didn’t work, and no shortcut is set right now. Try different keys, or go back to the default.`;
