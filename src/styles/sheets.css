@@ -31,24 +31,7 @@
 .sheet.ob { display: flex; flex-direction: column; gap: 10px; }
 .sheet.ob h3 { font-size: var(--fs-emph); margin: 4px 0 0; }
 .sheet.ob p { margin: 0; }
-.onboarding-step { display: flex; flex-direction: column; gap: 10px; }
 
-.steps { align-items: center; display: flex; gap: 6px; }
-.steps span {
-  background: var(--seg);
-  border-radius: 50%;
-  color: var(--mut);
-  display: grid;
-  font-size: var(--fs-label);
-  font-weight: 700;
-  height: 22px;
-  place-items: center;
-  width: 22px;
-}
-.steps span.on { background: var(--brand); color: #08080c; }
-.steps em { color: var(--mut); font-size: var(--fs-secondary); font-style: normal; margin-left: 6px; }
-
-.ob-hero { display: flex; justify-content: center; padding: 6px 0 2px; }
 .bigkeys { display: flex; justify-content: center; padding: 10px; }
 .bigkeys .kbd { font-size: var(--fs-bigkey); height: 46px; min-width: 46px; border-radius: 9px; }
 

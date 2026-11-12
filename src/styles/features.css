@@ -113,10 +113,6 @@
   padding: 12px;
 }
 
-.onboarding-step > p {
-  color: var(--muted);
-}
-
 .recording--overlay {
   align-items: center;
   background: color-mix(in srgb, var(--panel) 94%, transparent);

@@ -4,12 +4,12 @@ for (const width of [1120, 640]) {
   test(`mock-backed browser offers explicit English-first Turbo at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 760 });
     await page.goto('/');
-    await page.getByRole('button', { name: 'Skip', exact: true }).click();
+    await page.getByRole('button', { name: 'Set up later', exact: true }).click();
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await page.getByRole('tab', { name: 'Models', exact: true }).click();
     const turbo = page.getByRole('radio', { name: /Whisper Large v3 Turbo \(English\)/ });
     await expect(turbo).not.toBeChecked();
-    await expect(page.getByRole('radio', { name: /Whisper Tiny/ })).toBeChecked();
+    await expect(page.getByRole('radio', { name: /Whisper Base/ })).toBeChecked();
     const card = page.getByRole('listitem').filter({ has: turbo });
     await expect(card.getByText('1.62 GB', { exact: true })).toBeVisible();
     await expect(card.getByText('Larger download and higher memory use than Tiny or Base.')).toBeVisible();

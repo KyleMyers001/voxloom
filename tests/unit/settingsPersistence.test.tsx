@@ -135,7 +135,7 @@ describe('durable settings persistence', () => {
     // History file still holds its original payload.
     expect(historyIo.snapshot()).toContain('keep-me');
 
-    await user.click(screen.getByRole('button', { name: 'Skip' }));
+    await user.click(screen.getByRole('button', { name: 'Set up later' }));
     await user.click(screen.getByRole('button', { name: 'Settings' }));
     await user.click(await screen.findByRole('tab', { name: 'Privacy' }));
     const retention = await screen.findByRole('radiogroup', { name: 'Transcript retention' });

@@ -150,7 +150,19 @@ function consumeTerminal(
   return true;
 }
 
-export function useCaptureState(): UseCaptureStateResult {
+export interface UseCaptureStateOptions {
+  /**
+   * Adopt a native capture already running at mount (default true: a
+   * remounted product owner keeps its recording). Guided practice passes
+   * false so it never owns, stops, cancels or consumes another hook's capture.
+   */
+  adoptActive?: boolean;
+}
+
+export function useCaptureState(
+  options: UseCaptureStateOptions = {},
+): UseCaptureStateResult {
+  const adoptActiveRef = useRef(options.adoptActive !== false);
   const [captureReady, setCaptureReady] = useState(false);
   const [captureState, setCaptureState] =
     useState<CaptureState>({ kind: 'idle' });
@@ -289,7 +301,8 @@ export function useCaptureState(): UseCaptureStateResult {
             kind: 'error',
             message: errorMessages['capture-unavailable'],
           });
-        } else if (statusResult.value && ownerRef.current === null) {
+        } else if (adoptActiveRef.current && statusResult.value
+            && ownerRef.current === null) {
           const status = statusResult.value;
           if (!consumeTerminal(terminalsRef.current, status)) {
             ownerRef.current = {

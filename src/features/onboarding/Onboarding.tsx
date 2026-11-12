@@ -1,158 +1,292 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useApp } from '../../app/AppContext';
 import { Dialog } from '../../components/Dialog';
-import { Icon } from '../../components/Icon';
+import { KeyCombo } from '../../components/KeyCombo';
 import { initialSettings } from '../../domain/fixtures';
-import { setRecorderStatus } from '../settings/recorderStore';
 import { ShortcutRecorder } from '../settings/ShortcutRecorder';
-import { HELP as SHORTCUT_HELP, onboardingInUseText } from '../settings/shortcutCopy';
-import { isTauriEnv } from '../../services/capture/captureService';
-import { useCaptureState } from '../../services/capture/useCaptureState';
-import { MicStep } from './MicStep';
-import { StepDots } from './StepDots';
+import { HELP as SHORTCUT_HELP } from '../settings/shortcutCopy';
+import { useDogfoodCapture } from '../../services/stt/useDogfoodCapture';
+import type { OwnFieldDeliveryGuard } from '../../services/stt/dogfoodPath';
+import { resolveTranscriptionModelId } from '../../services/stt/resolveModelId';
+import { STT_MODEL_CATALOG } from '../../services/stt/types';
+import { subscribe as subscribeSettings } from '../../services/settingsWindow';
+import { listenShortcutBound } from '../../services/shortcut/bindingEvents';
+import { listenModelsChanged } from '../../services/stt/modelsChanged';
+import { createOverlayBridge } from '../../services/shortcut';
+import { createGuidedSetup, permissionsAuthorized, type PermissionKind, type SetupBoundary, type SetupProgressStorage } from './guidedSetup';
+import { registerPracticeHandler, resetPracticeGestures } from './practiceBridge';
+import { createSetupBoundary } from './setupBoundary';
 
 interface OnboardingProps {
   onClose: () => void;
   opener?: HTMLElement | null;
+  /** OS boundary and isolated progress store for safe component tests. */
+  boundary?: SetupBoundary;
+  progressStorage?: SetupProgressStorage;
+}
+const PROGRESS_KEY = 'voxloom.guided-setup.v1';
+const localProgress: SetupProgressStorage = {
+  read: () => localStorage.getItem(PROGRESS_KEY),
+  write: (value) => localStorage.setItem(PROGRESS_KEY, value),
+  clear: () => localStorage.removeItem(PROGRESS_KEY),
+};
+/** Reopening setup starts the tutorial over; Resume setup keeps unfinished progress. */
+export function clearGuidedProgress(): void {
+  try { localProgress.clear?.(); } catch { /* Unavailable storage has nothing to resume. */ }
+}
+const permissions = [
+  { kind: 'microphone', key: 'microphone', title: 'Hear your voice', name: 'Microphone', copy: 'Microphone access captures your speech when you dictate.' },
+  { kind: 'accessibility', key: 'accessibility', title: 'Type where you’re writing', name: 'Accessibility', copy: 'Accessibility lets Voxloom insert words into your text field. It also lets Esc cancel dictation and makes single-key shortcuts work.' },
+] as const;
+/** The other gesture than this try expects: say which one it wants instead of ignoring it. */
+const wrongGesture = {
+  hold: 'That was a double-tap. For this try, hold your shortcut, speak, then release.',
+  tap: 'That was a hold. For this try, double-tap your shortcut, speak, then press it once to finish.',
+} as const;
+
+/** Do not construct the controller or expose setup actions against boot defaults. */
+export function Onboarding(props: OnboardingProps) {
+  const { bootReady } = useApp();
+  if (!bootReady) return <Dialog label="Set up Voxloom" onClose={props.onClose} opener={props.opener}><p role="status">Loading your saved setup…</p></Dialog>;
+  return <HydratedOnboarding {...props} />;
 }
 
-/** Set-up sheet (SPEC § Onboarding; mocks onboarding-*). Simulate buttons are DEV-only. */
-export function Onboarding({ onClose, opener }: OnboardingProps) {
-  const { settings, setup, state } = useApp();
+/** Approved B / v3: a setup spine, two permissions and two real tries in one note. */
+function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: OnboardingProps) {
+  const { clipboard, settings, setup, state } = useApp();
+  const latest = useRef(state.settings);
+  latest.current = state.settings;
+  const [io] = useState(() => boundary ?? createSetupBoundary());
+  const [controller] = useState(() => createGuidedSetup(io,
+    () => resolveTranscriptionModelId(latest.current.transcriptionModel),
+    () => latest.current.shortcut, progressStorage ?? localProgress));
+  const guided = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const [error, setError] = useState('');
-  // Last combo that wasn't refused: a collision reverts the field to it.
-  const [kept, setKept] = useState(state.settings.shortcut);
-  const onboarding = state.onboarding;
-  const update = setup.update;
-  const capture = useCaptureState();
-  const isNative = isTauriEnv();
-  // In a browser context native capture is unavailable; allow Next without permission.
-  const micAuthorized = !isNative || capture.permissionStatus === 'authorized';
-  const shortcut = state.settings.shortcut;
+  const [hint, setHint] = useState<string | null>(null);
+  const field = useRef<HTMLTextAreaElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const guard = useRef<OwnFieldDeliveryGuard | undefined>(undefined);
+  const sequence = useRef(0);
+  const pending = useRef(false);
+  // A practice capture was started and has not reached a result yet.
+  const capturing = useRef(false);
+  const practice = useDogfoodCapture({
+    clipboard, clipboardFallback: false, cleanupActive: false, ownedCaptureOnly: true,
+    modelId: state.settings.transcriptionModel,
+    preferredDeviceId: state.settings.microphone,
+    deliveryGuard: () => guard.current,
+  });
+  const live = useRef(practice);
+  live.current = practice;
+  const busy = pending.current || ['starting', 'recording', 'transcribing', 'cleaning'].includes(practice.phase);
+  const modelId = resolveTranscriptionModelId(state.settings.transcriptionModel);
+  const model = STT_MODEL_CATALOG.find((item) => item.id === modelId);
+  const modelLabel = model?.label ?? modelId;
+  const size = model ? `${Math.round(model.sizeBytes / 1_000_000)} MB` : 'size shown in Settings';
 
-  function next() {
+  function cancel() {
+    sequence.current++;
+    pending.current = false;
+    setHint(null);
+    controller.cancelPractice();
+    guard.current = undefined;
+    // Only a live capture is cancelled: after a result, Try double-tap/Back
+    // must not replace it with "Capture cancelled — nothing transcribed."
+    if (capturing.current || ['starting', 'recording', 'transcribing', 'cleaning'].includes(live.current.phase)) live.current.cancel();
+    capturing.current = false;
+    resetPracticeGestures();
+  }
+  function close() { cancel(); onClose(); }
+  async function action(fn: () => Promise<unknown>) {
     setError('');
-    if (onboarding.step === 1 && !micAuthorized) {
-      setError('Enable microphone access to continue, or choose Skip.');
-      return;
-    }
-    if (onboarding.step === 2) {
-      if (!shortcut.trim()) {
-        setError('Record a shortcut.');
-        return;
-      }
-      if (!isNative && shortcut.toLowerCase() === 'ctrl + space') {
-        const fallback = kept.toLowerCase() === 'ctrl + space' ? initialSettings.shortcut : kept;
-        update({ shortcutCollision: true });
-        settings.update({ key: 'shortcut', value: fallback });
-        // The error line already says what was kept; don't repeat it in the status line.
-        setRecorderStatus(null);
-        setError(onboardingInUseText(shortcut, fallback));
-        return;
-      }
-    }
-    update({ shortcutCollision: false, step: (onboarding.step + 1) as 2 | 3 });
+    try { await fn(); } catch (e) { setError(String(e)); }
+  }
+  async function permission(kind: PermissionKind, settingsOnly = false) {
+    await action(async () => {
+      cancel();
+      if (settingsOnly) await io.openSettings(kind); else await io.request(kind);
+      await controller.refresh();
+    });
   }
 
-  function finish() {
-    if (!onboarding.holdTested || !onboarding.tapTested) {
-      setError('Complete both practice tests, or choose Skip.');
-      return;
+  useEffect(() => {
+    heading.current?.focus();
+    setup.update({ step: guided.step === 3 ? 3 : guided.step >= 2 ? 2 : 1 });
+  }, [guided.step, setup]);
+  useEffect(() => {
+    controller.cancelPractice();
+    sequence.current++;
+    pending.current = false;
+    if (['starting', 'recording', 'transcribing', 'cleaning'].includes(live.current.phase)) live.current.cancel();
+    resetPracticeGestures();
+    void controller.refresh();
+  }, [controller, state.settings.transcriptionModel, state.settings.shortcut]);
+  useEffect(() => {
+    const recheck = () => { void controller.refresh(); };
+    const onReturn = () => { if (document.visibilityState !== 'hidden') recheck(); };
+    window.addEventListener('focus', onReturn);
+    document.addEventListener('visibilitychange', onReturn);
+    const bound = subscribeSettings(() => listenShortcutBound(recheck));
+    const changed = subscribeSettings(() => listenModelsChanged(recheck));
+    return () => {
+      window.removeEventListener('focus', onReturn);
+      document.removeEventListener('visibilitychange', onReturn);
+      bound(); changed();
+    };
+  }, [controller]);
+  useEffect(() => {
+    if (!guided.downloading || guided.step === 0) return;
+    const timer = window.setInterval(() => { void controller.refresh(); }, 1500);
+    return () => window.clearInterval(timer);
+  }, [controller, guided.downloading, guided.step]);
+  useEffect(() => registerPracticeHandler((gesture) => {
+    if (controller.getSnapshot().step !== 3) return;
+    if (gesture === 'hold-start' || gesture === 'latch-start') {
+      if (pending.current || ['starting', 'recording', 'transcribing', 'cleaning'].includes(live.current.phase)) return;
+      const mode = gesture === 'hold-start' ? 'hold' : 'tap';
+      const expected = controller.getSnapshot().mode;
+      // A start that will not become a try must not leave the gesture machine
+      // latched/holding: a stray latch would turn the next hold into its finish.
+      if (mode !== expected) { setHint(wrongGesture[expected]); resetPracticeGestures(); return; }
+      setHint(null);
+      const own = ++sequence.current;
+      pending.current = true;
+      void controller.begin(mode).then(async (lease) => {
+        if (!lease || own !== sequence.current) {
+          if (own === sequence.current) { pending.current = false; resetPracticeGestures(); }
+          return;
+        }
+        guard.current = {
+          current: () => controller.current(lease),
+          validate: async () => (await controller.refresh()) && controller.current(lease),
+          insert: (text) => controller.insert(lease, text, field.current),
+          result: (result) => controller.result(lease, result),
+        };
+        pending.current = false;
+        capturing.current = true;
+        await live.current.start('gesture');
+      }).catch((e: unknown) => { pending.current = false; setError(String(e)); });
+    } else if (gesture === 'hold-finish' || gesture === 'latch-finish') {
+      if (pending.current) { sequence.current++; pending.current = false; controller.cancelPractice(); }
+      else void live.current.stop().catch((e: unknown) => setError(String(e)));
     }
-    update({ complete: true });
-    onClose();
-  }
+  }), [controller]);
+  useEffect(() => {
+    if (practice.phase === 'cancelled' || practice.phase === 'error' || practice.phase === 'success') {
+      capturing.current = false;
+      controller.cancelPractice();
+      resetPracticeGestures();
+    }
+  }, [controller, practice.phase]);
+  useEffect(() => {
+    if (!io.native) return;
+    const overlay = createOverlayBridge();
+    overlayRef.current = overlay;
+    return () => { overlayRef.current = null; void overlay.dispose(); };
+  }, [controller, io]);
+  const overlayRef = useRef<ReturnType<typeof createOverlayBridge> | null>(null);
+  useEffect(() => {
+    const phase = practice.phase;
+    const visual = phase === 'transcribing' || phase === 'cleaning'
+      ? { kind: 'processing' as const, completion: 'held' as const, runId: -1 }
+      : phase === 'recording' || phase === 'starting'
+        ? { kind: 'listening' as const, runId: -1, waveform: 'speaking' as const }
+        : { kind: 'ready' as const };
+    void overlayRef.current?.sync(practice.hudReady ? visual : { kind: 'ready' }, false, practice.scopeReady);
+  }, [practice.phase, practice.hudReady, practice.scopeReady]);
+  useEffect(() => () => { sequence.current++; controller.cancelPractice(); }, [controller]);
 
-  const simulate = (label: string, patch: Parameters<typeof update>[0]) => import.meta.env.DEV && (
-    <button className="btn" onClick={() => update(patch)} type="button">{label}</button>
-  );
+  const allPermissions = permissionsAuthorized(guided.permissions);
+  const connected = io.native && allPermissions && guided.modelReady && !guided.checking;
+  const both = guided.holdDone && guided.tapDone;
+  const status = practice.phase === 'recording' ? (guided.mode === 'tap' ? 'Listening hands-free · press once to finish' : 'Listening · release to finish')
+    : practice.phase === 'starting' ? 'Preparing microphone…'
+      : practice.phase === 'transcribing' || practice.phase === 'cleaning' ? 'Turning speech into text…'
+        : hint ?? practice.message ?? 'Ready when you are';
+  const next = () => action(async () => { cancel(); await controller.next(); });
+  const finish = () => action(async () => {
+    if (await controller.finish()) { controller.clearProgress(); setup.update({ complete: true }); close(); }
+  });
+  // Explicit opt-out (parity with the pre-guided Skip): marks setup complete
+  // without practice so it stops reopening at launch. Set up later stays incomplete.
+  function skip() { controller.clearProgress(); setup.update({ complete: true }); close(); }
 
-  return (
-    <Dialog label="Set up Voxloom" onClose={onClose} opener={opener}>
-      <div className="sheet ob">
-        <h2>Set up Voxloom</h2>
-        <StepDots step={onboarding.step} />
+  return <Dialog label="Set up Voxloom" onClose={close} onEscape={() => { if (pending.current || ['starting', 'recording', 'transcribing', 'cleaning'].includes(live.current.phase)) cancel(); else close(); }} opener={opener}>
+    <div className="guided-setup">
+      <aside className="guided-rail" aria-label="Setup progress">
+        <div className="guided-brand"><span className="guided-mark" aria-hidden="true"><i /><i /><i /></span>Voxloom</div>
+        <ol>{['Get connected', 'Your shortcut', 'First words'].map((label, index) => <li aria-current={guided.step === index + 1 ? 'step' : undefined} className={guided.step > index + 1 ? 'done' : ''} key={label}><b>{guided.step > index + 1 ? '✓' : index + 1}</b><span>{label}</span></li>)}</ol>
+        <div className="guided-private">PRIVATE BY DESIGN<br /><span>On-device dictation.<br />No account. No cloud model.</span></div>
+      </aside>
+      <div className="guided-main">
+        <section className="guided-content" aria-labelledby="guided-heading" tabIndex={0}>
+          <div className="guided-kicker">{['Your voice. Your Mac.', '01 / Get connected', '02 / Make it yours', '03 / First words', 'Ready for your next thought'][guided.step]}</div>
+          <h2 id="guided-heading" ref={heading} tabIndex={-1}>{guided.step === 0 ? <>Less typing.<br />More you.</> : guided.step === 1 ? <>A few permissions.<br />A smoother first dictation.</> : guided.step === 2 ? <>Your shortcut.<br />Ready when you are.</> : guided.step === 3 ? both ? 'Both ways. All yours.' : guided.mode === 'tap' ? 'Now, go hands-free.' : 'First, hold to talk.' : <>You speak.<br />Voxloom types.</>}</h2>
+          {guided.step === 0 && <>
+            <p className="guided-intro">Speak naturally. Voxloom turns your words into text, right where you’re writing.</p>
+            <div className="guided-sample" aria-label="Illustrative preview, not a transcript"><small>A LITTLE PREVIEW</small><blockquote>“My first words<br />with Voxloom.”</blockquote><hr /><hr /></div>
+            <ol className="guided-list"><li>Connect your microphone, typing and keyboard access</li><li>Keep our shortcut, or make it yours</li><li>Try your first dictation</li></ol>
 
-        {onboarding.step === 1 && <MicStep capture={capture} isNative={isNative} />}
-
-        {onboarding.step === 2 && (
-          <section className="onboarding-step">
-            <h3>Choose your shortcut</h3>
-            <p>{isNative
-              ? 'Desktop gestures use a global shortcut. Registration problems are shown in Settings.'
-              : 'Browser prototype gestures work only while this tab is focused.'}</p>
-            <div className="field onboarding-shortcut">
-              <span id="onboarding-shortcut-label">
-                {isNative ? 'Global shortcut' : 'App-local shortcut'}
-              </span>
-              <small className="frow__help" id="onboarding-shortcut-help">{SHORTCUT_HELP}</small>
-              <span className="frow__control">
-                <ShortcutRecorder
-                  defaultValue={initialSettings.shortcut}
-                  errorId="onboarding-error"
-                  helpId="onboarding-shortcut-help"
-                  id="onboarding-shortcut"
-                  invalid={Boolean(error)}
-                  labelId="onboarding-shortcut-label"
-                  onChange={(value) => {
-                    setError('');
-                    if (onboarding.shortcutCollision) update({ shortcutCollision: false });
-                    // `shortcut` is still the combo being replaced here, so this records
-                    // the last accepted one as the fallback for a later collision.
-                    if (shortcut.toLowerCase() !== 'ctrl + space') setKept(shortcut);
-                    settings.update({ key: 'shortcut', value });
-                  }}
-                  value={shortcut}
-                />
-              </span>
+          </>}
+          {guided.step === 1 && <>
+            <p className="guided-intro">Two permissions connect your microphone, typing and keyboard controls. We’ll check each before moving on.</p>
+            <div className="guided-permissions">{permissions.map((item) => {
+              const status = guided.permissions[item.key];
+              return <div className="guided-permission" key={item.kind}>
+                <div><strong>{item.title}</strong><p>{item.copy}</p><small>{status === 'authorized' ? '✓ Allowed' : status === 'not-granted' ? 'Access is off or has not been granted.' : status === 'not-determined' ? 'Not requested yet.' : status === 'unknown' ? 'Checking access…' : status}</small></div>
+                {status !== 'authorized' && <div className="guided-permission-actions"><button className="btn" disabled={!io.native} onClick={() => void permission(item.kind)} type="button">{item.kind === 'accessibility' ? 'Open Accessibility Settings' : `Allow ${item.name}`}</button>{status !== 'not-determined' && item.kind !== 'accessibility' && <button className="btn ghost" disabled={!io.native} onClick={() => void permission(item.kind, true)} type="button">Open {item.name} Settings</button>}</div>}
+              </div>;
+            })}</div>
+            <p className="guided-mini">Enable Voxloom in System Settings → Privacy &amp; Security, then return and check again. If macOS asks you to quit and reopen Voxloom, do so, then resume setup. If Accessibility shows as off, Voxloom can’t tell whether access was denied or never requested.</p>
+            <button className="btn ghost" onClick={() => void action(controller.refresh)} type="button">Check again</button>
+            <div className="guided-pack"><strong>{guided.modelReady ? '✓ Voice pack verified · engine available' : guided.downloading ? `Downloading ${STT_MODEL_CATALOG.find((item) => item.id === guided.downloading)?.label ?? guided.downloading}…` : 'Voice pack needs attention'}</strong><span>{modelLabel} · {size}</span>
+              {guided.progress && <progress aria-label="Voice pack download" max={guided.progress.bytesTotal || undefined} value={guided.progress.bytesReceived} />}
+              {guided.downloading && !guided.progress && <progress aria-label="Voice pack download" />}
+              {!guided.modelReady && !guided.downloading && <button className="btn" disabled={!io.native || guided.checking || guided.modelState !== 'missing'} onClick={() => void action(controller.download)} type="button">Retry download</button>}
+              {guided.downloading && <button className="btn ghost" onClick={() => void action(() => io.cancelDownload(guided.downloading!))} type="button">Cancel download</button>}
+              <small>One verified download, then offline dictation. Interrupted downloads restart on Retry.</small>
             </div>
-          </section>
-        )}
-
-        {onboarding.step === 3 && (
-          <section className="onboarding-step">
-            <h3>Quick test</h3>
-            <p>
-              Hold and release the shortcut, then double-tap to latch and press once more to finish.
-              This tests the gesture, not transcription.
-            </p>
-            <label className="field">Gesture feedback (not a speech transcript)
-              <textarea placeholder="Gesture feedback appears here." readOnly value={onboarding.recognizedText} />
-            </label>
-            <div className="frow">
-              <span>
-                {onboarding.holdTested && <Icon name="check" size={14} />}
-                Press-and-hold · {onboarding.holdTested ? 'recognized' : 'not tested'}
-              </span>
-              {simulate('Simulate hold', { holdTested: true, recognizedText: 'Simulated hold gesture detected.' })}
-            </div>
-            <div className="frow">
-              <span>
-                {onboarding.tapTested && <Icon name="check" size={14} />}
-                Rapid double-tap · {onboarding.tapTested ? 'recognized' : 'not tested'}
-              </span>
-              {simulate('Simulate double-tap', { recognizedText: 'Simulated double-tap gesture detected.', tapTested: true })}
-            </div>
-          </section>
-        )}
-
-        {error && <p className="form-error ferr" id="onboarding-error" role="alert"><Icon name="warn" size={14} />{error}</p>}
-
-        <div className="sheet-acts">
-          <button className="btn ghost" onClick={() => { update({ complete: true }); onClose(); }} type="button">
-            Skip
-          </button>
-          <span className="sp" />
-          {onboarding.step > 1 && (
-            <button className="btn" onClick={() => update({ step: (onboarding.step - 1) as 1 | 2 })} type="button">
-              Back
-            </button>
-          )}
-          {onboarding.step < 3
-            ? <button className="btn primary" onClick={next} type="button">Next</button>
-            : <button className="btn primary" onClick={finish} type="button">Finish</button>}
-        </div>
+            <details><summary>What happens to my voice?</summary><p>The selected speech model runs locally. The download needs internet; speech is not sent to a cloud model. Text cleanup stays off during practice.</p></details>
+          </>}
+          {guided.step === 2 && <>
+            <p className="guided-intro">We’ve picked a starting point. Keep it, or use a shortcut that feels natural to you.</p>
+            <div className="guided-shortcut"><span>Dictation shortcut · {state.settings.shortcut === initialSettings.shortcut ? 'Recommended' : 'Custom'}</span><KeyCombo combo={state.settings.shortcut} /><p>Hold to speak. Release to finish.</p></div>
+            <div className="field"><span id="onboarding-shortcut-label">Global shortcut</span><small id="onboarding-shortcut-help">{SHORTCUT_HELP}</small><ShortcutRecorder defaultValue={initialSettings.shortcut} helpId="onboarding-shortcut-help" id="onboarding-shortcut" labelId="onboarding-shortcut-label" onChange={(value) => settings.update({ key: 'shortcut', value })} value={state.settings.shortcut} /></div>
+            <p className="guided-mini" role="status">{io.activeShortcut() === state.settings.shortcut ? `✓ Registered: ${state.settings.shortcut}` : 'Waiting for a working native binding. A refused shortcut keeps the last working binding; choose another or restore the recommended shortcut.'}</p>
+            <details><summary>Prefer a single key or hands-free?</summary><p>Single keys are optional on Mac and use the same Accessibility access. Double-tap the same shortcut for hands-free, then press once to finish. We’ll try both ways next.</p></details>
+            <p className="guided-mini">You can change this anytime in Settings.</p>
+          </>}
+          {guided.step === 3 && <>
+            <div className="guided-modes" aria-label="Two ways to use the same shortcut"><span aria-current={guided.mode === 'hold' ? 'step' : undefined}>{guided.holdDone ? '✓' : '1'} Hold to talk</span><span aria-current={guided.mode === 'tap' ? 'step' : undefined}>{guided.tapDone ? '✓' : '2'} Double-tap</span></div>
+            <p className="guided-intro">{both ? 'You’ve tried both ways. Use whichever suits the moment.' : guided.mode === 'tap' ? 'Double-tap the same shortcut, then let go. Say a short sentence. Press the shortcut once more to finish.' : 'Click the note. Hold your shortcut, say a short sentence, then release to finish.'}</p>
+            <div className="guided-note"><div><span>PRACTICE NOTE</span><span role="status">{status}</span></div><textarea aria-label="Practice dictation field" defaultValue="" placeholder={guided.mode === 'tap' ? 'Try: Now I can speak hands-free.' : 'Try: My first words with Voxloom.'} ref={field} /></div>
+            <KeyCombo combo={state.settings.shortcut} />
+            <p className="guided-mini">{guided.mode === 'tap' ? 'Double-tap → speak → press once to finish.' : 'Hold → speak → release.'} Esc cancels without inserting.</p>
+            {!guided.ready && <p className="form-error">Check permissions, voice pack and registered shortcut before retrying.</p>}
+            <div className="guided-practice-actions"><button className="btn ghost" onClick={() => { cancel(); field.current?.focus(); }} type="button">{busy ? 'Cancel dictation' : 'Try again'}</button><button className="btn ghost" onClick={() => void action(controller.refresh)} type="button">Check again</button></div>
+          </>}
+          {guided.step === 4 && <>
+            <p className="guided-intro">You’ve tried both ways to dictate. Next, try a short sentence in an app you use.</p>
+            <ul className="guided-list"><li>Microphone, typing and keyboard access {allPermissions ? 'connected' : 'need rechecking'}</li><li>{modelLabel} {guided.modelReady ? 'verified' : 'needs attention'}</li><li>Hold and double-tap both tried</li></ul>
+            <div className="guided-shortcut"><KeyCombo combo={state.settings.shortcut} /><p>Hold for a quick thought. Double-tap to go hands-free. Press once more to finish.</p></div>
+            <p className="guided-mini">Voxloom is available from its app window. These tries confirm the practice field, not every app or text field.</p>
+            {!guided.ready && <button className="btn" onClick={() => { cancel(); controller.back(); controller.back(); controller.back(); }} type="button">Review access and voice pack</button>}
+          </>}
+          {(error || guided.error) && <p className="form-error" role="alert">{error || guided.error}</p>}
+        </section>
+        {guided.step === 0 && <p className="guided-mini guided-disclosure">{modelId === 'whisper-base.en' ? 'Starting setup downloads Whisper Base (English)' : `Starting setup prepares your selected ${modelLabel}`} ({size}) if needed. Your dictation is processed on this Mac. Larger voice packs are optional in Settings.</p>}
+        <footer className="guided-footer">
+          {guided.step > 0 ? <button className="btn ghost" onClick={() => { cancel(); controller.back(); }} type="button">Back</button> : <button className="btn ghost" onClick={close} type="button">Set up later</button>}
+          <button className="btn ghost" onClick={skip} type="button">Skip setup</button>
+          <span />
+          {guided.step === 0 ? <button className="btn primary" disabled={!io.native} onClick={() => void action(controller.start)} type="button">Start setup →</button>
+            : guided.step === 1 ? <button className="btn primary" disabled={!connected} onClick={() => void next()} type="button">Continue →</button>
+              : guided.step === 2 ? <button className="btn primary" disabled={!guided.ready} onClick={() => void next()} type="button">Use this shortcut →</button>
+                : guided.step === 3 && guided.mode === 'hold' ? <button className="btn primary" disabled={!guided.holdDone || busy} onClick={() => { cancel(); controller.tryHandsFree(); field.current?.focus(); }} type="button">Try double-tap →</button>
+                  : guided.step === 3 ? <button className="btn primary" disabled={!both || !guided.ready || busy} onClick={() => void next()} type="button">Finish setup →</button>
+                    : <button className="btn primary" disabled={!both || !guided.ready} onClick={() => void finish()} type="button">Open Voxloom</button>}
+        </footer>
       </div>
-    </Dialog>
-  );
+    </div>
+  </Dialog>;
 }

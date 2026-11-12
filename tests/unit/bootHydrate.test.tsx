@@ -116,8 +116,8 @@ describe('boot hydrate polish', () => {
       </AppProvider>,
     );
 
-    // Dismiss fixture onboarding so nav is usable while durable hydrate waits.
-    await user.click(screen.getByRole('button', { name: 'Skip' }));
+    // Dismiss the loading dialog without starting setup while hydration waits.
+    await user.click(screen.getByRole('button', { name: 'Close Set up Voxloom' }));
 
     await user.click(screen.getByRole('button', { name: 'Settings' }));
     expect(screen.getByRole('status')).toHaveTextContent('Loading…');
@@ -159,6 +159,25 @@ describe('boot hydrate polish', () => {
     expect(screen.queryByText('JSON')).not.toBeInTheDocument();
   });
 
+  it('does not flash Setup incomplete in the sidebar before a finished user hydrates', async () => {
+    const { gate, release } = deferredGate();
+    const settingsStore = delaySettingsLoad(
+      createSettingsStore(createMemorySettingsIo(serializeSettingsFile(initialSettings, true))),
+      gate,
+    );
+    render(
+      <AppProvider clock={() => 1_800_000_000_000} settingsPersistence={{ enabled: true, store: settingsStore }}>
+        <App />
+      </AppProvider>,
+    );
+    const status = () => document.querySelector('.brand__status');
+    expect(status()).toHaveTextContent('Loading…');
+    expect(status()).not.toHaveTextContent('Setup incomplete');
+    release();
+    await waitFor(() => expect(status()).toHaveTextContent('Ready'));
+    expect(status()).not.toHaveTextContent('Setup incomplete');
+  });
+
   it('marks boot ready after fail-safe corrupt load (toast + defaults)', async () => {
     const { gate, release } = deferredGate();
     const settingsStore = delaySettingsLoad(
@@ -185,7 +204,7 @@ describe('boot hydrate polish', () => {
       </AppProvider>,
     );
 
-    await user.click(screen.getByRole('button', { name: 'Skip' }));
+    await user.click(screen.getByRole('button', { name: 'Close Set up Voxloom' }));
     await user.click(screen.getByRole('button', { name: 'Settings' }));
     expect(screen.getByRole('status')).toHaveTextContent('Loading…');
 
@@ -212,7 +231,7 @@ describe('boot hydrate polish', () => {
         <App />
       </AppProvider>,
     );
-    await user.click(screen.getByRole('button', { name: 'Skip' }));
+    await user.click(screen.getByRole('button', { name: 'Set up later' }));
     await user.click(screen.getByRole('button', { name: 'Settings' }));
     expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
     await user.click(await screen.findByRole('tab', { name: 'Privacy' }));

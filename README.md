@@ -21,8 +21,14 @@ focused-window shortcuts; state clears on reload. The Tauri shell persists
 (`settings.json`, `history.json`, `dictionary.json`). Native audio retry and
 saved audio retention are not implemented. Transcripts in `history.json` are
 stored as **plain text**; see [PRIVACY.md](PRIVACY.md) for where they live,
-how to delete them, and why the app enables Tauri's `macOSPrivateApi`. Onboarding practice recognizes
-shortcut gestures but does not transcribe speech. Cleanup styles, the cleanup
+how to delete them, and why the app enables Tauri's `macOSPrivateApi`. Guided setup
+requires Microphone and Accessibility (Input Monitoring is not used; see
+BUS-209), a verified voice pack, and a registered shortcut. Its two practice tries use real capture and local
+inference, and only pass after text is inserted into the focused practice note.
+The browser cannot complete real setup; Set up later leaves it incomplete.
+Unfinished progress resumes without persisting the practice transcript or
+trusting old permission/model checks. See [guided setup](docs/decisions/guided-onboarding.md).
+Cleanup styles, the cleanup
 model and start-at-login are not functional desktop features yet. Development
 scenario controls are excluded from production builds.
 
@@ -213,7 +219,10 @@ failed until Retry download or the next launch.
 ### Optional Whisper Large v3 Turbo (English)
 
 Settings → Models offers `whisper-large-v3-turbo` alongside Tiny, Base and
-Parakeet. Tiny remains the default. Selecting Turbo does not download it;
+Parakeet. New users start with Whisper Base English (`whisper-base.en`,
+147,964,211 bytes, shown as 148 MB); explicit existing choices are preserved.
+Starting guided setup discloses and downloads the selected pack if needed.
+Selecting Turbo does not download it;
 click Download explicitly before dictating. The standard converted model is
 1,624,555,275 bytes (about 1.62 GB), verified against its revision-pinned size
 and SHA-256. Weights are not bundled with the app.

@@ -5,7 +5,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { ShortcutsDialog } from '../../src/app/AppDialogs';
 import { useToastMessages } from '../../src/app/useToastMessages';
 import { Toast, toastTone } from '../../src/components/Toast';
-import { StepDots } from '../../src/features/onboarding/StepDots';
 
 describe('toastTone (toasts board strings)', () => {
   it.each([
@@ -31,14 +30,6 @@ describe('toastTone (toasts board strings)', () => {
     rerender(<Toast message="" />);
     expect(container.querySelector('.toast svg')).toBeNull();
     expect(container.querySelector('.toast')).not.toHaveClass('visible');
-  });
-});
-
-describe('StepDots', () => {
-  it('fills dots up to the current step and reads "Step n of 3"', () => {
-    const { container } = render(<StepDots step={2} />);
-    expect(container.querySelectorAll('.steps span.on')).toHaveLength(2);
-    expect(screen.getByText('Step 2 of 3')).toBeInTheDocument();
   });
 });
 

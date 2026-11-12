@@ -84,6 +84,8 @@ export interface DogfoodTranscribeOptions {
    * delivery continues normally. Defaults to `insertIntoOwnField` (tests).
    */
   insertOwnField?: (text: string) => boolean;
+  /** Guided practice is restricted to its own note: never external AX or Copy. */
+  onlyOwnField?: boolean;
 }
 
 export interface DogfoodResult {
@@ -99,6 +101,14 @@ export interface DogfoodResult {
   /** Evidence-backed delivery outcome (Inserted / Copied / Failed). */
   delivery: DeliveryOutcome;
   transcript: Transcript;
+}
+
+/** Frozen per recording. Guided practice must never escape to another field. */
+export interface OwnFieldDeliveryGuard {
+  current(): boolean;
+  validate(): Promise<boolean>;
+  insert(text: string): boolean;
+  result(result: DogfoodResult): void;
 }
 
 function resolvePlatform(
@@ -180,6 +190,14 @@ export async function dogfoodTranscribeAndCopy(
         text: transcript.text,
       };
       return { cleanup, copied: false, delivery, transcript };
+    }
+
+    if (options.onlyOwnField) {
+      return { cleanup, copied: false, transcript, delivery: {
+        text: transcript.text, status: 'failed', clipboardRestored: false,
+        detail: 'practice field not confirmed', restoreSkippedReason: null,
+        message: transcript.text.trim() ? 'Click the practice note and try again. Nothing was inserted.' : 'No speech detected. Check your microphone and try again.',
+      } };
     }
 
     let intended: TargetSnapshot | null = null;

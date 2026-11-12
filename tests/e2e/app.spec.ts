@@ -37,26 +37,24 @@ async function openDevPanel(page: Page) {
 }
 
 async function skipOnboarding(page: Page) {
-  await page.getByRole('button', { name: 'Skip' }).click();
+  await page.getByRole('button', { name: 'Set up later' }).click();
 }
 
-test('first run practices gestures without native capture', async ({ page }) => {
+test('first run cannot fake real practice in a browser and can remain incomplete', async ({ page }) => {
   await page.goto('/');
   const onboarding = page.getByRole('dialog', { name: 'Set up Voxloom' });
   await expect(onboarding).toBeVisible();
   await expectAccessible(page);
   await page.screenshot({ path: 'artifacts/screenshots/onboarding.png' });
-  // In browser (non-Tauri) context, step 1 shows native capture unavailable
-  // and Next is not blocked by permission.
-  await page.getByRole('button', { name: 'Next' }).click();
-  await page.getByRole('button', { name: 'Next' }).click();
+  await expect(page.getByRole('button', { name: /Start setup/ })).toBeDisabled();
+  await expect(page.getByText(/Starting setup downloads Whisper Base/)).toBeVisible();
   await holdShortcut(page);
-  await expect(page.getByText(/Press-and-hold · recognized/)).toBeVisible();
   await tapShortcut(page);
   await tapShortcut(page);
   await tapShortcut(page);
-  await expect(page.getByText(/Rapid double-tap · recognized/)).toBeVisible();
-  await page.getByRole('button', { name: 'Finish' }).click();
+  await expect(page.getByRole('button', { name: /Finish setup/ })).toHaveCount(0);
+  await skipOnboarding(page);
+  await expect(page.getByText(/Setup is incomplete/)).toBeVisible();
   await page.keyboard.down('Control');
   await page.keyboard.down('Shift');
   await page.keyboard.down('Space');
@@ -297,9 +295,9 @@ test('History retry cannot interrupt an active listening run', async (
 
 test('onboarding records the shortcut with the shared recorder (BUS-47)', async ({ page }) => {
   const shots = process.env.BUS47_ONBOARDING_DIR;
-  await page.goto('/');
+  // Isolated synthetic prerequisites, using the production component; no native claims.
+  await page.goto('/tests/fixtures/guided-preview.html?step=2');
   const onboarding = page.getByRole('dialog', { name: 'Set up Voxloom' });
-  await page.getByRole('button', { name: 'Next' }).click();
   await expect(onboarding.getByRole('textbox')).toHaveCount(0);
   const field = onboarding.getByRole('button', { name: /^(Shortcut|App-local shortcut|Global shortcut) / });
   await expectAccessible(page);
@@ -311,19 +309,19 @@ test('onboarding records the shortcut with the shared recorder (BUS-47)', async 
   // Esc cancels recording; it must not close the onboarding sheet.
   await page.keyboard.press('Escape');
   await expect(onboarding).toBeVisible();
-  await expect(field).toHaveAccessibleName('App-local shortcut Control Shift Space');
-  await expect(onboarding.getByRole('status')).toHaveText('Canceled. Shortcut unchanged.');
+  await expect(field).toHaveAccessibleName('Global shortcut Control Shift Space');
+  await expect(onboarding.getByRole('status').filter({ hasText: 'Canceled. Shortcut unchanged.' })).toBeVisible();
   // Pressing the current shortcut while recording records it; it doesn't dictate.
   await field.click();
   await holdShortcut(page);
   await expect(field).toHaveAttribute('aria-pressed', 'false');
-  await expect(onboarding.getByRole('status')).toHaveText(/Shortcut set to/);
+  await expect(onboarding.getByRole('status').filter({ hasText: /Shortcut set to/ })).toBeVisible();
   await field.click();
   await page.keyboard.press('Control+F5');
   await expect(onboarding.getByText(/can't be used/)).toBeVisible();
   if (shots) await page.screenshot({ path: `${shots}/3-refused.png` });
   await page.keyboard.press('Control+Alt+KeyK');
-  await expect(field).toHaveAccessibleName(/^App-local shortcut Control (Option|Alt) K$/);
+  await expect(field).toHaveAccessibleName(/^Global shortcut Control (Option|Alt) K$/);
   await expectAccessible(page);
   if (shots) await page.screenshot({ path: `${shots}/4-saved.png` });
 });

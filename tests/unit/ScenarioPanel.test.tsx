@@ -8,7 +8,7 @@ describe('ScenarioPanel', () => {
   it('drives deterministic mock states and reset', async () => {
     const user = userEvent.setup();
     const reset = vi.fn();
-    renderWithApp(<ScenarioPanel onOnboarding={vi.fn()} onReset={reset} />);
+    renderWithApp(<ScenarioPanel onReset={reset} />);
     await user.click(screen.getByRole('button', {
       name: 'Listening · silent',
     }));
@@ -20,5 +20,8 @@ describe('ScenarioPanel', () => {
     expect(screen.getByLabelText('Copy failure')).toBeChecked();
     await user.click(screen.getByRole('button', { name: 'Reset session' }));
     expect(reset).toHaveBeenCalledOnce();
+    // Pre-guided onboarding scenarios no longer exist in the guided flow.
+    expect(screen.queryByRole('button', { name: 'Shortcut collision' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Permission denied' })).not.toBeInTheDocument();
   });
 });

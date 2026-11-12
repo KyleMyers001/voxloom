@@ -6,9 +6,11 @@ import { useRef } from 'react';
 import type { PreparedSttSession } from './prepareSession';
 import type { PasteBinding } from '../delivery';
 import type { CancelScope } from '../shortcut/cancelScope';
+import type { OwnFieldDeliveryGuard } from './dogfoodPath';
 
 /** Per-session lease: cancellation discards results, unlike supersession. */
 export interface Cancellation {
+  deliveryGuard?: OwnFieldDeliveryGuard;
   cancelled: boolean;
   modelId?: string;
   preparation?: PreparedSttSession;

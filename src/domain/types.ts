@@ -88,11 +88,5 @@ export type SettingUpdate = {
 
 export interface OnboardingState {
   complete: boolean;
-  holdTested: boolean;
-  microphoneGranted: boolean;
-  permissionDenied: boolean;
-  recognizedText: string;
-  shortcutCollision: boolean;
   step: 1 | 2 | 3;
-  tapTested: boolean;
 }

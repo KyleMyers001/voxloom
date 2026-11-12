@@ -83,7 +83,7 @@ describe('main window in the native app', () => {
     vi.mocked(isTauriEnv).mockReturnValue(true);
     const user = userEvent.setup();
     render(<AppProvider clock={() => 1_800_000_000_000}><App /></AppProvider>);
-    await user.click(screen.getByRole('button', { name: 'Skip' }));
+    await user.click(screen.getByRole('button', { name: 'Set up later' }));
     await user.click(screen.getByRole('button', { name: /Settings/ }));
     await user.keyboard('{Alt>}4{/Alt}');
     await user.keyboard('{Meta>},{/Meta}');
@@ -95,10 +95,10 @@ describe('main window in the native app', () => {
   it('opens onboarding when the Settings window asks (onboarding:open)', async () => {
     const user = userEvent.setup();
     render(<AppProvider clock={() => 1_800_000_000_000}><App /></AppProvider>);
-    await user.click(screen.getByRole('button', { name: 'Skip' }));
-    expect(screen.queryByText('Step 1 of 3')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Set up later' }));
+    expect(screen.queryByText(/Less typing/)).toBeNull();
     act(() => bridge.onboarding?.());
-    expect(screen.getByText('Step 1 of 3')).toBeInTheDocument();
+    expect(screen.getByText(/Less typing/)).toBeInTheDocument();
   });
 });
 

@@ -6,6 +6,10 @@
     "main"
   ],
   "permissions": [
+    "allow-setup-query-permissions",
+    "allow-setup-request-permission",
+    "allow-setup-open-permission-settings",
+    "allow-setup-model-readiness",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "core:event:allow-emit",
