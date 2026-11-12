@@ -5,7 +5,7 @@ import type { Screen } from '../domain/types';
 import { Dictionary } from '../features/dictionary/Dictionary';
 import { History } from '../features/history/History';
 import { Home } from '../features/home/Home';
-import { Onboarding } from '../features/onboarding/Onboarding';
+import { clearGuidedProgress, Onboarding } from '../features/onboarding/Onboarding';
 import { Settings } from '../features/settings/Settings';
 import { isTauriEnv } from '../services/capture/captureService';
 import { listenOnboardingOpen, openSettingsWindow, subscribe } from '../services/settingsWindow';
@@ -26,6 +26,7 @@ import { useToastMessages } from './useToastMessages';
 export function App() {
   const { bootReady, clipboard, dictation, dispatch, now, setup, state } = useApp();
   const [onboardingOpen, setOnboardingOpen] = useState(!state.onboarding.complete);
+  const [setupRun, setSetupRun] = useState(0);
   const [shortcutOpen, setShortcutOpen] = useState(false);
   const modalOpener = useRef<HTMLElement | null>(null);
   useTheme(state.settings.appearance);
@@ -96,22 +97,30 @@ export function App() {
   }, []);
   useAppKeys({ blocked: onboardingOpen || shortcutOpen, onHelp: openHelp, onNavigate: navigate });
 
+  // A dev session reset is a first run: the guided tutorial starts over too.
   const dev = useDevSession(
-    () => setOnboardingOpen(true),
+    () => { clearGuidedProgress(); setSetupRun((run) => run + 1); setOnboardingOpen(true); },
     () => { modalOpener.current = null; },
   );
 
+  // Reopening setup starts the guided tutorial over (fresh instance and saved
+  // progress); the Resume setup banner keeps unfinished progress instead.
   const openSetup = useCallback((opener: HTMLElement | null) => {
     modalOpener.current = opener;
     setup.reopen();
+    clearGuidedProgress();
+    setSetupRun((run) => run + 1);
     setOnboardingOpen(true);
   }, [setup]);
   // "Set up shortcuts…" in the Settings window opens onboarding here.
   useEffect(() => subscribe(() => listenOnboardingOpen(() => openSetup(null))), [openSetup]);
 
+  // Completion is unknown until durable settings hydrate: a finished user must
+  // not see "Setup incomplete" flash first.
   const status = dogfood.phase === 'recording' ? 'Listening'
     : dogfood.phase === 'transcribing' ? 'Transcribing'
-    : dogfood.phase === 'cleaning' ? 'Cleaning up' : 'Ready';
+    : dogfood.phase === 'cleaning' ? 'Cleaning up'
+    : !bootReady ? 'Loading…' : state.onboarding.complete ? 'Ready' : 'Setup incomplete';
   const gated = (title: string, screen: ReactNode) =>
     bootReady ? screen : <BootHydratePlaceholder title={title} />;
 
@@ -125,19 +134,19 @@ export function App() {
       <Sidebar
         onNavigate={navigate}
         onReset={dev.requestReset}
-        onScenario={dev.openScenario}
         screen={state.screen}
         shortcut={state.settings.shortcut}
         status={status}
       />
       <main className="main">
+        {bootReady && state.screen === 'home' && !onboardingOpen && !state.onboarding.complete && <div className="banner banner--info"><span className="banner__text">Setup is incomplete. Connect access and try both ways to dictate.</span><button className="btn ghost" onClick={(event) => { modalOpener.current = event.currentTarget; setOnboardingOpen(true); }} type="button">Resume setup</button></div>}
         {(state.screen === 'home' || (native && state.screen === 'settings')) && <Home dogfood={dogfood} onToast={announce} />}
         {state.screen === 'history' && gated('History', <History onToast={announce} />)}
         {state.screen === 'dictionary' && gated('Dictionary', <Dictionary />)}
         {!native && state.screen === 'settings' && gated('Settings', <Settings onSetup={openSetup} />)}
       </main>
     </div>
-    {onboardingOpen && <Onboarding onClose={() => setOnboardingOpen(false)}
+    {onboardingOpen && <Onboarding key={setupRun} onClose={() => setOnboardingOpen(false)}
       opener={modalOpener.current} />}
     {shortcutOpen && <ShortcutsDialog onClose={() => setShortcutOpen(false)}
       opener={modalOpener.current} shortcut={state.settings.shortcut} />}

@@ -85,8 +85,8 @@ export class SttError extends Error {
   }
 }
 
-/** English-first default catalog (ADR). Tiny is the suggested first download. */
-export const DEFAULT_STT_MODEL_ID = 'whisper-tiny.en' as const;
+/** BUS-208: new-user English recommendation; explicit saved choices survive. */
+export const DEFAULT_STT_MODEL_ID = 'whisper-base.en' as const;
 
 export const STT_MODEL_CATALOG: readonly Omit<SttModelInfo, 'status'>[] = [
   {
@@ -97,7 +97,7 @@ export const STT_MODEL_CATALOG: readonly Omit<SttModelInfo, 'status'>[] = [
   {
     id: 'whisper-base.en',
     label: 'Whisper Base (English)',
-    sizeBytes: 148_000_000,
+    sizeBytes: 147_964_211,
   },
   {
     id: 'whisper-large-v3-turbo',

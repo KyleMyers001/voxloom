@@ -1,11 +1,9 @@
 import { useState } from 'react';
-import type { OnboardingScenario } from '../dev/ScenarioPanel';
-import { initialOnboarding } from '../domain/fixtures';
 import { useApp } from './AppContext';
 
-/** Dev scenario panel actions: reset session (with durable-history prompt) and onboarding scenarios. */
+/** Dev scenario panel actions: reset session (with durable-history prompt), then first-run setup. */
 export function useDevSession(openOnboarding: () => void, clearOpener: () => void) {
-  const { dispatch, dictionaryDurable, historyDurable, now, settings, settingsDurable, setup } = useApp();
+  const { dispatch, dictionaryDurable, historyDurable, now, settingsDurable } = useApp();
   const [resetPromptOpen, setResetPromptOpen] = useState(false);
 
   function performReset(wipeHistory: boolean) {
@@ -30,24 +28,10 @@ export function useDevSession(openOnboarding: () => void, clearOpener: () => voi
     performReset(false);
   }
 
-  function openScenario(scenario: OnboardingScenario) {
-    const collision = scenario === 'collision';
-    setup.replace({
-      ...initialOnboarding,
-      microphoneGranted: collision,
-      permissionDenied: scenario === 'permission-denied',
-      shortcutCollision: collision,
-      step: collision ? 2 : 1,
-    });
-    if (collision) settings.update({ key: 'shortcut', value: 'Ctrl + Space' });
-    openOnboarding();
-  }
-
   return {
     resetPromptOpen,
     closeResetPrompt: () => setResetPromptOpen(false),
     performReset,
     requestReset,
-    openScenario,
   };
 }

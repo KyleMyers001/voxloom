@@ -14,6 +14,8 @@ interface DialogProps {
   initialFocus?: string;
   label: string;
   onClose: () => void;
+  /** Override only the Escape action (e.g. cancel dictation but retain the note). */
+  onEscape?: () => void;
   opener?: HTMLElement | null;
 }
 
@@ -24,7 +26,7 @@ const selector = [
   'textarea:not([disabled])',
 ].join(',');
 
-export function Dialog({ children, initialFocus, label, onClose, opener }: DialogProps) {
+export function Dialog({ children, initialFocus, label, onClose, onEscape, opener }: DialogProps) {
   const panel = useRef<HTMLDivElement>(null);
 
   useEffect(() => beginModal(), []);
@@ -54,11 +56,11 @@ export function Dialog({ children, initialFocus, label, onClose, opener }: Dialo
     const handleEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
-      onClose();
+      (onEscape ?? onClose)();
     };
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
-  }, [onClose]);
+  }, [onClose, onEscape]);
 
   function handleKeyDown(event: KeyboardEvent) {
     if (event.key !== 'Tab' || !panel.current) return;

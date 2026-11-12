@@ -15,7 +15,7 @@ describe('optional English-first Whisper Large v3 Turbo', () => {
       label: 'Whisper Large v3 Turbo (English)',
       sizeBytes: 1_624_555_275,
     });
-    expect(DEFAULT_STT_MODEL_ID).toBe('whisper-tiny.en');
+    expect(DEFAULT_STT_MODEL_ID).toBe('whisper-base.en');
     expect(isKnownSttModelId(TURBO_ID)).toBe(true);
     expect(resolveTranscriptionModelId(TURBO_ID)).toBe(TURBO_ID);
     const store = createMockSttModelStore();

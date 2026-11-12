@@ -13,6 +13,42 @@ use tauri::{WebviewUrl, WebviewWindowBuilder};
 const OVERLAY: &str = "dictation-overlay";
 
 #[tauri::command]
+fn setup_query_permissions() {}
+#[tauri::command]
+fn setup_request_permission() {}
+#[tauri::command]
+fn setup_open_permission_settings() {}
+#[tauri::command]
+fn setup_model_readiness() {}
+
+#[test]
+fn guided_setup_adapters_are_main_only() {
+    for command in [
+        "setup_query_permissions",
+        "setup_request_permission",
+        "setup_open_permission_settings",
+        "setup_model_readiness",
+    ] {
+        let app = mock_builder()
+            .invoke_handler(tauri::generate_handler![
+                setup_query_permissions,
+                setup_request_permission,
+                setup_open_permission_settings,
+                setup_model_readiness
+            ])
+            .build(crate::app_context())
+            .unwrap();
+        assert_eq!(invoke_command(&app, "main", "index.html", command), Ok(()));
+        assert!(invoke_command(&app, "settings", "settings.html", command)
+            .unwrap_err()
+            .contains("not allowed"));
+        assert!(invoke_command(&app, OVERLAY, "overlay.html", command)
+            .unwrap_err()
+            .contains("not allowed"));
+    }
+}
+
+#[tauri::command]
 fn store_backup(store: String) -> Result<Option<String>, String> {
     Ok(Some(format!("stub-{store}")))
 }

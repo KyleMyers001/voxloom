@@ -72,6 +72,7 @@ export function useDogfoodProcessing({
     const session = live.session;
     const startBinding = live.pasteBinding;
     const cancellation = live.cancellation;
+    const guard = cancellation.deliveryGuard;
     cancellation.transcribing = true;
     const current = () => session === live.session && !cancellation.cancelled;
     const platform = platformRef.current;
@@ -142,9 +143,14 @@ export function useDogfoodProcessing({
         clipboardFallback: optionsRef.current.clipboardFallback !== false,
         deliveryPlatform: platform,
         dictionary: latest.dictionary,
-        isCurrent: current,
+        isCurrent: () => current() && (!guard || guard.current()),
+        onlyOwnField: Boolean(guard),
+        insertOwnField: guard ? (text) => guard.insert(text) : undefined,
         pasteBinding,
-        beforeDelivery: settleCancellation,
+        beforeDelivery: async () => {
+          if (guard && !(await guard.validate())) throw new Error('Setup access or voice pack changed. Check again before retrying.');
+          await settleCancellation();
+        },
         snapshotTarget: async () => {
           const target = await platform.snapshotTarget();
           if (current()) setIntendedTarget(target);
@@ -158,6 +164,7 @@ export function useDogfoodProcessing({
       await settleCancellation();
       if (cancellation.cancelled) return;
       if (current()) {
+        guard?.result(result);
         setTranscript(result.transcript);
         setHudResult(hudResultFor(result.delivery));
         setPhase('success');
@@ -225,7 +232,10 @@ export function useDogfoodProcessing({
     }
     if (live.handledAudioId === audio.id) return;
     live.handledAudioId = audio.id;
-    if (live.cancellation.cancelled) {
+    // Guided practice consumes only audio from its own guarded session.
+    const unowned = optionsRef.current.ownedCaptureOnly === true
+      && !live.cancellation.deliveryGuard;
+    if (live.cancellation.cancelled || unowned) {
       // A late stopped event must dispose PCM without restarting cancelled STT.
       void live.cancellation.preparation?.release(audio.id).catch(() => {});
       return;

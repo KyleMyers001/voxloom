@@ -3,6 +3,10 @@
 // main: everything; settings: settings + model management + the mic test;
 // overlay: none.
 const COMMANDS: &[&str] = &[
+    "setup_query_permissions",
+    "setup_request_permission",
+    "setup_open_permission_settings",
+    "setup_model_readiness",
     "dictation_cancel_arm",
     "dictation_cancel_finish",
     "dictation_cancel_end",

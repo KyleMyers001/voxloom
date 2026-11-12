@@ -27,6 +27,7 @@ import type { OverlayResult } from '../shortcut/overlayVisibility';
 import type { SttModelStore } from './contracts';
 import { ensureModelAvailable } from './dogfoodModel';
 import type { dogfoodTranscribeAndCopy } from './dogfoodPath';
+import type { OwnFieldDeliveryGuard } from './dogfoodPath';
 import {
   cancellablePhase,
   useDogfoodView,
@@ -49,6 +50,12 @@ export {
 export { hudResultFor, type DogfoodPhase } from './dogfoodPhase';
 
 export interface UseDogfoodCaptureOptions {
+  deliveryGuard?: OwnFieldDeliveryGuard | (() => OwnFieldDeliveryGuard | undefined);
+  /**
+   * Guided practice: never adopt a capture another hook started, and process
+   * only stopped audio from a session this hook started with a delivery guard.
+   */
+  ownedCaptureOnly?: boolean;
   clipboard: ClipboardAdapter;
   /** Settings `clipboardFallback` (default true). */
   clipboardFallback?: boolean;
@@ -113,7 +120,7 @@ export interface UseDogfoodCaptureResult {
 export function useDogfoodCapture(
   options: UseDogfoodCaptureOptions,
 ): UseDogfoodCaptureResult {
-  const liveCapture = useCaptureState();
+  const liveCapture = useCaptureState({ adoptActive: !options.ownedCaptureOnly });
   const capture = options.captureApi ?? liveCapture;
   const { actions, state } = useDogfoodView(options.onToast);
   const live = useDogfoodLiveSession();
@@ -126,6 +133,8 @@ export function useDogfoodCapture(
     storeRef.current = options.createModelStore();
   }
   const modelIdRef = useRef(options.modelId);
+  const guardRef = useRef(options.deliveryGuard);
+  guardRef.current = options.deliveryGuard;
   modelIdRef.current = options.modelId;
   const ensureModel = useCallback(
     (modelId = modelIdRef.current) => ensureModelAvailable(storeRef.current, modelId),
@@ -145,6 +154,7 @@ export function useDogfoodCapture(
     phase: state.phase,
     preferredDeviceId: options.preferredDeviceId,
     selectedModelId: () => resolveTranscriptionModelId(modelIdRef.current),
+    deliveryGuard: () => typeof guardRef.current === 'function' ? guardRef.current() : guardRef.current,
   });
 
   return {

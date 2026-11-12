@@ -131,36 +131,17 @@ describe('appReducer', () => {
   });
 
   it(
-    'reopens setup transient state while preserving session permission',
+    'reopens setup at the first step while preserving completion',
     () => {
       const initial = createInitialState(10_000);
       const configured = {
         ...initial,
-        onboarding: {
-          complete: true,
-          holdTested: true,
-          microphoneGranted: true,
-          permissionDenied: true,
-          recognizedText: 'fixture',
-          shortcutCollision: true,
-          step: 3 as const,
-          tapTested: true,
-        },
+        onboarding: { complete: true, step: 3 as const },
       };
       const reopened = appReducer(configured, { type: 'reopen-onboarding' });
-      expect(reopened.onboarding).toEqual({
-        complete: true,
-        holdTested: false,
-        microphoneGranted: true,
-        permissionDenied: false,
-        recognizedText: '',
-        shortcutCollision: false,
-        step: 1,
-        tapTested: false,
-      });
+      expect(reopened.onboarding).toEqual({ complete: true, step: 1 });
       const reset = appReducer(configured, { now: 20_000, type: 'reset' });
-      expect(reset.onboarding.microphoneGranted).toBe(false);
-      expect(reset.onboarding.complete).toBe(false);
+      expect(reset.onboarding).toEqual({ complete: false, step: 1 });
     },
   );
 

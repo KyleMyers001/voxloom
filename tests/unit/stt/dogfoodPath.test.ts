@@ -74,7 +74,7 @@ describe('dogfoodTranscribeAndCopy', () => {
       modelId: 'Pine Voice Small · local',
     });
 
-    expect(createEngine).toHaveBeenCalledWith('whisper-tiny.en');
+    expect(createEngine).toHaveBeenCalledWith('whisper-base.en');
   });
 
   it('never auto-downloads — only constructs an engine', async () => {

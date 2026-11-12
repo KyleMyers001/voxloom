@@ -1,16 +1,10 @@
 import { useApp } from '../app/AppContext';
 
-export type OnboardingScenario = 'collision' | 'permission-denied';
-
 interface ScenarioPanelProps {
-  onOnboarding: (scenario: OnboardingScenario) => void;
   onReset: () => void;
 }
 
-export function ScenarioPanel({
-  onOnboarding,
-  onReset,
-}: ScenarioPanelProps) {
+export function ScenarioPanel({ onReset }: ScenarioPanelProps) {
   const { dictation, dispatch, now, state } = useApp();
   const runId = 'runId' in state.dictation ? state.dictation.runId : null;
 
@@ -21,9 +15,6 @@ export function ScenarioPanel({
         Reset session
       </button>
       <button onClick={onReset}>First-run setup</button>
-      <button onClick={() => onOnboarding('collision')}>
-        Shortcut collision
-      </button>
       <button onClick={() => dispatch({ type: 'scenario-empty' })}>
         Empty lists
       </button>
@@ -58,9 +49,6 @@ export function ScenarioPanel({
         })} type="checkbox" />
         Copy failure
       </label>
-      <button onClick={() => onOnboarding('permission-denied')}>
-        Permission denied
-      </button>
       <p>
         Controls are synthetic. No audio or OS capability is used.
         With durable history on, Reset asks before wiping{' '}

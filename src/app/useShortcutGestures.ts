@@ -2,7 +2,8 @@ import { isTauri } from '@tauri-apps/api/core';
 import type { OverlayResult } from '../services/shortcut/overlayVisibility';
 import { useEffect, useRef } from 'react';
 import { subscribeModal } from './modalState';
-import { handlePractice, interactionContext } from './gestureContext';
+import { handlePractice, interactionContext, setupOverProductCapture } from './gestureContext';
+import { subscribePracticeReset } from '../features/onboarding/practiceBridge';
 import { suspendable } from '../services/shortcut/recordingSuspend';
 import { unbindWhileRecording } from '../services/shortcut/recordingUnbind';
 import type { AppState } from './state';
@@ -157,6 +158,14 @@ export function useShortcutGestures(options: GestureOptions) {
   };
   optionsRef.current = options;
   const phaseGuardRef = useRef<PhaseGuard>({ seen: options.dogfood.phase });
+  useEffect(() => subscribePracticeReset(() => {
+    // Practice resets must not drop the hold/latch of a product capture setup opened over.
+    if (setupOverProductCapture(optionsRef.current)) return;
+    pendingFinishRef.current?.clear();
+    documentControllerRef.current?.setContext(null);
+    documentControllerRef.current?.setContext(interactionContext(optionsRef.current));
+    nativeControllerRef.current?.resetPartial();
+  }), []);
 
   // Shared pending-finish gate (hold release can race React listening commit).
   // Finish stops audio immediately; this gate handles only overlay teardown.
@@ -288,12 +297,13 @@ export function useShortcutGestures(options: GestureOptions) {
     options.state.settings.shortcut, nativeControllerRef, registeredRef, optionsRef, isSettingsWindowOpen, bootReady,
   );
 
+  const overProductCapture = setupOverProductCapture(options);
   useEffect(() => {
     const ctx = interactionContext(options);
     documentControllerRef.current?.setContext(ctx);
     nativeControllerRef.current?.setContext(ctx);
   }, [options.onboardingOpen, options.shortcutOpen,
-    options.state.onboarding.step]);
+    options.state.onboarding.step, overProductCapture]);
 
   // Gesture runs and Home capture share the single native overlay.
   useEffect(() => {
@@ -369,6 +379,12 @@ function handleGesture(
 ) {
   const { dictation, dogfood, onboardingOpen, shortcutOpen, state } = options;
   if (shortcutOpen) return;
+  // Setup opened over a live product capture: the shortcut can still finish
+  // it, but starts nothing (no new product run, no practice try) meanwhile.
+  if (setupOverProductCapture(options)) {
+    if (gesture === 'hold-finish' || gesture === 'latch-finish') finishProductCapture(options, pending, optionsRef);
+    return;
+  }
   if (onboardingOpen && state.onboarding.step === 3) {
     handlePractice(options, gesture);
     return;
@@ -396,19 +412,28 @@ function handleGesture(
       tearDownOverlayDictation(optionsRef.current);
     });
   } else if (gesture === 'hold-finish' || gesture === 'latch-finish') {
-    // Stop audio now, before the pending-listening gate or overlay work.
-    // A release racing model/microphone startup must also latch stop now.
-    void dogfood.stop().catch(() => {});
-    if (state.dictation.kind === 'listening') {
-      const runId = state.dictation.runId;
-      if (pending) pending.requestFinish(true, runId);
-      else endGestureCapture(optionsRef);
-    } else if (pending) {
-      pending.requestFinish(false, null);
-    } else if (isDogfoodBusy(dogfood.phase)) {
-      // Dictation overlay not listening yet, but capture may have started.
-      endGestureCapture(optionsRef);
-    }
+    finishProductCapture(options, pending, optionsRef);
+  }
+}
+
+function finishProductCapture(
+  options: GestureOptions,
+  pending: PendingFinishGate | null,
+  optionsRef: { current: GestureOptions },
+) {
+  const { dogfood, state } = options;
+  // Stop audio now, before the pending-listening gate or overlay work.
+  // A release racing model/microphone startup must also latch stop now.
+  void dogfood.stop().catch(() => {});
+  if (state.dictation.kind === 'listening') {
+    const runId = state.dictation.runId;
+    if (pending) pending.requestFinish(true, runId);
+    else endGestureCapture(optionsRef);
+  } else if (pending) {
+    pending.requestFinish(false, null);
+  } else if (isDogfoodBusy(dogfood.phase)) {
+    // Dictation overlay not listening yet, but capture may have started.
+    endGestureCapture(optionsRef);
   }
 }
 

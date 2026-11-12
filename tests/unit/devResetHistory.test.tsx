@@ -33,8 +33,8 @@ async function renderDurableApp(store = createHistoryStore(
       <App />
     </AppProvider>,
   );
-  // Onboarding sets #root aria-hidden; dismiss before querying Home/History.
-  await user.click(screen.getByRole('button', { name: 'Skip' }));
+  // Dismiss the boot-loading dialog before querying Home/History.
+  await user.click(screen.getByRole('button', { name: 'Close Set up Voxloom' }));
   await waitFor(() => {
     expect(screen.getByText('real durable history row')).toBeInTheDocument();
   });
@@ -57,8 +57,8 @@ describe('DEV Reset vs durable history', () => {
       screen.getByRole('button', { name: 'Keep durable history' }),
     );
 
-    expect(screen.getByText('Step 1 of 3')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Skip' }));
+    expect(screen.getByText(/Less typing/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Set up later' }));
 
     expect(screen.getByText('real durable history row')).toBeInTheDocument();
     expect(screen.queryByText(/Make retry explicit/i)).not.toBeInTheDocument();
@@ -84,8 +84,8 @@ describe('DEV Reset vs durable history', () => {
       screen.getByRole('button', { name: 'Wipe durable history' }),
     );
 
-    expect(screen.getByText('Step 1 of 3')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Skip' }));
+    expect(screen.getByText(/Less typing/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Set up later' }));
 
     expect(
       screen.queryByText('real durable history row'),
