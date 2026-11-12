@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   browser-app:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     env:
       PLAYWRIGHT_BROWSERS_PATH: .playwright-browsers
     steps:
@@ -36,7 +36,7 @@ jobs:
     # Release-mode Playwright suite (playwright.release.config.ts): serves the
     # production build via `vite preview` and checks onboarding with no dev
     # scenarios. Separate job so it runs in parallel with browser-app.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     env:
       PLAYWRIGHT_BROWSERS_PATH: .playwright-browsers
     steps:
@@ -60,7 +60,7 @@ jobs:
           retention-days: 14
 
   rust:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: src-tauri
@@ -92,7 +92,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-latest]
+        os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     env:
       # The worker never uses cpp-httplib's HTTPS (LLAMA_CURL is off, models
@@ -147,7 +147,12 @@ jobs:
     # Builds and tests with the opt-in `whisper` feature (whisper-rs ->
     # whisper.cpp via cmake + bindgen/libclang), which the other Rust jobs
     # never compile. Separate cache key: whisper.cpp objects differ.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
+    env:
+      # ubuntu-latest ships libclang 20-22 and clang-sys loads the newest.
+      # whisper-rs-sys 0.11's bindgen 0.69 emits an opaque
+      # whisper_full_params under libclang 22 (BUS-212), so use 21.
+      LIBCLANG_PATH: /usr/lib/llvm-21/lib
     defaults:
       run:
         working-directory: src-tauri
@@ -175,7 +180,7 @@ jobs:
     # RustSec advisories for src-tauri/Cargo.lock (BUS-63). Runs inside
     # src-tauri so .cargo/audit.toml (the reasoned ignore list) is loaded;
     # -D warnings fails on any advisory not ignored there.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     defaults:
