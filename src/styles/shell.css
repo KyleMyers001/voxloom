@@ -107,3 +107,8 @@
 @media (max-width: 780px) {
   .main { padding: var(--s-10) var(--s-9) 60px; }
 }
+
+/* BUS-216: guided setup replaces the shell; `display: grid` would override `hidden`. */
+.app[hidden] {
+  display: none;
+}

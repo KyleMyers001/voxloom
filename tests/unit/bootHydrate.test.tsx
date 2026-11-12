@@ -116,8 +116,8 @@ describe('boot hydrate polish', () => {
       </AppProvider>,
     );
 
-    // Dismiss the loading dialog without starting setup while hydration waits.
-    await user.click(screen.getByRole('button', { name: 'Close Set up Voxloom' }));
+    // Dismiss the loading setup without starting setup while hydration waits.
+    await user.click(screen.getByRole('button', { name: 'Set up later' }));
 
     await user.click(screen.getByRole('button', { name: 'Settings' }));
     expect(screen.getByRole('status')).toHaveTextContent('Loading…');
@@ -204,7 +204,7 @@ describe('boot hydrate polish', () => {
       </AppProvider>,
     );
 
-    await user.click(screen.getByRole('button', { name: 'Close Set up Voxloom' }));
+    await user.click(screen.getByRole('button', { name: 'Set up later' }));
     await user.click(screen.getByRole('button', { name: 'Settings' }));
     expect(screen.getByRole('status')).toHaveTextContent('Loading…');
 

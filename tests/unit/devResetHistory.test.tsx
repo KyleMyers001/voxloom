@@ -33,8 +33,9 @@ async function renderDurableApp(store = createHistoryStore(
       <App />
     </AppProvider>,
   );
-  // Dismiss the boot-loading dialog before querying Home/History.
-  await user.click(screen.getByRole('button', { name: 'Close Set up Voxloom' }));
+  // Setup fills the window (BUS-216): let it hydrate, then leave it for Home/History.
+  await screen.findByText(/Less typing/);
+  await user.click(screen.getByRole('button', { name: 'Set up later' }));
   await waitFor(() => {
     expect(screen.getByText('real durable history row')).toBeInTheDocument();
   });

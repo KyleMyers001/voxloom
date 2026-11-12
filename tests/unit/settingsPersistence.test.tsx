@@ -39,9 +39,9 @@ describe('durable settings persistence', () => {
       </AppProvider>,
     );
 
-    // onboardingComplete=true → overlay should close without Skip.
+    // onboardingComplete=true → setup should close without Skip.
     await waitFor(() => {
-      expect(screen.queryByText('Step 1 of 3')).not.toBeInTheDocument();
+      expect(screen.queryByRole('main', { name: 'Set up Voxloom' })).not.toBeInTheDocument();
     });
 
     await user.click(screen.getByRole('button', { name: 'Settings' }));
@@ -66,7 +66,7 @@ describe('durable settings persistence', () => {
     );
 
     await waitFor(() => {
-      expect(screen.queryByText('Step 1 of 3')).not.toBeInTheDocument();
+      expect(screen.queryByRole('main', { name: 'Set up Voxloom' })).not.toBeInTheDocument();
     });
     await user.click(screen.getByRole('button', { name: 'Settings' }));
 

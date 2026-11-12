@@ -124,8 +124,10 @@ export function App() {
   const gated = (title: string, screen: ReactNode) =>
     bootReady ? screen : <BootHydratePlaceholder title={title} />;
 
+  // Guided setup is the window itself (BUS-216): the shell stays mounted, so
+  // Home keeps its state and the opener gets focus back, but is not shown.
   return <>
-    <div className="app" id="app-shell">
+    <div className="app" hidden={onboardingOpen} id="app-shell">
       <TitleBar
         onHelp={openHelp}
         onSettings={() => navigate('settings')}

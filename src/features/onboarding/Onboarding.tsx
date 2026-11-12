@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useApp } from '../../app/AppContext';
-import { Dialog } from '../../components/Dialog';
 import { KeyCombo } from '../../components/KeyCombo';
 import { initialSettings } from '../../domain/fixtures';
 import { ShortcutRecorder } from '../settings/ShortcutRecorder';
@@ -16,6 +15,7 @@ import { createOverlayBridge } from '../../services/shortcut';
 import { createGuidedSetup, permissionsAuthorized, type PermissionKind, type SetupBoundary, type SetupProgressStorage } from './guidedSetup';
 import { registerPracticeHandler, resetPracticeGestures } from './practiceBridge';
 import { createSetupBoundary } from './setupBoundary';
+import { SetupWindow } from './SetupWindow';
 
 interface OnboardingProps {
   onClose: () => void;
@@ -47,7 +47,9 @@ const wrongGesture = {
 /** Do not construct the controller or expose setup actions against boot defaults. */
 export function Onboarding(props: OnboardingProps) {
   const { bootReady } = useApp();
-  if (!bootReady) return <Dialog label="Set up Voxloom" onClose={props.onClose} opener={props.opener}><p role="status">Loading your saved setup…</p></Dialog>;
+  if (!bootReady) return <SetupWindow onEscape={props.onClose} opener={props.opener}>
+    <div className="setup-window__loading"><p role="status">Loading your saved setup…</p><button className="btn ghost" onClick={props.onClose} type="button">Set up later</button></div>
+  </SetupWindow>;
   return <HydratedOnboarding {...props} />;
 }
 
@@ -211,7 +213,7 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
   // without practice so it stops reopening at launch. Set up later stays incomplete.
   function skip() { controller.clearProgress(); setup.update({ complete: true }); close(); }
 
-  return <Dialog label="Set up Voxloom" onClose={close} onEscape={() => { if (pending.current || ['starting', 'recording', 'transcribing', 'cleaning'].includes(live.current.phase)) cancel(); else close(); }} opener={opener}>
+  return <SetupWindow onEscape={() => { if (pending.current || ['starting', 'recording', 'transcribing', 'cleaning'].includes(live.current.phase)) cancel(); else close(); }} opener={opener}>
     <div className="guided-setup">
       <aside className="guided-rail" aria-label="Setup progress">
         <div className="guided-brand"><span className="guided-mark" aria-hidden="true"><i /><i /><i /></span>Voxloom</div>
@@ -276,7 +278,8 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
         </section>
         {guided.step === 0 && <p className="guided-mini guided-disclosure">{modelId === 'whisper-base.en' ? 'Starting setup downloads Whisper Base (English)' : `Starting setup prepares your selected ${modelLabel}`} ({size}) if needed. Your dictation is processed on this Mac. Larger voice packs are optional in Settings.</p>}
         <footer className="guided-footer">
-          {guided.step > 0 ? <button className="btn ghost" onClick={() => { cancel(); controller.back(); }} type="button">Back</button> : <button className="btn ghost" onClick={close} type="button">Set up later</button>}
+          {guided.step > 0 && <button className="btn ghost" onClick={() => { cancel(); controller.back(); }} type="button">Back</button>}
+          <button className="btn ghost" onClick={close} type="button">Set up later</button>
           <button className="btn ghost" onClick={skip} type="button">Skip setup</button>
           <span />
           {guided.step === 0 ? <button className="btn primary" disabled={!io.native} onClick={() => void action(controller.start)} type="button">Start setup →</button>
@@ -288,5 +291,5 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
         </footer>
       </div>
     </div>
-  </Dialog>;
+  </SetupWindow>;
 }

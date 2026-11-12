@@ -21,6 +21,7 @@
     "core:window:allow-set-position",
     "core:window:allow-set-focusable",
     "core:window:allow-set-always-on-top",
+    "core:window:allow-set-title",
     "core:window:allow-current-monitor",
     "core:window:allow-get-all-windows",
     "core:window:allow-primary-monitor",
