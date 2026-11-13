@@ -5,8 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::ax::*;
 use super::{host, registry, web_ax};
 use crate::delivery::decide::element_token;
-use crate::delivery::decide::fallback::{classify_target, EditFacts};
 use crate::delivery::decide::known_terminal::flag_terminal;
+use crate::delivery::decide::paste_role::{classify_target, EditFacts};
 use crate::delivery::types::TargetSnapshotDto;
 
 pub fn now_ms() -> i64 {
@@ -77,6 +77,7 @@ pub fn edit_facts(element: AXUIElementRef) -> EditFacts {
         value: is_settable(element, "AXValue"),
         selected_text: is_settable(element, "AXSelectedText"),
         selected_range: is_settable(element, "AXSelectedTextRange"),
+        text_value: read_value(element).text().is_some(),
     }
 }
 

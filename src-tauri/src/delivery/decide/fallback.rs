@@ -2,15 +2,14 @@
 //! Pure decisions for the guarded ⌘V fallback:
 //! - `ValueStatus`: an empty field (kAXErrorNoValue, nil, "") or an
 //!   attributed AXValue is readable; any other AX error is not;
-//! - `classify_target`: roles outside the AX allowlist become paste-only
-//!   targets when they look editable, never a grid/table selection;
+//! - `paste_role::classify_target`: which roles outside the AX allowlist
+//!   are paste-only targets;
 //! - `may_paste`: the ⌘V fallback runs only after nothing was written
 //!   (Ok writes proven unchanged, or write-free AX errors only).
 
 use super::diag::DeliveryDiag;
 use super::report::{InsertReport, PasteReport};
 use super::retry::{RETRY_READBACK_POLLS, RETRY_READBACK_POLL_MS};
-use super::target::{classify_role, effective_role};
 use super::text::check_typing_text;
 use super::verify::same_ax_text;
 use crate::delivery::types::TargetSnapshotDto;
@@ -146,70 +145,6 @@ pub fn poll_readback(
     last
 }
 
-/// Settable edit attributes of the focused element.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct EditFacts {
-    pub value: bool,
-    pub selected_text: bool,
-    pub selected_range: bool,
-}
-
-impl EditFacts {
-    pub fn any(&self) -> bool {
-        self.value || self.selected_text || self.selected_range
-    }
-
-    pub fn label(&self) -> String {
-        let flag = |on: bool| if on { 1 } else { 0 };
-        format!(
-            "value={} selected_text={} range={}",
-            flag(self.value),
-            flag(self.selected_text),
-            flag(self.selected_range)
-        )
-    }
-}
-
-/// Spreadsheet grids and tables: a ⌘V into a selected cell (not in edit
-/// mode) replaces it, so these stay Copy.
-const GRID_ROLES: &[&str] = &[
-    "AXTable",
-    "AXGrid",
-    "AXCell",
-    "AXLayoutArea",
-    "AXLayoutItem",
-    "AXOutline",
-    "AXRow",
-    "AXColumn",
-    "AXList",
-    "AXBrowser",
-];
-
-/// Controls that are never edited by pasting.
-const CONTROL_ROLES: &[&str] = &[
-    "AXStaticText",
-    "AXButton",
-    "AXImage",
-    "AXToolbar",
-    "AXMenu",
-    "AXMenuItem",
-    "AXCheckBox",
-    "AXRadioButton",
-    "AXPopUpButton",
-    "AXSlider",
-];
-
-/// A grid/table selection without editable text focus. A cell editor in
-/// edit mode is an allowlisted text role and stays an AX target, even inside
-/// a grid; `may_paste` still refuses its ⌘V (`under_grid`).
-pub fn is_grid_selection<S: AsRef<str>>(role: &str, ancestors: &[S]) -> bool {
-    if GRID_ROLES.contains(&role) {
-        return true;
-    }
-    classify_role(role).0 != "insertable"
-        && ancestors.iter().any(|r| GRID_ROLES.contains(&r.as_ref()))
-}
-
 /// Ancestors that make any focused element, allowlisted text roles included,
 /// a grid/table context for the ⌘V gate. A selected (not editing) cell may
 /// expose a text role with a settable range, the same AX facts as the cell
@@ -221,36 +156,6 @@ pub fn under_grid<S: AsRef<str>>(ancestors: &[S]) -> bool {
     ancestors
         .iter()
         .any(|r| GRID_ANCESTORS.contains(&r.as_ref()))
-}
-
-pub const GRID_REASON: &str =
-    "spreadsheet grid or table selection (no cell in edit mode) — insert skipped";
-
-/// `classify_role`, plus paste-only targets: a container or unknown role
-/// whose edit attributes are settable is insertable, but only through the
-/// ⌘V fallback (`choose_insert_path` never AX-writes it). `facts` and
-/// `ancestors` are only read for such roles.
-pub fn classify_target(
-    role: &str,
-    subrole: Option<&str>,
-    facts: impl FnOnce() -> EditFacts,
-    ancestors: impl FnOnce() -> Vec<String>,
-) -> (&'static str, bool, Option<&'static str>) {
-    let base = classify_role(effective_role(role, subrole));
-    // "unknown": the AXRole itself could not be read (`build_snapshot`).
-    if base.0 != "unsupported" || role == "unknown" || CONTROL_ROLES.contains(&role) {
-        return base;
-    }
-    if GRID_ROLES.contains(&role) {
-        return ("unsupported", false, Some(GRID_REASON));
-    }
-    if !facts().any() {
-        return base;
-    }
-    if is_grid_selection(role, &ancestors()) {
-        return ("unsupported", false, Some(GRID_REASON));
-    }
-    ("insertable", true, None)
 }
 
 /// What the ⌘V gate knows after the AX path returned `Err`.

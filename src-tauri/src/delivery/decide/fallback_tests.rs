@@ -1,7 +1,7 @@
 use super::*;
+use crate::delivery::decide::paste_role::EditFacts;
 use crate::delivery::decide::test_support::target;
 use crate::delivery::decide::verify::{after_ax, AfterAx};
-use crate::delivery::decide::{choose_insert_path, InsertPath};
 
 const SECRET_TEXT: &str = "dictated secret phrase";
 const SECRET_FIELD: &str = "confidential field body";
@@ -120,103 +120,6 @@ fn readback_latches_the_first_change_so_a_revert_cannot_read_as_unchanged() {
     let mut reads = vec![ValueStatus::Unreadable(Some(-25204)), before.clone()].into_iter();
     let got = poll_readback(&before, || reads.next().unwrap(), |_| {});
     assert_eq!(got, None);
-}
-
-fn no_walk() -> Vec<String> {
-    panic!("ancestors must not be walked")
-}
-
-#[test]
-fn allowlisted_and_secure_roles_classify_as_before() {
-    let settable = || EditFacts {
-        value: true,
-        ..Default::default()
-    };
-    for role in ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"] {
-        assert_eq!(
-            classify_target(role, None, settable, no_walk),
-            classify_role(role)
-        );
-    }
-    let secure = classify_target("AXTextField", Some("AXSecureTextField"), settable, no_walk);
-    assert_eq!(secure.0, "secure");
-    for role in [
-        "AXStaticText",
-        "AXButton",
-        "AXImage",
-        "AXMenu",
-        "AXCheckBox",
-        "unknown",
-    ] {
-        assert!(!classify_target(role, None, settable, no_walk).1, "{role}");
-    }
-}
-
-#[test]
-fn editable_containers_and_unknown_roles_become_paste_only_targets() {
-    let none: fn() -> Vec<String> = Vec::new;
-    let settable = || EditFacts {
-        selected_range: true,
-        ..Default::default()
-    };
-    for role in [
-        "AXWebArea",
-        "AXGroup",
-        "AXScrollArea",
-        "AXDocument",
-        "AXUnknown",
-    ] {
-        assert_eq!(
-            classify_target(role, None, settable, none),
-            ("insertable", true, None),
-            "{role}"
-        );
-        assert!(
-            !classify_target(role, None, EditFacts::default, none).1,
-            "{role}"
-        );
-        // A paste-only target never takes an AX write.
-        let mut snap = target("insertable", Some(1), Some("1:x:#1"));
-        snap.element_role = Some(role.into());
-        assert!(matches!(
-            choose_insert_path(&snap, true),
-            InsertPath::Refuse(_)
-        ));
-    }
-}
-
-#[test]
-fn a_grid_selection_is_never_a_target_but_a_cell_editor_keeps_the_ax_write() {
-    let settable = || EditFacts {
-        value: true,
-        selected_text: true,
-        selected_range: true,
-    };
-    let none: fn() -> Vec<String> = Vec::new;
-    for role in [
-        "AXTable",
-        "AXGrid",
-        "AXCell",
-        "AXLayoutArea",
-        "AXLayoutItem",
-    ] {
-        let (kind, insertable, reason) = classify_target(role, None, settable, none);
-        assert_eq!(
-            (kind, insertable, reason),
-            ("unsupported", false, Some(GRID_REASON))
-        );
-    }
-    let in_grid = || vec!["AXRow".to_string(), "AXTable".into(), "AXWindow".into()];
-    assert!(!classify_target("AXGroup", None, settable, in_grid).1);
-    assert!(!classify_target("AXUnknown", None, settable, in_grid).1);
-    // Cell in edit mode: the editor is a text role and keeps the verified AX
-    // write; its ⌘V fallback is refused by `under_grid` in `may_paste`.
-    assert!(!is_grid_selection("AXTextArea", &in_grid()));
-    assert!(under_grid(&in_grid()));
-    assert_eq!(
-        classify_target("AXTextArea", None, settable, no_walk),
-        ("insertable", true, None)
-    );
 }
 
 fn facts() -> PasteFacts {

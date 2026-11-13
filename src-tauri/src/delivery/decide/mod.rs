@@ -8,6 +8,7 @@ pub mod known_terminal;
 pub mod messages_app;
 pub mod paste;
 pub mod paste_key;
+pub mod paste_role;
 pub mod paste_target;
 pub mod report;
 pub mod retry;
