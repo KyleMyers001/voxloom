@@ -25,11 +25,14 @@
 .guided-content .guided-intro { line-height: 1.55; margin: 0 0 22px; max-width: 430px; font-size: var(--fs-body); }
 .guided-content p { line-height: 1.55; }
 .guided-mini { font-size: var(--fs-label); line-height: 1.65; }
-.guided-sample { border: 1px solid var(--line); border-radius: 10px; padding: 20px 24px; background: var(--panel); margin: 18px 0; }
-.guided-sample small { color: var(--mut); font-size: var(--fs-micro); letter-spacing: .1em; }
-.guided-sample blockquote { font-size: var(--fs-hero); line-height: 1.2; letter-spacing: -.035em; margin: 15px 0; }
-.guided-sample hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; width: 80%; }
-.guided-sample hr:last-child { width: 60%; }
+/* BUS-220 · Option A: step 0 lists the three setup steps; the badges mirror the spine circles. */
+.guided-steps { list-style: none; margin: 0; padding: 0; max-width: 520px; border-bottom: 1px solid var(--line); }
+.guided-steps li { display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; border-top: 1px solid var(--line); }
+.guided-steps-badge { height: 28px; width: 28px; display: grid; place-items: center; border: 1px solid var(--ctl-line); border-radius: 50%; font-size: var(--fs-label); font-weight: 500; color: var(--fg); flex: none; }
+.guided-steps h3 { margin: 0 0 2px; font-size: var(--fs-emph); font-weight: 600; line-height: 1.3; letter-spacing: -.01em; }
+.guided-content .guided-steps p { margin: 0; font-size: var(--fs-body); line-height: 1.5; color: var(--mut); }
+.guided-steps .key-combo { vertical-align: baseline; }
+.guided-steps .kbd { font-size: var(--fs-label); padding: 2px 6px; vertical-align: 1px; color: var(--fg); }
 .guided-list { padding-left: 20px; font-size: var(--fs-secondary); line-height: 1.8; margin: 18px 0; }
 .guided-permission { display: flex; align-items: center; gap: 14px; border-bottom: 1px solid var(--line); padding: 14px 0; }
 .guided-permission > div:first-child { flex: 1; min-width: 0; }
@@ -73,6 +76,12 @@
   .guided-permission { align-items: flex-start; flex-wrap: wrap; }
   .guided-permission-actions { max-width: 100%; align-items: flex-start; flex-direction: row; flex-wrap: wrap; }
   .guided-content .btn { min-height: 44px; }
+  .guided-disclosure { padding: 10px 22px; }
+  /* BUS-220: step 0 only, so the three rows and the download note fit at 640×620 without scrolling. */
+  .guided-content:has(> .guided-steps) { padding-top: 24px; }
+  .guided-content:has(> .guided-steps) h2 { margin-bottom: 12px; }
+  .guided-content:has(> .guided-steps) .guided-intro { margin-bottom: 14px; }
+  .guided-steps li { padding: 10px 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   .guided-setup *, .guided-setup *::before, .guided-setup *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }

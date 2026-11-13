@@ -22,6 +22,18 @@ for (const theme of ['dark', 'light']) for (const width of [640, 1000]) {
       if (step === 0) {
         const disclosure = await page.getByText(/Starting setup downloads Whisper Base/).boundingBox();
         expect(disclosure!.y + disclosure!.height).toBeLessThanOrEqual(footer!.y);
+        // BUS-220: all three welcome rows fit without scrolling the content pane.
+        const content = page.locator('.guided-content');
+        expect(await content.evaluate((el) => el.scrollHeight <= el.clientHeight)).toBe(true);
+        const pane = await content.boundingBox();
+        const rows = page.getByRole('list', { name: 'Setup steps' }).getByRole('listitem');
+        await expect(rows).toHaveCount(3);
+        for (const row of await rows.all()) {
+          const box = await row.boundingBox();
+          expect(box!.y + box!.height).toBeLessThanOrEqual(pane!.y + pane!.height);
+        }
+        // Under 760px the download note lines up with the content edge (22px).
+        if (width < 760) expect(await page.locator('.guided-disclosure').evaluate((el) => getComputedStyle(el).paddingLeft)).toBe('22px');
       }
       if (step === 3) await expect(page.getByRole('status')).toHaveText('Ready when you are');
       expect(await page.locator('.guided-setup').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
