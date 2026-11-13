@@ -11,7 +11,8 @@ export function WelcomeSteps({ shortcut }: { shortcut: string }) {
     <>Keep <KeyCombo combo={shortcut} />, or pick your own keys.</>,
     'Hold your shortcut and say a short sentence, then try it hands-free.',
   ];
-  return <ol aria-label="Setup steps" className="guided-steps">
+  // role="list" keeps list semantics in WebKit, which drops them with list-style: none.
+  return <ol aria-label="Setup steps" className="guided-steps" role="list">
     {SETUP_STEP_TITLES.map((title, index) => <li key={title}>
       <span aria-hidden="true" className="guided-steps-badge">{index + 1}</span>
       <div><h3>{title}</h3><p>{descriptions[index]}</p></div>

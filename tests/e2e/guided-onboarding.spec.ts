@@ -3,7 +3,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { join } from 'node:path';
 import process from 'node:process';
 
-for (const theme of ['dark', 'light']) for (const width of [640, 1000]) {
+for (const theme of ['dark', 'light']) for (const width of [640, 1000, 1440]) {
   test(`${theme} B spine and controls fit ${width}x620 with reduced motion`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 620 });
     await page.emulateMedia({ reducedMotion: 'reduce' });

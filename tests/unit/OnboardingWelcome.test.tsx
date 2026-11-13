@@ -24,6 +24,8 @@ describe('guided setup welcome (step 0)', () => {
     renderWithApp(<Onboarding boundary={setupBoundary()} onClose={vi.fn()} progressStorage={storage()} />);
     const list = screen.getByRole('list', { name: 'Setup steps' });
     expect(list.tagName).toBe('OL');
+    // WebKit drops list semantics with list-style: none, so the role is explicit.
+    expect(list).toHaveAttribute('role', 'list');
     const rows = within(list).getAllByRole('listitem');
     expect(rows).toHaveLength(3);
     const titles = within(list).getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent);
