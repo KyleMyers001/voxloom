@@ -123,6 +123,8 @@
   .guided-content:has(> .guided-steps) h2 { margin-bottom: 12px; }
   .guided-content:has(> .guided-steps) .guided-intro { margin-bottom: 14px; }
   .guided-steps li { padding: 10px 0; gap: 12px; }
+  /* BUS-225: step 4 only (the only step with the shortcut card), so a two-line error fits at 620 tall. */
+  .guided-content:has(> .guided-shortcut) .guided-intro { margin-bottom: 14px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .guided-setup *, .guided-setup *::before, .guided-setup *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }

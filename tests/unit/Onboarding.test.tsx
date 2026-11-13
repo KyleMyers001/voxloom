@@ -153,12 +153,14 @@ describe('B guided setup', () => {
       expect(alert.nextElementSibling).toBe(review);
       expect(review.nextElementSibling).toHaveClass('guided-shortcut');
     });
-    it('not ready with no specific error keeps the generic attention line and no alert', async () => {
+    it('not ready with no specific error shows the generic attention line as the one alert', async () => {
       const io = setupBoundary();
       vi.mocked(io.query).mockResolvedValue({ microphone: 'authorized', accessibility: 'not-granted' });
       renderWithApp(<Onboarding boundary={io} onClose={vi.fn()} progressStorage={finished()} />);
       expect(await screen.findByText('Access or the voice pack needs attention before you finish.')).toBeVisible();
-      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      const alerts = screen.getAllByRole('alert');
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0]).toHaveTextContent('Access or the voice pack needs attention before you finish.');
     });
     it('ready with an error (save failure) keeps the shared bottom alert, once', async () => {
       const io = setupBoundary();

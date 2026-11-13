@@ -269,7 +269,7 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
           {guided.step === 4 && <>
             <p className="guided-intro">You’ve tried both ways to dictate. Choose Open Voxloom to finish, then use your shortcut in any app.</p>
             {!guided.ready && <>
-              {shownError ? <p className="form-error" role="alert">{shownError}</p> : <p className="form-error">Access or the voice pack needs attention before you finish.</p>}
+              <p className="form-error" role="alert">{shownError || 'Access or the voice pack needs attention before you finish.'}</p>
               <button className="btn" onClick={() => { cancel(); controller.back(); controller.back(); controller.back(); }} type="button">Review access and voice pack</button>
             </>}
             <div className="guided-shortcut"><KeyCombo combo={state.settings.shortcut} /><p>Hold for a quick thought. Double-tap to go hands-free. Press once more to finish.</p></div>

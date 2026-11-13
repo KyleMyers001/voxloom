@@ -82,7 +82,7 @@ for (const theme of ['dark', 'light']) {
       await expect(page.getByRole('heading', { level: 2 })).toBeFocused();
       const open = page.getByRole('button', { name: 'Open Voxloom' });
       if (ready) await expect(open).toBeEnabled();
-      else await expect(page.getByText('Access or the voice pack needs attention before you finish.')).toBeVisible();
+      else await expect(page.getByRole('alert')).toHaveText('Access or the voice pack needs attention before you finish.');
       await expect(page.locator('.guided-footer').getByRole('button')).toHaveText(['Back', 'Open Voxloom']);
       expect(await page.locator('.guided-content').evaluate((el) => el.scrollHeight <= el.clientHeight)).toBe(true);
       const footer = await page.locator('.guided-footer').boundingBox();
