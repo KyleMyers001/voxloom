@@ -189,35 +189,24 @@ mod tests {
 
     #[test]
     fn attributed_values_read_as_their_plain_string() {
+        #[repr(C)]
+        #[allow(dead_code)] // Read by CoreFoundation, not by Rust.
+        struct CFRange {
+            location: isize,
+            length: isize,
+        }
         extern "C" {
-            fn CFAttributedStringCreate(
-                alloc: CFTypeRef,
-                text: CFStringRef,
-                attributes: CFTypeRef,
-            ) -> CFTypeRef;
-            fn CFDictionaryCreate(
-                alloc: CFTypeRef,
-                keys: *const CFTypeRef,
-                values: *const CFTypeRef,
-                count: isize,
-                key_callbacks: *const c_void,
-                value_callbacks: *const c_void,
-            ) -> CFTypeRef;
+            fn CFAttributedStringCreateMutable(alloc: CFTypeRef, max_length: isize) -> CFTypeRef;
+            fn CFAttributedStringReplaceString(s: CFTypeRef, range: CFRange, text: CFStringRef);
         }
         for text in ["", "Word body café 🙂"] {
             let plain = Owned::string(text);
-            let attrs = Owned(unsafe {
-                CFDictionaryCreate(
-                    ptr::null(),
-                    ptr::null(),
-                    ptr::null(),
-                    0,
-                    ptr::null(),
-                    ptr::null(),
-                )
-            });
-            let attributed =
-                Owned(unsafe { CFAttributedStringCreate(ptr::null(), plain.0, attrs.0) });
+            let attributed = Owned(unsafe { CFAttributedStringCreateMutable(ptr::null(), 0) });
+            let start = CFRange {
+                location: 0,
+                length: 0,
+            };
+            unsafe { CFAttributedStringReplaceString(attributed.0, start, plain.0) };
             assert!(!attributed.0.is_null());
             assert_eq!(cfstring_to_rust(attributed.0), None);
             assert_eq!(cf_text(attributed.0).as_deref(), Some(text));
