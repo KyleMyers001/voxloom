@@ -5,7 +5,8 @@
 //! reporting: never AX-first, never scrollback verification, never auto-copy or
 //! retry after events are posted. Secure/changed targets always refuse.
 //! Other known terminals (WezTerm, iTerm2, ...) and Apple Messages take the clipboard paste route
-//! (`paste_text`) instead of any AX write.
+//! (`paste_text`) instead of any AX write. Other native fields that AX
+//! refuses without writing get one guarded ⌘V (`paste_after_refusal`, BUS-223).
 
 mod ax;
 mod ax_insert;
@@ -22,11 +23,15 @@ mod web_ctx;
 use std::sync::Mutex;
 
 use ax::{copy_string_attr, release, AXIsProcessTrusted, CFTypeRef};
-use focus::{build_snapshot, focused_ui_element, snapshot_at};
+use focus::{build_snapshot, edit_facts, focused_ui_element, snapshot_at};
 
+use super::decide::diag::DeliveryDiag;
+use super::decide::fallback::{after_ax_refusal, may_paste, poll_readback};
 use super::decide::paste_target::{binding_for, check_paste_target};
 use super::decide::report::PasteReport;
-use super::decide::{check_insert_text, validate_snapshots, InsertPath, InsertReport};
+use super::decide::{
+    check_insert_text, validate_snapshots, value_confirms_insert, InsertPath, InsertReport,
+};
 use super::types::{PasteBindingDto, TargetSnapshotDto};
 
 /// Serializes inserts (commands run off the main thread and may overlap).
@@ -90,7 +95,13 @@ fn terminal_still_matches(
     Ok(())
 }
 
-pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<InsertReport, String> {
+/// `paste_fallback`: the Clipboard fallback setting. With it on, a native
+/// field that AX refused without writing gets one guarded ⌘V (BUS-223).
+pub fn insert_text(
+    text: &str,
+    intended: &TargetSnapshotDto,
+    paste_fallback: bool,
+) -> Result<InsertReport, String> {
     check_insert_text(text)?;
     if !intended.insertable || intended.kind != "insertable" {
         return Err(format!(
@@ -104,23 +115,104 @@ pub fn insert_text(text: &str, intended: &TargetSnapshotDto) -> Result<InsertRep
     let _serial = INSERT_LOCK
         .lock()
         .map_err(|_| "insert lock poisoned".to_string())?;
+    let started = std::time::Instant::now();
     // Validate the same element handle we will mutate, not a prior focus read.
     let (element, app_name) =
         focused_ui_element("insert").map_err(|e| format!("insert aborted — {e}"))?;
     let validated = validate_snapshots(intended, build_snapshot(element, app_name, false));
-    let before = copy_string_attr(element, "AXValue");
+    let before = ax::read_value(element);
     let terminal = validated.app_pid.and_then(host::apple_terminal_identity);
-    let result = match super::decide::terminal::choose_path(&validated, before.is_some(), terminal)
-    {
-        InsertPath::Refuse(reason) => Err(reason),
+    let mut diag = DeliveryDiag {
+        bundle_id: validated.app_pid.and_then(host::bundle_id),
+        role: validated.element_role.clone(),
+        subrole: copy_string_attr(element, "AXSubrole"),
+        value: before.label(),
+        settable: edit_facts(element).label(),
+        ..Default::default()
+    };
+    let path = super::decide::terminal::choose_path(&validated, before.text().is_some(), terminal);
+    let terminal_path = path == InsertPath::TerminalUnicode;
+    let result = match path {
+        InsertPath::Refuse(reason) => {
+            diag.gate = "refuse";
+            Err(reason)
+        }
         InsertPath::TerminalUnicode => {
+            diag.gate = "terminal";
             typing::type_terminal(text, || terminal_still_matches(&validated, element))
         }
         InsertPath::AxSelectedText => {
-            ax_insert::insert_selected(element, &validated, before.unwrap_or_default(), text)
+            diag.gate = "ax";
+            ax_insert::insert_selected(element, &validated, &before, text, &mut diag)
         }
     };
+    let result = if terminal_path {
+        result // Apple Terminal never takes the ⌘V fallback.
+    } else {
+        paste_after_refusal(
+            result,
+            element,
+            &validated,
+            terminal,
+            paste_fallback,
+            text,
+            &mut diag,
+        )
+    };
     release(element as CFTypeRef);
+    diag.total_ms = started.elapsed().as_millis();
+    eprintln!("{}", diag.line());
+    result
+}
+
+/// BUS-223 (c): one ⌘V when the AX path wrote nothing (`Err`), under the
+/// terminal route's guards (same frontmost pid, Secure Keyboard Entry off,
+/// change-count-guarded restore) plus the same focused field. Read-back
+/// then decides Inserted or "may have been inserted".
+fn paste_after_refusal(
+    ax: Result<InsertReport, String>,
+    element: ax::AXUIElementRef,
+    validated: &TargetSnapshotDto,
+    apple_terminal: Option<bool>,
+    enabled: bool,
+    text: &str,
+    diag: &mut DeliveryDiag,
+) -> Result<InsertReport, String> {
+    if ax.is_ok() {
+        return ax; // Something was written (or proven inserted): never paste.
+    }
+    let known_terminal = host::terminal_flags(validated.app_pid).known;
+    let gate = may_paste(validated, enabled, apple_terminal, known_terminal);
+    let before = ax::read_value(element);
+    let pasted = std::time::Instant::now();
+    let still_field: &dyn Fn() -> Result<(), String> = &|| focus_still_matches(validated);
+    let result = after_ax_refusal(
+        ax,
+        gate,
+        |pid| {
+            let paster = paste::MacPaste {
+                pid,
+                still_field: Some(still_field),
+            };
+            super::decide::paste::paste_into_field(&paster, text)
+        },
+        || {
+            let before_text = before.text().map(str::to_string);
+            let after = poll_readback(
+                true,
+                &before,
+                text,
+                || ax::read_value(element),
+                |ms| std::thread::sleep(std::time::Duration::from_millis(ms)),
+            );
+            match (before_text, after) {
+                (Some(b), Some(a)) => value_confirms_insert(&b, &a, text),
+                _ => false,
+            }
+        },
+        diag,
+    );
+    diag.paste_ms = pasted.elapsed().as_millis();
     result
 }
 
@@ -142,7 +234,11 @@ pub fn paste_text(text: &str, bound: &PasteBindingDto) -> Result<PasteReport, St
     let _serial = INSERT_LOCK
         .lock()
         .map_err(|_| "insert lock poisoned".to_string())?;
-    let report = super::decide::paste::paste_text(&paste::MacPaste { pid }, text)?;
+    let host = paste::MacPaste {
+        pid,
+        still_field: None,
+    };
+    let report = super::decide::paste::paste_text(&host, text)?;
     // Never the transcript: only that a paste went out and what became of the clipboard.
     eprintln!(
         "[paste] cmd-v posted to paste-route app; clipboard_restored={} reason={:?}",

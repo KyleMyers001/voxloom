@@ -3,6 +3,8 @@
 use std::ffi::c_void;
 use std::ptr;
 
+use crate::delivery::decide::fallback::ValueStatus;
+
 pub type CFTypeRef = *const c_void;
 pub type CFStringRef = *const c_void;
 pub type AXUIElementRef = *mut c_void;
@@ -28,6 +30,11 @@ extern "C" {
         attribute: CFStringRef,
         value: CFTypeRef,
     ) -> AXError;
+    fn AXUIElementIsAttributeSettable(
+        element: AXUIElementRef,
+        attribute: CFStringRef,
+        settable: *mut u8,
+    ) -> AXError;
     fn AXUIElementGetPid(element: AXUIElementRef, pid: *mut pid_t) -> AXError;
     pub fn AXIsProcessTrusted() -> u8;
 
@@ -37,6 +44,8 @@ extern "C" {
     fn CFStringGetMaximumSizeForEncoding(length: isize, encoding: u32) -> isize;
     fn CFGetTypeID(cf: CFTypeRef) -> usize;
     fn CFStringGetTypeID() -> usize;
+    fn CFAttributedStringGetTypeID() -> usize;
+    fn CFAttributedStringGetString(s: CFTypeRef) -> CFStringRef;
     fn CFRelease(cf: CFTypeRef);
     pub fn CFRetain(cf: CFTypeRef) -> CFTypeRef;
     pub fn CFEqual(a: CFTypeRef, b: CFTypeRef) -> u8;
@@ -109,6 +118,34 @@ pub fn copy_string_attr(element: AXUIElementRef, attr: &str) -> Option<String> {
     result
 }
 
+/// Text of a CFString, or the plain string of a CFAttributedString (Office,
+/// iWork and TextKit fields may report AXValue that way). Other types: None.
+pub fn cf_text(value: CFTypeRef) -> Option<String> {
+    if !value.is_null() && unsafe { CFGetTypeID(value) == CFAttributedStringGetTypeID() } {
+        // Get rule: the attributed string owns the returned string.
+        return cfstring_to_rust(unsafe { CFAttributedStringGetString(value) });
+    }
+    cfstring_to_rust(value)
+}
+
+/// The field's AXValue as a `ValueStatus` (BUS-223 a).
+pub fn read_value(element: AXUIElementRef) -> ValueStatus {
+    ValueStatus::from_read(copy_attr(element, "AXValue").map(|value| {
+        let text = cf_text(value);
+        release(value);
+        text
+    }))
+}
+
+/// Whether `attr` is settable on `element`; false on any AX error.
+pub fn is_settable(element: AXUIElementRef, attr: &str) -> bool {
+    let name = cfstr(attr);
+    let mut settable: u8 = 0;
+    let err = unsafe { AXUIElementIsAttributeSettable(element, name, &mut settable) };
+    release(name);
+    err == AX_OK && settable != 0
+}
+
 pub fn element_pid(element: AXUIElementRef) -> Option<i32> {
     let mut pid: pid_t = 0;
     (unsafe { AXUIElementGetPid(element, &mut pid) } == AX_OK).then_some(pid)
@@ -148,6 +185,46 @@ mod tests {
             let value = Owned::string(text);
             assert_eq!(cfstring_to_rust(value.0).as_deref(), Some(text));
         }
+    }
+
+    #[test]
+    fn attributed_values_read_as_their_plain_string() {
+        extern "C" {
+            fn CFAttributedStringCreate(
+                alloc: CFTypeRef,
+                text: CFStringRef,
+                attributes: CFTypeRef,
+            ) -> CFTypeRef;
+            fn CFDictionaryCreate(
+                alloc: CFTypeRef,
+                keys: *const CFTypeRef,
+                values: *const CFTypeRef,
+                count: isize,
+                key_callbacks: *const c_void,
+                value_callbacks: *const c_void,
+            ) -> CFTypeRef;
+        }
+        for text in ["", "Word body café 🙂"] {
+            let plain = Owned::string(text);
+            let attrs = Owned(unsafe {
+                CFDictionaryCreate(
+                    ptr::null(),
+                    ptr::null(),
+                    ptr::null(),
+                    0,
+                    ptr::null(),
+                    ptr::null(),
+                )
+            });
+            let attributed =
+                Owned(unsafe { CFAttributedStringCreate(ptr::null(), plain.0, attrs.0) });
+            assert!(!attributed.0.is_null());
+            assert_eq!(cfstring_to_rust(attributed.0), None);
+            assert_eq!(cf_text(attributed.0).as_deref(), Some(text));
+            assert_eq!(cf_text(plain.0).as_deref(), Some(text));
+        }
+        assert_eq!(cf_text(unsafe { kCFBooleanTrue }), None);
+        assert_eq!(cf_text(ptr::null()), None);
     }
 
     #[test]

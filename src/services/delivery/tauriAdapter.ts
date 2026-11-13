@@ -76,7 +76,7 @@ export function createTauriDeliveryAdapter(
     clipboardRead: () => stub.clipboardRead(),
     clipboardRestore: (prior) => stub.clipboardRestore(prior),
     clipboardWrite: (text) => stub.clipboardWrite(text),
-    async insertText(text, intended) {
+    async insertText(text, intended, options) {
       // JS-side failures before the call reaches native (no Tauri bridge, args
       // that cannot be serialized) are plain failures: nothing was sent.
       try {
@@ -89,6 +89,7 @@ export function createTauriDeliveryAdapter(
         return await invoke<InsertReport | null>('delivery_insert_text', {
           text,
           intended,
+          pasteFallback: options?.pasteFallback ?? false,
         }) ?? undefined;
       } catch (error: unknown) {
         // A string is the command's own Err, which by contract (see

@@ -59,6 +59,13 @@ export function copiedMessage(reason: string, terminal: boolean): string {
   return terminal ? TERMINAL_COPY_MESSAGE : deliveryMessage('copied', reason);
 }
 
+/**
+ * The native ⌘V fallback (BUS-223) went out but read-back could not prove
+ * the text landed. Nothing is copied on top of the restored clipboard.
+ */
+export const FIELD_PASTE_UNVERIFIED_MESSAGE =
+  'May have been inserted — pasted with ⌘V; check the field';
+
 export function restoreSkippedSuffix(reason: string | null): string {
   if (!reason) return '';
   return ` (clipboard not restored: ${reason})`;

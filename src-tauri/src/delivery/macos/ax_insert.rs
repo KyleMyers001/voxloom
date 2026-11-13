@@ -1,9 +1,11 @@
-//! Caret-aware AXSelectedText insert with exact read-back, the guarded
+//! Caret-aware AXSelectedText insert with exact (polled) read-back, the guarded
 //! Chromium/Electron retry (`decide::retry`), and verified Unicode typing
 //! for unchanged web fields.
 
-use super::ax::{ancestor_roles, copy_string_attr, set_ax_string, AXUIElementRef};
+use super::ax::{ancestor_roles, copy_string_attr, read_value, set_ax_string, AXUIElementRef};
 use super::{focus_still_matches, host, typing, web_ax};
+use crate::delivery::decide::diag::{readback_label, DeliveryDiag};
+use crate::delivery::decide::fallback::{poll_readback, ValueStatus};
 use crate::delivery::decide::retry::{reprobe_decision, retry_eligible, retry_once, RetryIo};
 use crate::delivery::decide::{
     after_ax, is_web_content_field, value_confirms_insert, AfterAx, InsertReport,
@@ -36,11 +38,23 @@ impl RetryIo for AxRetry<'_> {
 pub fn insert_selected(
     element: AXUIElementRef,
     validated: &TargetSnapshotDto,
-    before: String,
+    before_value: &ValueStatus,
     text: &str,
+    diag: &mut DeliveryDiag,
 ) -> Result<InsertReport, String> {
+    let before = before_value.text().unwrap_or_default().to_string();
     let ax = insert_selected_text_with(text, |a, t| set_ax_string(element, a, t));
-    let after = copy_string_attr(element, "AXValue");
+    diag.ax_error = ax.as_ref().err().cloned();
+    // Hosts may apply AXSelectedText asynchronously: poll briefly (BUS-223 b).
+    let polled = std::time::Instant::now();
+    let after = poll_readback(
+        ax.is_ok(),
+        before_value,
+        text,
+        || read_value(element),
+        |ms| std::thread::sleep(std::time::Duration::from_millis(ms)),
+    );
+    diag.readback_ms = polled.elapsed().as_millis();
     let role = validated.element_role.clone().unwrap_or_default();
     let has_dom_id = copy_string_attr(element, "AXDOMIdentifier").is_some();
     // Skip the parent walk when the DOM id already proves web content.
@@ -75,6 +89,7 @@ pub fn insert_selected(
             log_chrome_failure(validated, err);
         }
     }
+    diag.readback = readback_label(&outcome);
     match outcome {
         AfterAx::Inserted => Ok(InsertReport::default()),
         AfterAx::Failed(err) => Err(err),

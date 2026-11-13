@@ -1,0 +1,340 @@
+use super::*;
+use crate::delivery::decide::test_support::target;
+use crate::delivery::decide::verify::{after_ax, AfterAx};
+use crate::delivery::decide::{choose_insert_path, InsertPath};
+
+const SECRET_TEXT: &str = "dictated secret phrase";
+const SECRET_FIELD: &str = "confidential field body";
+
+fn restored() -> PasteReport {
+    PasteReport {
+        clipboard_restored: true,
+        restore_skipped_reason: None,
+    }
+}
+
+#[test]
+fn empty_and_attributed_values_are_readable_other_errors_are_not() {
+    use ValueStatus::*;
+    let cases = [
+        (Ok(Some(String::new())), Text(String::new()), Some("")),
+        // An attributed AXValue arrives here as its plain string.
+        (Ok(Some("abc".into())), Text("abc".into()), Some("abc")),
+        (Err(AX_ERROR_NO_VALUE), NoValue, Some("")),
+        (Err(AX_NIL_VALUE), NoValue, Some("")),
+        (Err(-25205), Unreadable(Some(-25205)), None),
+        (Err(-25204), Unreadable(Some(-25204)), None),
+        (Err(-25211), Unreadable(Some(-25211)), None),
+        (Ok(None), Unreadable(None), None),
+    ];
+    for (read, status, text) in cases {
+        let got = ValueStatus::from_read(read.clone());
+        assert_eq!(got, status, "{read:?}");
+        assert_eq!(got.text(), text, "{read:?}");
+    }
+    let field = ValueStatus::Text(SECRET_FIELD.into());
+    assert_eq!(field.label(), "text");
+    assert_eq!(ValueStatus::NoValue.label(), "no-value");
+    assert_eq!(
+        ValueStatus::Unreadable(Some(-25205)).label(),
+        "unreadable(-25205)"
+    );
+}
+
+#[test]
+fn a_field_that_never_shows_a_value_proves_nothing_after_an_accepted_write() {
+    let none = ValueStatus::NoValue;
+    assert_eq!(readback_text(true, &none, &none), None);
+    // After an AX error the write did not apply: the empty value stands.
+    assert_eq!(readback_text(false, &none, &none).as_deref(), Some(""));
+    let landed = ValueStatus::Text("hi".into());
+    assert_eq!(readback_text(true, &none, &landed).as_deref(), Some("hi"));
+    let empty = ValueStatus::Text(String::new());
+    assert_eq!(readback_text(true, &empty, &none).as_deref(), Some(""));
+    assert_eq!(
+        readback_text(true, &empty, &ValueStatus::Unreadable(None)),
+        None
+    );
+}
+
+#[test]
+fn readback_polls_for_a_late_apply_and_stops_at_proof() {
+    let before = ValueStatus::Text("ab".into());
+    let mut reads = 0;
+    let mut slept = Vec::new();
+    let got = poll_readback(
+        true,
+        &before,
+        "X",
+        || {
+            reads += 1;
+            ValueStatus::Text(if reads < 4 { "ab" } else { "abX" }.into())
+        },
+        |ms| slept.push(ms),
+    );
+    assert_eq!(got.as_deref(), Some("abX"));
+    assert_eq!(reads, 4);
+    assert_eq!(slept, [RETRY_READBACK_POLL_MS; 3]);
+}
+
+#[test]
+fn readback_gives_up_after_about_600_ms_and_stays_strict() {
+    let before = ValueStatus::Text("ab".into());
+    let mut slept = 0;
+    // A partial landing never counts as proof.
+    let got = poll_readback(
+        true,
+        &before,
+        "XYZ",
+        || ValueStatus::Text("abX".into()),
+        |ms| slept += ms,
+    );
+    assert_eq!(got.as_deref(), Some("abX"));
+    assert!((300..=600).contains(&slept), "{slept}");
+    assert_eq!(
+        after_ax(false, Ok(()), "ab", got.as_deref(), "XYZ"),
+        AfterAx::Unverified
+    );
+}
+
+fn no_walk() -> Vec<String> {
+    panic!("ancestors must not be walked")
+}
+
+#[test]
+fn allowlisted_and_secure_roles_classify_as_before() {
+    let settable = || EditFacts {
+        value: true,
+        ..Default::default()
+    };
+    for role in ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"] {
+        assert_eq!(
+            classify_target(role, None, settable, no_walk),
+            classify_role(role)
+        );
+    }
+    let secure = classify_target("AXTextField", Some("AXSecureTextField"), settable, no_walk);
+    assert_eq!(secure.0, "secure");
+    for role in [
+        "AXStaticText",
+        "AXButton",
+        "AXImage",
+        "AXMenu",
+        "AXCheckBox",
+        "unknown",
+    ] {
+        assert!(!classify_target(role, None, settable, no_walk).1, "{role}");
+    }
+}
+
+#[test]
+fn editable_containers_and_unknown_roles_become_paste_only_targets() {
+    let none: fn() -> Vec<String> = Vec::new;
+    let settable = || EditFacts {
+        selected_range: true,
+        ..Default::default()
+    };
+    for role in [
+        "AXWebArea",
+        "AXGroup",
+        "AXScrollArea",
+        "AXDocument",
+        "AXUnknown",
+    ] {
+        assert_eq!(
+            classify_target(role, None, settable, none),
+            ("insertable", true, None),
+            "{role}"
+        );
+        assert!(
+            !classify_target(role, None, EditFacts::default, none).1,
+            "{role}"
+        );
+        // A paste-only target never takes an AX write.
+        let mut snap = target("insertable", Some(1), Some("1:x:#1"));
+        snap.element_role = Some(role.into());
+        assert!(matches!(
+            choose_insert_path(&snap, true),
+            InsertPath::Refuse(_)
+        ));
+    }
+}
+
+#[test]
+fn a_grid_selection_never_pastes_but_a_cell_editor_does() {
+    let settable = || EditFacts {
+        value: true,
+        selected_text: true,
+        selected_range: true,
+    };
+    let none: fn() -> Vec<String> = Vec::new;
+    for role in [
+        "AXTable",
+        "AXGrid",
+        "AXCell",
+        "AXLayoutArea",
+        "AXLayoutItem",
+    ] {
+        let (kind, insertable, reason) = classify_target(role, None, settable, none);
+        assert_eq!(
+            (kind, insertable, reason),
+            ("unsupported", false, Some(GRID_REASON))
+        );
+    }
+    let in_grid = || vec!["AXRow".to_string(), "AXTable".into(), "AXWindow".into()];
+    assert!(!classify_target("AXGroup", None, settable, in_grid).1);
+    assert!(!classify_target("AXUnknown", None, settable, in_grid).1);
+    // Cell in edit mode: the editor is a text role, inside the grid or not.
+    assert!(!is_grid_selection("AXTextArea", &in_grid()));
+    assert_eq!(
+        classify_target("AXTextArea", None, settable, no_walk),
+        ("insertable", true, None)
+    );
+}
+
+#[test]
+fn paste_needs_the_setting_an_insertable_target_and_a_non_terminal_app() {
+    let ok = target("insertable", Some(42), Some("42:AXTextArea:#1"));
+    assert_eq!(may_paste(&ok, true, Some(false), false), Ok(42));
+    assert!(may_paste(&ok, false, Some(false), false).is_err());
+    assert!(may_paste(&ok, true, Some(true), false).is_err());
+    assert!(may_paste(&ok, true, None, false).is_err());
+    assert!(may_paste(&ok, true, Some(false), true).is_err());
+    for kind in ["secure", "changed", "unavailable", "unsupported"] {
+        let snap = target(kind, Some(42), Some("42:AXTextArea:#1"));
+        assert!(
+            may_paste(&snap, true, Some(false), false).is_err(),
+            "{kind}"
+        );
+    }
+    let no_pid = target("insertable", None, Some("x"));
+    assert!(may_paste(&no_pid, true, Some(false), false).is_err());
+}
+
+#[test]
+fn only_a_write_free_refusal_pastes_never_a_partial_write() {
+    let mut diag = DeliveryDiag::default();
+    let writes = || {
+        [
+            InsertReport::default(),
+            InsertReport {
+                unverified: true,
+                detail: Some("AX write changed the field but could not be verified".into()),
+                ..Default::default()
+            },
+            InsertReport {
+                typed: true,
+                unverified: true,
+                ..Default::default()
+            },
+        ]
+    };
+    for (ax, expected) in writes().into_iter().zip(writes()) {
+        let got = after_ax_refusal(
+            Ok(ax),
+            Ok(42),
+            |_| panic!("no paste after a write"),
+            || panic!("no read-back"),
+            &mut diag,
+        );
+        assert_eq!(got, Ok(expected));
+    }
+    // The AX decision behind those: a changed or unreadable read-back is
+    // Unverified (Ok), never Failed (Err), so it can never reach the paste.
+    assert_eq!(
+        after_ax(false, Ok(()), "a", Some("aX"), "XY"),
+        AfterAx::Unverified
+    );
+    assert_eq!(
+        after_ax(false, Err("e".into()), "a", None, "XY"),
+        AfterAx::Unverified
+    );
+}
+
+#[test]
+fn a_refusal_pastes_once_and_reports_verified_or_maybe() {
+    for (verified, unverified) in [(true, false), (false, true)] {
+        let mut diag = DeliveryDiag::default();
+        let mut pasted = Vec::new();
+        let report = after_ax_refusal(
+            Err("AXValue unreadable before insert — insert skipped".into()),
+            Ok(42),
+            |pid| {
+                pasted.push(pid);
+                Ok(restored())
+            },
+            || verified,
+            &mut diag,
+        )
+        .unwrap();
+        assert_eq!(pasted, [42]);
+        assert_eq!(report.unverified, unverified);
+        assert_eq!(report.paste, Some(restored()));
+        assert!(!report.typed);
+    }
+}
+
+#[test]
+fn a_refused_or_ungated_paste_stays_copy() {
+    let mut diag = DeliveryDiag::default();
+    let err = after_ax_refusal(
+        Err("refused".into()),
+        Err("clipboard fallback off"),
+        |_| panic!("gated"),
+        || panic!("no read-back"),
+        &mut diag,
+    )
+    .unwrap_err();
+    assert_eq!(err, "refused");
+    assert_eq!(diag.fallback, "skipped(clipboard fallback off)");
+    let err = after_ax_refusal(
+        Err("refused".into()),
+        Ok(42),
+        |_| Err("Secure Keyboard Entry is on — paste skipped".into()),
+        || panic!("no read-back"),
+        &mut diag,
+    )
+    .unwrap_err();
+    assert!(err.starts_with("refused; ⌘V fallback skipped: Secure Keyboard Entry"));
+}
+
+#[test]
+fn the_delivery_log_line_never_holds_text_or_field_contents() {
+    let before = ValueStatus::Text(SECRET_FIELD.into());
+    let mut diag = DeliveryDiag {
+        bundle_id: Some("com.microsoft.Word".into()),
+        role: Some("AXTextArea".into()),
+        value: before.label(),
+        settable: EditFacts::default().label(),
+        gate: "ax",
+        ..Default::default()
+    };
+    let after = poll_readback(
+        true,
+        &before,
+        SECRET_TEXT,
+        || ValueStatus::Text(SECRET_FIELD.into()),
+        |_| {},
+    );
+    let outcome = after_ax(false, Ok(()), SECRET_FIELD, after.as_deref(), SECRET_TEXT);
+    diag.readback = super::super::diag::readback_label(&outcome);
+    let AfterAx::Failed(reason) = outcome else {
+        panic!("unchanged field must fail");
+    };
+    let _ = after_ax_refusal(Err(reason), Ok(7), |_| Ok(restored()), || false, &mut diag);
+    let line = diag.line();
+    for secret in [SECRET_TEXT, SECRET_FIELD, "secret", "confidential"] {
+        assert!(!line.contains(secret), "{line}");
+    }
+    for field in [
+        "bundle=com.microsoft.Word",
+        "role=AXTextArea",
+        "value=text",
+        "gate=ax",
+        "readback=unchanged",
+        "fallback=paste-unverified",
+        "total_ms=",
+    ] {
+        assert!(line.contains(field), "{field}: {line}");
+    }
+}

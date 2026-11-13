@@ -83,7 +83,7 @@ describe('every delivery path gets the replaced text', () => {
     const { deliveryPlatform, result } = run({ target: NOTES });
     const done = await result;
     expect(done.delivery.status).toBe('inserted');
-    expect(deliveryPlatform.insertText).toHaveBeenCalledWith(FIXED, NOTES);
+    expect(deliveryPlatform.insertText).toHaveBeenCalledWith(FIXED, NOTES, { pasteFallback: true });
     expect(done.transcript.text).toBe(FIXED);
   });
 

@@ -1,6 +1,8 @@
 //! Platform-independent delivery decisions (pure; unit-tested on any OS).
 //! The macOS adapter gathers AX facts and delegates every policy choice here.
 
+pub mod diag;
+pub mod fallback;
 pub mod host;
 pub mod known_terminal;
 pub mod messages_app;

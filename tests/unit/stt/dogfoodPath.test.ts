@@ -132,7 +132,7 @@ describe('dogfoodTranscribeAndCopy delivery (BUS-14)', () => {
     expect(result.delivery.status).toBe('inserted');
     expect(result.delivery.message).toBe('Inserted');
     expect(result.copied).toBe(false);
-    expect(insertText).toHaveBeenCalledWith('into notes', intended);
+    expect(insertText).toHaveBeenCalledWith('into notes', intended, { pasteFallback: true });
     expect(clip.copy).not.toHaveBeenCalled();
   });
 

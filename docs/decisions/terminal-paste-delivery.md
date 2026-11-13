@@ -27,3 +27,13 @@ A posted paste is recorded `unverified`: a terminal has no field to read back. T
 
 - A password prompt that does not turn on Secure Keyboard Entry (for example `sudo` in most terminals) cannot be detected, so a dictation could be pasted into it.
 - A terminal that reads the pasteboard later than the restore delay would paste the user's previous clipboard instead.
+
+## Native field fallback (BUS-223)
+
+Native fields that the AX path refuses (Word, Excel, PowerPoint, Mail, Journal, Weather search, Numbers, Pages, Podcasts, SwitchHosts) reuse this sequence through `decide::paste::paste_into_field`, inside `delivery_insert_text`:
+
+- **When.** Only after the AX path wrote nothing: refused before any write (a role outside the AX allowlist that looks editable, or an unreadable AXValue), or an AX write whose polled read-back (~600 ms) proved the field unchanged. Any `Ok`, including a partial or unverified write, is returned as is (`fallback::after_ax_refusal`). A field that never exposed a value proves nothing after an accepted write, so it is unverified, not pasted.
+- **Never.** Clipboard fallback off; secure, changed or unavailable targets; Apple Terminal and every known terminal; a grid or table selection with no cell in edit mode (`AXTable`, `AXGrid`, `AXCell`, `AXLayoutArea`, ... stay Copy, `fallback::classify_target`).
+- **Guards.** The terminal route's preflight and restore (frontmost pid, Secure Keyboard Entry, transient marker, change-count-guarded restore), plus the same focused field (CFEqual) before the clipboard is touched and again right before ⌘V. The restore waits `FIELD_RESTORE_DELAY_MS` (1.5 s): Office reads the pasteboard late.
+- **Outcome.** Read-back proves it: Inserted. Otherwise `unverified` with "May have been inserted — pasted with ⌘V; check the field"; nothing is copied on top of the restored clipboard.
+- Native logs one `[insert] delivery ...` line per insert: bundle id, role, subrole, value kind, settable flags, gate, reason, AX error, read-back, fallback and timings. Never the text or field contents.

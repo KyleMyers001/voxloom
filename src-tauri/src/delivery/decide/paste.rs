@@ -1,12 +1,15 @@
 //! Clipboard paste route for apps that expose no insertable AX field
-//! (WezTerm, Alacritty, kitty, Ghostty, iTerm2, Apple Messages). Pure orchestration over
-//! `PasteHost`; the macOS adapter supplies the pasteboard and ⌘V.
+//! (WezTerm, Alacritty, kitty, Ghostty, iTerm2, Apple Messages), and the
+//! BUS-223 ⌘V fallback for native fields AX refuses (`paste_into_field`).
+//! Pure orchestration over `PasteHost`; the macOS adapter supplies the
+//! pasteboard and ⌘V.
 //!
 //! Contract (as `delivery_insert_text`): `Err` means ⌘V was not posted. After
 //! it was, the result is `Ok`, with the clipboard restore reported honestly.
 
 use super::report::PasteReport;
 use super::terminal::check_terminal_text;
+use super::text::check_insert_text;
 
 /// How long the transcript stays on the clipboard after ⌘V before the user's
 /// own clipboard is restored. A terminal reads the pasteboard when it handles
@@ -14,6 +17,11 @@ use super::terminal::check_terminal_text;
 /// That slow-terminal race is known and not handled here (no completion signal
 /// exists), so this is a tuning constant.
 pub const CLIPBOARD_RESTORE_DELAY_MS: u64 = 500;
+
+/// The same delay for the native field fallback. Office (Word, Excel,
+/// PowerPoint) can take well over 500 ms to read the pasteboard on ⌘V, and
+/// a restore before that would paste the user's old clipboard instead.
+pub const FIELD_RESTORE_DELAY_MS: u64 = 1500;
 
 pub trait PasteHost {
     /// The user's clipboard, whole (every item and type).
@@ -47,6 +55,21 @@ pub fn require_marker(attached: bool) -> Result<(), String> {
 
 pub fn paste_text<H: PasteHost>(host: &H, text: &str) -> Result<PasteReport, String> {
     check_terminal_text(text)?;
+    paste_checked(host, text, CLIPBOARD_RESTORE_DELAY_MS)
+}
+
+/// The native field fallback. Terminals never come here (`fallback::may_paste`),
+/// so the text keeps the AX write's contract (`check_insert_text`).
+pub fn paste_into_field<H: PasteHost>(host: &H, text: &str) -> Result<PasteReport, String> {
+    check_insert_text(text)?;
+    paste_checked(host, text, FIELD_RESTORE_DELAY_MS)
+}
+
+fn paste_checked<H: PasteHost>(
+    host: &H,
+    text: &str,
+    restore_delay_ms: u64,
+) -> Result<PasteReport, String> {
     host.preflight()?;
     let saved = host.snapshot();
     let ours = match host.write_transient(text) {
@@ -63,7 +86,7 @@ pub fn paste_text<H: PasteHost>(host: &H, text: &str) -> Result<PasteReport, Str
         let _ = restore_if_unchanged(host, saved, ours);
         return Err(error);
     }
-    host.wait(CLIPBOARD_RESTORE_DELAY_MS);
+    host.wait(restore_delay_ms);
     Ok(match restore_if_unchanged(host, saved, ours) {
         Ok(()) => PasteReport {
             clipboard_restored: true,

@@ -37,6 +37,12 @@ pub fn choose_insert_path(validated: &TargetSnapshotDto, value_readable: bool) -
                 .unwrap_or_else(|| validated.kind.clone())
         ));
     }
+    // Paste-only targets (`fallback::classify_target`): containers and
+    // unknown roles where AXSelectedText may report success without editing.
+    let role = validated.element_role.as_deref().unwrap_or_default();
+    if classify_role(role).0 != "insertable" {
+        return InsertPath::Refuse("role outside the AX insert allowlist — insert skipped".into());
+    }
     // A readable value is needed to prove the text actually landed; without
     // it we refuse before mutating anything (no double insert).
     if !value_readable {

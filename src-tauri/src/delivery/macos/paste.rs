@@ -1,5 +1,6 @@
-//! macOS side of the terminal paste route: preflight facts, NSPasteboard and
-//! one ⌘V. All policy and ordering live in `decide::paste`.
+//! macOS side of the paste route (terminals, Messages, and the BUS-223 native
+//! field fallback): preflight facts, NSPasteboard and one ⌘V. All policy and
+//! ordering live in `decide::paste`.
 
 use super::ax::AXIsProcessTrusted;
 use super::{host, keylayout, pasteboard, typing};
@@ -10,22 +11,27 @@ extern "C" {
     fn IsSecureEventInputEnabled() -> u8;
 }
 
-pub struct MacPaste {
-    /// The terminal that was frontmost when the paste began.
+pub struct MacPaste<'a> {
+    /// The app that was frontmost when the paste began.
     pub pid: i32,
+    /// The native field fallback (BUS-223) also needs the focused field to
+    /// still be the validated one; the terminal route has no field (None).
+    pub still_field: Option<&'a dyn Fn() -> Result<(), String>>,
 }
 
-impl MacPaste {
+impl MacPaste<'_> {
     fn still_frontmost(&self) -> Result<(), String> {
-        if host::frontmost_pid() == Some(self.pid) {
-            Ok(())
-        } else {
-            Err("frontmost app changed — paste skipped".into())
+        if host::frontmost_pid() != Some(self.pid) {
+            return Err("frontmost app changed — paste skipped".into());
+        }
+        match self.still_field {
+            Some(still_field) => still_field().map_err(|e| format!("{e} — paste skipped")),
+            None => Ok(()),
         }
     }
 }
 
-impl PasteHost for MacPaste {
+impl PasteHost for MacPaste<'_> {
     type Saved = pasteboard::Snapshot;
 
     fn preflight(&self) -> Result<(), String> {

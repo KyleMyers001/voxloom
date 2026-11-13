@@ -23,6 +23,17 @@ describe('tauri insertText errors', () => {
     expect((error as InstanceType<typeof InsertError>).writeStarted).toBe(true);
   });
 
+  it('passes the Clipboard fallback setting as pasteFallback, off when absent (BUS-223)', async () => {
+    invoke.mockClear();
+    invoke.mockResolvedValue(null);
+    const adapter = createTauriDeliveryAdapter(clipboard);
+    await adapter.insertText('hi', target, { pasteFallback: true });
+    await adapter.insertText('hi', target);
+    expect(invoke).toHaveBeenNthCalledWith(1, 'delivery_insert_text', { intended: target, pasteFallback: true, text: 'hi' });
+    expect(invoke).toHaveBeenNthCalledWith(2, 'delivery_insert_text', { intended: target, pasteFallback: false, text: 'hi' });
+    invoke.mockReset();
+  });
+
   it('a JS-side error before the call reaches native is a plain failure (QA #44)', async () => {
     invoke.mockClear();
     const cyclic: Record<string, unknown> = {};
