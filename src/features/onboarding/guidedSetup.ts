@@ -64,6 +64,13 @@ export function createGuidedSetup(io: SetupBoundary, modelId: () => string, shor
   let attempt = 0;
   let lease: PracticeLease | null = null;
   let inserted: { lease: PracticeLease; text: string; field: HTMLTextAreaElement; value: string } | null = null;
+  // The last voice-pack readiness reason. Before setup starts (Welcome), a
+  // missing, pending or downloading pack is expected (Start setup downloads it),
+  // so that reason is not shown as an error there. Unavailable engines, failed
+  // downloads, save failures and thrown checks still surface on every step.
+  let readinessReason: string | null = null;
+  const readinessError = (step: number, modelState: SetupModelState) =>
+    step === 0 && (modelState === 'missing' || modelState === 'pending' || modelState === 'downloading') ? null : readinessReason;
   const cancelPractice = () => { attempt++; lease = null; inserted = null; };
   const current = (owned: PracticeLease) => lease === owned && owned.id === attempt
     && state.step === 3 && owned.model === modelId() && owned.shortcut === shortcut()
@@ -114,7 +121,8 @@ export function createGuidedSetup(io: SetupBoundary, modelId: () => string, shor
         const ready = io.native && modelReady && permissionsAuthorized(permissions) && io.activeShortcut() === binding;
         if (!ready) cancelPractice();
         verdictFor = config;
-        patch({ permissions, modelReady, modelState, ready, downloading, error: modelReady ? null : model.reason });
+        readinessReason = modelReady ? null : model.reason;
+        patch({ permissions, modelReady, modelState, ready, downloading, error: readinessError(state.step, modelState) });
         return ready;
       } catch (error) {
         if (own === generation && id === modelId() && binding === shortcut()) {
@@ -155,7 +163,12 @@ export function createGuidedSetup(io: SetupBoundary, modelId: () => string, shor
     refresh,
     finish: async () => (await refresh()) && state.step === 4 && state.holdDone && state.tapDone,
     cancelPractice,
-    back: () => { cancelPractice(); patch({ step: Math.max(0, state.step - 1) }); },
+    back: () => {
+      cancelPractice();
+      const step = Math.max(0, state.step - 1);
+      // Back to Welcome hides only the expected readiness reason, never another error.
+      patch(step === 0 && state.error === readinessReason ? { step, error: readinessError(step, state.modelState) } : { step });
+    },
     current,
     next: async () => {
       cancelPractice();
@@ -189,7 +202,7 @@ export function createGuidedSetup(io: SetupBoundary, modelId: () => string, shor
       cancelPractice();
     },
     download,
-    /** Completion or skip: forget saved progress so a later reopen starts over. */
+    /** Completion: forget saved progress so a later reopen starts over. */
     clearProgress: () => {
       cancelPractice();
       saved = progress();

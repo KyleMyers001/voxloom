@@ -33,7 +33,6 @@
 .guided-content .guided-steps p { margin: 0; font-size: var(--fs-body); line-height: 1.5; color: var(--mut); }
 .guided-steps .key-combo { vertical-align: baseline; }
 .guided-steps .kbd { font-size: var(--fs-label); padding: 2px 6px; vertical-align: 1px; color: var(--fg); }
-.guided-list { padding-left: 20px; font-size: var(--fs-secondary); line-height: 1.8; margin: 18px 0; }
 .guided-permission { display: flex; align-items: center; gap: 14px; border-bottom: 1px solid var(--line); padding: 14px 0; }
 .guided-permission > div:first-child { flex: 1; min-width: 0; }
 .guided-permission strong { font-size: var(--fs-secondary); font-weight: 550; }

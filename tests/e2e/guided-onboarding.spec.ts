@@ -44,3 +44,37 @@ for (const theme of ['dark', 'light']) for (const width of [640, 1000, 1440]) {
     }
   });
 }
+
+// BUS-224/BUS-225: Welcome with the voice pack not downloaded yet, and the finish step ready and not ready.
+const shot = async (page: import('@playwright/test').Page, testInfo: import('@playwright/test').TestInfo, filename: string) =>
+  page.screenshot({ path: process.env.GUIDED_EVIDENCE_DIR ? join(process.env.GUIDED_EVIDENCE_DIR, filename) : testInfo.outputPath(filename) });
+for (const theme of ['dark', 'light']) {
+  test(`${theme} welcome shows no voice-pack error before setup starts and no Skip setup`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 640, height: 620 });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto(`/tests/fixtures/guided-preview.html?step=0&theme=${theme}&ready=0`);
+    await expect(page.getByRole('heading', { level: 2 })).toBeFocused();
+    await expect(page.getByRole('button', { name: /Start setup/ })).toBeEnabled();
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    await expect(page.locator('.guided-footer').getByRole('button')).toHaveText(['Set up later', 'Start setup →']);
+    await shot(page, testInfo, `bus224-${theme}-640x620-step0-not-ready.png`);
+  });
+  for (const [width, height] of [[1120, 760], [640, 620]]) for (const ready of [true, false]) {
+    test(`${theme} finish step fits ${width}x${height} ${ready ? 'ready' : 'not ready'}`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height });
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await page.goto(`/tests/fixtures/guided-preview.html?step=4&theme=${theme}${ready ? '' : '&access=off'}`);
+      await expect(page.getByRole('heading', { level: 2 })).toBeFocused();
+      const open = page.getByRole('button', { name: 'Open Voxloom' });
+      if (ready) await expect(open).toBeEnabled();
+      else await expect(page.getByText('Access or the voice pack needs attention before you finish.')).toBeVisible();
+      await expect(page.locator('.guided-footer').getByRole('button')).toHaveText(['Back', 'Open Voxloom']);
+      expect(await page.locator('.guided-content').evaluate((el) => el.scrollHeight <= el.clientHeight)).toBe(true);
+      const footer = await page.locator('.guided-footer').boundingBox();
+      expect(footer!.y + footer!.height).toBeLessThanOrEqual(height);
+      const violations = (await new AxeBuilder({ page }).include('.setup-window').analyze()).violations;
+      expect(violations).toEqual([]);
+      await shot(page, testInfo, `bus225-${theme}-${width}x${height}-step4-${ready ? 'ready' : 'not-ready'}.png`);
+    });
+  }
+}

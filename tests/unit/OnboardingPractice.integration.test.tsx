@@ -51,7 +51,7 @@ it('joins real capture/STT/delivery hooks for hold then hands-free, preserves ho
   await waitFor(() => expect(screen.getByRole('button', { name: /Finish setup/ })).toBeEnabled());
   expect(field).toHaveValue('Speech boundary fixture.Speech boundary fixture.');
   await user.click(screen.getByRole('button', { name: /Finish setup/ }));
-  expect(screen.getByText(/These tries confirm the practice field, not every app/)).toBeInTheDocument();
+  expect(screen.getByText(/Your shortcut works in other apps once setup closes/)).toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: 'Open Voxloom' }));
   expect(close).toHaveBeenCalledOnce();
 });
