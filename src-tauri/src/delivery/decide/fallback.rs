@@ -200,13 +200,27 @@ const CONTROL_ROLES: &[&str] = &[
 ];
 
 /// A grid/table selection without editable text focus. A cell editor in
-/// edit mode is an allowlisted text role and passes, even inside a grid.
+/// edit mode is an allowlisted text role and stays an AX target, even inside
+/// a grid; `may_paste` still refuses its ⌘V (`under_grid`).
 pub fn is_grid_selection<S: AsRef<str>>(role: &str, ancestors: &[S]) -> bool {
     if GRID_ROLES.contains(&role) {
         return true;
     }
     classify_role(role).0 != "insertable"
         && ancestors.iter().any(|r| GRID_ROLES.contains(&r.as_ref()))
+}
+
+/// Ancestors that make any focused element, allowlisted text roles included,
+/// a grid/table context for the ⌘V gate. A selected (not editing) cell may
+/// expose a text role with a settable range, the same AX facts as the cell
+/// editor in edit mode, so the two cannot be told apart from here: the safe
+/// side is no paste (the AX write itself still runs and verifies).
+const GRID_ANCESTORS: &[&str] = &["AXTable", "AXGrid", "AXOutline", "AXCell", "AXRow"];
+
+pub fn under_grid<S: AsRef<str>>(ancestors: &[S]) -> bool {
+    ancestors
+        .iter()
+        .any(|r| GRID_ANCESTORS.contains(&r.as_ref()))
 }
 
 pub const GRID_REASON: &str =
@@ -252,6 +266,8 @@ pub struct PasteFacts {
     pub web_host: bool,
     /// `in_web_content` for the focused element.
     pub web_content: bool,
+    /// `under_grid` for the focused element's ancestors.
+    pub grid_ancestor: bool,
     /// `field_unchanged(before the AX path, right before the paste)`.
     pub field_unchanged: bool,
 }
@@ -276,6 +292,9 @@ pub fn may_paste(
     }
     if facts.apple_terminal != Some(false) || facts.known_terminal {
         return Err("terminal or unknown executable");
+    }
+    if facts.grid_ancestor {
+        return Err("grid or table ancestor");
     }
     if !facts.attempt.write_free() {
         return Err("AX error may have applied the write");

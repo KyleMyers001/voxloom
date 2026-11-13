@@ -27,8 +27,8 @@ use focus::{build_snapshot, edit_facts, focused_ui_element, snapshot_at};
 
 use super::decide::diag::DeliveryDiag;
 use super::decide::fallback::{
-    after_ax_refusal, field_unchanged, in_web_content, may_paste, poll_readback, AxAttempt,
-    PasteFacts, ValueStatus,
+    after_ax_refusal, field_unchanged, in_web_content, may_paste, poll_readback, under_grid,
+    AxAttempt, PasteFacts, ValueStatus,
 };
 use super::decide::paste_target::{binding_for, check_paste_target};
 use super::decide::report::PasteReport;
@@ -193,6 +193,7 @@ fn paste_after_refusal(
     let has_dom_id = copy_string_attr(element, "AXDOMIdentifier").is_some();
     let ancestors = ax::ancestor_roles(element);
     facts.web_content = in_web_content(role, has_dom_id, &ancestors);
+    facts.grid_ancestor = under_grid(&ancestors);
     let before = ax::read_value(element);
     facts.field_unchanged = field_unchanged(before_ax, &before);
     let gate = may_paste(validated, &facts, text);

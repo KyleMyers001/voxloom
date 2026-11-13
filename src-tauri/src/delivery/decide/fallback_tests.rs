@@ -186,7 +186,7 @@ fn editable_containers_and_unknown_roles_become_paste_only_targets() {
 }
 
 #[test]
-fn a_grid_selection_never_pastes_but_a_cell_editor_does() {
+fn a_grid_selection_is_never_a_target_but_a_cell_editor_keeps_the_ax_write() {
     let settable = || EditFacts {
         value: true,
         selected_text: true,
@@ -209,8 +209,10 @@ fn a_grid_selection_never_pastes_but_a_cell_editor_does() {
     let in_grid = || vec!["AXRow".to_string(), "AXTable".into(), "AXWindow".into()];
     assert!(!classify_target("AXGroup", None, settable, in_grid).1);
     assert!(!classify_target("AXUnknown", None, settable, in_grid).1);
-    // Cell in edit mode: the editor is a text role, inside the grid or not.
+    // Cell in edit mode: the editor is a text role and keeps the verified AX
+    // write; its ⌘V fallback is refused by `under_grid` in `may_paste`.
     assert!(!is_grid_selection("AXTextArea", &in_grid()));
+    assert!(under_grid(&in_grid()));
     assert_eq!(
         classify_target("AXTextArea", None, settable, no_walk),
         ("insertable", true, None)
@@ -361,6 +363,28 @@ fn multi_line_text_in_a_chromium_or_electron_web_field_stays_copy() {
     );
     assert!(got.is_err());
     assert_eq!(diag.fallback, "skipped(Chromium/Electron web field)");
+}
+
+#[test]
+fn a_text_role_under_a_grid_or_table_never_pastes() {
+    // An allowlisted AXTextArea (Excel/Numbers cell, Finder list rename)
+    // under a table, grid or outline: the AX write may run, the paste not.
+    let ok = target("insertable", Some(42), Some("42:AXTextArea:#1"));
+    for ancestors in [
+        vec!["AXCell", "AXRow", "AXTable", "AXScrollArea"],
+        vec!["AXGrid", "AXLayoutArea"],
+        vec!["AXOutline", "AXScrollArea"],
+    ] {
+        assert!(under_grid(&ancestors), "{ancestors:?}");
+        let grid = PasteFacts {
+            grid_ancestor: under_grid(&ancestors),
+            ..facts()
+        };
+        assert_eq!(may_paste(&ok, &grid, "hi"), Err("grid or table ancestor"));
+    }
+    // Pages body text sits in an AXLayoutArea, not a grid.
+    assert!(!under_grid(&["AXLayoutArea", "AXScrollArea", "AXWindow"]));
+    assert!(!under_grid(&["AXScrollArea", "AXSplitGroup", "AXWindow"]));
 }
 
 #[test]
