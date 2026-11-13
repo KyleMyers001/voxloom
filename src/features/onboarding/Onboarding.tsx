@@ -201,6 +201,8 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
   const allPermissions = permissionsAuthorized(guided.permissions);
   const connected = io.native && allPermissions && guided.modelReady && !guided.checking;
   const both = guided.holdDone && guided.tapDone;
+  // Step 4 not ready shows a specific error in place of its attention line, so it is never shown twice.
+  const shownError = error || guided.error;
   const status = practice.phase === 'recording' ? (guided.mode === 'tap' ? 'Listening hands-free · press once to finish' : 'Listening · release to finish')
     : practice.phase === 'starting' ? 'Preparing microphone…'
       : practice.phase === 'transcribing' || practice.phase === 'cleaning' ? 'Turning speech into text…'
@@ -209,9 +211,6 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
   const finish = () => action(async () => {
     if (await controller.finish()) { controller.clearProgress(); setup.update({ complete: true }); close(); }
   });
-  // Explicit opt-out (parity with the pre-guided Skip): marks setup complete
-  // without practice so it stops reopening at launch. Set up later stays incomplete.
-  function skip() { controller.clearProgress(); setup.update({ complete: true }); close(); }
 
   return <SetupWindow onEscape={() => { if (pending.current || ['starting', 'recording', 'transcribing', 'cleaning'].includes(live.current.phase)) cancel(); else close(); }} opener={opener}>
     <div className="guided-setup">
@@ -268,19 +267,20 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
             <div className="guided-practice-actions"><button className="btn ghost" onClick={() => { cancel(); field.current?.focus(); }} type="button">{busy ? 'Cancel dictation' : 'Try again'}</button><button className="btn ghost" onClick={() => void action(controller.refresh)} type="button">Check again</button></div>
           </>}
           {guided.step === 4 && <>
-            <p className="guided-intro">You’ve tried both ways to dictate. Next, try a short sentence in an app you use.</p>
-            <ul className="guided-list"><li>Microphone, typing and keyboard access {allPermissions ? 'connected' : 'need rechecking'}</li><li>{modelLabel} {guided.modelReady ? 'verified' : 'needs attention'}</li><li>Hold and double-tap both tried</li></ul>
+            <p className="guided-intro">You’ve tried both ways to dictate. Choose Open Voxloom to finish, then use your shortcut in any app.</p>
+            {!guided.ready && <>
+              <p className="form-error" role="alert">{shownError || 'Access or the voice pack needs attention before you finish.'}</p>
+              <button className="btn" onClick={() => { cancel(); controller.back(); controller.back(); controller.back(); }} type="button">Review access and voice pack</button>
+            </>}
             <div className="guided-shortcut"><KeyCombo combo={state.settings.shortcut} /><p>Hold for a quick thought. Double-tap to go hands-free. Press once more to finish.</p></div>
-            <p className="guided-mini">Voxloom is available from its app window. These tries confirm the practice field, not every app or text field.</p>
-            {!guided.ready && <button className="btn" onClick={() => { cancel(); controller.back(); controller.back(); controller.back(); }} type="button">Review access and voice pack</button>}
+            <p className="guided-mini">Your shortcut works in other apps once setup closes. If an app won’t take typed text, Voxloom may copy your words so you can paste them.</p>
           </>}
-          {(error || guided.error) && <p className="form-error" role="alert">{error || guided.error}</p>}
+          {shownError && !(guided.step === 4 && !guided.ready) && <p className="form-error" role="alert">{shownError}</p>}
         </section>
         {guided.step === 0 && <p className="guided-mini guided-disclosure">{modelId === 'whisper-base.en' ? 'Starting setup downloads Whisper Base (English)' : `Starting setup prepares your selected ${modelLabel}`} ({size}) if needed. Your dictation is processed on this Mac. Larger voice packs are optional in Settings.</p>}
         <footer className="guided-footer">
           {guided.step > 0 && <button className="btn ghost" onClick={() => { cancel(); controller.back(); }} type="button">Back</button>}
-          <button className="btn ghost" onClick={close} type="button">Set up later</button>
-          <button className="btn ghost" onClick={skip} type="button">Skip setup</button>
+          {guided.step < 4 && <button className="btn ghost" onClick={close} type="button">Set up later</button>}
           <span />
           {guided.step === 0 ? <button className="btn primary" disabled={!io.native} onClick={() => void action(controller.start)} type="button">Start setup →</button>
             : guided.step === 1 ? <button className="btn primary" disabled={!connected} onClick={() => void next()} type="button">Continue →</button>

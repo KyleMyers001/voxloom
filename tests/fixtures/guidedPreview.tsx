@@ -10,9 +10,13 @@ const appearance = params.get('theme') ?? 'dark';
 document.documentElement.dataset.appearanceResolved = appearance;
 const boundary: SetupBoundary = {
   native: true,
-  query: async () => ({ microphone: 'authorized', accessibility: 'authorized' }),
+  // access=off: Accessibility turned off after practice (BUS-225 not-ready shots).
+  query: async () => ({ microphone: 'authorized', accessibility: params.get('access') === 'off' ? 'not-granted' : 'authorized' }),
   request: async () => {}, openSettings: async () => {},
-  readiness: async (modelId) => ({ modelId, ready: true, reason: null }),
+  // ready=0: the fresh-install state, voice pack not downloaded yet (BUS-224/BUS-225 shots).
+  readiness: async (modelId) => (params.get('ready') === '0'
+    ? { modelId, ready: false, status: 'missing', reason: 'The selected voice pack is missing, downloading or not verified. Check or retry the download.' }
+    : { modelId, ready: true, reason: null }),
   download: async () => {}, cancelDownload: async () => {},
   activeShortcut: () => 'Ctrl + Shift + Space',
 };

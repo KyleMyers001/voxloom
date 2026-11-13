@@ -55,22 +55,23 @@ describe('full-window guided setup', () => {
     expect(screen.getByText(/Setup is incomplete/)).toBeVisible();
   });
 
-  it('Skip setup still completes without practice and shows the normal app', async () => {
+  it('BUS-224: offers no Skip setup, so leaving setup early never claims Ready', async () => {
     localStorage.setItem(progressKey, JSON.stringify({ version: 1, step: 2 }));
     const user = userEvent.setup();
     renderWithApp(<App />);
     expectFullWindowSetup();
-    await user.click(screen.getByRole('button', { name: 'Skip setup' }));
+    expect(screen.queryByRole('button', { name: 'Skip setup' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Set up later' }));
     expect(shell()).toBeVisible();
-    expect(screen.queryByText(/Setup is incomplete/)).not.toBeInTheDocument();
-    expect(document.querySelector('.brand__status')).toHaveTextContent('Ready');
-    expect(localStorage.getItem(progressKey)).toBeNull();
+    expect(screen.getByText(/Setup is incomplete/)).toBeVisible();
+    expect(document.querySelector('.brand__status')).toHaveTextContent('Setup incomplete');
+    expect(JSON.parse(localStorage.getItem(progressKey) ?? 'null')).toMatchObject({ step: 2 });
   });
 
   it('reopening setup from Settings uses the full-window layout', async () => {
     const user = userEvent.setup();
     renderWithApp(<App />);
-    await user.click(screen.getByRole('button', { name: 'Skip setup' }));
+    await user.click(screen.getByRole('button', { name: 'Set up later' }));
     await user.click(screen.getByRole('button', { name: 'Settings' }));
     await user.click(screen.getByRole('button', { name: 'Set up shortcuts' }));
     expectFullWindowSetup();

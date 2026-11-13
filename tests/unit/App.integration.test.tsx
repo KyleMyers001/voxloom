@@ -28,16 +28,18 @@ describe('App integration', () => {
     await user.click(screen.getByRole('button', { name: 'Resume setup' }));
     expect(screen.getByRole('main', { name: 'Set up Voxloom' })).toBeInTheDocument();
   });
-  it('Skip setup finishes setup without practice so it no longer blocks the shortcut', async () => {
+  it('BUS-224: without Skip setup, Set up later still reopens setup at the next launch', async () => {
     localStorage.setItem(progressKey, JSON.stringify({ version: 1, step: 2 }));
     try {
       const user = userEvent.setup();
-      renderWithApp(<App />);
-      await user.click(screen.getByRole('button', { name: 'Skip setup' }));
+      const first = renderWithApp(<App />);
+      expect(screen.queryByRole('button', { name: 'Skip setup' })).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Set up later' }));
       expect(screen.queryByRole('main', { name: 'Set up Voxloom' })).not.toBeInTheDocument();
-      expect(screen.queryByText(/Setup is incomplete/)).not.toBeInTheDocument();
-      expect(document.querySelector('.brand__status')).toHaveTextContent('Ready');
-      expect(localStorage.getItem(progressKey)).toBeNull();
+      first.unmount();
+      renderWithApp(<App />);
+      expect(screen.getByRole('main', { name: 'Set up Voxloom' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /Your shortcut/ })).toBeInTheDocument();
     } finally { localStorage.clear(); }
   });
   it('Resume setup restores unfinished progress while reopening setup from Settings starts practice over', async () => {

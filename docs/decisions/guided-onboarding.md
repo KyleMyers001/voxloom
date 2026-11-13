@@ -73,10 +73,9 @@ flags. It does not hold speech text, permissions, engine readiness or registrati
 claims. Missing/corrupt progress safely starts over; a save error is visible.
 Legacy gesture-only flags do not count. Final `onboardingComplete` remains in the
 existing durable settings file and is set from Ready after both real result
-gates and a fresh prerequisites check, or by an explicit Skip setup on any step
-(parity with the earlier Skip), which completes setup without practice so it no
-longer reopens at launch. Set up later/Escape leave incomplete state, with a
-visible Resume setup action that restores saved progress. Finishing or skipping
+gates and a fresh prerequisites check. There is no Skip setup (removed in
+BUS-224). Set up later/Escape leave incomplete state, with a
+visible Resume setup action that restores saved progress. Finishing
 clears saved progress, and reopening setup from Settings starts it over.
 Existing completed users remain complete; they are not silently forced into the
 new tutorial or an automatic download.
