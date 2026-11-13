@@ -122,6 +122,44 @@ fn readback_latches_the_first_change_so_a_revert_cannot_read_as_unchanged() {
     assert_eq!(got, None);
 }
 
+#[test]
+fn readback_keeps_polling_an_empty_field_until_the_late_apply_lands() {
+    // N1: an empty search field (Weather, Podcasts) reads NoValue until the
+    // write applies a few ms later; that is still "unchanged", not unknown.
+    let before = ValueStatus::NoValue;
+    let mut reads = vec![ValueStatus::NoValue, ValueStatus::NoValue].into_iter();
+    let mut slept = 0;
+    let got = poll_readback(
+        &before,
+        || reads.next().unwrap_or(ValueStatus::Text("hi".into())),
+        |ms| slept += ms,
+    );
+    assert_eq!(got.as_deref(), Some("hi"));
+    assert_eq!(slept, 2 * RETRY_READBACK_POLL_MS);
+    assert_eq!(
+        after_ax(false, Ok(()), "", got.as_deref(), "hi"),
+        AfterAx::Inserted
+    );
+}
+
+#[test]
+fn readback_of_an_empty_field_that_never_changes_is_unknown_at_the_deadline() {
+    let before = ValueStatus::NoValue;
+    let mut reads = 0;
+    let mut slept = 0;
+    let got = poll_readback(
+        &before,
+        || {
+            reads += 1;
+            ValueStatus::NoValue
+        },
+        |ms| slept += ms,
+    );
+    assert_eq!(got, None);
+    assert_eq!(reads, RETRY_READBACK_POLLS);
+    assert!((300..=600).contains(&slept), "{slept}");
+}
+
 fn facts() -> PasteFacts {
     PasteFacts {
         enabled: true,

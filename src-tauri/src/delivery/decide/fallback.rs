@@ -121,6 +121,7 @@ pub fn field_unchanged(before: &ValueStatus, now: &ValueStatus) -> bool {
 /// exactly as `before`. The first read that differs (proof, a partial or
 /// other change, or an unknown value) is latched and returned at once, so a
 /// later revert can never turn a change back into "unchanged" (and a paste).
+/// NoValue -> NoValue keeps polling, but is still unknown at the deadline.
 /// The verification itself stays strict.
 pub fn poll_readback(
     before: &ValueStatus,
@@ -133,9 +134,12 @@ pub fn poll_readback(
         if poll > 0 {
             sleep(RETRY_READBACK_POLL_MS);
         }
-        last = readback_text(before, &read());
+        let after = read();
+        last = readback_text(before, &after);
+        // NoValue is still empty for polling, even though it cannot prove
+        // nothing was written when the deadline is reached.
         let unchanged = matches!(
-            (last.as_deref(), before_text),
+            (after.text(), before_text),
             (Some(now), Some(was)) if same_ax_text(now, was)
         );
         if !unchanged {
