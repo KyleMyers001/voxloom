@@ -42,18 +42,26 @@ fn empty_and_attributed_values_are_readable_other_errors_are_not() {
 }
 
 #[test]
-fn a_field_that_never_shows_a_value_proves_nothing_after_an_accepted_write() {
+fn a_field_that_never_shows_a_value_proves_nothing_whatever_the_write_returned() {
     let none = ValueStatus::NoValue;
-    assert_eq!(readback_text(true, &none, &none), None);
-    // After an AX error the write did not apply: the empty value stands.
-    assert_eq!(readback_text(false, &none, &none).as_deref(), Some(""));
+    assert_eq!(readback_text(&none, &none), None);
     let landed = ValueStatus::Text("hi".into());
-    assert_eq!(readback_text(true, &none, &landed).as_deref(), Some("hi"));
+    assert_eq!(readback_text(&none, &landed).as_deref(), Some("hi"));
     let empty = ValueStatus::Text(String::new());
-    assert_eq!(readback_text(true, &empty, &none).as_deref(), Some(""));
+    assert_eq!(readback_text(&empty, &none).as_deref(), Some(""));
+    assert_eq!(readback_text(&empty, &ValueStatus::Unreadable(None)), None);
+    // Even after an AX error: NoValue -> NoValue is Unverified, never Failed.
+    let got = poll_readback(&none, || ValueStatus::NoValue, |_| {});
+    assert_eq!(got, None);
     assert_eq!(
-        readback_text(true, &empty, &ValueStatus::Unreadable(None)),
-        None
+        after_ax(
+            false,
+            Err("AX set AXSelectedText failed (error -25205)".into()),
+            "",
+            got.as_deref(),
+            "hi"
+        ),
+        AfterAx::Unverified
     );
 }
 
@@ -63,7 +71,6 @@ fn readback_polls_for_a_late_apply_and_stops_at_proof() {
     let mut reads = 0;
     let mut slept = Vec::new();
     let got = poll_readback(
-        true,
         &before,
         || {
             reads += 1;
@@ -80,16 +87,11 @@ fn readback_polls_for_a_late_apply_and_stops_at_proof() {
 fn readback_gives_up_after_about_600_ms_and_stays_strict() {
     let before = ValueStatus::Text("ab".into());
     let mut slept = 0;
-    let got = poll_readback(
-        true,
-        &before,
-        || ValueStatus::Text("ab".into()),
-        |ms| slept += ms,
-    );
+    let got = poll_readback(&before, || ValueStatus::Text("ab".into()), |ms| slept += ms);
     assert_eq!(got.as_deref(), Some("ab"));
     assert!((300..=600).contains(&slept), "{slept}");
     // A partial landing never counts as proof.
-    let partial = poll_readback(true, &before, || ValueStatus::Text("abX".into()), |_| {});
+    let partial = poll_readback(&before, || ValueStatus::Text("abX".into()), |_| {});
     assert_eq!(
         after_ax(false, Ok(()), "ab", partial.as_deref(), "XYZ"),
         AfterAx::Unverified
@@ -103,7 +105,6 @@ fn readback_latches_the_first_change_so_a_revert_cannot_read_as_unchanged() {
     let mut next = reads.iter();
     let mut slept = 0;
     let got = poll_readback(
-        true,
         &before,
         || ValueStatus::Text(next.next().unwrap_or(&"ab").to_string()),
         |ms| slept += ms,
@@ -117,7 +118,7 @@ fn readback_latches_the_first_change_so_a_revert_cannot_read_as_unchanged() {
     );
     // An unreadable read is latched as unknown too.
     let mut reads = vec![ValueStatus::Unreadable(Some(-25204)), before.clone()].into_iter();
-    let got = poll_readback(true, &before, || reads.next().unwrap(), |_| {});
+    let got = poll_readback(&before, || reads.next().unwrap(), |_| {});
     assert_eq!(got, None);
 }
 
@@ -216,23 +217,120 @@ fn a_grid_selection_never_pastes_but_a_cell_editor_does() {
     );
 }
 
+fn facts() -> PasteFacts {
+    PasteFacts {
+        enabled: true,
+        apple_terminal: Some(false),
+        field_unchanged: true,
+        ..Default::default()
+    }
+}
+
 #[test]
 fn paste_needs_the_setting_an_insertable_target_and_a_non_terminal_app() {
     let ok = target("insertable", Some(42), Some("42:AXTextArea:#1"));
-    assert_eq!(may_paste(&ok, true, Some(false), false), Ok(42));
-    assert!(may_paste(&ok, false, Some(false), false).is_err());
-    assert!(may_paste(&ok, true, Some(true), false).is_err());
-    assert!(may_paste(&ok, true, None, false).is_err());
-    assert!(may_paste(&ok, true, Some(false), true).is_err());
+    assert_eq!(may_paste(&ok, &facts()), Ok(42));
+    let off = PasteFacts {
+        enabled: false,
+        ..facts()
+    };
+    assert!(may_paste(&ok, &off).is_err());
+    for apple_terminal in [Some(true), None] {
+        let f = PasteFacts {
+            apple_terminal,
+            ..facts()
+        };
+        assert!(may_paste(&ok, &f).is_err());
+    }
+    let known = PasteFacts {
+        known_terminal: true,
+        ..facts()
+    };
+    assert!(may_paste(&ok, &known).is_err());
     for kind in ["secure", "changed", "unavailable", "unsupported"] {
         let snap = target(kind, Some(42), Some("42:AXTextArea:#1"));
-        assert!(
-            may_paste(&snap, true, Some(false), false).is_err(),
-            "{kind}"
-        );
+        assert!(may_paste(&snap, &facts()).is_err(), "{kind}");
     }
     let no_pid = target("insertable", None, Some("x"));
-    assert!(may_paste(&no_pid, true, Some(false), false).is_err());
+    assert!(may_paste(&no_pid, &facts()).is_err());
+}
+
+fn with_writes(writes: &[Result<(), i32>]) -> PasteFacts {
+    PasteFacts {
+        attempt: AxAttempt {
+            writes: writes.to_vec(),
+        },
+        ..facts()
+    }
+}
+
+#[test]
+fn an_ax_error_that_may_have_applied_never_reaches_paste() {
+    let ok = target("insertable", Some(42), Some("42:AXTextArea:#1"));
+    // -25204 CannotComplete (a busy Word), -25200 Failure, and anything else
+    // not proven write-free, alone or after an Ok first write (the retry).
+    for writes in [
+        vec![Err(-25204)],
+        vec![Err(-25200)],
+        vec![Err(-25212)],
+        vec![Err(-25203)],
+        vec![Ok(()), Err(-25204)],
+        vec![Err(-25205), Err(-25200)],
+    ] {
+        let gate = may_paste(&ok, &with_writes(&writes));
+        assert_eq!(
+            gate,
+            Err("AX error may have applied the write"),
+            "{writes:?}"
+        );
+        let mut diag = DeliveryDiag::default();
+        let got = after_ax_refusal(
+            Err("AX set AXSelectedText failed (error -25204)".into()),
+            gate,
+            |_| panic!("no paste after {writes:?}"),
+            || panic!("no read-back"),
+            &mut diag,
+        );
+        assert!(got.is_err());
+        assert!(diag.fallback.starts_with("skipped("), "{}", diag.fallback);
+    }
+    // Write-free errors, a refusal before any write, and Ok writes proven
+    // unchanged (Chromium retry: two writes) may paste.
+    for code in WRITE_FREE_AX_ERRORS {
+        assert_eq!(may_paste(&ok, &with_writes(&[Err(*code)])), Ok(42));
+    }
+    assert_eq!(may_paste(&ok, &with_writes(&[])), Ok(42));
+    assert_eq!(may_paste(&ok, &with_writes(&[Ok(()), Ok(())])), Ok(42));
+    assert_eq!(may_paste(&ok, &with_writes(&[Ok(()), Err(-25205)])), Ok(42));
+}
+
+#[test]
+fn a_field_that_changed_before_the_paste_aborts_it() {
+    let ok = target("insertable", Some(42), Some("42:AXTextArea:#1"));
+    let before = ValueStatus::Text("ab".into());
+    for now in [
+        ValueStatus::Text("abX".into()),
+        ValueStatus::Text("".into()),
+        ValueStatus::Unreadable(Some(-25204)),
+    ] {
+        let changed = PasteFacts {
+            field_unchanged: field_unchanged(&before, &now),
+            ..facts()
+        };
+        assert_eq!(
+            may_paste(&ok, &changed),
+            Err("field changed since the AX attempt"),
+            "{now:?}"
+        );
+    }
+    assert!(field_unchanged(&before, &ValueStatus::Text("ab".into())));
+    assert!(field_unchanged(
+        &ValueStatus::NoValue,
+        &ValueStatus::Text("".into())
+    ));
+    let unreadable = ValueStatus::Unreadable(None);
+    assert!(field_unchanged(&unreadable, &unreadable));
+    assert!(!field_unchanged(&unreadable, &before));
 }
 
 #[test]
@@ -333,12 +431,7 @@ fn the_delivery_log_line_never_holds_text_or_field_contents() {
         gate: "ax",
         ..Default::default()
     };
-    let after = poll_readback(
-        true,
-        &before,
-        || ValueStatus::Text(SECRET_FIELD.into()),
-        |_| {},
-    );
+    let after = poll_readback(&before, || ValueStatus::Text(SECRET_FIELD.into()), |_| {});
     let outcome = after_ax(false, Ok(()), SECRET_FIELD, after.as_deref(), SECRET_TEXT);
     diag.readback = super::super::diag::readback_label(&outcome);
     let AfterAx::Failed(reason) = outcome else {

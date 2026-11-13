@@ -151,14 +151,16 @@ pub fn element_pid(element: AXUIElementRef) -> Option<i32> {
     (unsafe { AXUIElementGetPid(element, &mut pid) } == AX_OK).then_some(pid)
 }
 
-pub fn set_ax_string(element: AXUIElementRef, attr: &str, text: &str) -> Result<(), String> {
+/// Err carries the AX error code: only some codes prove nothing was written
+/// (`decide::fallback::WRITE_FREE_AX_ERRORS`).
+pub fn set_ax_string(element: AXUIElementRef, attr: &str, text: &str) -> Result<(), AXError> {
     let name = cfstr(attr);
     let value = cfstr(text);
     let err = unsafe { AXUIElementSetAttributeValue(element, name, value) };
     release(name);
     release(value);
     if err != AX_OK {
-        return Err(format!("AX set {attr} failed (error {err})"));
+        return Err(err);
     }
     Ok(())
 }

@@ -4,7 +4,8 @@
 //!   attributed AXValue is readable; any other AX error is not;
 //! - `classify_target`: roles outside the AX allowlist become paste-only
 //!   targets when they look editable, never a grid/table selection;
-//! - `may_paste`: the ⌘V fallback runs only after nothing was written.
+//! - `may_paste`: the ⌘V fallback runs only after nothing was written
+//!   (Ok writes proven unchanged, or write-free AX errors only).
 
 use super::diag::DeliveryDiag;
 use super::report::{InsertReport, PasteReport};
@@ -62,14 +63,48 @@ impl ValueStatus {
 }
 
 /// Read-back evidence after the AX write. A field that never exposed a value
-/// (no value before and after) proves nothing after a write AX accepted: the
-/// text may have landed unseen, so it reads as unknown (no paste, no
-/// double insert). After an AX error the empty value stands.
-pub fn readback_text(write_ok: bool, before: &ValueStatus, after: &ValueStatus) -> Option<String> {
-    if write_ok && *before == ValueStatus::NoValue && *after == ValueStatus::NoValue {
+/// (no value before and after) proves nothing, whatever the write returned:
+/// the text may have landed unseen (an AX error does not prove it did not),
+/// so it reads as unknown (no paste, no double insert).
+pub fn readback_text(before: &ValueStatus, after: &ValueStatus) -> Option<String> {
+    if *before == ValueStatus::NoValue && *after == ValueStatus::NoValue {
         return None;
     }
     after.text().map(str::to_string)
+}
+
+/// AX errors returned before the app touched the field: unsupported
+/// attribute, illegal argument, not implemented, API disabled, invalid
+/// element. Any other error (-25204 CannotComplete, -25200 Failure, ...) may
+/// come back after the text landed (a busy app), so it never pastes.
+pub const WRITE_FREE_AX_ERRORS: &[i32] = &[-25205, -25201, -25208, -25211, -25202];
+
+/// Every AXSelectedText write the AX path made (first and Chromium retry):
+/// Ok, or its AX error code. Empty when AX refused before any write.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct AxAttempt {
+    pub writes: Vec<Result<(), i32>>,
+}
+
+impl AxAttempt {
+    /// No write can have landed unseen: each one returned Ok (read-back then
+    /// proved the field unchanged) or a write-free error.
+    pub fn write_free(&self) -> bool {
+        self.writes.iter().all(|write| match write {
+            Ok(()) => true,
+            Err(code) => WRITE_FREE_AX_ERRORS.contains(code),
+        })
+    }
+}
+
+/// The field right before the ⌘V reads exactly as it did before the AX path
+/// (both unreadable only on a refusal before any write).
+pub fn field_unchanged(before: &ValueStatus, now: &ValueStatus) -> bool {
+    match (before.text(), now.text()) {
+        (Some(was), Some(is)) => same_ax_text(was, is),
+        (None, None) => true,
+        _ => false,
+    }
 }
 
 /// Poll the read-back (BUS-223 b): apps may apply AXSelectedText
@@ -80,7 +115,6 @@ pub fn readback_text(write_ok: bool, before: &ValueStatus, after: &ValueStatus) 
 /// later revert can never turn a change back into "unchanged" (and a paste).
 /// The verification itself stays strict.
 pub fn poll_readback(
-    write_ok: bool,
     before: &ValueStatus,
     mut read: impl FnMut() -> ValueStatus,
     mut sleep: impl FnMut(u64),
@@ -91,7 +125,7 @@ pub fn poll_readback(
         if poll > 0 {
             sleep(RETRY_READBACK_POLL_MS);
         }
-        last = readback_text(write_ok, before, &read());
+        last = readback_text(before, &read());
         let unchanged = matches!(
             (last.as_deref(), before_text),
             (Some(now), Some(was)) if same_ax_text(now, was)
@@ -196,24 +230,38 @@ pub fn classify_target(
     ("insertable", true, None)
 }
 
+/// What the ⌘V gate knows after the AX path returned `Err`.
+#[derive(Debug, Default)]
+pub struct PasteFacts {
+    /// The Clipboard fallback setting.
+    pub enabled: bool,
+    /// `host::apple_terminal_identity`; None when unknown.
+    pub apple_terminal: Option<bool>,
+    pub known_terminal: bool,
+    pub attempt: AxAttempt,
+    /// `field_unchanged(before the AX path, right before the paste)`.
+    pub field_unchanged: bool,
+}
+
 /// Whether the ⌘V fallback may run after the AX path wrote nothing (an
 /// `Err` from it). Err gives why not, for the log; the caller then copies.
-/// `apple_terminal` / `known_terminal`: terminals have their own routes, and
-/// a newline pasted there could run a command.
-pub fn may_paste(
-    validated: &TargetSnapshotDto,
-    enabled: bool,
-    apple_terminal: Option<bool>,
-    known_terminal: bool,
-) -> Result<i32, &'static str> {
-    if !enabled {
+/// Terminals have their own routes, and a newline pasted there could run a
+/// command.
+pub fn may_paste(validated: &TargetSnapshotDto, facts: &PasteFacts) -> Result<i32, &'static str> {
+    if !facts.enabled {
         return Err("clipboard fallback off");
     }
     if !validated.insertable || validated.kind != "insertable" {
         return Err("target not insertable");
     }
-    if apple_terminal != Some(false) || known_terminal {
+    if facts.apple_terminal != Some(false) || facts.known_terminal {
         return Err("terminal or unknown executable");
+    }
+    if !facts.attempt.write_free() {
+        return Err("AX error may have applied the write");
+    }
+    if !facts.field_unchanged {
+        return Err("field changed since the AX attempt");
     }
     validated.app_pid.ok_or("no target pid")
 }

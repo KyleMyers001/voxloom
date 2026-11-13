@@ -26,7 +26,9 @@ use ax::{copy_string_attr, release, AXIsProcessTrusted, CFTypeRef};
 use focus::{build_snapshot, edit_facts, focused_ui_element, snapshot_at};
 
 use super::decide::diag::DeliveryDiag;
-use super::decide::fallback::{after_ax_refusal, may_paste, poll_readback};
+use super::decide::fallback::{
+    after_ax_refusal, field_unchanged, may_paste, poll_readback, AxAttempt, PasteFacts, ValueStatus,
+};
 use super::decide::paste_target::{binding_for, check_paste_target};
 use super::decide::report::PasteReport;
 use super::decide::{
@@ -132,6 +134,7 @@ pub fn insert_text(
     };
     let path = super::decide::terminal::choose_path(&validated, before.text().is_some(), terminal);
     let terminal_path = path == InsertPath::TerminalUnicode;
+    let mut attempt = AxAttempt::default();
     let result = match path {
         InsertPath::Refuse(reason) => {
             diag.gate = "refuse";
@@ -143,21 +146,19 @@ pub fn insert_text(
         }
         InsertPath::AxSelectedText => {
             diag.gate = "ax";
-            ax_insert::insert_selected(element, &validated, &before, text, &mut diag)
+            ax_insert::insert_selected(element, &validated, &before, text, &mut diag, &mut attempt)
         }
     };
     let result = if terminal_path {
         result // Apple Terminal never takes the ⌘V fallback.
     } else {
-        paste_after_refusal(
-            result,
-            element,
-            &validated,
-            terminal,
-            paste_fallback,
-            text,
-            &mut diag,
-        )
+        let facts = PasteFacts {
+            enabled: paste_fallback,
+            apple_terminal: terminal,
+            attempt,
+            ..Default::default()
+        };
+        paste_after_refusal(result, element, &validated, &before, facts, text, &mut diag)
     };
     release(element as CFTypeRef);
     diag.total_ms = started.elapsed().as_millis();
@@ -165,25 +166,27 @@ pub fn insert_text(
     result
 }
 
-/// BUS-223 (c): one ⌘V when the AX path wrote nothing (`Err`), under the
-/// terminal route's guards (same frontmost pid, Secure Keyboard Entry off,
-/// change-count-guarded restore) plus the same focused field. Read-back
-/// then decides Inserted or "may have been inserted".
+/// BUS-223 (c): one ⌘V when the AX path wrote nothing (`Err`, and only
+/// write-free AX errors), under the terminal route's guards (same frontmost
+/// pid, Secure Keyboard Entry off, change-count-guarded restore) plus the
+/// same focused field, unchanged since `before_ax`. Read-back then decides
+/// Inserted or "may have been inserted".
 fn paste_after_refusal(
     ax: Result<InsertReport, String>,
     element: ax::AXUIElementRef,
     validated: &TargetSnapshotDto,
-    apple_terminal: Option<bool>,
-    enabled: bool,
+    before_ax: &ValueStatus,
+    mut facts: PasteFacts,
     text: &str,
     diag: &mut DeliveryDiag,
 ) -> Result<InsertReport, String> {
     if ax.is_ok() {
         return ax; // Something was written (or proven inserted): never paste.
     }
-    let known_terminal = host::terminal_flags(validated.app_pid).known;
-    let gate = may_paste(validated, enabled, apple_terminal, known_terminal);
+    facts.known_terminal = host::terminal_flags(validated.app_pid).known;
     let before = ax::read_value(element);
+    facts.field_unchanged = field_unchanged(before_ax, &before);
+    let gate = may_paste(validated, &facts);
     let pasted = std::time::Instant::now();
     let still_field: &dyn Fn() -> Result<(), String> = &|| focus_still_matches(validated);
     let result = after_ax_refusal(
@@ -199,7 +202,6 @@ fn paste_after_refusal(
         || {
             let before_text = before.text().map(str::to_string);
             let after = poll_readback(
-                true,
                 &before,
                 || ax::read_value(element),
                 |ms| std::thread::sleep(std::time::Duration::from_millis(ms)),
