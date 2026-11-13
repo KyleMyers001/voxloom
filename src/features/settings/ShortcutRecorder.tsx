@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { comboLabel, isMacPlatform, Kbd, KeyCombo, spokenCombo } from '../../components/KeyCombo';
 import { captureShortcut } from '../../services/shortcut/shortcutCapture';
-import { isLoneModifier, loneKeyCap, spokenLoneKey } from '../../services/shortcut/loneKey';
+import { isLoneKey, isLoneModifier, loneKeyCap, spokenLoneKey } from '../../services/shortcut/loneKey';
 import { IDLE, keyUp, modifierDown, otherDown, type LoneTracker } from '../../services/shortcut/loneKeyCapture';
 import { getActiveShortcut, useShortcutActive } from '../../services/shortcut/activeShortcut';
 import { emitShortcutRetry } from '../../services/shortcut/bindingEvents';
@@ -185,10 +185,16 @@ export function ShortcutRecorder({
   const reset = () => apply(defaultValue, resetText(defaultValue));
 
   if (card) {
-    const isDefault = value === defaultValue;
-    const message = cardMessage(status, recording, value);
-    const error = message.tone === 'error';
+    // A-none: show the keys that failed, though settings keep the previous
+    // shortcut for the next launch (recorderStore restores it).
+    const shown = !recording && status?.kind === 'none-active' && status.combo ? status.combo : value;
+    const isDefault = shown === defaultValue;
+    const message = cardMessage(status, recording, defaultValue);
+    const error = message?.tone === 'error';
+    const cardHelpId = `${id}-help`;
     const messageId = `${id}-status`;
+    // Described by the help (not live). An error after recording is added, like
+    // the inline field's errorId; while recording the live line announces it.
     const cancel = () => recording && stop({ text: CANCELED, tone: 'info', kind: 'canceled' });
     return (
       <div
@@ -203,7 +209,7 @@ export function ShortcutRecorder({
         <div className="shortcut-card__row">
           {recording ? <>
             <button
-              aria-describedby={messageId}
+              aria-describedby={cardHelpId}
               aria-invalid={error || undefined}
               aria-label={recorderName(false, true, value, active)}
               aria-pressed="true"
@@ -221,9 +227,9 @@ export function ShortcutRecorder({
             {/* Pointer affordance: pressing it blurs the recorder (the same cancel). WebKit may not move focus on click, so it cancels too. */}
             <button className="btn shortcut-card__cancel" key="cancel" onClick={cancel} type="button">{CARD_CANCEL}</button>
           </> : <>
-            <CardKeys active={active} value={value} />
+            <CardKeys active={active} value={shown} />
             <button
-              aria-describedby={messageId}
+              aria-describedby={error ? `${cardHelpId} ${messageId}` : cardHelpId}
               aria-invalid={error || undefined}
               className="btn shortcut-card__change"
               key="change"
@@ -236,11 +242,15 @@ export function ShortcutRecorder({
           </>}
         </div>
         <div className="shortcut-card__foot">
-          <p aria-live="polite" className="shortcut-card__message" data-tone={message.tone} id={messageId} role="status">
-            {message.tone === 'ok' && <span aria-hidden="true">✓</span>}
-            {message.tone === 'error' && !recording && <span aria-hidden="true">!</span>}
-            {message.text}
-          </p>
+          <div className="shortcut-card__slot">
+            {/* A message takes the help's place on screen; hidden, it still describes the button. */}
+            <p className="shortcut-card__help" hidden={Boolean(message)} id={cardHelpId}>{recording ? CARD_RECORDING_HELP : holdHint(shown)}</p>
+            <p aria-live="polite" className="shortcut-card__message" data-tone={message?.tone} id={messageId} role="status">
+              {message?.tone === 'ok' && <span aria-hidden="true">✓</span>}
+              {message?.tone === 'error' && !recording && <span aria-hidden="true">!</span>}
+              {message?.text}
+            </p>
+          </div>
           {!recording && !isDefault && <button className="shortcut-card__link" onClick={reset} type="button">{resetLinkText(defaultValue)}</button>}
         </div>
       </div>
@@ -289,16 +299,20 @@ export function ShortcutRecorder({
   );
 }
 
-/** The card's one line under the keys: help, the hint, or what just happened. */
-function cardMessage(status: Status, recording: boolean, value: string): { text: string; tone?: 'error' | 'ok' } {
-  if (recording) return status?.kind === 'invalid' ? { text: status.text, tone: 'error' } : { text: CARD_RECORDING_HELP };
-  switch (status?.kind) {
-    case 'saved': return { text: savedText(status.combo ?? value), tone: 'ok' };
-    case 'in-use': return { text: cardInUseText(status.combo ?? value, status.kept ?? value), tone: 'error' };
-    case 'none-active': return { text: cardNoneActiveText(status.combo ?? value), tone: 'error' };
+/** What just happened, shown in the help's place; null keeps the help/hint. */
+function cardMessage(status: Status, recording: boolean, defaultValue: string): { text: string; tone?: 'error' | 'ok' } | null {
+  if (recording) return status?.kind === 'invalid' ? { text: status.text, tone: 'error' } : null;
+  if (!status?.combo) return null;
+  switch (status.kind) {
+    case 'saved': return { text: savedText(status.combo), tone: 'ok' };
+    case 'in-use': return { text: cardInUseText(status.combo, status.kept ?? status.combo), tone: 'error' };
+    // A lone key keeps Settings' reason (Accessibility, or macOS only).
+    case 'none-active': return isLoneKey(status.combo)
+      ? { text: status.text, tone: 'error' }
+      : { text: cardNoneActiveText(status.combo, status.combo !== defaultValue), tone: 'error' };
     case 'lone-refused': case 'timeout': return { text: status.text, tone: 'error' };
     case 'pending': return { text: status.text };
-    default: return { text: holdHint(value) };
+    default: return null;
   }
 }
 

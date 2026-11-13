@@ -99,7 +99,7 @@ describe('B guided setup', () => {
     expect(screen.getByText('Hold these keys and talk, and Voxloom types your words where you’re writing. Keep them, or pick your own.')).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Your shortcut Default' })).toBeInTheDocument();
     expect(screen.getAllByText('Control Shift Space')).toHaveLength(1);
-    expect(screen.getByRole('status')).toHaveTextContent('Hold the keys while you talk. Let go when you’re done.');
+    expect(screen.getByRole('button', { name: 'Change shortcut' })).toHaveAccessibleDescription('Hold the keys while you talk. Let go when you’re done.');
     expect(screen.getByText('More ways to use it')).toBeInTheDocument();
     expect(screen.getByText('You can change this later in Settings.')).toBeInTheDocument();
     for (const gone of [/Global shortcut/, /Registered:/, /latch/i, /native binding/, /Reset to default/, /Prefer a single key/, /AltRight/]) {

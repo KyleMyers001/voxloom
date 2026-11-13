@@ -250,7 +250,7 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
             <details><summary>What happens to my voice?</summary><p>The selected speech model runs locally. The download needs internet; speech is not sent to a cloud model. Text cleanup stays off during practice.</p></details>
           </>}
           {guided.step === 2 && <>
-            <p className="guided-intro guided-shortcut-intro">Hold these keys and talk, and Voxloom types your words where you’re writing. Keep them, or pick your own.</p>
+            <p className="guided-intro">Hold these keys and talk, and Voxloom types your words where you’re writing. Keep them, or pick your own.</p>
             <ShortcutRecorder defaultValue={initialSettings.shortcut} id="onboarding-shortcut" onChange={(value) => settings.update({ key: 'shortcut', value })} value={state.settings.shortcut} variant="card" />
             <details className="guided-more"><summary>More ways to use it</summary><ul>
               <li><b>Hands-free:</b> tap your shortcut twice quickly and Voxloom keeps listening without holding. Press it once more when you’re done. You’ll try both on the next step.</li>

@@ -303,14 +303,17 @@ test('onboarding records the shortcut with the shared recorder (BUS-47, BUS-219 
   const change = card.getByRole('button', { name: 'Change shortcut' });
   const recorder = card.getByRole('button', { name: 'Dictation shortcut, recording' });
   const message = card.getByRole('status');
+  const help = card.locator('#onboarding-shortcut-help');
   await expect(card).toHaveAccessibleName('Your shortcut Default');
-  await expect(message).toHaveText('Hold the keys while you talk. Let go when you’re done.');
+  await expect(help).toHaveText('Hold the keys while you talk. Let go when you’re done.');
+  await expect(change).toHaveAccessibleDescription('Hold the keys while you talk. Let go when you’re done.');
   await expectAccessible(page);
   if (shots) await page.screenshot({ path: `${shots}/1-idle.png` });
   await change.click();
   await expect(recorder).toBeFocused();
   await expect(recorder).toHaveText('Waiting for your keys…');
-  await expect(message).toContainText('Press them together');
+  await expect(help).toContainText('Press them together');
+  await expect(recorder).toHaveAccessibleDescription(/^Press them together/);
   await expectAccessible(page);
   if (shots) await page.screenshot({ path: `${shots}/2-recording.png` });
   // Esc cancels recording; it must not close the onboarding window.

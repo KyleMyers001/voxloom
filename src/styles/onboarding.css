@@ -49,7 +49,6 @@
 .guided-content details { border-top: 1px solid var(--line); padding-top: 15px; margin-top: 20px; color: var(--mut); font-size: var(--fs-label); }
 .guided-content summary { cursor: pointer; }
 /* BUS-219: step 2 "Your shortcut" card (Option A). */
-.guided-shortcut-intro { max-width: 430px; }
 .shortcut-card { background: var(--field); border: 1px solid var(--line); border-radius: 10px; padding: 20px 22px; margin: 4px 0 18px; display: flex; flex-direction: column; gap: 14px; }
 .shortcut-card[data-state="recording"] { border-color: var(--accent); }
 .shortcut-card[data-state="error"] { border-color: color-mix(in srgb, var(--err) 55%, var(--line)); }
@@ -65,7 +64,8 @@
 .shortcut-card__change:hover { border-color: var(--fg); }
 .shortcut-card__change svg { width: 14px; height: 14px; flex: none; }
 .shortcut-card__foot { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; }
-.shortcut-card__message { margin: 0; font-size: var(--fs-secondary); line-height: 1.45; display: flex; gap: 6px; align-items: baseline; }
+.shortcut-card__help, .shortcut-card__message { margin: 0; font-size: var(--fs-secondary); line-height: 1.45; }
+.shortcut-card__message { display: flex; gap: 6px; align-items: baseline; }
 .shortcut-card__message[data-tone="ok"] { color: var(--ok); }
 .shortcut-card__message[data-tone="error"] { color: var(--err); }
 .shortcut-card__link { border: 0; background: none; padding: 2px 0; min-height: 32px; color: var(--accent); font: inherit; font-size: var(--fs-secondary); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }

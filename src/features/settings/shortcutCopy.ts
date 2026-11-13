@@ -143,5 +143,6 @@ export const savedText = (combo: string, mac = isMacPlatform()) =>
   `Saved. On the next step, hold ${shortcutName(combo, mac)} to try it.${combo === 'ShiftRight' ? shiftWarning(mac) : ''}`;
 export const cardInUseText = (combo: string, kept: string, mac = isMacPlatform()) =>
   `Another app already uses ${shortcutName(combo, mac)}, so we kept your current shortcut, ${shortcutName(kept, mac)}. Try different keys.`;
-export const cardNoneActiveText = (combo: string, mac = isMacPlatform()) =>
-  `${shortcutName(combo, mac)} didn’t work, and no shortcut is set right now. Try different keys, or go back to the default.`;
+/** `offerDefault`: the card shows "Go back to the default" (the failed keys aren't the default). */
+export const cardNoneActiveText = (combo: string, offerDefault: boolean, mac = isMacPlatform()) =>
+  `${shortcutName(combo, mac)} didn’t work, and no shortcut is set right now. Try different keys${offerDefault ? ', or go back to the default' : ''}.`;
