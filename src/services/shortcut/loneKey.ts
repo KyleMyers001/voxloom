@@ -64,6 +64,14 @@ export function loneKeyKeys(shortcut: string, mac: boolean): string[] | null {
   return [`${mac ? m.glyph : m.word} (right)`];
 }
 
+/** The one cap for a lone key, without "(right)": "⌥" on macOS, "Alt" elsewhere, "F13". */
+export function loneKeyCap(shortcut: string, mac: boolean): string | null {
+  const code = canonicalLoneKey(shortcut) ?? shortcut.trim();
+  if (isLoneFKey(code)) return code;
+  if (!isLoneModifier(code)) return null;
+  return mac ? MODIFIERS[code].glyph : MODIFIERS[code].word;
+}
+
 /** What VoiceOver should say: "Right Option", "Right Alt", "F13". */
 export function spokenLoneKey(shortcut: string, mac: boolean): string | null {
   const code = canonicalLoneKey(shortcut) ?? shortcut.trim();

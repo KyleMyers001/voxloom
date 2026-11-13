@@ -3,7 +3,6 @@ import { useApp } from '../../app/AppContext';
 import { KeyCombo } from '../../components/KeyCombo';
 import { initialSettings } from '../../domain/fixtures';
 import { ShortcutRecorder } from '../settings/ShortcutRecorder';
-import { HELP as SHORTCUT_HELP } from '../settings/shortcutCopy';
 import { useDogfoodCapture } from '../../services/stt/useDogfoodCapture';
 import type { OwnFieldDeliveryGuard } from '../../services/stt/dogfoodPath';
 import { resolveTranscriptionModelId } from '../../services/stt/resolveModelId';
@@ -251,12 +250,13 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
             <details><summary>What happens to my voice?</summary><p>The selected speech model runs locally. The download needs internet; speech is not sent to a cloud model. Text cleanup stays off during practice.</p></details>
           </>}
           {guided.step === 2 && <>
-            <p className="guided-intro">We’ve picked a starting point. Keep it, or use a shortcut that feels natural to you.</p>
-            <div className="guided-shortcut"><span>Dictation shortcut · {state.settings.shortcut === initialSettings.shortcut ? 'Recommended' : 'Custom'}</span><KeyCombo combo={state.settings.shortcut} /><p>Hold to speak. Release to finish.</p></div>
-            <div className="field"><span id="onboarding-shortcut-label">Global shortcut</span><small id="onboarding-shortcut-help">{SHORTCUT_HELP}</small><ShortcutRecorder defaultValue={initialSettings.shortcut} helpId="onboarding-shortcut-help" id="onboarding-shortcut" labelId="onboarding-shortcut-label" onChange={(value) => settings.update({ key: 'shortcut', value })} value={state.settings.shortcut} /></div>
-            <p className="guided-mini" role="status">{io.activeShortcut() === state.settings.shortcut ? `✓ Registered: ${state.settings.shortcut}` : 'Waiting for a working native binding. A refused shortcut keeps the last working binding; choose another or restore the recommended shortcut.'}</p>
-            <details><summary>Prefer a single key or hands-free?</summary><p>Single keys are optional on Mac and use the same Accessibility access. Double-tap the same shortcut for hands-free, then press once to finish. We’ll try both ways next.</p></details>
-            <p className="guided-mini">You can change this anytime in Settings.</p>
+            <p className="guided-intro">Hold these keys and talk, and Voxloom types your words where you’re writing. Keep them, or pick your own.</p>
+            <ShortcutRecorder defaultValue={initialSettings.shortcut} id="onboarding-shortcut" onChange={(value) => settings.update({ key: 'shortcut', value })} value={state.settings.shortcut} variant="card" />
+            <details className="guided-more"><summary>More ways to use it</summary><ul>
+              <li><b>Hands-free:</b> tap your shortcut twice quickly and Voxloom keeps listening without holding. Press it once more when you’re done. You’ll try both on the next step.</li>
+              <li><b>One key:</b> choose Change shortcut, then press just one key, like Right Option, Right Command or F13–F19. It uses the Accessibility access you allowed in step 1.</li>
+            </ul></details>
+            <p className="guided-mini guided-settings-note">You can change this later in Settings.</p>
           </>}
           {guided.step === 3 && <>
             <div className="guided-modes" aria-label="Two ways to use the same shortcut"><span aria-current={guided.mode === 'hold' ? 'step' : undefined}>{guided.holdDone ? '✓' : '1'} Hold to talk</span><span aria-current={guided.mode === 'tap' ? 'step' : undefined}>{guided.tapDone ? '✓' : '2'} Double-tap</span></div>

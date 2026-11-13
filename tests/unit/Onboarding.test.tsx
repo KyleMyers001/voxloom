@@ -81,7 +81,7 @@ describe('B guided setup', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /Continue/ })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: /Continue/ }));
     expect(screen.getByRole('heading', { name: /Your shortcut/ })).toBeInTheDocument();
-    expect(screen.getByText(/Single keys are optional/)).toHaveTextContent('same Accessibility access');
+    expect(screen.getByText(/press just one key/)).toHaveTextContent('Accessibility access you allowed in step 1');
     expect(screen.queryByText(/Input Monitoring/)).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Use this shortcut/ }));
     const note = screen.getByRole('textbox', { name: 'Practice dictation field' });
@@ -91,5 +91,26 @@ describe('B guided setup', () => {
     await user.type(note, 'Typing does not count.');
     expect(screen.getByRole('button', { name: /Try double-tap/ })).toBeDisabled();
     expect(screen.queryByText(/Simulate/)).not.toBeInTheDocument();
+  });
+  it('BUS-219: step 2 shows the shortcut once in a card, with no latch or raw-code wording', async () => {
+    const user = userEvent.setup();
+    renderWithApp(<Onboarding boundary={setupBoundary()} onClose={vi.fn()} progressStorage={{ read: () => JSON.stringify({ version: 1, step: 2 }), write: vi.fn() }} />);
+    expect(screen.getByRole('heading', { name: /Your shortcut/ })).toBeInTheDocument();
+    expect(screen.getByText('Hold these keys and talk, and Voxloom types your words where you’re writing. Keep them, or pick your own.')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Your shortcut Default' })).toBeInTheDocument();
+    expect(screen.getAllByText('Control Shift Space')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Change shortcut' })).toHaveAccessibleDescription('Hold the keys while you talk. Let go when you’re done.');
+    expect(screen.getByText('More ways to use it')).toBeInTheDocument();
+    expect(screen.getByText('You can change this later in Settings.')).toBeInTheDocument();
+    for (const gone of [/Global shortcut/, /Registered:/, /latch/i, /native binding/, /Reset to default/, /Prefer a single key/, /AltRight/]) {
+      expect(screen.queryByText(gone)).not.toBeInTheDocument();
+    }
+    await waitFor(() => expect(screen.getByRole('button', { name: /Use this shortcut/ })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Change shortcut' }));
+    expect(screen.getByRole('button', { name: 'Dictation shortcut, recording' })).toHaveFocus();
+    await user.keyboard('{Escape}');
+    // Esc ends recording; it must not close setup.
+    expect(screen.getByRole('heading', { name: /Your shortcut/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Change shortcut' })).toHaveFocus();
   });
 });

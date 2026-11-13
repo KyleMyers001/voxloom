@@ -293,35 +293,54 @@ test('History retry cannot interrupt an active listening run', async (
   await page.getByRole('button', { name: 'Cancel' }).click();
 });
 
-test('onboarding records the shortcut with the shared recorder (BUS-47)', async ({ page }) => {
+test('onboarding records the shortcut with the shared recorder (BUS-47, BUS-219 card)', async ({ page }) => {
   const shots = process.env.BUS47_ONBOARDING_DIR;
   // Isolated synthetic prerequisites, using the production component; no native claims.
   await page.goto('/tests/fixtures/guided-preview.html?step=2');
   const onboarding = page.getByRole('main', { name: 'Set up Voxloom' });
   await expect(onboarding.getByRole('textbox')).toHaveCount(0);
-  const field = onboarding.getByRole('button', { name: /^(Shortcut|App-local shortcut|Global shortcut) / });
+  const card = onboarding.getByRole('group', { name: /^(Your shortcut|Now press the keys you want to use)/ });
+  const change = card.getByRole('button', { name: 'Change shortcut' });
+  const recorder = card.getByRole('button', { name: 'Dictation shortcut, recording' });
+  const message = card.getByRole('status');
+  const help = card.locator('#onboarding-shortcut-help');
+  await expect(card).toHaveAccessibleName('Your shortcut Default');
+  await expect(help).toHaveText('Hold the keys while you talk. Let go when you’re done.');
+  await expect(change).toHaveAccessibleDescription('Hold the keys while you talk. Let go when you’re done.');
   await expectAccessible(page);
   if (shots) await page.screenshot({ path: `${shots}/1-idle.png` });
-  await field.click();
-  await expect(field).toHaveText('Press keys…');
+  await change.click();
+  await expect(recorder).toBeFocused();
+  await expect(recorder).toHaveText('Waiting for your keys…');
+  await expect(help).toContainText('Press them together');
+  await expect(recorder).toHaveAccessibleDescription(/^Press them together/);
   await expectAccessible(page);
   if (shots) await page.screenshot({ path: `${shots}/2-recording.png` });
-  // Esc cancels recording; it must not close the onboarding sheet.
+  // Esc cancels recording; it must not close the onboarding window.
   await page.keyboard.press('Escape');
   await expect(onboarding).toBeVisible();
-  await expect(field).toHaveAccessibleName('Global shortcut Control Shift Space');
-  await expect(onboarding.getByRole('status').filter({ hasText: 'Canceled. Shortcut unchanged.' })).toBeVisible();
+  await expect(change).toBeFocused();
+  await expect(card).toHaveAccessibleName('Your shortcut Default');
+  // Cancel ends recording too (it blurs the recorder).
+  await change.click();
+  await card.getByRole('button', { name: 'Cancel' }).click();
+  await expect(recorder).toHaveCount(0);
+  await expect(change).toBeVisible();
   // Pressing the current shortcut while recording records it; it doesn't dictate.
-  await field.click();
+  await change.click();
   await holdShortcut(page);
-  await expect(field).toHaveAttribute('aria-pressed', 'false');
-  await expect(onboarding.getByRole('status').filter({ hasText: /Shortcut set to/ })).toBeVisible();
-  await field.click();
+  await expect(recorder).toHaveCount(0);
+  await expect(message).toHaveText(/^✓Saved\. On the next step, hold /);
+  await change.click();
   await page.keyboard.press('Control+F5');
-  await expect(onboarding.getByText(/can't be used/)).toBeVisible();
+  await expect(message).toHaveText(/can't be used/);
   if (shots) await page.screenshot({ path: `${shots}/3-refused.png` });
   await page.keyboard.press('Control+Alt+KeyK');
-  await expect(field).toHaveAccessibleName(/^Global shortcut Control (Option|Alt) K$/);
+  await expect(card).toHaveAccessibleName('Your shortcut');
+  await expect(card.getByText(/^Control (Option|Alt) K$/)).toBeAttached();
+  await expect(card.getByRole('button', { name: /^Go back to the default/ })).toBeVisible();
   await expectAccessible(page);
   if (shots) await page.screenshot({ path: `${shots}/4-saved.png` });
+  await card.getByRole('button', { name: /^Go back to the default/ }).click();
+  await expect(card).toHaveAccessibleName('Your shortcut Default');
 });

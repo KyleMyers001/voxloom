@@ -14,7 +14,16 @@ import {
   inUseText, loneRefusedText, noneActiveText, successText, timeoutText,
 } from './shortcutCopy';
 
-export type Status = { tone: 'error' | 'info' | 'ok'; text: string } | null;
+/**
+ * What happened, for views with their own wording (BUS-219 setup card).
+ * `text` is Settings' line; `combo` is the shortcut it is about, `kept` the
+ * one still active after a refusal.
+ */
+export type StatusKind =
+  | 'canceled' | 'in-use' | 'invalid' | 'lone-refused' | 'none-active' | 'pending' | 'recording' | 'saved' | 'timeout';
+export type Status = {
+  tone: 'error' | 'info' | 'ok'; text: string; kind?: StatusKind; combo?: string; kept?: string;
+} | null;
 
 /** How long "Setting…" waits for the main window's result. */
 export const CONFIRM_TIMEOUT_MS = 5000;
@@ -60,14 +69,14 @@ function onBound({ active, ok, previous, replay, shortcut }: ShortcutBoundPayloa
   if (!replay && !ok && active === null && sameComboSaved(shortcut)) {
     // BUS-74: re-recording the current combo skips "Setting…", so a failed
     // re-bind afterwards must replace its "Shortcut set to …" line.
-    setRecorderStatus({ text: noneActiveText(shortcut, null), tone: 'error' });
+    setRecorderStatus({ text: noneActiveText(shortcut, null), tone: 'error', kind: 'none-active', combo: shortcut });
     return;
   }
   if (replay || (s.pending !== shortcut && s.late !== shortcut)) return;
   clearPending();
   s.late = null;
   if (ok) {
-    setRecorderStatus({ text: successText(shortcut), tone: 'ok' });
+    setRecorderStatus({ text: successText(shortcut), tone: 'ok', kind: 'saved', combo: shortcut });
     return;
   }
   const kept = s.confirmed;
@@ -76,11 +85,15 @@ function onBound({ active, ok, previous, replay, shortcut }: ShortcutBoundPayloa
   const restore = previous ?? before;
   const target = kept ?? restore;
   if (target && target !== shortcut) s.onChange?.(target);
+  const kind = kept === null ? 'none-active' : isLoneKey(shortcut) ? 'lone-refused' : 'in-use';
   setRecorderStatus({
     text: kept === null
       ? noneActiveText(shortcut, restore)
       : (isLoneKey(shortcut) ? loneRefusedText : inUseText)(shortcut, target ?? shortcut),
     tone: 'error',
+    kind,
+    combo: shortcut,
+    kept: target ?? shortcut,
   });
 }
 
@@ -102,7 +115,7 @@ export function beginPending(combo: string): void {
     if (s.pending !== combo) return;
     s.late = combo;
     clearPending();
-    setRecorderStatus({ text: timeoutText(combo), tone: 'error' });
+    setRecorderStatus({ text: timeoutText(combo), tone: 'error', kind: 'timeout', combo });
   }, CONFIRM_TIMEOUT_MS);
 }
 
