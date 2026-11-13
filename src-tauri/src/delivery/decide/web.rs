@@ -37,7 +37,7 @@ pub fn choose_insert_path(validated: &TargetSnapshotDto, value_readable: bool) -
                 .unwrap_or_else(|| validated.kind.clone())
         ));
     }
-    // Paste-only targets (`fallback::classify_target`): containers and
+    // Paste-only targets (`paste_role::classify_target`): containers and
     // unknown roles where AXSelectedText may report success without editing.
     let role = validated.element_role.as_deref().unwrap_or_default();
     if classify_role(role).0 != "insertable" {

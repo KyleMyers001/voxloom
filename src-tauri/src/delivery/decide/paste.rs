@@ -58,8 +58,9 @@ pub fn paste_text<H: PasteHost>(host: &H, text: &str) -> Result<PasteReport, Str
     paste_checked(host, text, CLIPBOARD_RESTORE_DELAY_MS)
 }
 
-/// The native field fallback. Terminals never come here (`fallback::may_paste`),
-/// so the text keeps the AX write's contract (`check_insert_text`).
+/// The native field fallback. Terminals never come here, and web content only
+/// with single-line text (`fallback::may_paste`), so the text otherwise keeps
+/// the AX write's contract (`check_insert_text`).
 pub fn paste_into_field<H: PasteHost>(host: &H, text: &str) -> Result<PasteReport, String> {
     check_insert_text(text)?;
     paste_checked(host, text, FIELD_RESTORE_DELAY_MS)
