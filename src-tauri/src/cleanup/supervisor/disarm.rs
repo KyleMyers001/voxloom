@@ -6,9 +6,10 @@
 //! at its next chunk and never spawns. Loading or warming up with nobody
 //! claiming it: closed to claims and killed at once; the prewarm's own
 //! thread reaps it and frees the slot. Claimed by a dictation: left running
-//! for it. If that dictation ends without handing over (`on_release`), the
-//! worker is killed then; if it is cut off, the prewarm is not re-armed
-//! (`may_rearm`).
+//! for it. If that dictation ends without handing over, or is cut off
+//! (`on_release`), the worker is killed then rather than kept for the next
+//! dictation (BUS-120). A load already kept after a cut-off is unclaimed,
+//! so a disarm kills it at once.
 //!
 //! A disarm lasts as long as the prewarm that was armed: the next one, after
 //! the slot is free, starts as usual.
@@ -24,7 +25,8 @@ pub enum Disarmed {
     Nothing,
     /// The prewarm was ended.
     Stopped,
-    /// A dictation is using the prewarm's worker; only the re-arm is off.
+    /// A dictation is using the prewarm's worker; it ends with that
+    /// dictation instead of being kept for the next one.
     Kept,
 }
 
@@ -57,16 +59,6 @@ impl WorkerSupervisor {
     }
 }
 
-/// Under the lock, before a re-arm: reserve the slot again unless the
-/// prewarm was disarmed meanwhile.
-pub(super) fn may_rearm(state: &mut SupervisorState) -> bool {
-    if state.prewarm_disarmed {
-        return false;
-    }
-    state.prewarm = Some(Slot::Reserved { abandoned: false });
-    true
-}
-
 /// Under the lock, when the prewarm's ticket drops: the slot is free, and a
 /// disarm ends with the prewarm it found.
 pub(super) fn on_ticket_drop(state: &mut SupervisorState) {
@@ -76,9 +68,9 @@ pub(super) fn on_ticket_drop(state: &mut SupervisorState) {
 
 /// Under the lock, when a dictation's reservation ends (after
 /// `handoff::on_release` dropped its claim): a disarmed load that the
-/// dictation claimed but never used, or finished with, has nothing left to
-/// do. Closed to claims; the caller kills it once the lock is released. A
-/// load that isn't disarmed stays for the next dictation to claim.
+/// dictation claimed but never used, was cut off from, or finished with,
+/// has nothing left to do. It is closed to claims, and the caller kills it
+/// outside the lock. A load that isn't disarmed stays for the next one.
 pub(super) fn on_release(state: &mut SupervisorState) -> Option<ProcessHandle> {
     if !state.prewarm_disarmed {
         return None;

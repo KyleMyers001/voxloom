@@ -8,9 +8,20 @@ use std::time::{Duration, Instant};
 /// A fake worker that logs each spawn, its pid (and a preempted warm-up) to
 /// `log`.
 /// As a prewarm it "loads" for `load` s and warms up for `warm` s unless a
-/// frame arrives; it then serves that frame, or the next one, as "reused".
+/// frame arrives; it then serves every frame in turn as "reused" (logged
+/// "served <id>"), each taking `decode` s unless a newer frame preempts it
+/// (an error reply, logged "abandoned <id>"), until stdin closes.
 /// A normal request is answered "fresh".
 pub(super) fn prewarm_worker(name: &str, load: f64, warm: f64) -> (PathBuf, PathBuf) {
+    decoding_prewarm_worker(name, load, warm, 0.0)
+}
+
+pub(super) fn decoding_prewarm_worker(
+    name: &str,
+    load: f64,
+    warm: f64,
+    decode: f64,
+) -> (PathBuf, PathBuf) {
     let log = fake_root(name).with_extension("log");
     let _ = fs::remove_file(&log);
     let path = fake_worker(
@@ -34,6 +45,12 @@ def note(line):
 def reply(request_id, text):
     write({{"error": None, "errorCode": None, "requestId": request_id,
            "status": "ok", "text": text}})
+def newer(seconds):
+    end = time.time() + seconds
+    while time.time() < end:
+        if select.select([0], [], [], 0.01)[0]:
+            return frame()
+    return None
 first = frame()
 note("spawn")
 note("pid %d" % os.getpid())
@@ -41,23 +58,24 @@ if not first.get("prewarm"):
     reply(first["requestId"], "fresh")
     sys.exit(0)
 time.sleep({load})
-handed = None
-end = time.time() + {warm}
-while handed is None and time.time() < end:
-    if select.select([0], [], [], 0.01)[0]:
-        handed = frame()
-        note("preempted")
-reply("prewarm", "preempted" if handed else "warm")
-handed = handed or frame()
-reply(handed["requestId"], "reused")
+pending = newer({warm})
+if pending:
+    note("preempted")
+reply("prewarm", "preempted" if pending else "warm")
+while True:
+    request = pending or frame()
+    pending = newer({decode})
+    if pending:
+        note("abandoned " + request["requestId"])
+        write({{"error": "cleanup preempted", "errorCode": "runtime-error",
+               "requestId": request["requestId"], "status": "error", "text": None}})
+    else:
+        note("served " + request["requestId"])
+        reply(request["requestId"], "reused")
 "#
         ),
     );
     (path, log)
-}
-
-pub(super) fn never() -> bool {
-    false
 }
 
 pub(super) fn spawns(log: &std::path::Path) -> usize {
@@ -74,6 +92,15 @@ pub(super) fn all_reaped(log: &std::path::Path) -> bool {
         .lines()
         .filter_map(|line| line.strip_prefix("pid ")?.parse().ok())
         .all(|pid| !process_exists(pid))
+}
+
+/// The dictation has a worker: its own, or the prewarm's handed over.
+pub(super) fn started(supervisor: &WorkerSupervisor) -> bool {
+    let state = supervisor.shared.state.lock().unwrap();
+    state
+        .active
+        .as_ref()
+        .is_some_and(|a| a.process.is_some() || a.handed.is_some())
 }
 
 pub(super) fn idle(supervisor: &WorkerSupervisor) -> bool {
@@ -96,7 +123,7 @@ fn one_prewarm_runs_in_the_background_then_frees_its_slot() {
         supervisor.reserve_prewarm().is_none(),
         "at most one prewarm"
     );
-    assert!(ticket.start(model_file("prewarm-alone"), never));
+    assert!(ticket.start(model_file("prewarm-alone")));
     assert!(supervisor.reserve_prewarm().is_none());
     assert!(wait_until(Duration::from_secs(5), || idle(&supervisor)));
     assert_eq!(spawns(&log), 1);
@@ -113,7 +140,7 @@ fn a_dictation_during_the_load_reuses_it() {
     assert!(supervisor
         .reserve_prewarm()
         .unwrap()
-        .start(model_file("prewarm-load"), never));
+        .start(model_file("prewarm-load")));
     assert_eq!(dictation(&supervisor, "during-load").unwrap(), "reused");
     assert!(started.elapsed() >= Duration::from_millis(600));
     // It waited for the one load, then took priority over the warm-up.
@@ -129,7 +156,7 @@ fn a_dictation_preempts_the_warm_up_decode() {
     assert!(supervisor
         .reserve_prewarm()
         .unwrap()
-        .start(model_file("prewarm-warm"), never));
+        .start(model_file("prewarm-warm")));
     std::thread::sleep(Duration::from_millis(300));
     let started = Instant::now();
     assert_eq!(dictation(&supervisor, "during-warm").unwrap(), "reused");
@@ -143,48 +170,13 @@ fn a_dictation_preempts_the_warm_up_decode() {
 }
 
 #[test]
-fn the_backstop_can_run_out_during_the_load() {
-    let (path, log) = prewarm_worker("prewarm-slow", 30.0, 0.0);
-    let mut supervisor = WorkerSupervisor::with_timeout(path, Duration::from_millis(400));
-    supervisor.prewarm_timeout = Duration::from_millis(300);
-    assert!(supervisor
-        .reserve_prewarm()
-        .unwrap()
-        .start(model_file("prewarm-slow"), never));
-    let error = dictation(&supervisor, "slow-load").unwrap_err();
-    assert_eq!(error.code, "timeout", "{}", error.message);
-    // The timed-out dictation killed the load; the prewarm starts over once,
-    // and that one, with nobody waiting, ends at its own timeout.
-    assert!(wait_until(Duration::from_secs(5), || spawns(&log) == 2));
-    assert!(wait_until(Duration::from_secs(5), || idle(&supervisor)));
-    assert_eq!(spawns(&log), 2);
-    assert!(wait_until(Duration::from_secs(5), || all_reaped(&log)));
-}
-
-#[test]
-fn a_handed_over_dictation_outlasts_the_prewarm_timeout() {
-    // The load runs past the prewarm's own timeout, but a dictation waits on
-    // it: the worker is kept, and the dictation gets its reply, not the
-    // prewarm's late one.
-    let (path, log) = prewarm_worker("prewarm-late", 0.8, 5.0);
-    let mut supervisor = WorkerSupervisor::new(path);
-    supervisor.prewarm_timeout = Duration::from_millis(300);
-    assert!(supervisor
-        .reserve_prewarm()
-        .unwrap()
-        .start(model_file("prewarm-late"), never));
-    assert_eq!(dictation(&supervisor, "late").unwrap(), "reused");
-    assert_eq!(spawns(&log), 1);
-}
-
-#[test]
 fn a_dictation_before_the_spawn_abandons_the_prewarm() {
     let (path, log) = prewarm_worker("prewarm-abandoned", 0.0, 0.0);
     let supervisor = WorkerSupervisor::new(path);
     let ticket = supervisor.reserve_prewarm().unwrap();
     // The model is still being hashed: nothing is loading yet.
     let reservation = supervisor.reserve("first".into()).unwrap();
-    assert!(!ticket.start(model_file("prewarm-abandoned"), never));
+    assert!(!ticket.start(model_file("prewarm-abandoned")));
     assert!(idle(&supervisor));
     assert_eq!(spawns(&log), 0);
     drop(reservation);
@@ -199,48 +191,4 @@ fn no_prewarm_starts_while_a_dictation_holds_the_slot() {
     assert!(supervisor.reserve_prewarm().is_none());
     drop(reservation);
     assert!(supervisor.reserve_prewarm().is_some());
-}
-
-#[test]
-fn a_prewarm_that_never_warms_up_is_ended() {
-    let (path, log) = prewarm_worker("prewarm-stuck", 30.0, 0.0);
-    let mut supervisor = WorkerSupervisor::new(path);
-    supervisor.prewarm_timeout = Duration::from_millis(300);
-    assert!(supervisor
-        .reserve_prewarm()
-        .unwrap()
-        .start(model_file("prewarm-stuck"), never));
-    assert!(wait_until(Duration::from_secs(5), || idle(&supervisor)));
-    assert!(all_reaped(&log), "the worker is killed and reaped");
-}
-
-#[test]
-fn cancelling_a_handed_over_dictation_ends_the_prewarm_worker() {
-    let (path, log) = prewarm_worker("prewarm-cancel", 30.0, 0.0);
-    let mut supervisor = WorkerSupervisor::new(path);
-    supervisor.prewarm_timeout = Duration::from_millis(300);
-    let supervisor = Arc::new(supervisor);
-    assert!(supervisor
-        .reserve_prewarm()
-        .unwrap()
-        .start(model_file("prewarm-cancel"), never));
-    let running = Arc::clone(&supervisor);
-    let run = thread::spawn(move || dictation(&running, "cancelled"));
-    assert!(wait_until(Duration::from_secs(5), || {
-        supervisor
-            .shared
-            .state
-            .lock()
-            .unwrap()
-            .active
-            .as_ref()
-            .is_some_and(|a| a.process.is_some())
-    }));
-    assert!(wait_until(Duration::from_secs(5), || spawns(&log) == 1));
-    supervisor.cancel("cancelled");
-    assert_eq!(run.join().unwrap().unwrap_err().code, "cancelled");
-    // Re-armed once (prewarm_claim.rs), then ended at its timeout.
-    assert!(wait_until(Duration::from_secs(5), || idle(&supervisor)
-        && spawns(&log) == 2));
-    assert!(wait_until(Duration::from_secs(5), || all_reaped(&log)));
 }

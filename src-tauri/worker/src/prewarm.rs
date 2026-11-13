@@ -6,10 +6,14 @@
 //! to this same process as a second request frame: it waits for the load
 //! (never cancelled, never repeated) and takes priority over the warm-up
 //! decode, which stops at the next token. Every request frame gets exactly
-//! one reply, in order: the prewarm frame's first, then the dictation's.
-//! Without a dictation, the app ends the process after the first reply.
+//! one reply, in order: the prewarm frame's first, then each dictation's.
+//! The process serves every request handed over, in turn, until the app
+//! kills it or closes stdin (BUS-120): a dictation the app gave up on (cut
+//! off by its budget, or cancelled) still owes the load to the next one. A
+//! newer request preempts the one being served, since the app only sends it
+//! once it has given up on the earlier one.
 
-use std::io::{self, Read};
+use std::io;
 use std::process::ExitCode;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
@@ -45,21 +49,29 @@ pub fn serve(prewarm: WorkerRequest) -> ExitCode {
     if !write(reply) {
         return ExitCode::from(3);
     }
-    // At most one more request, the dictation handed over. Without one the
-    // app ends the process (killing it, or closing stdin for listen()).
-    let Some((request, arrived)) = pending.or_else(|| frames.recv().ok()) else {
-        return ExitCode::SUCCESS;
-    };
-    let response = match &loaded {
-        Ok(engine) => request::handle_loaded(engine.as_ref(), request, arrived),
-        Err(error) => error.into_response(request.request_id),
-    };
-    let ok = response.status == "ok";
-    match (write(response), ok) {
-        (false, _) => ExitCode::from(3),
-        (true, true) => ExitCode::SUCCESS,
-        (true, false) => ExitCode::from(2),
+    // Each request handed over, until the app ends the process (killing
+    // it, or closing stdin for listen()).
+    while let Some((request, arrived)) = pending.take().or_else(|| frames.recv().ok()) {
+        let response = match &loaded {
+            Ok(engine) => {
+                let mut preempt = || newer(&frames, &mut pending);
+                request::handle_loaded(engine.as_ref(), request, arrived, &mut preempt)
+            }
+            Err(error) => error.into_response(request.request_id),
+        };
+        if !write(response) {
+            return ExitCode::from(3);
+        }
     }
+    ExitCode::SUCCESS
+}
+
+/// Whether a request frame has arrived, kept in `pending` to serve next.
+fn newer(frames: &Receiver<Frame>, pending: &mut Option<Frame>) -> bool {
+    if pending.is_none() {
+        *pending = frames.try_recv().ok();
+    }
+    pending.is_some()
 }
 
 fn load() -> Result<Box<dyn Generate>, WorkerError> {
@@ -78,12 +90,7 @@ fn warm_up(
     frames: &Receiver<Frame>,
     pending: &mut Option<Frame>,
 ) -> Result<&'static str, WorkerError> {
-    let mut preempt = || {
-        if pending.is_none() {
-            *pending = frames.try_recv().ok();
-        }
-        pending.is_some()
-    };
+    let mut preempt = || newer(frames, pending);
     if preempt() {
         return Ok(PREEMPTED);
     }
@@ -97,25 +104,16 @@ fn warm_up(
     }
 }
 
-/// Read request frames from stdin on a background thread. The first one
-/// (the handed-over dictation) is passed on; after that, as in parent.rs,
-/// end of stdin or a read error means the app is gone or done with us,
-/// and the process ends at once without a reply.
+/// Read request frames from stdin on a background thread and pass each on
+/// as it arrives. As in parent.rs, end of stdin or a read error means the
+/// app is gone or done with us, and the process ends at once without a
+/// reply.
 fn listen() -> Receiver<Frame> {
     let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
         let mut stdin = io::stdin();
-        if let Ok(request) = read_frame::<WorkerRequest>(&mut stdin) {
+        while let Ok(request) = read_frame::<WorkerRequest>(&mut stdin) {
             let _ = sender.send((request, Instant::now()));
-            let mut buffer = [0_u8; 64];
-            loop {
-                match stdin.read(&mut buffer) {
-                    Ok(0) => break,
-                    Ok(_) => {}
-                    Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-                    Err(_) => break,
-                }
-            }
         }
         // SAFETY: as in parent.rs: _exit touches no Rust or llama.cpp state.
         unsafe { libc::_exit(crate::parent::GONE_EXIT_CODE) }
