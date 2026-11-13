@@ -15,6 +15,7 @@ import { createGuidedSetup, permissionsAuthorized, type PermissionKind, type Set
 import { registerPracticeHandler, resetPracticeGestures } from './practiceBridge';
 import { createSetupBoundary } from './setupBoundary';
 import { SetupWindow } from './SetupWindow';
+import { SETUP_STEP_TITLES, WelcomeSteps } from './WelcomeSteps';
 
 interface OnboardingProps {
   onClose: () => void;
@@ -216,7 +217,7 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
     <div className="guided-setup">
       <aside className="guided-rail" aria-label="Setup progress">
         <div className="guided-brand"><span className="guided-mark" aria-hidden="true"><i /><i /><i /></span>Voxloom</div>
-        <ol>{['Get connected', 'Your shortcut', 'First words'].map((label, index) => <li aria-current={guided.step === index + 1 ? 'step' : undefined} className={guided.step > index + 1 ? 'done' : ''} key={label}><b>{guided.step > index + 1 ? '✓' : index + 1}</b><span>{label}</span></li>)}</ol>
+        <ol>{SETUP_STEP_TITLES.map((label, index) => <li aria-current={guided.step === index + 1 ? 'step' : undefined} className={guided.step > index + 1 ? 'done' : ''} key={label}><b>{guided.step > index + 1 ? '✓' : index + 1}</b><span>{label}</span></li>)}</ol>
         <div className="guided-private">PRIVATE BY DESIGN<br /><span>On-device dictation.<br />No account. No cloud model.</span></div>
       </aside>
       <div className="guided-main">
@@ -225,8 +226,7 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
           <h2 id="guided-heading" ref={heading} tabIndex={-1}>{guided.step === 0 ? <>Less typing.<br />More you.</> : guided.step === 1 ? <>A few permissions.<br />A smoother first dictation.</> : guided.step === 2 ? <>Your shortcut.<br />Ready when you are.</> : guided.step === 3 ? both ? 'Both ways. All yours.' : guided.mode === 'tap' ? 'Now, go hands-free.' : 'First, hold to talk.' : <>You speak.<br />Voxloom types.</>}</h2>
           {guided.step === 0 && <>
             <p className="guided-intro">Speak naturally. Voxloom turns your words into text, right where you’re writing.</p>
-            <div className="guided-sample" aria-label="Illustrative preview, not a transcript"><small>A LITTLE PREVIEW</small><blockquote>“My first words<br />with Voxloom.”</blockquote><hr /><hr /></div>
-            <ol className="guided-list"><li>Connect your microphone, typing and keyboard access</li><li>Keep our shortcut, or make it yours</li><li>Try your first dictation</li></ol>
+            <WelcomeSteps shortcut={state.settings.shortcut} />
 
           </>}
           {guided.step === 1 && <>
