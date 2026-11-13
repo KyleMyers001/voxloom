@@ -113,7 +113,7 @@ describe('setup shortcut card, native results', () => {
     expect(screen.queryByRole('button', { name: /Go back to the default/ })).not.toBeInTheDocument();
   });
 
-  it('a lone key with nothing active keeps the Accessibility reason (Settings wording)', async () => {
+  it('a lone key with nothing active gives the card’s Accessibility line (UI/UX ruling)', async () => {
     render(<Card onChange={vi.fn()} />);
     const user = userEvent.setup();
     await report({ active: null, ok: false, shortcut: DEFAULT });
@@ -121,8 +121,8 @@ describe('setup shortcut card, native results', () => {
     act(() => { fireEvent.keyDown(window, { code: 'AltRight', key: 'Alt', altKey: true }); });
     act(() => { fireEvent.keyUp(window, { code: 'AltRight', key: 'Alt' }); });
     await report({ active: null, ok: false, previous: DEFAULT, shortcut: 'AltRight' });
-    expect(message()).toHaveTextContent('⌥ (right) needs Accessibility. Allow Voxloom in System Settings › Privacy & Security › Accessibility. No shortcut is active. Record one.');
-    expect(message()).not.toHaveTextContent('didn’t work');
+    expect(message().textContent).toBe('!Right Option (⌥) needs Accessibility, and no shortcut is set right now. Allow Voxloom in System Settings › Privacy & Security › Accessibility, then choose Change shortcut and press the key again. Relaunch Voxloom if that doesn’t help.');
+    expect(screen.getByRole('button', { name: 'Go back to the default (⌃ ⇧ Space)' })).toBeInTheDocument();
   });
 
   it('off macOS a lone key with nothing active says it only works on macOS', async () => {
@@ -136,9 +136,26 @@ describe('setup shortcut card, native results', () => {
       act(() => { fireEvent.keyDown(window, { code: 'AltRight', key: 'Alt', altKey: true }); });
       act(() => { fireEvent.keyUp(window, { code: 'AltRight', key: 'Alt' }); });
       await report({ active: null, ok: false, previous: DEFAULT, shortcut: 'AltRight' });
-      expect(message()).toHaveTextContent('Alt (right) on its own only works on macOS. No shortcut is active. Record one.');
+      expect(message().textContent).toBe('!Right Alt (Alt) only works on its own on macOS, and no shortcut is set right now. Try different keys, or go back to the default.');
+      // The line points at the link, so it must be there.
+      expect(screen.getByRole('button', { name: 'Go back to the default (Ctrl Shift Space)' })).toBeVisible();
     } finally {
       if (platform) Object.defineProperty(window.navigator, 'platform', platform);
     }
+  });
+
+  it('Settings (inline) keeps its existing lone-key, nothing-active wording', async () => {
+    function Inline() {
+      const [value, setValue] = useState(DEFAULT);
+      return <ShortcutRecorder defaultValue={DEFAULT} onChange={setValue} value={value} />;
+    }
+    render(<Inline />);
+    const user = userEvent.setup();
+    await report({ active: null, ok: false, shortcut: DEFAULT });
+    await user.click(screen.getByRole('button', { name: /^Dictation shortcut/ }));
+    act(() => { fireEvent.keyDown(window, { code: 'AltRight', key: 'Alt', altKey: true }); });
+    act(() => { fireEvent.keyUp(window, { code: 'AltRight', key: 'Alt' }); });
+    await report({ active: null, ok: false, previous: DEFAULT, shortcut: 'AltRight' });
+    expect(message().textContent).toBe('⌥ (right) needs Accessibility. Allow Voxloom in System Settings › Privacy & Security › Accessibility. No shortcut is active. Record one.');
   });
 });

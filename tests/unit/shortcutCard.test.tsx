@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ShortcutRecorder } from '../../src/features/settings/ShortcutRecorder';
 import { resetRecorderStore } from '../../src/features/settings/recorderStore';
 import {
-  cardInUseText, cardNoneActiveText, holdHint, resetLinkText, savedText, shortcutName,
+  cardInUseText, cardLoneNoneActiveText, cardNoneActiveText, holdHint, resetLinkText, savedText, shortcutName,
 } from '../../src/features/settings/shortcutCopy';
 
 const DEFAULT = 'Ctrl + Shift + Space';
@@ -48,6 +48,8 @@ describe('setup shortcut copy', () => {
     // No link to promise when the keys shown already are the default.
     expect(cardNoneActiveText(DEFAULT, false, true)).toBe('⌃⇧Space didn’t work, and no shortcut is set right now. Try different keys.');
     expect(resetLinkText(DEFAULT, true)).toBe('Go back to the default (⌃ ⇧ Space)');
+    expect(cardLoneNoneActiveText('AltRight', true)).toBe('Right Option (⌥) needs Accessibility, and no shortcut is set right now. Allow Voxloom in System Settings › Privacy & Security › Accessibility, then choose Change shortcut and press the key again. Relaunch Voxloom if that doesn’t help.');
+    expect(cardLoneNoneActiveText('AltRight', false)).toBe('Right Alt (Alt) only works on its own on macOS, and no shortcut is set right now. Try different keys, or go back to the default.');
   });
 });
 

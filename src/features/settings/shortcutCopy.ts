@@ -146,3 +146,7 @@ export const cardInUseText = (combo: string, kept: string, mac = isMacPlatform()
 /** `offerDefault`: the card shows "Go back to the default" (the failed keys aren't the default). */
 export const cardNoneActiveText = (combo: string, offerDefault: boolean, mac = isMacPlatform()) =>
   `${shortcutName(combo, mac)} didn’t work, and no shortcut is set right now. Try different keys${offerDefault ? ', or go back to the default' : ''}.`;
+/** Card only (UI/UX ruling on #180): a lone key was refused and nothing is active. Settings keeps loneReason. */
+export const cardLoneNoneActiveText = (combo: string, mac = isMacPlatform()) => mac
+  ? `${shortcutName(combo, mac)} needs Accessibility, and no shortcut is set right now. Allow Voxloom in ${ACCESSIBILITY}, then choose Change shortcut and press the key again. Relaunch Voxloom if that doesn’t help.`
+  : `${shortcutName(combo, mac)} only works on its own on macOS, and no shortcut is set right now. Try different keys, or go back to the default.`;

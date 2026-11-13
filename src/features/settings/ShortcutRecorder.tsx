@@ -12,7 +12,7 @@ import {
 } from './recorderStore';
 import {
   addAKey, CANCELED, CARD_CANCEL, CARD_CHANGE, CARD_DEFAULT_PILL, CARD_LABEL, CARD_PROMPT, CARD_RECORDING_HELP,
-  CARD_RECORDING_LABEL, cardInUseText, cardNoneActiveText, holdHint, invalidText, NOT_ACTIVE, pendingText, PROMPT,
+  CARD_RECORDING_LABEL, cardInUseText, cardLoneNoneActiveText, cardNoneActiveText, holdHint, invalidText, NOT_ACTIVE, pendingText, PROMPT,
   RECORDING, resetLinkText, resetText, savedText, successText,
 } from './shortcutCopy';
 
@@ -306,9 +306,9 @@ function cardMessage(status: Status, recording: boolean, defaultValue: string): 
   switch (status.kind) {
     case 'saved': return { text: savedText(status.combo), tone: 'ok' };
     case 'in-use': return { text: cardInUseText(status.combo, status.kept ?? status.combo), tone: 'error' };
-    // A lone key keeps Settings' reason (Accessibility, or macOS only).
+    // A lone key says why (Accessibility, or macOS only) in the card's own words.
     case 'none-active': return isLoneKey(status.combo)
-      ? { text: status.text, tone: 'error' }
+      ? { text: cardLoneNoneActiveText(status.combo), tone: 'error' }
       : { text: cardNoneActiveText(status.combo, status.combo !== defaultValue), tone: 'error' };
     case 'lone-refused': case 'timeout': return { text: status.text, tone: 'error' };
     case 'pending': return { text: status.text };
