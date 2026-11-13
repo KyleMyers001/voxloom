@@ -117,6 +117,7 @@ pub fn insert_selected(
             "AX write changed the field but could not be verified".into(),
         ),
         AfterAx::TypeFallback => {
+            attempt.typed = true; // Never a ⌘V after this route (BUS-223).
             let (posted, typed) = typing::type_text(
                 text,
                 || focus_still_matches(validated),

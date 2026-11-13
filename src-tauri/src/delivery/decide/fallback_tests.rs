@@ -229,36 +229,37 @@ fn facts() -> PasteFacts {
 #[test]
 fn paste_needs_the_setting_an_insertable_target_and_a_non_terminal_app() {
     let ok = target("insertable", Some(42), Some("42:AXTextArea:#1"));
-    assert_eq!(may_paste(&ok, &facts()), Ok(42));
+    assert_eq!(may_paste(&ok, &facts(), "hi"), Ok(42));
     let off = PasteFacts {
         enabled: false,
         ..facts()
     };
-    assert!(may_paste(&ok, &off).is_err());
+    assert!(may_paste(&ok, &off, "hi").is_err());
     for apple_terminal in [Some(true), None] {
         let f = PasteFacts {
             apple_terminal,
             ..facts()
         };
-        assert!(may_paste(&ok, &f).is_err());
+        assert!(may_paste(&ok, &f, "hi").is_err());
     }
     let known = PasteFacts {
         known_terminal: true,
         ..facts()
     };
-    assert!(may_paste(&ok, &known).is_err());
+    assert!(may_paste(&ok, &known, "hi").is_err());
     for kind in ["secure", "changed", "unavailable", "unsupported"] {
         let snap = target(kind, Some(42), Some("42:AXTextArea:#1"));
-        assert!(may_paste(&snap, &facts()).is_err(), "{kind}");
+        assert!(may_paste(&snap, &facts(), "hi").is_err(), "{kind}");
     }
     let no_pid = target("insertable", None, Some("x"));
-    assert!(may_paste(&no_pid, &facts()).is_err());
+    assert!(may_paste(&no_pid, &facts(), "hi").is_err());
 }
 
 fn with_writes(writes: &[Result<(), i32>]) -> PasteFacts {
     PasteFacts {
         attempt: AxAttempt {
             writes: writes.to_vec(),
+            ..Default::default()
         },
         ..facts()
     }
@@ -277,7 +278,7 @@ fn an_ax_error_that_may_have_applied_never_reaches_paste() {
         vec![Ok(()), Err(-25204)],
         vec![Err(-25205), Err(-25200)],
     ] {
-        let gate = may_paste(&ok, &with_writes(&writes));
+        let gate = may_paste(&ok, &with_writes(&writes), "hi");
         assert_eq!(
             gate,
             Err("AX error may have applied the write"),
@@ -297,11 +298,82 @@ fn an_ax_error_that_may_have_applied_never_reaches_paste() {
     // Write-free errors, a refusal before any write, and Ok writes proven
     // unchanged (Chromium retry: two writes) may paste.
     for code in WRITE_FREE_AX_ERRORS {
-        assert_eq!(may_paste(&ok, &with_writes(&[Err(*code)])), Ok(42));
+        assert_eq!(may_paste(&ok, &with_writes(&[Err(*code)]), "hi"), Ok(42));
     }
-    assert_eq!(may_paste(&ok, &with_writes(&[])), Ok(42));
-    assert_eq!(may_paste(&ok, &with_writes(&[Ok(()), Ok(())])), Ok(42));
-    assert_eq!(may_paste(&ok, &with_writes(&[Ok(()), Err(-25205)])), Ok(42));
+    assert_eq!(may_paste(&ok, &with_writes(&[]), "hi"), Ok(42));
+    assert_eq!(
+        may_paste(&ok, &with_writes(&[Ok(()), Ok(())]), "hi"),
+        Ok(42)
+    );
+    assert_eq!(
+        may_paste(&ok, &with_writes(&[Ok(()), Err(-25205)]), "hi"),
+        Ok(42)
+    );
+}
+
+#[test]
+fn multi_line_text_in_a_chromium_or_electron_web_field_stays_copy() {
+    let ok = target("insertable", Some(42), Some("42:AXTextArea:#1"));
+    let multi = "echo one\necho two";
+    let web = |web_host, web_content| PasteFacts {
+        web_host,
+        web_content,
+        ..facts()
+    };
+    // VS Code / Cursor xterm.js, Slack, Brave: Electron/Chromium web fields
+    // keep the typing route; the paste fallback never runs, whatever the text.
+    for text in [multi, "one line"] {
+        assert_eq!(
+            may_paste(&ok, &web(true, true), text),
+            Err("Chromium/Electron web field")
+        );
+    }
+    // The typing route refused (multi-line) or ran: Copy, no paste.
+    let typed = PasteFacts {
+        attempt: AxAttempt {
+            typed: true,
+            ..Default::default()
+        },
+        web_host: true,
+        ..facts()
+    };
+    assert!(may_paste(&ok, &typed, "one line").is_err());
+    // Other web hosts and web content (a partial Chromium tree, WebKit Mail,
+    // Tauri): single-line only.
+    for (host, content) in [(true, false), (false, true)] {
+        assert_eq!(
+            may_paste(&ok, &web(host, content), multi),
+            Err("multi-line or control text in web content")
+        );
+        assert!(may_paste(&ok, &web(host, content), "a\tb").is_err());
+        assert_eq!(may_paste(&ok, &web(host, content), "one line"), Ok(42));
+    }
+    // Native fields (Word, Pages) keep multi-line.
+    assert_eq!(may_paste(&ok, &facts(), multi), Ok(42));
+    // The end to end decision: Copy, and the ⌘V closure never runs.
+    let mut diag = DeliveryDiag::default();
+    let got = after_ax_refusal(
+        Err("Transcript contains control or line separator — nothing sent".into()),
+        may_paste(&ok, &web(true, true), multi),
+        |_| panic!("no paste into an Electron web field"),
+        || panic!("no read-back"),
+        &mut diag,
+    );
+    assert!(got.is_err());
+    assert_eq!(diag.fallback, "skipped(Chromium/Electron web field)");
+}
+
+#[test]
+fn web_content_is_any_role_in_or_under_a_web_area() {
+    let none: [&str; 0] = [];
+    assert!(in_web_content("AXWebArea", false, &none));
+    assert!(in_web_content("AXGroup", true, &none));
+    assert!(in_web_content("AXGroup", false, &["AXGroup", "AXWebArea"]));
+    assert!(!in_web_content(
+        "AXTextArea",
+        false,
+        &["AXScrollArea", "AXWindow"]
+    ));
 }
 
 #[test]
@@ -318,7 +390,7 @@ fn a_field_that_changed_before_the_paste_aborts_it() {
             ..facts()
         };
         assert_eq!(
-            may_paste(&ok, &changed),
+            may_paste(&ok, &changed, "hi"),
             Err("field changed since the AX attempt"),
             "{now:?}"
         );

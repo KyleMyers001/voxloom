@@ -27,7 +27,8 @@ use focus::{build_snapshot, edit_facts, focused_ui_element, snapshot_at};
 
 use super::decide::diag::DeliveryDiag;
 use super::decide::fallback::{
-    after_ax_refusal, field_unchanged, may_paste, poll_readback, AxAttempt, PasteFacts, ValueStatus,
+    after_ax_refusal, field_unchanged, in_web_content, may_paste, poll_readback, AxAttempt,
+    PasteFacts, ValueStatus,
 };
 use super::decide::paste_target::{binding_for, check_paste_target};
 use super::decide::report::PasteReport;
@@ -184,9 +185,17 @@ fn paste_after_refusal(
         return ax; // Something was written (or proven inserted): never paste.
     }
     facts.known_terminal = host::terminal_flags(validated.app_pid).known;
+    facts.web_host = validated
+        .app_pid
+        .and_then(host::web_ax_activation)
+        .is_some();
+    let role = validated.element_role.as_deref().unwrap_or_default();
+    let has_dom_id = copy_string_attr(element, "AXDOMIdentifier").is_some();
+    let ancestors = ax::ancestor_roles(element);
+    facts.web_content = in_web_content(role, has_dom_id, &ancestors);
     let before = ax::read_value(element);
     facts.field_unchanged = field_unchanged(before_ax, &before);
-    let gate = may_paste(validated, &facts);
+    let gate = may_paste(validated, &facts, text);
     let pasted = std::time::Instant::now();
     let still_field: &dyn Fn() -> Result<(), String> = &|| focus_still_matches(validated);
     let result = after_ax_refusal(

@@ -11,6 +11,7 @@ use super::diag::DeliveryDiag;
 use super::report::{InsertReport, PasteReport};
 use super::retry::{RETRY_READBACK_POLLS, RETRY_READBACK_POLL_MS};
 use super::target::{classify_role, effective_role};
+use super::text::check_typing_text;
 use super::verify::same_ax_text;
 use crate::delivery::types::TargetSnapshotDto;
 
@@ -84,6 +85,8 @@ pub const WRITE_FREE_AX_ERRORS: &[i32] = &[-25205, -25201, -25208, -25211, -2520
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct AxAttempt {
     pub writes: Vec<Result<(), i32>>,
+    /// The web-field Unicode typing route (`AfterAx::TypeFallback`) ran.
+    pub typed: bool,
 }
 
 impl AxAttempt {
@@ -95,6 +98,12 @@ impl AxAttempt {
             Err(code) => WRITE_FREE_AX_ERRORS.contains(code),
         })
     }
+}
+
+/// Web content: the web area itself, a DOM-backed element, or anything
+/// under an AXWebArea. Unlike `is_web_content_field`, any role counts.
+pub fn in_web_content<S: AsRef<str>>(role: &str, has_dom_id: bool, ancestors: &[S]) -> bool {
+    role == "AXWebArea" || has_dom_id || ancestors.iter().any(|r| r.as_ref() == "AXWebArea")
 }
 
 /// The field right before the ⌘V reads exactly as it did before the AX path
@@ -239,6 +248,10 @@ pub struct PasteFacts {
     pub apple_terminal: Option<bool>,
     pub known_terminal: bool,
     pub attempt: AxAttempt,
+    /// A Chromium/Electron host (`host::web_ax_activation`).
+    pub web_host: bool,
+    /// `in_web_content` for the focused element.
+    pub web_content: bool,
     /// `field_unchanged(before the AX path, right before the paste)`.
     pub field_unchanged: bool,
 }
@@ -246,8 +259,15 @@ pub struct PasteFacts {
 /// Whether the ⌘V fallback may run after the AX path wrote nothing (an
 /// `Err` from it). Err gives why not, for the log; the caller then copies.
 /// Terminals have their own routes, and a newline pasted there could run a
-/// command.
-pub fn may_paste(validated: &TargetSnapshotDto, facts: &PasteFacts) -> Result<i32, &'static str> {
+/// command. So could one in web content: xterm.js terminals (VS Code, Cursor,
+/// Hyper, Tabby, Wave, browser shells) are web fields. A Chromium/Electron
+/// web field keeps its own typing route and never pastes; any other web
+/// host or web content pastes single-line text only (`check_typing_text`).
+pub fn may_paste(
+    validated: &TargetSnapshotDto,
+    facts: &PasteFacts,
+    text: &str,
+) -> Result<i32, &'static str> {
     if !facts.enabled {
         return Err("clipboard fallback off");
     }
@@ -262,6 +282,12 @@ pub fn may_paste(validated: &TargetSnapshotDto, facts: &PasteFacts) -> Result<i3
     }
     if !facts.field_unchanged {
         return Err("field changed since the AX attempt");
+    }
+    if facts.attempt.typed || (facts.web_host && facts.web_content) {
+        return Err("Chromium/Electron web field");
+    }
+    if (facts.web_host || facts.web_content) && check_typing_text(text).is_err() {
+        return Err("multi-line or control text in web content");
     }
     validated.app_pid.ok_or("no target pid")
 }
