@@ -140,12 +140,45 @@ describe('B guided setup', () => {
       expect(screen.getByRole('button', { name: 'Open Voxloom' })).toBeDisabled();
       expect(screen.queryByRole('button', { name: 'Set up later' })).not.toBeInTheDocument();
     });
-    it('not ready because the pack is missing: Welcome suppression does not hide the step 4 line', async () => {
+    it('not ready because the pack is missing: the specific reason replaces the attention line, with exactly one alert', async () => {
       const io = setupBoundary();
       io.readiness = vi.fn(async (modelId) => ({ modelId, ready: false, status: 'missing' as const, reason: 'Missing' }));
       renderWithApp(<Onboarding boundary={io} onClose={vi.fn()} progressStorage={finished()} />);
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent('Missing');
+      expect(alert).toHaveClass('form-error');
+      expect(screen.getAllByRole('alert')).toHaveLength(1);
+      expect(screen.queryByText('Access or the voice pack needs attention before you finish.')).not.toBeInTheDocument();
+      const review = screen.getByRole('button', { name: 'Review access and voice pack' });
+      expect(alert.nextElementSibling).toBe(review);
+      expect(review.nextElementSibling).toHaveClass('guided-shortcut');
+    });
+    it('not ready with no specific error keeps the generic attention line and no alert', async () => {
+      const io = setupBoundary();
+      vi.mocked(io.query).mockResolvedValue({ microphone: 'authorized', accessibility: 'not-granted' });
+      renderWithApp(<Onboarding boundary={io} onClose={vi.fn()} progressStorage={finished()} />);
       expect(await screen.findByText('Access or the voice pack needs attention before you finish.')).toBeVisible();
-      expect(screen.getByRole('alert')).toHaveTextContent('Missing');
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+    it('ready with an error (save failure) keeps the shared bottom alert, once', async () => {
+      const io = setupBoundary();
+      renderWithApp(<Onboarding boundary={io} onClose={vi.fn()} progressStorage={{ ...finished(), write: () => { throw new Error('quota'); } }} />);
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Open Voxloom' })).toBeEnabled());
+      const alerts = screen.getAllByRole('alert');
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0]).toHaveTextContent(/Setup progress could not be saved/);
+      expect(alerts[0].closest('.guided-content')!.lastElementChild).toBe(alerts[0]);
+      expect(screen.queryByRole('button', { name: 'Review access and voice pack' })).not.toBeInTheDocument();
+    });
+    it.each([1, 2, 3])('step %i keeps the specific error at the shared bottom spot', async (step) => {
+      const io = setupBoundary();
+      io.readiness = vi.fn(async (modelId) => ({ modelId, ready: false, status: 'missing' as const, reason: 'Missing' }));
+      renderWithApp(<Onboarding boundary={io} onClose={vi.fn()} progressStorage={{ read: () => JSON.stringify({ version: 1, step, holdDone: true, tapDone: false, mode: 'tap', modelId: 'whisper-base.en', shortcut: 'Ctrl + Shift + Space' }), write: vi.fn() }} />);
+      const alert = await screen.findByRole('alert');
+      expect(screen.getAllByRole('alert')).toHaveLength(1);
+      expect(alert).toHaveTextContent('Missing');
+      expect(alert.closest('.guided-content')!.lastElementChild).toBe(alert);
+      expect(screen.queryByText('Access or the voice pack needs attention before you finish.')).not.toBeInTheDocument();
     });
     it('Escape on step 4 still closes the window', async () => {
       const user = userEvent.setup();

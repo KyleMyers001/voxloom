@@ -59,6 +59,21 @@ for (const theme of ['dark', 'light']) {
     await expect(page.locator('.guided-footer').getByRole('button')).toHaveText(['Set up later', 'Start setup →']);
     await shot(page, testInfo, `bus224-${theme}-640x620-step0-not-ready.png`);
   });
+  test(`${theme} finish step with the voice pack missing shows one in-place alert without scrolling at 640x620`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 640, height: 620 });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto(`/tests/fixtures/guided-preview.html?step=4&theme=${theme}&ready=0`);
+    await expect(page.getByRole('heading', { level: 2 })).toBeFocused();
+    const alert = page.getByRole('alert');
+    await expect(alert).toHaveText(/voice pack is missing/);
+    await expect(alert).toHaveCount(1);
+    await expect(page.getByText('Access or the voice pack needs attention before you finish.')).toHaveCount(0);
+    await expect(page.locator('.guided-footer').getByRole('button')).toHaveText(['Back', 'Open Voxloom']);
+    expect(await page.locator('.guided-content').evaluate((el) => el.scrollHeight <= el.clientHeight)).toBe(true);
+    const violations = (await new AxeBuilder({ page }).include('.setup-window').analyze()).violations;
+    expect(violations).toEqual([]);
+    await shot(page, testInfo, `bus225-${theme}-640x620-step4-pack-missing.png`);
+  });
   for (const [width, height] of [[1120, 760], [640, 620]]) for (const ready of [true, false]) {
     test(`${theme} finish step fits ${width}x${height} ${ready ? 'ready' : 'not ready'}`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width, height });

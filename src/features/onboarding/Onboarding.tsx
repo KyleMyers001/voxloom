@@ -201,6 +201,8 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
   const allPermissions = permissionsAuthorized(guided.permissions);
   const connected = io.native && allPermissions && guided.modelReady && !guided.checking;
   const both = guided.holdDone && guided.tapDone;
+  // Step 4 not ready shows a specific error in place of its attention line, so it is never shown twice.
+  const shownError = error || guided.error;
   const status = practice.phase === 'recording' ? (guided.mode === 'tap' ? 'Listening hands-free · press once to finish' : 'Listening · release to finish')
     : practice.phase === 'starting' ? 'Preparing microphone…'
       : practice.phase === 'transcribing' || practice.phase === 'cleaning' ? 'Turning speech into text…'
@@ -267,13 +269,13 @@ function HydratedOnboarding({ onClose, opener, boundary, progressStorage }: Onbo
           {guided.step === 4 && <>
             <p className="guided-intro">You’ve tried both ways to dictate. Choose Open Voxloom to finish, then use your shortcut in any app.</p>
             {!guided.ready && <>
-              <p className="form-error">Access or the voice pack needs attention before you finish.</p>
+              {shownError ? <p className="form-error" role="alert">{shownError}</p> : <p className="form-error">Access or the voice pack needs attention before you finish.</p>}
               <button className="btn" onClick={() => { cancel(); controller.back(); controller.back(); controller.back(); }} type="button">Review access and voice pack</button>
             </>}
             <div className="guided-shortcut"><KeyCombo combo={state.settings.shortcut} /><p>Hold for a quick thought. Double-tap to go hands-free. Press once more to finish.</p></div>
             <p className="guided-mini">Your shortcut works in other apps once setup closes. If an app won’t take typed text, Voxloom may copy your words so you can paste them.</p>
           </>}
-          {(error || guided.error) && <p className="form-error" role="alert">{error || guided.error}</p>}
+          {shownError && !(guided.step === 4 && !guided.ready) && <p className="form-error" role="alert">{shownError}</p>}
         </section>
         {guided.step === 0 && <p className="guided-mini guided-disclosure">{modelId === 'whisper-base.en' ? 'Starting setup downloads Whisper Base (English)' : `Starting setup prepares your selected ${modelLabel}`} ({size}) if needed. Your dictation is processed on this Mac. Larger voice packs are optional in Settings.</p>}
         <footer className="guided-footer">
