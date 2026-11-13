@@ -7,9 +7,20 @@
  */
 
 import { copyFallback, mayHaveInserted } from './fallback';
-import { restoreSkippedSuffix, TERMINAL_PASTE_MESSAGE } from './messages';
+import {
+  deliveryMessage,
+  FIELD_PASTE_UNVERIFIED_MESSAGE,
+  restoreSkippedSuffix,
+  TERMINAL_PASTE_MESSAGE,
+} from './messages';
 import { InsertError } from './types';
-import type { DeliverOptions, DeliveryOutcome, PasteBinding, PasteReport } from './types';
+import type {
+  DeliverOptions,
+  DeliveryOutcome,
+  InsertReport,
+  PasteBinding,
+  PasteReport,
+} from './types';
 
 export function pastedOutcome(text: string, report: PasteReport): DeliveryOutcome {
   const skipped = report.clipboardRestored
@@ -22,6 +33,38 @@ export function pastedOutcome(text: string, report: PasteReport): DeliveryOutcom
     restoreSkippedReason: skipped,
     status: 'unverified',
     text,
+  };
+}
+
+/**
+ * Native ⌘V fallback into a field AX refused (BUS-223). Read-back proved it:
+ * Inserted. Otherwise "may have been inserted", recorded `unverified` and
+ * never copied on top: the user's clipboard was just restored. Either way a
+ * clipboard that was not restored says so.
+ */
+export function fieldPastedOutcome(
+  text: string,
+  report: InsertReport,
+  paste: PasteReport,
+): DeliveryOutcome {
+  const skipped = paste.clipboardRestored
+    ? null
+    : paste.restoreSkippedReason ?? 'prior clipboard not restored';
+  const suffix = restoreSkippedSuffix(skipped);
+  const shared = {
+    clipboardRestored: paste.clipboardRestored,
+    detail: report.detail,
+    restoreSkippedReason: skipped,
+    text,
+  };
+  if (!report.unverified) {
+    return { ...shared, message: deliveryMessage('inserted', null) + suffix, status: 'inserted' };
+  }
+  return {
+    ...shared,
+    mayHaveInserted: true,
+    message: FIELD_PASTE_UNVERIFIED_MESSAGE + suffix,
+    status: 'unverified',
   };
 }
 

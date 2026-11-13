@@ -36,6 +36,7 @@ pub fn validate_target(intended: TargetSnapshotDto) -> Result<TargetSnapshotDto,
 pub fn insert_text(
     _text: &str,
     _intended: &TargetSnapshotDto,
+    _paste_fallback: bool,
 ) -> Result<super::decide::InsertReport, String> {
     Err("insert unavailable on this platform (macOS AX adapter required)".into())
 }

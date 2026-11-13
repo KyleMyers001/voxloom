@@ -1,5 +1,6 @@
-//! macOS side of the terminal paste route: preflight facts, NSPasteboard and
-//! one ⌘V. All policy and ordering live in `decide::paste`.
+//! macOS side of the paste route (terminals, Messages, and the BUS-223 native
+//! field fallback): preflight facts, NSPasteboard and one ⌘V. All policy and
+//! ordering live in `decide::paste`.
 
 use super::ax::AXIsProcessTrusted;
 use super::{host, keylayout, pasteboard, typing};
@@ -10,22 +11,33 @@ extern "C" {
     fn IsSecureEventInputEnabled() -> u8;
 }
 
-pub struct MacPaste {
-    /// The terminal that was frontmost when the paste began.
+pub struct MacPaste<'a> {
+    /// The app that was frontmost when the paste began.
     pub pid: i32,
+    /// The native field fallback (BUS-223) also needs the focused field to
+    /// still be the validated one; the terminal route has no field (None).
+    pub still_field: Option<&'a dyn Fn() -> Result<(), String>>,
 }
 
-impl MacPaste {
-    fn still_frontmost(&self) -> Result<(), String> {
-        if host::frontmost_pid() == Some(self.pid) {
-            Ok(())
-        } else {
-            Err("frontmost app changed — paste skipped".into())
+impl MacPaste<'_> {
+    /// The order of `terminal_still_matches`: the field snapshot (slow AX
+    /// reads) first, then the cheap frontmost pid and Secure Keyboard Entry
+    /// last, so they are as close to the ⌘V as possible.
+    fn still_target(&self) -> Result<(), String> {
+        if let Some(still_field) = self.still_field {
+            still_field().map_err(|e| format!("{e} — paste skipped"))?;
         }
+        if host::frontmost_pid() != Some(self.pid) {
+            return Err("frontmost app changed — paste skipped".into());
+        }
+        if unsafe { IsSecureEventInputEnabled() } != 0 {
+            return Err("Secure Keyboard Entry is on — paste skipped".into());
+        }
+        Ok(())
     }
 }
 
-impl PasteHost for MacPaste {
+impl PasteHost for MacPaste<'_> {
     type Saved = pasteboard::Snapshot;
 
     fn preflight(&self) -> Result<(), String> {
@@ -35,10 +47,7 @@ impl PasteHost for MacPaste {
         if !typing::can_post_events() {
             return Err("event-posting permission denied — paste skipped".into());
         }
-        if unsafe { IsSecureEventInputEnabled() } != 0 {
-            return Err("Secure Keyboard Entry is on — paste skipped".into());
-        }
-        self.still_frontmost()
+        self.still_target()
     }
 
     fn snapshot(&self) -> Option<Self::Saved> {
@@ -53,7 +62,7 @@ impl PasteHost for MacPaste {
         let keycode = keylayout::v_keycode();
         // CGEventPost targets whatever is frontmost: check right before it.
         // The check/post race is unavoidable, as for Terminal typing.
-        self.still_frontmost()?;
+        self.still_target()?;
         typing::post_key_chord(keycode, typing::FLAG_COMMAND)
     }
 

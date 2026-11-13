@@ -4,8 +4,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::ax::*;
 use super::{host, registry, web_ax};
+use crate::delivery::decide::element_token;
 use crate::delivery::decide::known_terminal::flag_terminal;
-use crate::delivery::decide::{classify_role, effective_role, element_token};
+use crate::delivery::decide::paste_role::{classify_target, EditFacts};
 use crate::delivery::types::TargetSnapshotDto;
 
 pub fn now_ms() -> i64 {
@@ -70,6 +71,16 @@ pub fn focused_ui_element(stage: &str) -> Result<(AXUIElementRef, Option<String>
     focused_ui_element_once(stage)
 }
 
+/// Which edit attributes the focused element lets us set.
+pub fn edit_facts(element: AXUIElementRef) -> EditFacts {
+    EditFacts {
+        value: is_settable(element, "AXValue"),
+        selected_text: is_settable(element, "AXSelectedText"),
+        selected_range: is_settable(element, "AXSelectedTextRange"),
+        text_value: read_value(element).text().is_some(),
+    }
+}
+
 pub fn build_snapshot(
     element: AXUIElementRef,
     app_name: Option<String>,
@@ -78,7 +89,12 @@ pub fn build_snapshot(
     let role = copy_string_attr(element, "AXRole").unwrap_or_else(|| "unknown".into());
     let pid = element_pid(element);
     let subrole = copy_string_attr(element, "AXSubrole");
-    let (kind, insertable, reason) = classify_role(effective_role(&role, subrole.as_deref()));
+    let (kind, insertable, reason) = classify_target(
+        &role,
+        subrole.as_deref(),
+        || edit_facts(element),
+        || ancestor_roles(element),
+    );
     let generation = if register {
         registry::register(element)
     } else {

@@ -119,7 +119,7 @@ describe('deliverTranscript', () => {
     });
     expect(outcome.status).toBe('inserted');
     expect(outcome.message).toBe('Inserted');
-    expect(platform.insertText).toHaveBeenCalledWith('hello', snap());
+    expect(platform.insertText).toHaveBeenCalledWith('hello', snap(), { pasteFallback: true });
     expect(platform.clipboardWrite).not.toHaveBeenCalled();
   });
 
@@ -266,7 +266,7 @@ describe('deliverTranscript', () => {
       text,
     });
     expect(outcome.status).toBe('inserted');
-    expect(platform.insertText).toHaveBeenCalledWith(text, snap());
+    expect(platform.insertText).toHaveBeenCalledWith(text, snap(), { pasteFallback: true });
     expect(outcome.text).toBe(text);
   });
 

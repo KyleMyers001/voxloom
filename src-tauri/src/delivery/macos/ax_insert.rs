@@ -1,9 +1,13 @@
-//! Caret-aware AXSelectedText insert with exact read-back, the guarded
+//! Caret-aware AXSelectedText insert with exact (polled) read-back, the guarded
 //! Chromium/Electron retry (`decide::retry`), and verified Unicode typing
 //! for unchanged web fields.
 
-use super::ax::{ancestor_roles, copy_string_attr, set_ax_string, AXUIElementRef};
+use std::cell::RefCell;
+
+use super::ax::{ancestor_roles, copy_string_attr, read_value, set_ax_string, AXUIElementRef};
 use super::{focus_still_matches, host, typing, web_ax};
+use crate::delivery::decide::diag::{readback_label, DeliveryDiag};
+use crate::delivery::decide::fallback::{poll_readback, AxAttempt, ValueStatus};
 use crate::delivery::decide::retry::{reprobe_decision, retry_eligible, retry_once, RetryIo};
 use crate::delivery::decide::{
     after_ax, is_web_content_field, value_confirms_insert, AfterAx, InsertReport,
@@ -15,6 +19,7 @@ struct AxRetry<'a> {
     element: AXUIElementRef,
     validated: &'a TargetSnapshotDto,
     text: &'a str,
+    writes: &'a RefCell<Vec<Result<(), i32>>>,
 }
 
 impl RetryIo for AxRetry<'_> {
@@ -29,18 +34,44 @@ impl RetryIo for AxRetry<'_> {
     }
     fn write(&mut self) -> Result<(), String> {
         focus_still_matches(self.validated)?;
-        insert_selected_text_with(self.text, |a, t| set_ax_string(self.element, a, t))
+        insert_selected_text_with(self.text, |a, t| {
+            logged_set(self.writes, self.element, a, t)
+        })
     }
+}
+
+/// `set_ax_string`, recording its result for the ⌘V gate (BUS-223).
+fn logged_set(
+    writes: &RefCell<Vec<Result<(), i32>>>,
+    element: AXUIElementRef,
+    attr: &str,
+    text: &str,
+) -> Result<(), String> {
+    let result = set_ax_string(element, attr, text);
+    writes.borrow_mut().push(result);
+    result.map_err(|code| format!("AX set {attr} failed (error {code})"))
 }
 
 pub fn insert_selected(
     element: AXUIElementRef,
     validated: &TargetSnapshotDto,
-    before: String,
+    before_value: &ValueStatus,
     text: &str,
+    diag: &mut DeliveryDiag,
+    attempt: &mut AxAttempt,
 ) -> Result<InsertReport, String> {
-    let ax = insert_selected_text_with(text, |a, t| set_ax_string(element, a, t));
-    let after = copy_string_attr(element, "AXValue");
+    let before = before_value.text().unwrap_or_default().to_string();
+    let writes = RefCell::new(Vec::new());
+    let ax = insert_selected_text_with(text, |a, t| logged_set(&writes, element, a, t));
+    diag.ax_error = ax.as_ref().err().cloned();
+    // Hosts may apply AXSelectedText asynchronously: poll briefly (BUS-223 b).
+    let polled = std::time::Instant::now();
+    let after = poll_readback(
+        before_value,
+        || read_value(element),
+        |ms| std::thread::sleep(std::time::Duration::from_millis(ms)),
+    );
+    diag.readback_ms = polled.elapsed().as_millis();
     let role = validated.element_role.clone().unwrap_or_default();
     let has_dom_id = copy_string_attr(element, "AXDOMIdentifier").is_some();
     // Skip the parent walk when the DOM id already proves web content.
@@ -64,6 +95,7 @@ pub fn insert_selected(
             element,
             validated,
             text,
+            writes: &writes,
         };
         let retried = retry_once(&ax, &before, text, &mut io);
         outcome = if matches!(retried.after, AfterAx::Failed(_)) && !may_type {
@@ -75,6 +107,8 @@ pub fn insert_selected(
             log_chrome_failure(validated, err);
         }
     }
+    diag.readback = readback_label(&outcome);
+    attempt.writes = writes.take();
     match outcome {
         AfterAx::Inserted => Ok(InsertReport::default()),
         AfterAx::Failed(err) => Err(err),
@@ -83,6 +117,7 @@ pub fn insert_selected(
             "AX write changed the field but could not be verified".into(),
         ),
         AfterAx::TypeFallback => {
+            attempt.typed = true; // Never a ⌘V after this route (BUS-223).
             let (posted, typed) = typing::type_text(
                 text,
                 || focus_still_matches(validated),

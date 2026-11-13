@@ -1,7 +1,7 @@
 //! BUS-14 insertion delivery — platform adapter boundary.
 //! macOS: Accessibility (AX) snapshot + insert. Other OS: honest stubs.
 //! Never synthesizes Enter / Tab as product submit. Command chords: only the
-//! terminal paste route's ⌘V.
+//! paste route's ⌘V (terminals, Messages, and the BUS-223 native field fallback).
 //! macOS inserts via verified AXSelectedText; web fields that ignore it fall back
 //! to Unicode key events (no clipboard, no command chords). Terminals without
 //! an insertable AX field take a separate clipboard + ⌘V route (`paste`). Failures
@@ -49,12 +49,17 @@ pub fn delivery_validate_target(intended: TargetSnapshotDto) -> Result<TargetSna
 /// Once anything may have landed (a partial typing run, a changed but
 /// unconfirmed AX value) the command returns `Ok` with `unverified: true`,
 /// never `Err`. So the UI may only say "maybe inserted" for `Ok(unverified)`.
+///
+/// `paste_fallback` (the Clipboard fallback setting; absent = off): a native
+/// field AX refused without writing may get one guarded ⌘V (BUS-223). Then
+/// `Ok` carries `paste`, and `unverified` unless read-back proved it.
 #[tauri::command(async)]
 pub fn delivery_insert_text(
     text: String,
     intended: TargetSnapshotDto,
+    paste_fallback: Option<bool>,
 ) -> Result<decide::InsertReport, String> {
-    platform::insert_text(&text, &intended)
+    platform::insert_text(&text, &intended, paste_fallback.unwrap_or(false))
 }
 
 /// The paste terminal in front right now (pid + app path), taken when

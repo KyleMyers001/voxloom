@@ -3,6 +3,8 @@
 use std::ffi::c_void;
 use std::ptr;
 
+use crate::delivery::decide::fallback::ValueStatus;
+
 pub type CFTypeRef = *const c_void;
 pub type CFStringRef = *const c_void;
 pub type AXUIElementRef = *mut c_void;
@@ -28,6 +30,11 @@ extern "C" {
         attribute: CFStringRef,
         value: CFTypeRef,
     ) -> AXError;
+    fn AXUIElementIsAttributeSettable(
+        element: AXUIElementRef,
+        attribute: CFStringRef,
+        settable: *mut u8,
+    ) -> AXError;
     fn AXUIElementGetPid(element: AXUIElementRef, pid: *mut pid_t) -> AXError;
     pub fn AXIsProcessTrusted() -> u8;
 
@@ -37,6 +44,8 @@ extern "C" {
     fn CFStringGetMaximumSizeForEncoding(length: isize, encoding: u32) -> isize;
     fn CFGetTypeID(cf: CFTypeRef) -> usize;
     fn CFStringGetTypeID() -> usize;
+    fn CFAttributedStringGetTypeID() -> usize;
+    fn CFAttributedStringGetString(s: CFTypeRef) -> CFStringRef;
     fn CFRelease(cf: CFTypeRef);
     pub fn CFRetain(cf: CFTypeRef) -> CFTypeRef;
     pub fn CFEqual(a: CFTypeRef, b: CFTypeRef) -> u8;
@@ -109,19 +118,49 @@ pub fn copy_string_attr(element: AXUIElementRef, attr: &str) -> Option<String> {
     result
 }
 
+/// Text of a CFString, or the plain string of a CFAttributedString (Office,
+/// iWork and TextKit fields may report AXValue that way). Other types: None.
+pub fn cf_text(value: CFTypeRef) -> Option<String> {
+    if !value.is_null() && unsafe { CFGetTypeID(value) == CFAttributedStringGetTypeID() } {
+        // Get rule: the attributed string owns the returned string.
+        return cfstring_to_rust(unsafe { CFAttributedStringGetString(value) });
+    }
+    cfstring_to_rust(value)
+}
+
+/// The field's AXValue as a `ValueStatus` (BUS-223 a).
+pub fn read_value(element: AXUIElementRef) -> ValueStatus {
+    ValueStatus::from_read(copy_attr(element, "AXValue").map(|value| {
+        let text = cf_text(value);
+        release(value);
+        text
+    }))
+}
+
+/// Whether `attr` is settable on `element`; false on any AX error.
+pub fn is_settable(element: AXUIElementRef, attr: &str) -> bool {
+    let name = cfstr(attr);
+    let mut settable: u8 = 0;
+    let err = unsafe { AXUIElementIsAttributeSettable(element, name, &mut settable) };
+    release(name);
+    err == AX_OK && settable != 0
+}
+
 pub fn element_pid(element: AXUIElementRef) -> Option<i32> {
     let mut pid: pid_t = 0;
     (unsafe { AXUIElementGetPid(element, &mut pid) } == AX_OK).then_some(pid)
 }
 
-pub fn set_ax_string(element: AXUIElementRef, attr: &str, text: &str) -> Result<(), String> {
+/// Err carries the AX error code: only some codes prove nothing was written
+/// (`decide::fallback::WRITE_FREE_AX_ERRORS`).
+pub fn set_ax_string(element: AXUIElementRef, attr: &str, text: &str) -> Result<(), AXError> {
     let name = cfstr(attr);
     let value = cfstr(text);
     let err = unsafe { AXUIElementSetAttributeValue(element, name, value) };
     release(name);
     release(value);
     if err != AX_OK {
-        return Err(format!("AX set {attr} failed (error {err})"));
+        return Err(err);
     }
     Ok(())
 }
@@ -148,6 +187,35 @@ mod tests {
             let value = Owned::string(text);
             assert_eq!(cfstring_to_rust(value.0).as_deref(), Some(text));
         }
+    }
+
+    #[test]
+    fn attributed_values_read_as_their_plain_string() {
+        #[repr(C)]
+        #[allow(dead_code)] // Read by CoreFoundation, not by Rust.
+        struct CFRange {
+            location: isize,
+            length: isize,
+        }
+        extern "C" {
+            fn CFAttributedStringCreateMutable(alloc: CFTypeRef, max_length: isize) -> CFTypeRef;
+            fn CFAttributedStringReplaceString(s: CFTypeRef, range: CFRange, text: CFStringRef);
+        }
+        for text in ["", "Word body café 🙂"] {
+            let plain = Owned::string(text);
+            let attributed = Owned(unsafe { CFAttributedStringCreateMutable(ptr::null(), 0) });
+            let start = CFRange {
+                location: 0,
+                length: 0,
+            };
+            unsafe { CFAttributedStringReplaceString(attributed.0, start, plain.0) };
+            assert!(!attributed.0.is_null());
+            assert_eq!(cfstring_to_rust(attributed.0), None);
+            assert_eq!(cf_text(attributed.0).as_deref(), Some(text));
+            assert_eq!(cf_text(plain.0).as_deref(), Some(text));
+        }
+        assert_eq!(cf_text(unsafe { kCFBooleanTrue }), None);
+        assert_eq!(cf_text(ptr::null()), None);
     }
 
     #[test]

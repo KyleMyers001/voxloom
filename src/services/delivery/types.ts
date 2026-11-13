@@ -102,6 +102,21 @@ export interface InsertReport {
   unverified: boolean;
   /** Diagnostic detail. */
   detail: string | null;
+  /**
+   * Set when native AX refused without writing and the guarded ⌘V fallback
+   * posted a paste instead (BUS-223): the clipboard restore result.
+   * `unverified` then says whether read-back proved the text landed.
+   */
+  paste?: PasteReport;
+}
+
+/** Per-insert options for the native adapter. */
+export interface InsertOptions {
+  /**
+   * The Clipboard fallback setting. With it on, a native field AX refuses
+   * without writing may get one guarded ⌘V (the clipboard is restored).
+   */
+  pasteFallback: boolean;
 }
 
 /**
@@ -144,13 +159,15 @@ export interface DeliveryPlatformAdapter {
   /** Write plain text to the clipboard. */
   clipboardWrite(text: string): Promise<void>;
   /**
-   * Insert plain text into the intended target (macOS: AX selected-text only;
-   * no full-field value replacement).
+   * Insert plain text into the intended target (macOS: AX selected-text, or
+   * the guarded ⌘V fallback when `options.pasteFallback`; no full-field value
+   * replacement).
    * Must refuse rather than insert into a different app.
    */
   insertText(
     text: string,
     intended: TargetSnapshot,
+    options?: InsertOptions,
   ): Promise<InsertReport | void>;
   /**
    * The paste-route app in front right now, or null when the frontmost app is

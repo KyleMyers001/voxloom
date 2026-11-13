@@ -9,7 +9,7 @@ import {
   restoreSkippedSuffix,
 } from './messages';
 import { copyFallback, failOutcome, mayHaveInserted } from './fallback';
-import { pasteInTerminal } from './paste';
+import { fieldPastedOutcome, pasteInTerminal } from './paste';
 import {
   planDelivery,
   shouldRestoreClipboard,
@@ -88,7 +88,9 @@ export async function deliverTranscript(
   if (plan.action === 'insert') {
     let report: InsertReport | void;
     try {
-      report = await platform.insertText(text, plan.target);
+      report = await platform.insertText(text, plan.target, {
+        pasteFallback: options.clipboardFallback,
+      });
     } catch (error: unknown) {
       const insertFail = error instanceof Error
         ? error.message
@@ -123,6 +125,10 @@ export async function deliverTranscript(
         status: 'unverified',
         text,
       };
+    }
+    if (report?.paste) {
+      // Native ⌘V fallback: the clipboard was restored on purpose, so never copy.
+      return fieldPastedOutcome(text, report, report.paste);
     }
     if (report?.unverified) {
       // An in-flight native write cannot be undone; preserve its uncertainty.

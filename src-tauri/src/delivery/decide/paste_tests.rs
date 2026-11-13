@@ -235,3 +235,38 @@ fn a_transcript_that_cannot_be_marked_transient_is_never_pasted() {
     assert!(!host.calls().iter().any(|c| c.starts_with("wait")));
     assert_eq!(*host.board.borrow(), "my notes");
 }
+
+#[test]
+fn the_field_fallback_waits_longer_for_office_and_keeps_every_guard() {
+    let host = Fake::new("my notes");
+    let report = paste_into_field(&host, "first line\nsecond line").unwrap();
+    assert_eq!(
+        host.calls(),
+        [
+            "preflight",
+            "snapshot",
+            "write",
+            "post",
+            &format!("wait {FIELD_RESTORE_DELAY_MS}"),
+            "restore"
+        ]
+    );
+    assert_eq!(FIELD_RESTORE_DELAY_MS, 1500);
+    assert!(report.clipboard_restored);
+    assert_eq!(*host.board.borrow(), "my notes");
+    // Secure Keyboard Entry (or the app/field changing) refuses before the clipboard.
+    let mut host = Fake::new("my notes");
+    host.preflight_err = Some("Secure Keyboard Entry is on — paste skipped");
+    assert!(paste_into_field(&host, "hello").is_err());
+    assert_eq!(host.calls(), ["preflight"]);
+    // A user copy during the wait is never clobbered.
+    let mut host = Fake::new("my notes");
+    host.user_copies_during_wait = Some("fresh copy");
+    assert!(!paste_into_field(&host, "hello").unwrap().clipboard_restored);
+    assert_eq!(*host.board.borrow(), "fresh copy");
+    for text in ["", "a\u{0}b"] {
+        let host = Fake::new("x");
+        assert!(paste_into_field(&host, text).is_err());
+        assert!(host.calls().is_empty());
+    }
+}

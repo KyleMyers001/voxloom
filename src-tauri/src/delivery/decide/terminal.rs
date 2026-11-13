@@ -62,6 +62,7 @@ pub fn dispatch(
             return Ok(super::InsertReport {
                 typed: true, unverified: true,
                 terminal_dispatch: Some(TerminalDispatch::Partial),
+                paste: None,
                 detail: Some(format!("{error}; stopped after {posted} chunks; input not verified; inspect before retrying")),
             });
         }
@@ -71,6 +72,7 @@ pub fn dispatch(
         typed: true,
         unverified: true,
         terminal_dispatch: Some(TerminalDispatch::Complete),
+        paste: None,
         detail: Some(
             "Terminal events sent; input buffer not verified; inspect before retrying".into(),
         ),

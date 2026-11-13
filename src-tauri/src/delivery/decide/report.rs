@@ -15,6 +15,10 @@ pub struct InsertReport {
     pub unverified: bool,
     /// Diagnostic detail for logs/toasts.
     pub detail: Option<String>,
+    /// Set when the BUS-223 ⌘V fallback posted a paste: the clipboard
+    /// restore result. `unverified` then says whether read-back proved it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub paste: Option<PasteReport>,
 }
 
 /// Result of the clipboard paste route. ⌘V was posted; whether the terminal
@@ -56,10 +60,22 @@ mod tests {
             unverified: true,
             terminal_dispatch: Some(TerminalDispatch::Complete),
             detail: None,
+            paste: None,
         };
         let v = serde_json::to_value(&terminal).unwrap();
         assert_eq!(v["terminalDispatch"], "complete");
         assert_eq!(v["unverified"], true);
+        assert!(v.get("paste").is_none());
+        let pasted = InsertReport {
+            paste: Some(PasteReport {
+                clipboard_restored: true,
+                restore_skipped_reason: None,
+            }),
+            ..Default::default()
+        };
+        let v = serde_json::to_value(&pasted).unwrap();
+        assert_eq!(v["paste"]["clipboardRestored"], true);
+        assert_eq!(v["unverified"], false);
     }
 
     #[test]
