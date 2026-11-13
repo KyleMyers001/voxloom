@@ -201,7 +201,6 @@ fn paste_after_refusal(
             let after = poll_readback(
                 true,
                 &before,
-                text,
                 || ax::read_value(element),
                 |ms| std::thread::sleep(std::time::Duration::from_millis(ms)),
             );

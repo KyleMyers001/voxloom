@@ -65,7 +65,6 @@ fn readback_polls_for_a_late_apply_and_stops_at_proof() {
     let got = poll_readback(
         true,
         &before,
-        "X",
         || {
             reads += 1;
             ValueStatus::Text(if reads < 4 { "ab" } else { "abX" }.into())
@@ -81,20 +80,45 @@ fn readback_polls_for_a_late_apply_and_stops_at_proof() {
 fn readback_gives_up_after_about_600_ms_and_stays_strict() {
     let before = ValueStatus::Text("ab".into());
     let mut slept = 0;
-    // A partial landing never counts as proof.
     let got = poll_readback(
         true,
         &before,
-        "XYZ",
-        || ValueStatus::Text("abX".into()),
+        || ValueStatus::Text("ab".into()),
+        |ms| slept += ms,
+    );
+    assert_eq!(got.as_deref(), Some("ab"));
+    assert!((300..=600).contains(&slept), "{slept}");
+    // A partial landing never counts as proof.
+    let partial = poll_readback(true, &before, || ValueStatus::Text("abX".into()), |_| {});
+    assert_eq!(
+        after_ax(false, Ok(()), "ab", partial.as_deref(), "XYZ"),
+        AfterAx::Unverified
+    );
+}
+
+#[test]
+fn readback_latches_the_first_change_so_a_revert_cannot_read_as_unchanged() {
+    let before = ValueStatus::Text("ab".into());
+    let reads = ["ab", "abX", "ab", "ab"];
+    let mut next = reads.iter();
+    let mut slept = 0;
+    let got = poll_readback(
+        true,
+        &before,
+        || ValueStatus::Text(next.next().unwrap_or(&"ab").to_string()),
         |ms| slept += ms,
     );
     assert_eq!(got.as_deref(), Some("abX"));
-    assert!((300..=600).contains(&slept), "{slept}");
+    assert_eq!(slept, RETRY_READBACK_POLL_MS);
+    // Changed but not proof: Unverified (no paste), never Failed.
     assert_eq!(
         after_ax(false, Ok(()), "ab", got.as_deref(), "XYZ"),
         AfterAx::Unverified
     );
+    // An unreadable read is latched as unknown too.
+    let mut reads = vec![ValueStatus::Unreadable(Some(-25204)), before.clone()].into_iter();
+    let got = poll_readback(true, &before, || reads.next().unwrap(), |_| {});
+    assert_eq!(got, None);
 }
 
 fn no_walk() -> Vec<String> {
@@ -312,7 +336,6 @@ fn the_delivery_log_line_never_holds_text_or_field_contents() {
     let after = poll_readback(
         true,
         &before,
-        SECRET_TEXT,
         || ValueStatus::Text(SECRET_FIELD.into()),
         |_| {},
     );

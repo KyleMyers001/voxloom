@@ -50,7 +50,6 @@ pub fn insert_selected(
     let after = poll_readback(
         ax.is_ok(),
         before_value,
-        text,
         || read_value(element),
         |ms| std::thread::sleep(std::time::Duration::from_millis(ms)),
     );

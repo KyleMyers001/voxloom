@@ -10,7 +10,7 @@ use super::diag::DeliveryDiag;
 use super::report::{InsertReport, PasteReport};
 use super::retry::{RETRY_READBACK_POLLS, RETRY_READBACK_POLL_MS};
 use super::target::{classify_role, effective_role};
-use super::verify::value_confirms_insert;
+use super::verify::same_ax_text;
 use crate::delivery::types::TargetSnapshotDto;
 
 /// kAXErrorNoValue: the attribute exists but has no value (an empty field).
@@ -74,27 +74,30 @@ pub fn readback_text(write_ok: bool, before: &ValueStatus, after: &ValueStatus) 
 
 /// Poll the read-back (BUS-223 b): apps may apply AXSelectedText
 /// asynchronously. Up to `RETRY_READBACK_POLLS` reads `RETRY_READBACK_POLL_MS`
-/// apart (~600 ms, as the retry path), stopping at the first exact proof.
-/// Returns the last evidence; the verification itself stays strict.
+/// apart (~600 ms, as the retry path), only while the field still reads
+/// exactly as `before`. The first read that differs (proof, a partial or
+/// other change, or an unknown value) is latched and returned at once, so a
+/// later revert can never turn a change back into "unchanged" (and a paste).
+/// The verification itself stays strict.
 pub fn poll_readback(
     write_ok: bool,
     before: &ValueStatus,
-    text: &str,
     mut read: impl FnMut() -> ValueStatus,
     mut sleep: impl FnMut(u64),
 ) -> Option<String> {
-    let before_text = before.text().unwrap_or_default();
+    let before_text = before.text();
     let mut last = None;
     for poll in 0..RETRY_READBACK_POLLS {
         if poll > 0 {
             sleep(RETRY_READBACK_POLL_MS);
         }
         last = readback_text(write_ok, before, &read());
-        if last
-            .as_deref()
-            .is_some_and(|now| value_confirms_insert(before_text, now, text))
-        {
-            break;
+        let unchanged = matches!(
+            (last.as_deref(), before_text),
+            (Some(now), Some(was)) if same_ax_text(now, was)
+        );
+        if !unchanged {
+            return last;
         }
     }
     last
